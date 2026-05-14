@@ -436,4 +436,35 @@
 
 ---
 
+## ADR-0015: Step 5.1 MySQL 커넥터 — PyMySQL + executemany 기반
+
+- **Date**: 2026-05-14
+- **Status**: Accepted
+- **Context**:
+  Step 5는 SPEC.md §10 Step 5의 커넥터 확장. 첫 번째 슬라이스인 5.1은 RDBMS 카테고리에 MySQL 추가. 결정: 드라이버 선택, write 전략(LOAD DATA vs executemany), boolean 처리.
+- **Decision**:
+  1. **드라이버: PyMySQL (`pymysql>=1.1`)**. 순수 Python — 시스템 deps 불필요. mysqlclient(C)보다 느리지만 install 간편하고 testcontainers / CI 환경에서 안정적. 성능이 병목되면 mysqlclient adapter는 별도 슬라이스.
+  2. **Read: server-side `SSDictCursor` + `fetchmany(chunk_size)` 루프**. 대용량 결과에서도 메모리 bounded. 결과는 dict로 즉시 받아 `Record(data=dict(row))` 변환.
+  3. **Write 전략 — executemany 기반 multi-row INSERT** (default `batch_size=1000`).
+     - `append`: `INSERT INTO ... VALUES ...` batched
+     - `overwrite`: `TRUNCATE TABLE` + 동일 INSERT
+     - `upsert`: `INSERT ... ON DUPLICATE KEY UPDATE col = VALUES(col), ...` — MySQL native upsert. `key_columns`는 사용자 명시 + 테이블에 매칭되는 UNIQUE/PK 키가 있어야 동작(MySQL 의미론).
+     - LOAD DATA LOCAL INFILE은 더 빠르지만 (a) 서버에 `local_infile=1` 옵션 필요, (b) CSV 직렬화 필요. **추후 최적화로** — `local_infile=True`를 connector kwargs에 통과 가능하게 두었으나 자동 사용은 안 함.
+  4. **Identifier quoting은 backtick (`` ` ``)**. PostgreSQL의 `sql.Identifier`처럼 라이브러리 헬퍼는 없으므로 `_ident(name)` 헬퍼가 backtick으로 감싸고 내부 backtick은 `` `` ``로 escape — SQL 인젝션 방지. `db.table` 같은 schema-qualified 이름도 `_table_ident`이 처리.
+  5. **Boolean 의미론 mismatch — MySQL은 TINYINT(1)으로 저장**. 그래서 contract test에서 read-back되는 `active`는 0/1 int. 두 가지 선택:
+     - (a) connector가 boolean 추측해서 변환 — 위험(어떤 컬럼이 bool인지 알 수 없음).
+     - (b) 사용자/테스트가 mismatch 인지하고 처리. **(b) 채택**. 통합 테스트는 `_mysqlify(sample_records)` 헬퍼로 `active: bool → int`로 변환 후 contract 호출 — 명시적 trade-off.
+  6. **`@ConnectorRegistry.register("mysql")` + entry-point** — postgres와 동일 패턴. `[mysql]` extra = `pymysql>=1.1`.
+  7. **통합 테스트: testcontainers `MySqlContainer("mysql:8.0")` (session-scoped)**. postgres와 동일 구조 — `mysql_container` / `mysql_conn_params` / `mysql_table` / `mysql_seeded` / `mysql_connector` 5 fixtures. contract subclasses (Source 7 + Sink 5 + RoundTrip 3) + MySQL-specific 14 = **29 통합 테스트**.
+- **Consequences**:
+  - (+) RDBMS 슬롯에 두 번째 커넥터 — Contract 패턴이 다른 DB에서도 작동함을 증명(앞으로 MSSQL/Oracle/SQLite 추가가 모델로 활용).
+  - (+) 두 connector(postgres / mysql)는 정확히 같은 ABC를 구현 → orchestrator/pipeline layer는 차이 없이 다룸.
+  - (+) Backtick quoting 테스트(`a``b` 컬럼명)가 통과 — SQL 인젝션 방어 검증.
+  - (−) Boolean 의미론 차이는 contract test에서 수동으로 매핑 — 미래 다른 type 미스매치(DECIMAL → Python float 정확도 손실 등) 발생 시 동일 패턴 필요. 문서로 보완.
+  - (−) executemany는 LOAD DATA보다 느림 — 진짜 대용량(>1M rows)이 들어오면 성능 이슈. Step 6에서 LOAD DATA 자동 전환 검토.
+  - (−) MariaDB 호환성 명시적 테스트 안 함 — PyMySQL이 동일 wire protocol을 쓰므로 작동할 가능성 높으나 미검증.
+- **References**: SPEC.md §6 · `etl_plugins/connectors/rdbms/mysql.py` · `tests/integration/test_mysql.py` · `tests/integration/conftest.py` (mysql fixtures)
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

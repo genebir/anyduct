@@ -1263,6 +1263,9 @@ dagster = [
 kafka = [
     { name = "aiokafka" },
 ]
+mysql = [
+    { name = "pymysql" },
+]
 postgres = [
     { name = "psycopg", extra = ["binary"] },
 ]
@@ -1283,11 +1286,12 @@ dev = [
     { name = "pre-commit" },
     { name = "psycopg", extra = ["binary"] },
     { name = "pyarrow" },
+    { name = "pymysql" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
     { name = "ruff" },
-    { name = "testcontainers", extra = ["minio"] },
+    { name = "testcontainers", extra = ["minio", "mysql"] },
     { name = "types-pyyaml" },
     { name = "yamllint" },
 ]
@@ -1303,13 +1307,14 @@ requires-dist = [
     { name = "psycopg", extras = ["binary"], marker = "extra == 'postgres'", specifier = ">=3.1" },
     { name = "pyarrow", marker = "extra == 's3'", specifier = ">=16.0" },
     { name = "pydantic", specifier = ">=2.7" },
+    { name = "pymysql", marker = "extra == 'mysql'", specifier = ">=1.1" },
     { name = "python-dotenv", specifier = ">=1.0" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "structlog", specifier = ">=24.1" },
     { name = "tenacity", specifier = ">=8.2" },
     { name = "typer", specifier = ">=0.12" },
 ]
-provides-extras = ["airflow", "dagster", "kafka", "observability", "postgres", "prefect", "s3"]
+provides-extras = ["airflow", "dagster", "kafka", "mysql", "observability", "postgres", "prefect", "s3"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1320,11 +1325,12 @@ dev = [
     { name = "pre-commit", specifier = ">=3.8" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.1" },
     { name = "pyarrow", specifier = ">=16.0" },
+    { name = "pymysql", specifier = ">=1.1" },
     { name = "pytest", specifier = ">=8.0" },
     { name = "pytest-asyncio", specifier = ">=0.23" },
     { name = "pytest-cov", specifier = ">=5.0" },
     { name = "ruff", specifier = ">=0.6" },
-    { name = "testcontainers", extras = ["postgres", "minio", "kafka"], specifier = ">=4.7" },
+    { name = "testcontainers", extras = ["postgres", "minio", "kafka", "mysql"], specifier = ">=4.7" },
     { name = "types-pyyaml", specifier = ">=6.0" },
     { name = "yamllint", specifier = ">=1.35" },
 ]
@@ -3146,6 +3152,20 @@ wheels = [
 ]
 
 [[package]]
+name = "pymysql"
+version = "1.1.3"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/7f/ec/8d45c920e90445f0b75c590b32851853ed319763b0d8dff8d283052da8cf/pymysql-1.1.3.tar.gz", hash = "sha256:e70ebf2047a4edf6138cf79c68ad418ef620af65900aa585c5e8bfc95044d43a", size = 48207, upload-time = "2026-05-01T09:09:54.532Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/8e/dc/9085f3d6f497e9b25fb40d6e8ecef3ddbb5cf977a949b933624a299f5c16/pymysql-1.1.3-py3-none-any.whl", hash = "sha256:8164ba62c552f6105f3b11753352d0f16b90d1703ba67d81923d5a8a5d1c5289", size = 45356, upload-time = "2026-05-01T09:09:53.316Z" },
+]
+
+[package.optional-dependencies]
+rsa = [
+    { name = "cryptography" },
+]
+
+[[package]]
 name = "pyreadline3"
 version = "3.5.4"
 source = { registry = "https://pypi.org/simple" }
@@ -4067,6 +4087,10 @@ wheels = [
 [package.optional-dependencies]
 minio = [
     { name = "minio" },
+]
+mysql = [
+    { name = "pymysql", extra = ["rsa"] },
+    { name = "sqlalchemy" },
 ]
 
 [[package]]

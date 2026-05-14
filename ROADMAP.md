@@ -187,7 +187,7 @@
 ## Step 5 — Connector 확장
 
 ### 5.1 RDBMS
-- [ ] MySQL/MariaDB
+- [x] MySQL/MariaDB (PyMySQL, server-side cursor, executemany INSERT, ON DUPLICATE KEY UPDATE, 29 it tests) — ADR-0015
 - [ ] MSSQL
 - [ ] Oracle
 - [ ] SQLite
@@ -249,3 +249,4 @@
 - 2026-05-14: **Step 3.2 (Stream runtime) 완료.** `Pipeline.arun_stream` + Kafka async `commit()` (ABC sync→async 보정) + buffer + `etlx run-stream`. 17 신규 unit + 2 Kafka integration tests (총 269 unit + 82 it = 351). ADR-0012 추가. 다음은 Step 3.3 (Retry / DLQ / Checkpoint).
 - 2026-05-14: **Step 3.3 (Retry / DLQ / 자동 메트릭 / CLI logging) + Step 3 전체 완료.** Pipeline 자동 retry+DLQ+metrics, CLI global `--log-format/--log-level`. 13 신규 unit tests (총 282 unit + 82 it = 364). ADR-0013 추가. Checkpoint/Span은 Step 6 강화로 이동. 다음은 Step 4 (Orchestrator Adapters) 또는 Step 5 (커넥터 확장).
 - 2026-05-14: **Step 4 (Orchestrator Adapters) 완료.** Airflow/Dagster/Prefect adapters with PEP 562 lazy loading. 10 신규 tests (총 289 unit + 3 skip + 82 it = 374). ADR-0014 추가. 다음은 Step 5 (커넥터 확장).
+- 2026-05-14: **Step 5.1 (MySQL 커넥터) 완료.** PyMySQL 기반 BatchSource + BatchSink (append=executemany / overwrite=TRUNCATE+INSERT / upsert=ON DUPLICATE KEY UPDATE). 29 신규 통합 테스트 (총 289 unit + 3 skip + 111 it = 403). ADR-0015 추가. 다음은 Step 5.x (다른 RDBMS / NoSQL / DW).

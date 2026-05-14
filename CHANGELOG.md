@@ -262,6 +262,32 @@
 ### Milestone
 - **Step 4 — Orchestrator Adapters 완료 (2026-05-14)**: Airflow/Dagster/Prefect adapters + 10 신규 tests (289 unit + 3 skip + 82 it). 다음은 Step 5 (커넥터 확장).
 
+- **MySQL 커넥터** [Step 5.1]
+  - `etl_plugins/connectors/rdbms/mysql.py` — `MySQLConnector(BatchSource, BatchSink)` (PyMySQL)
+  - `read()`: server-side `SSDictCursor` + `fetchmany(chunk_size)` 루프 — bounded memory streaming
+  - `write()`: executemany 기반 multi-row INSERT (default `batch_size=1000`)
+    - `append`: 일반 INSERT
+    - `overwrite`: TRUNCATE TABLE + INSERT
+    - `upsert`: `INSERT ... ON DUPLICATE KEY UPDATE col = VALUES(col)` — MySQL native upsert syntax
+  - Backtick 기반 식별자 quoting (`a``b`처럼 내부 backtick은 escape), DB-qualified 이름(`db.table`) 지원
+  - `@ConnectorRegistry.register("mysql")` + `[project.entry-points."etl_plugins.connectors"]`
+  - 의존성: `[mysql]` extra = `pymysql>=1.1`
+- **통합 테스트** [Step 5.1]
+  - `tests/integration/test_mysql.py` — 모듈 단위 `pytestmark = pytest.mark.it`
+  - Contract subclass (Source 7 + Sink 5 + RoundTrip 3 = 15) + MySQL-specific 14 = **29 통합 테스트**
+  - `testcontainers[mysql]` (`MySqlContainer("mysql:8.0")`), boolean→TINYINT(1) 의미론 차이는 `_mysqlify()` 헬퍼로 매핑
+  - `tests/integration/conftest.py` — `mysql_container` (session) / `mysql_conn_params` / `mysql_table` / `mysql_seeded` / `mysql_connector` 5개 fixture 추가
+- **의존성 추가**
+  - 런타임 extras: `mysql = ["pymysql>=1.1"]`
+  - dev: `testcontainers[postgres,minio,kafka,mysql]>=4.7`, `pymysql>=1.1`
+  - mypy override: `pymysql`, `pymysql.*` (ignore_missing_imports — no stubs)
+
+### Decisions
+- ADR-0015: Step 5.1 MySQL 커넥터 (PyMySQL 드라이버, SSDictCursor server-side streaming, executemany 기반 multi-row INSERT, ON DUPLICATE KEY UPDATE upsert, backtick quoting, boolean=TINYINT(1) 의미론 차이는 통합 테스트에서 `_mysqlify` 헬퍼로 매핑)
+
+### Milestone
+- **Step 5.1 — MySQL 커넥터 완료 (2026-05-14)**: 두 번째 RDBMS connector. Contract suite 재사용으로 새 커넥터 보일러플레이트 검증. 29 신규 통합 테스트 (289 unit + 3 skip + 111 it = 403 total). 다음은 Step 5.x 추가 connectors (SQLite/Oracle/MSSQL 또는 NoSQL/DW 카테고리).
+
 ### Changed
 - (없음)
 

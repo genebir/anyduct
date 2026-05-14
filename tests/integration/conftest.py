@@ -13,12 +13,15 @@ from uuid import uuid4
 
 import boto3
 import psycopg
+import pymysql
 import pytest
 from testcontainers.kafka import KafkaContainer
 from testcontainers.minio import MinioContainer
+from testcontainers.mysql import MySqlContainer
 from testcontainers.postgres import PostgresContainer
 
 from etl_plugins.connectors.object_storage.s3 import S3Connector
+from etl_plugins.connectors.rdbms.mysql import MySQLConnector
 from etl_plugins.connectors.rdbms.postgres import PostgresConnector
 from etl_plugins.connectors.stream.kafka import KafkaConnector
 from etl_plugins.core.record import Record
@@ -96,6 +99,72 @@ def pg_connector(pg_conn_params: dict[str, Any]) -> Iterator[PostgresConnector]:
     pg = PostgresConnector(**pg_conn_params)
     yield pg
     pg.close()
+
+
+# =============================================================================
+# MySQL — Step 5.1
+# =============================================================================
+
+
+@pytest.fixture(scope="session")
+def mysql_container() -> Iterator[MySqlContainer]:
+    """A long-lived mysql:8 container shared across the test session."""
+    with MySqlContainer("mysql:8.0") as container:
+        yield container
+
+
+@pytest.fixture(scope="session")
+def mysql_conn_params(mysql_container: MySqlContainer) -> dict[str, Any]:
+    """Params for ``MySQLConnector(**params)``."""
+    return {
+        "host": mysql_container.get_container_host_ip(),
+        "port": int(mysql_container.get_exposed_port(3306)),
+        "database": mysql_container.dbname,
+        "user": mysql_container.username,
+        "password": mysql_container.password,
+    }
+
+
+@pytest.fixture
+def mysql_table(mysql_conn_params: dict[str, Any]) -> Iterator[str]:
+    """Create a fresh MySQL table with the sample_records schema. Dropped on teardown."""
+    name = f"etl_test_{uuid4().hex[:8]}"
+    create_stmt = (
+        f"CREATE TABLE `{name}` (id INT PRIMARY KEY, name VARCHAR(255), age INT, active BOOLEAN)"
+    )
+    with pymysql.connect(**mysql_conn_params) as conn:
+        with conn.cursor() as cur:
+            cur.execute(create_stmt)
+        conn.commit()
+    yield name
+    with pymysql.connect(**mysql_conn_params) as conn:
+        with conn.cursor() as cur:
+            cur.execute(f"DROP TABLE IF EXISTS `{name}`")
+        conn.commit()
+
+
+@pytest.fixture
+def mysql_seeded(
+    mysql_conn_params: dict[str, Any], mysql_table: str, sample_records: list[Record]
+) -> str:
+    """Seed ``mysql_table`` with ``sample_records`` and return the table name."""
+    with pymysql.connect(**mysql_conn_params) as conn:
+        with conn.cursor() as cur:
+            for r in sample_records:
+                cur.execute(
+                    f"INSERT INTO `{mysql_table}` VALUES (%s, %s, %s, %s)",
+                    (r.data["id"], r.data["name"], r.data["age"], r.data["active"]),
+                )
+        conn.commit()
+    return mysql_table
+
+
+@pytest.fixture
+def mysql_connector(mysql_conn_params: dict[str, Any]) -> Iterator[MySQLConnector]:
+    """A fresh, unconnected MySQLConnector. Closed on teardown."""
+    m = MySQLConnector(**mysql_conn_params)
+    yield m
+    m.close()
 
 
 # =============================================================================

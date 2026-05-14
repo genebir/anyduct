@@ -116,17 +116,32 @@
 - [x] `[s3]` extra = `boto3>=1.34, pyarrow>=16.0`
 - [ ] multipart upload (큰 파일) — **Step 6 강화로 이동**
 
-### 2.3 `kafka` (StreamSource + StreamSink)  ← **다음 작업 (2026-05-14)**
-- [ ] 드라이버 결정 (confluent-kafka vs aiokafka) — ADR
-- [ ] StreamSource.subscribe (group_id, offset 관리)
-- [ ] StreamSource.commit (`at_least_once` 보장)
-- [ ] StreamSink.publish / flush
-- [ ] Schema Registry 연동 (avro/protobuf)
-- [ ] Contract + integration test
+### 2.3 `kafka` (StreamSource + StreamSink)
+- [x] 드라이버 결정 (aiokafka — native async) — ADR-0010
+- [x] StreamSource.subscribe (group_id, auto_offset_reset, async generator with finally cleanup)
+- [x] StreamSink.publish / flush (lazy producer)
+- [x] Sync `connect/close` flag-only + async `aclose()` 명시적 cleanup
+- [x] 메타데이터에 Kafka 위치(topic/partition/offset/key/timestamp) 포함
+- [x] Registry + entry-point 자동 발견
+- [x] **Stream Contract 신규 도입** (`tests/contracts/stream.py`): `_StreamSourceContract`/`_StreamSinkContract`/`_StreamRoundTripContract`
+- [x] 16 통합 테스트 (testcontainers Kafka KRaft mode)
+- [x] `[kafka]` extra = `aiokafka>=0.11`
+- [ ] StreamSource.commit (`at_least_once` 보장) — **Step 3 Pipeline runtime에서 구현**
+- [ ] Schema Registry 연동 (Avro/Protobuf) — **Step 5로 이동**
 
 ---
 
-## Step 3 — Pipeline 실행기 + CLI
+## **Step 2 — Reference Connectors: 완료 (2026-05-14)**
+
+세 카테고리 각 1종 (RDBMS=postgres, Object=s3, Stream=kafka) 모두 구현 및 통합 테스트 통과.
+80 통합 테스트 (postgres 29 + s3 35 + kafka 16). Batch Contract + Stream Contract 양쪽 패턴 확립.
+**다음은 Step 3: Pipeline 실행기 + CLI.**
+
+
+
+---
+
+## Step 3 — Pipeline 실행기 + CLI  ← **다음 작업 (2026-05-14)**
 
 - [ ] YAML → Pipeline 빌더 (`Pipeline.from_yaml`)
 - [ ] `transforms` 처리기 (rename/cast/filter/python callable)
@@ -208,3 +223,4 @@
 - 2026-05-14: **Step 1.8 (테스트 인프라) + Step 1 전체 완료.** tests/fixtures/ + tests/contracts/ + 15 contract tests (총 193). ADR-0007 추가. 다음은 Step 2.1 (postgres 커넥터).
 - 2026-05-14: **Step 2.1 (PostgreSQL 커넥터) 완료.** psycopg 3 기반 BatchSource + BatchSink (append=COPY / overwrite / upsert). 29 통합 테스트 (193 unit + 29 it = 222 total). ADR-0008 추가. contracts/batch.py에 read_kwargs/write_kwargs fixture 추가. 다음은 Step 2.2 (s3).
 - 2026-05-14: **Step 2.2 (S3 커넥터) 완료.** boto3 기반 BatchSource + BatchSink (jsonl/csv/parquet). 21 unit + 35 integration tests (총 214 unit + 64 it = 278 tests). ADR-0009 추가. MinIO testcontainers 통합 — 같은 코드가 AWS S3/MinIO/R2 호환. 다음은 Step 2.3 (kafka).
+- 2026-05-14: **Step 2.3 (Kafka 커넥터) + Step 2 전체 완료.** aiokafka 기반 StreamSource + StreamSink. Stream Contract 신규 도입(`_StreamSourceContract`/`_StreamSinkContract`/`_StreamRoundTripContract`). 16 통합 테스트 (총 214 unit + 80 it = 294 tests). ADR-0010 추가. 다음은 Step 3 (Pipeline 실행기 + CLI).

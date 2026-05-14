@@ -266,4 +266,38 @@
 
 ---
 
+## ADR-0010: Step 2.3 Kafka 커넥터 — 드라이버 + Stream Contract 도입
+
+- **Date**: 2026-05-14
+- **Status**: Accepted
+- **Context**:
+  Step 2.3은 SPEC.md §4.1의 StreamSource/StreamSink 첫 구현. 결정: 드라이버(`confluent-kafka` sync vs `aiokafka` async), Stream Contract 도입 여부, 비동기 lifecycle(connector ABC는 sync `connect/close`만 정의), at-least-once vs at-most-once 디폴트.
+- **Decision**:
+  1. **드라이버: aiokafka (`aiokafka>=0.11`)**. 이유:
+     - SPEC.md §4.1의 `subscribe(...) -> AsyncIterator[Record]`와 native async 매칭.
+     - asyncio 통합이 자연스러움 — `asyncio.to_thread` 같은 우회 없이 진짜 비동기 IO.
+     - confluent-kafka는 성능 우위지만 sync → AsyncIterator 어댑팅이 번거롭다. 성능이 병목이 되면 Step 5+에서 confluent-kafka 어댑터 추가 검토.
+  2. **Sync `connect/close`는 flag-only**. 실제 클라이언트(`AIOKafkaConsumer/Producer`)는 lazy: 첫 `subscribe()` / `publish()` 호출 때 시작. 이유: Connector ABC가 `def connect() -> None`을 강제(sync) → 비동기 시작을 sync 안에 넣으면 `asyncio.run` 호출이 필요하고 이벤트 루프 안에서 호출되면 깨짐.
+  3. **`aclose()` 명시적 async 메서드**. 비동기 자원 정리(producer.stop) 필요한 호출자가 명시적으로 호출. async generator인 `subscribe()`는 `finally` 절에서 consumer.stop 자동 호출 — break/cancel 모두 안전.
+  4. **`subscribe()`는 async generator function** (`async def` + `yield`). 호출 시점에는 await 불필요 — 그냥 `subscribe(topic)`이 `AsyncGenerator`를 반환. ABC 시그니처 `def subscribe(...) -> AsyncIterator[Record]`와 호환.
+  5. **Stream Contract 도입** (`tests/contracts/stream.py`). 패턴은 batch와 동일(subclass-able `_`-prefix mixin). 차이점:
+     - 모든 test 메서드가 `async def` (pytest-asyncio auto mode가 자동 처리).
+     - `asyncio.wait_for(..., timeout=consume_timeout)`로 무한 블로킹 방지 (default 30s).
+     - `_StreamRoundTripContract`는 source/sink 동일 인스턴스(`source is sink`) 허용 — 중간 close 없이 한 번에 정리.
+  6. **at-least-once 디폴트**: `auto_offset_reset="earliest"` + `enable_auto_commit=False`. 명시적 offset commit은 Step 3 Pipeline runtime에서. 지금은 `commit()`이 `NotImplementedError` 발생.
+  7. **메시지 직렬화: JSON UTF-8** (`json.dumps(default=str)`). 비-JSON-serializable 값은 repr fallback. Avro/Protobuf은 Step 5에서 Schema Registry와 함께.
+  8. **메타데이터에 Kafka 위치 정보 포함**: `topic`/`partition`/`offset`/`key`/`timestamp`. SPEC.md §4.2 ("커넥터별 raw 객체나 위치 정보는 metadata에 보관") 준수.
+  9. **`bootstrap_servers`는 str 또는 list 허용**. 리스트면 자동으로 콤마-조인. SPEC.md §5.3의 YAML 리스트 표기와 일관.
+  10. **테스트: testcontainers KafkaContainer (KRaft mode)**. Zookeeper 없이 단일 컨테이너. `auto.create.topics.enable=true`로 토픽 자동 생성 — 테스트별 unique 이름.
+- **Consequences**:
+  - (+) 16 통합 테스트 (Stream Contract 5 + Kafka-specific 11) 모두 통과 (~11s).
+  - (+) Stream Contract 패턴 확립 — 향후 Kinesis/Pulsar/RabbitMQ 추가가 같은 방식.
+  - (+) Pipeline runtime이 sync인 batch와 async인 stream을 다르게 다룰 수 있는 인터페이스 정리됨.
+  - (−) Sync `connect/close`가 flag-only라 다른 batch 커넥터와 의미가 다름 — 이중 정신모델 발생. 문서로 보완.
+  - (−) `commit()`은 아직 NotImplementedError — Step 3 retry+observability 통합에서 구현.
+  - (−) Schema Registry / Avro / Protobuf은 Step 5로 미룸.
+- **References**: SPEC.md §4.1, §4.2, §5.3, §5.5 · `etl_plugins/connectors/stream/kafka.py` · `tests/contracts/stream.py` · `tests/integration/test_kafka.py`
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

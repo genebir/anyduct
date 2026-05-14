@@ -130,9 +130,36 @@
   - 런타임 extras: `s3 = ["boto3>=1.34", "pyarrow>=16.0"]`
   - dev: `testcontainers[postgres,minio]>=4.7`, `boto3>=1.34`, `pyarrow>=16.0`
 
+- **Kafka 커넥터** [Step 2.3]
+  - `etl_plugins/connectors/stream/kafka.py` — `KafkaConnector(StreamSource, StreamSink)` (aiokafka 기반)
+  - Sync `connect/close`는 flag-only, 실제 클라이언트는 `subscribe()`/`publish()`에서 lazy 시작
+  - `subscribe(topic, group_id=...)` — `async def` + `yield` 형태의 async generator. `finally` 절에서 consumer 자동 stop. `auto_offset_reset="earliest"` + `enable_auto_commit=False` (at-least-once)
+  - `publish(topic, record, key=...)` — `send_and_wait` (acks=all 기본)
+  - `flush()` / `aclose()` — async 명시적 자원 정리. `aclose()` idempotent
+  - 메타데이터에 Kafka 위치 정보(topic/partition/offset/key/timestamp) 포함
+  - `bootstrap_servers`는 str 또는 list 허용 (list → comma-join)
+  - `commit()`은 Step 3 Pipeline runtime에서 구현 — 현재는 `NotImplementedError`
+  - SASL/SSL 파라미터 placeholder — Step 5에서 확장
+- **Stream Contract** [Step 2.3 — NEW]
+  - `tests/contracts/stream.py` — `_StreamSourceContract` / `_StreamSinkContract` / `_StreamRoundTripContract`
+  - 모든 메서드 `async def`, `asyncio.wait_for(timeout=consume_timeout)`로 무한 블로킹 방지
+  - 같은 subclass-able mixin 패턴 (`_` prefix 자동 수집 회피)
+- **테스트** [Step 2.3]
+  - `tests/integration/test_kafka.py` — 모듈 단위 `pytestmark = pytest.mark.it`
+  - 3 Stream Contract subclass (5 tests) + Kafka-specific (11 tests) = **16 integration tests** (~11s with `testcontainers[kafka]`, KRaft mode)
+  - `tests/integration/conftest.py` — `kafka_container` (session) / `kafka_bootstrap` / `kafka_connector` (function) / `kafka_topic` (unique per-test) / `kafka_seeded_topic` (async fixture, pre-publishes sample_records)
+- **의존성 추가**
+  - 런타임 extras: `kafka = ["aiokafka>=0.11"]`
+  - dev: `testcontainers[postgres,minio,kafka]>=4.7`, `aiokafka>=0.11`
+  - mypy override: `aiokafka`, `aiokafka.*` (ignore_missing_imports — no public stubs yet)
+
+### Milestone
+- **Step 2 — Reference Connectors 완료 (2026-05-14)**: 세 카테고리 각 1종 (postgres / s3 / kafka), 총 80 integration tests + Batch/Stream Contract 양쪽 패턴 확립. 214 unit + 80 it = 294 tests.
+
 ### Decisions
 - ADR-0008: Step 2.1 PostgreSQL 커넥터 (psycopg 3 채택, COPY 기반 append, TRUNCATE+COPY overwrite, INSERT ON CONFLICT upsert, server-side cursor, sql.Identifier quoting)
 - ADR-0009: Step 2.2 S3 커넥터 (boto3, jsonl/csv/parquet, `query=prefix`, `upsert` 거부, MinIO 호환 + 통합 테스트, MinIO batch-delete 우회)
+- ADR-0010: Step 2.3 Kafka 커넥터 (aiokafka 채택, sync connect/close flag-only + async aclose, subscribe는 async generator, Stream Contract 신규 도입, at-least-once 기본, commit은 Step 3로 이동)
 
 ### Changed
 - (없음)

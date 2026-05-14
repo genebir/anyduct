@@ -14,11 +14,13 @@ from uuid import uuid4
 import boto3
 import psycopg
 import pytest
+from testcontainers.kafka import KafkaContainer
 from testcontainers.minio import MinioContainer
 from testcontainers.postgres import PostgresContainer
 
 from etl_plugins.connectors.object_storage.s3 import S3Connector
 from etl_plugins.connectors.rdbms.postgres import PostgresConnector
+from etl_plugins.connectors.stream.kafka import KafkaConnector
 from etl_plugins.core.record import Record
 
 
@@ -174,3 +176,61 @@ def s3_seeded(
     client = boto3.client("s3", **s3_boto_kwargs)
     client.put_object(Bucket=s3_bucket, Key=f"{prefix}data.jsonl", Body=body)
     return {"bucket": s3_bucket, "prefix": prefix}
+
+
+# =============================================================================
+# Kafka — Step 2.3
+# =============================================================================
+
+
+@pytest.fixture(scope="session")
+def kafka_container() -> Iterator[KafkaContainer]:
+    """Long-lived Kafka (KRaft mode) container shared across the test session."""
+    with KafkaContainer() as container:
+        yield container
+
+
+@pytest.fixture(scope="session")
+def kafka_bootstrap(kafka_container: KafkaContainer) -> str:
+    return str(kafka_container.get_bootstrap_server())
+
+
+@pytest.fixture
+def kafka_connector(kafka_bootstrap: str) -> Iterator[KafkaConnector]:
+    """A fresh KafkaConnector instance. Caller is responsible for connect()."""
+    kc = KafkaConnector(bootstrap_servers=kafka_bootstrap)
+    yield kc
+    # Best-effort sync cleanup; tests that exercise async lifecycle call aclose() themselves.
+    kc.close()
+
+
+@pytest.fixture
+def kafka_topic() -> str:
+    """A unique topic name per test. Auto-created by Kafka on first produce/subscribe."""
+    return f"etl-test-{uuid4().hex[:8]}"
+
+
+@pytest.fixture
+async def kafka_seeded_topic(
+    kafka_bootstrap: str, kafka_topic: str, sample_records: list[Record]
+) -> str:
+    """Pre-publish ``sample_records`` to ``kafka_topic`` and return the topic name.
+
+    Uses its own short-lived producer (separate from the connector under test)
+    so the test starts with a clean producer state.
+    """
+    import json as _json
+
+    from aiokafka import AIOKafkaProducer
+
+    producer = AIOKafkaProducer(bootstrap_servers=kafka_bootstrap)
+    await producer.start()
+    try:
+        for r in sample_records:
+            await producer.send_and_wait(
+                kafka_topic,
+                value=_json.dumps(r.data).encode("utf-8"),
+            )
+    finally:
+        await producer.stop()
+    return kafka_topic

@@ -141,16 +141,30 @@
 
 ---
 
-## Step 3 — Pipeline 실행기 + CLI  ← **다음 작업 (2026-05-14)**
+## Step 3 — Pipeline 실행기 + CLI  ← **현재 단계 (착수: 2026-05-14)**
 
-- [ ] YAML → Pipeline 빌더 (`Pipeline.from_yaml`)
-- [ ] `transforms` 처리기 (rename/cast/filter/python callable)
-- [ ] `etlx` CLI (`run`, `run-stream`, `test-connection`, `list-connectors`, `schema`, `validate`, `version`)
-- [ ] Retry / Circuit Breaker 적용
-- [ ] Dead Letter Queue 라우팅
-- [ ] Checkpoint / Cursor 저장 hook
-- [ ] Stream sink 버퍼링 (`max_records`/`max_seconds`)
-- [ ] `commit.strategy: after_sink_flush` 구현
+### 3.1 YAML 빌더 + Transforms + CLI (batch only)
+- [x] `etl_plugins/runtime/transforms.py` — `@register_transform` + 빌트인 4종 (rename / cast / filter sandbox / python)
+- [x] `etl_plugins/runtime/builder.py` — `build_connector` / `build_connectors` / `build_pipeline` / `build_pipeline_from_yaml`
+- [x] `etl_plugins/runtime/runner.py` — `run_pipeline_yaml`
+- [x] `etl_plugins/cli.py` — Typer app + 5 서브커맨드 (`version`, `list-connectors`, `validate`, `run`, `test-connection`)
+- [x] `pyproject.toml` console_scripts: `etlx = "etl_plugins.cli:main"`
+- [x] 38 unit tests (transforms 23 + builder 8 + CLI 7) — 총 252 unit
+- [x] ADR-0011
+
+### 3.2 Stream runtime  ← **다음**
+- [ ] `Pipeline.run`에 stream mode 분기 (async)
+- [ ] `etlx run-stream` 서브커맨드
+- [ ] `commit.strategy: after_sink_flush` (Kafka `StreamSource.commit` 구현)
+- [ ] Stream sink 버퍼링 (`max_records`/`max_seconds` BufferConfig)
+- [ ] Stream integration test (`testcontainers[kafka]` + Pipeline.run)
+
+### 3.3 Retry / DLQ / Checkpoint / Observability
+- [ ] Retry `@retryable` 통합 (RetryConfig → tenacity)
+- [ ] Dead Letter Queue 라우팅 (transform/sink 실패 → 별도 sink)
+- [ ] Checkpoint / Cursor 저장 hook (BatchSource cursor, StreamSource offset)
+- [ ] Pipeline.run 내부 자동 metrics/span emit (Step 1.6 ABC 연결)
+- [ ] CLI logging 통합 (`--log-format json|console`)
 
 ---
 
@@ -224,3 +238,4 @@
 - 2026-05-14: **Step 2.1 (PostgreSQL 커넥터) 완료.** psycopg 3 기반 BatchSource + BatchSink (append=COPY / overwrite / upsert). 29 통합 테스트 (193 unit + 29 it = 222 total). ADR-0008 추가. contracts/batch.py에 read_kwargs/write_kwargs fixture 추가. 다음은 Step 2.2 (s3).
 - 2026-05-14: **Step 2.2 (S3 커넥터) 완료.** boto3 기반 BatchSource + BatchSink (jsonl/csv/parquet). 21 unit + 35 integration tests (총 214 unit + 64 it = 278 tests). ADR-0009 추가. MinIO testcontainers 통합 — 같은 코드가 AWS S3/MinIO/R2 호환. 다음은 Step 2.3 (kafka).
 - 2026-05-14: **Step 2.3 (Kafka 커넥터) + Step 2 전체 완료.** aiokafka 기반 StreamSource + StreamSink. Stream Contract 신규 도입(`_StreamSourceContract`/`_StreamSinkContract`/`_StreamRoundTripContract`). 16 통합 테스트 (총 214 unit + 80 it = 294 tests). ADR-0010 추가. 다음은 Step 3 (Pipeline 실행기 + CLI).
+- 2026-05-14: **Step 3.1 (YAML 빌더 + Transforms + `etlx` CLI) 완료.** `etl_plugins/runtime/` (transforms/builder/runner) + Typer CLI 5 서브커맨드. 38 신규 unit tests (총 252 unit + 80 it = 332). ADR-0011 추가. 다음은 Step 3.2 (stream runtime + commit).

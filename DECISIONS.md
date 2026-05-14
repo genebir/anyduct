@@ -300,4 +300,38 @@
 
 ---
 
+## ADR-0011: Step 3.1 Pipeline runtime — YAML 빌더 + Transforms + `etlx` CLI
+
+- **Date**: 2026-05-14
+- **Status**: Accepted
+- **Context**:
+  Step 3.1은 SPEC.md §10 Step 3의 첫 슬라이스다. 핵심 결정: 빌더가 어디까지 책임지는가(연결 lifecycle / 변환 로직 / CLI), transform 어떻게 등록되고 dispatch되는가, filter expression의 보안 모델, CLI 프레임워크.
+- **Decision**:
+  1. **Runtime layer를 별도 패키지로 분리** (`etl_plugins/runtime/`). `core/`는 순수 추상 + Pipeline 모델, `runtime/`은 YAML 파싱 + 변환 dispatch + 라이프사이클. 책임 분리 → core가 runtime을 import하지 않으므로 외부 작성자가 같은 Pipeline ABC를 다른 runtime으로 활용 가능.
+  2. **`build_pipeline_from_yaml(...)` 한 함수가 composition root**. `(Pipeline, dict[str, Connector])` 튜플 반환. caller가 open/close 관리하거나 `run_pipeline_yaml(...)` 헬퍼 호출. 이유: 테스트에서 `extra_connectors=`로 InMemory mock 주입이 자연스럽고, orchestrator adapter(Airflow/Dagster/Prefect)가 자기네 라이프사이클로 감싸기 쉬움.
+  3. **Transform 디스패치는 별도 registry** (`runtime/transforms.py:_REGISTRY`, decorator `@register_transform("name")`). 이유: Connector registry와 의미·수명이 달라(transform은 stateless function builder, Connector는 stateful instance) — 한 레지스트리에 섞으면 혼란. 외부 패키지가 자체 transform 추가 가능 (`pyproject.toml` entry-point는 Step 5에서 필요해질 때 추가).
+  4. **빌트인 4종**: `rename`, `cast`, `filter`, `python`. SPEC.md §5.4의 예시와 정확히 일치. 추가는 사용자/외부가 register_transform으로.
+  5. **`cast` 타입 시스템은 보수적**: int/int64/float/float64/str/string/bool/timestamp 만. timestamp는 `datetime.fromisoformat`로 ISO 8601만 받음 (다양한 포맷 파서는 사용자가 `python` transform으로). `None`은 패스스루, 누락 컬럼은 스킵 → 부분 스키마 안전.
+  6. **`filter` expression은 sandboxed eval**: `eval(code, {"__builtins__": {}}, {"data": ..., "metadata": ...})`. 컴파일은 빌드 타임 1회 (`compile(..., "eval")`). 빌트인 차단 → `open`/`__import__` 등 사용 불가. 완전한 샌드박싱은 아니나(`().__class__` 같은 escape 기법은 막지 못함), 의도된 위협 모델은 "실수로 잘못 쓴 YAML이 OS 명령을 실행하는 사고"를 막는 것 — 신뢰할 수 없는 YAML을 실행하려면 별도 정책 필요. 진짜 임의 코드가 필요한 use case는 `python` transform으로 갈 것을 권장.
+  7. **`python` transform은 `module:function` 문자열로 import** — Airflow Operator import_string 같은 관습. import 실패는 ConfigError(빌드 시), 런타임 예외는 TransformError로 래핑.
+  8. **Transform이 `None` 반환 시 record drop** — Pipeline.run에서 이미 그렇게 처리되므로 filter/python 모두 자연스럽게 작동.
+  9. **CLI 프레임워크: Typer (`typer>=0.12`)**. argparse 대비 타입 어노테이션 기반 API가 깔끔하고, `Annotated[Path, typer.Argument(...)]` 패턴이 mypy strict와 호환. Click 기반이라 풀스택 검증 충분.
+  10. **CLI 서브커맨드 (Step 3.1 MVP)**: `version`, `list-connectors`, `validate`, `run`, `test-connection`. `run-stream`은 Step 3.2에서, `schema`는 Step 5+에서. `validate`는 YAML 파싱 + 연결 구성자 인자 검증까지만 — 실제 connect는 `test-connection`에서.
+  11. **`run` 명령은 자동으로 connectors.connect() → pipeline.run() → close()**. close()는 `contextlib.suppress(Exception)`로 감싸서 cleanup 실패가 결과 전파 막지 않게. 모든 ETLError는 빨간 에러 메시지로 exit code 1, 예상치 못한 예외는 클래스 이름 포함.
+  12. **`test-connection`은 `--all`로 일괄 점검 가능**. 실패 개수만큼 exit code 결정. 단순.
+  13. **`pyproject.toml`에 `etlx = "etl_plugins.cli:app"` entry-point**. `uv pip install -e .` 후 `etlx version`이 동작. Typer `app`은 callable이라 그대로 entry-point로 사용 가능. 테스트는 `typer.testing.CliRunner`로 in-process 호출 — 빠르고 sys.exit 없음.
+  14. **Test fixture에서 InMemory 커넥터를 stable name으로 등록 + 복원** (`ConnectorRegistry.register("cli-inmem-source", replace=True)(InMemoryBatchSource)`). `replace=True`로 idempotent. yield 후 원상복구. 다른 테스트 파일과 충돌 회피.
+- **Consequences**:
+  - (+) CLI smoke test 7개 + builder 8개 + transforms 23개 = 38 unit tests 추가 (총 252). 외부 Docker 없이 YAML → Pipeline 라이프사이클 전체 검증됨.
+  - (+) Orchestrator adapter는 이제 단 3줄로 작성 가능: `pipeline, conns = build_pipeline_from_yaml(...); pipeline.run(connectors=conns)`. Step 4 작업 부담 대폭 감소.
+  - (+) `etlx validate <yaml>`이 CI에서 모든 파이프라인 YAML 검증 가능 — 수정 즉시 피드백.
+  - (+) 외부 패키지가 자체 transform 추가는 한 줄: `@register_transform("my-transform")`.
+  - (−) Stream mode는 아직 미구현 (Pipeline.run이 batch만). `mode: stream` YAML은 빌드는 되지만 `run`은 NotImplementedError. **Step 3.2**.
+  - (−) Retry/DLQ/Checkpoint 미구현. `RetryConfig`는 빌드되지만 무시됨. **Step 3.3**.
+  - (−) Filter sandbox는 완벽하지 않음 — `python` transform이 더 명시적이므로 신뢰 안 되는 입력은 그쪽으로 안내. 문서로 보완.
+  - (−) CLI logging은 기본 stderr만 — JSON 구조화 로그 통합은 `--log-format` 옵션 형태로 Step 3.3에서.
+- **References**: SPEC.md §5.4, §5.5, §9.6 · `etl_plugins/runtime/{transforms,builder,runner}.py` · `etl_plugins/cli.py` · `tests/unit/runtime/` · `tests/unit/test_cli.py`
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

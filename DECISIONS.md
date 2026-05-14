@@ -467,4 +467,35 @@
 
 ---
 
+## ADR-0016: Step 5.1b SQLite 커넥터 — stdlib 드라이버, Docker 없는 유닛 테스트
+
+- **Date**: 2026-05-14
+- **Status**: Accepted
+- **Context**:
+  Step 5.1b는 RDBMS 카테고리의 세 번째 슬라이스. SQLite는 (a) 파이썬 stdlib `sqlite3`로 제공되어 외부 dep 0, (b) 파일 기반이라 Docker 불필요, (c) PostgreSQL과 거의 호환되는 ON CONFLICT 문법을 지원. 결정: 어디까지 stdlib을 의지할지, in-memory vs file 기본, mypy의 sqlite3.connect 시그니처 충돌.
+- **Decision**:
+  1. **드라이버: stdlib `sqlite3`** — 추가 install 0. `[sqlite]` extra 불필요. 모든 사용자가 즉시 활용.
+  2. **기본 database=`":memory:"`** — quick start / 테스트 친화. 실 사용은 파일 경로 지정.
+  3. **Read: `cursor.fetchmany(chunk_size)` 루프** + `row_factory = sqlite3.Row`로 dict-like 변환. `Record(data=dict(row))` 직접 사용.
+  4. **Write 전략은 mysql과 동일** (executemany batched, 기본 `batch_size=1000`):
+     - `append`: `INSERT INTO ... VALUES ...`
+     - `overwrite`: `DELETE FROM <table>` (`TRUNCATE`는 SQLite 미지원) + INSERT
+     - `upsert`: `INSERT ... ON CONFLICT (keys) DO UPDATE SET col = excluded.col, ...` (SQLite 3.24+ 필요 — 모든 모던 Python 인스톨에 포함)
+  5. **Identifier quoting은 double-quote**(`"name"`). 내부 `"`는 `""`로 escape. PostgreSQL과 동일 SQL 표준 문법.
+  6. **mypy `sqlite3.connect`가 `isolation_level: Literal[...]`을 요구** → `cast`로 우회. 우리는 사용자가 `"DEFERRED"` (기본)/ `"IMMEDIATE"` / `"EXCLUSIVE"` / `None`을 전달할 수 있게 허용 — cast 한 줄로 stdlib 시그니처 만족.
+  7. **모든 테스트는 unit tests** (`tests/unit/connectors/rdbms/test_sqlite.py`). Docker 불필요. `tmp_path` fixture로 매 테스트마다 새 db 파일. Contract 3종 (Source 7 + Sink 5 + RoundTrip 3) + SQLite-specific 17 = **32 tests**.
+  8. **Boolean은 INT(0/1)** — MySQL과 동일 이슈. `_sqlitify()` 헬퍼로 contract test에서 bool→int 매핑.
+  9. **Entry-point 등록 (no extra)** — `etlx list-connectors`에 자동 노출.
+- **Consequences**:
+  - (+) RDBMS 슬롯 3개째 (postgres / mysql / sqlite). Contract suite가 매번 그대로 재사용 — 한 connector 추가에 평균 ~200 LOC + 30 tests.
+  - (+) 가장 가벼운 RDBMS 옵션 — 로컬 dev / quick scripts / 테스트 fixture로 활용 가능 (예: pipeline의 dlq sink로 SQLite 파일 지정).
+  - (+) Unit tests로 CI에서 빠르게 실행 (~0.3s). 통합 테스트 잡에 부담 없음.
+  - (+) ON CONFLICT 구문이 PostgreSQL과 거의 동일 → SQLite 학습이 Postgres 친화.
+  - (−) SQLite는 동시 쓰기 제약(파일 lock) — 멀티스레드 파이프라인에서 주의 필요. 문서로 보완.
+  - (−) `TRUNCATE` 부재 → `DELETE FROM`으로 대체. 큰 테이블에서 `overwrite`가 postgres/mysql보다 느림 (1M+ rows에서 차이 체감).
+  - (−) `:memory:` 기본은 connect/close 후 데이터 사라짐 — 실 use case에선 항상 파일 경로 지정 필요. docstring으로 명시.
+- **References**: SPEC.md §6 · `etl_plugins/connectors/rdbms/sqlite.py` · `tests/unit/connectors/rdbms/test_sqlite.py`
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

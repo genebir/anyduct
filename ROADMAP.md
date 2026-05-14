@@ -190,7 +190,7 @@
 - [x] MySQL/MariaDB (PyMySQL, server-side cursor, executemany INSERT, ON DUPLICATE KEY UPDATE, 29 it tests) — ADR-0015
 - [ ] MSSQL
 - [ ] Oracle
-- [ ] SQLite
+- [x] SQLite (stdlib sqlite3, executemany, INSERT ON CONFLICT DO UPDATE, 32 unit tests, Docker zero) — ADR-0016
 
 ### 5.2 Data Warehouse
 - [ ] Snowflake (PUT/COPY INTO bulk load)
@@ -250,3 +250,4 @@
 - 2026-05-14: **Step 3.3 (Retry / DLQ / 자동 메트릭 / CLI logging) + Step 3 전체 완료.** Pipeline 자동 retry+DLQ+metrics, CLI global `--log-format/--log-level`. 13 신규 unit tests (총 282 unit + 82 it = 364). ADR-0013 추가. Checkpoint/Span은 Step 6 강화로 이동. 다음은 Step 4 (Orchestrator Adapters) 또는 Step 5 (커넥터 확장).
 - 2026-05-14: **Step 4 (Orchestrator Adapters) 완료.** Airflow/Dagster/Prefect adapters with PEP 562 lazy loading. 10 신규 tests (총 289 unit + 3 skip + 82 it = 374). ADR-0014 추가. 다음은 Step 5 (커넥터 확장).
 - 2026-05-14: **Step 5.1 (MySQL 커넥터) 완료.** PyMySQL 기반 BatchSource + BatchSink (append=executemany / overwrite=TRUNCATE+INSERT / upsert=ON DUPLICATE KEY UPDATE). 29 신규 통합 테스트 (총 289 unit + 3 skip + 111 it = 403). ADR-0015 추가. 다음은 Step 5.x (다른 RDBMS / NoSQL / DW).
+- 2026-05-14: **Step 5.1b (SQLite 커넥터) 완료.** stdlib sqlite3 — 외부 dep 0. ON CONFLICT DO UPDATE upsert. 32 신규 unit tests (총 321 unit + 3 skip + 111 it = 435). ADR-0016 추가. 다음은 Step 5.x.

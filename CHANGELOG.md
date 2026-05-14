@@ -288,6 +288,28 @@
 ### Milestone
 - **Step 5.1 — MySQL 커넥터 완료 (2026-05-14)**: 두 번째 RDBMS connector. Contract suite 재사용으로 새 커넥터 보일러플레이트 검증. 29 신규 통합 테스트 (289 unit + 3 skip + 111 it = 403 total). 다음은 Step 5.x 추가 connectors (SQLite/Oracle/MSSQL 또는 NoSQL/DW 카테고리).
 
+- **SQLite 커넥터** [Step 5.1b]
+  - `etl_plugins/connectors/rdbms/sqlite.py` — `SQLiteConnector(BatchSource, BatchSink)`. stdlib `sqlite3` 사용 — **외부 dep 0, extras 불필요**.
+  - 기본 `database=":memory:"`. 파일 경로는 그대로 지정 (`SQLiteConnector(database="/path/to.db")`).
+  - `read()`: `cursor.fetchmany(chunk_size)` 루프 + `row_factory = sqlite3.Row` → `dict(row)`.
+  - `write()` 세 모드:
+    - `append`: executemany INSERT (batch_size=1000)
+    - `overwrite`: `DELETE FROM <table>` (TRUNCATE 미지원) + INSERT
+    - `upsert`: `INSERT ... ON CONFLICT (key_columns) DO UPDATE SET col = excluded.col, ...` (SQLite 3.24+)
+  - Double-quote 기반 식별자 quoting (`"name"`), 내부 `"`는 `""` escape.
+  - `@ConnectorRegistry.register("sqlite")` + `[project.entry-points."etl_plugins.connectors"]` — `etlx list-connectors`에 자동 노출.
+- **테스트** [Step 5.1b]
+  - `tests/unit/connectors/rdbms/test_sqlite.py` — Contract subclass (Source 7 + Sink 5 + RoundTrip 3 = 15) + SQLite-specific 17 = **32 unit tests** (Docker 없이, `tmp_path`로 파일 db 매 테스트마다). ~0.3s 실행.
+  - boolean → INT(0/1) 의미론은 `_sqlitify()` 헬퍼로 매핑.
+- **typing**
+  - `sqlite3.connect`의 `isolation_level: Literal[...]` 요구를 `cast`로 우회 — 사용자는 평범한 `str | None` 그대로 전달.
+
+### Decisions
+- ADR-0016: Step 5.1b SQLite 커넥터 (stdlib sqlite3 — extras 불필요, in-memory 기본, ON CONFLICT (PostgreSQL과 동일 문법) 채택, unit-test only — Docker zero)
+
+### Milestone
+- **Step 5.1b — SQLite 커넥터 완료 (2026-05-14)**: 세 번째 RDBMS connector. RDBMS 슬롯에 3/5 채움(postgres/mysql/sqlite). 32 신규 unit tests (321 unit + 3 skip + 111 it = 435 total). 다음은 Step 5.x 추가 connectors.
+
 ### Changed
 - (없음)
 

@@ -46,6 +46,7 @@ etlx = "etl_plugins.cli:app"
 [project.entry-points."etl_plugins.connectors"]
 postgres = "etl_plugins.connectors.rdbms.postgres:PostgresConnector"
 mysql = "etl_plugins.connectors.rdbms.mysql:MySQLConnector"
+sqlite = "etl_plugins.connectors.rdbms.sqlite:SQLiteConnector"
 s3 = "etl_plugins.connectors.object_storage.s3:S3Connector"
 kafka = "etl_plugins.connectors.stream.kafka:KafkaConnector"
 

@@ -673,7 +673,7 @@
 ## ADR-0021: 실행 엔진 = 자체 PostgreSQL-backed worker queue (Dagster/Prefect 임베드 거부)
 
 - **Date**: 2026-05-14
-- **Status**: Accepted
+- **Status**: Accepted (Step 7.0 직후 재검토 후 확정 — 아래 Considered alternatives 참조)
 - **Context**:
   Step 9가 풀어야 할 문제:
   - **스케줄링**: cron 표현식 → 다음 실행 시각 계산 + 트리거.
@@ -714,6 +714,29 @@
   - (−) Distributed scheduling 정교화(우선순위 큐, fair-share, 자원 예약)는 우리가 직접 만들어야. 첫 릴리스는 단순 FIFO + per-workspace concurrency cap.
   - (−) Cron이 정확히 한 번 트리거되는지(스케줄러 SPOF)는 운영 이슈. advisory lock으로 단일 leader 보장.
   - (−) 추후 100k+ runs/day 규모에서 PG 큐 한계가 보이면 별도 broker(Redis Streams / NATS JetStream)로 마이그레이션 필요.
+
+- **Considered alternatives** (Step 7.0 직후 재검토 결과 — 같은 기준의 후보 비교):
+
+  | 옵션 | broker 의존 | task model | 코어 재사용 | UI 중복 | 거부 사유 |
+  |---|---|---|---|---|---|
+  | **자체 PG queue (채택)** | PG만 | Pipeline 직접 호출 | 100% | 없음 | — |
+  | Dagster OSS 임베드 | dagster-postgres | Asset/Op로 재모델링 | Op 안에서만 | Dagster UI vs 우리 UI | UI/모델 이중화. Step 4 adapter로도 동일 사용성 확보 가능 |
+  | Prefect 3.x server 임베드 | Prefect server (PG) | Flow/Task로 재모델링 | Task 안에서만 | Prefect UI vs 우리 UI | 위와 동일 사유 |
+  | Celery + Redis | **Redis 추가** | task | 100% | 없음 | Redis 인프라 추가 부담 + 우리 use case 부하(~수 runs/sec)가 broker 분리 이득을 정당화 못 함 |
+  | arq (async + Redis) | **Redis 추가** | task | 100% | 없음 | 위와 유사 + 생태계가 Celery 대비 작음 |
+  | APScheduler 4 + 자체 worker | PG | task | 100% | 없음 | `croniter` 한 줄로 동등 기능 가능 → 의존성 추가 이득 없음 |
+  | Temporal | **Temporal cluster** | workflow + activity | activity 안에서만 | 없음 | 첫 릴리스 과함. 추후 거대 규모 시 재검토 |
+
+  결정적 기준 = **(1) 코어 재사용 100%** + **(2) 인프라 추가 0** + **(3) UI 중복 없음**. 자체 PG queue만 세 가지 모두 만족.
+
+- **Operating envelope, exit ramp, PoC gates**:
+  1. **Operating envelope** (목표 부하): ~50 runs/sec, ~10k runs/day, p95 enqueue→start < 2s, 동시 워커 ~50. 그 너머는 broker 전환 검토.
+  2. **Exit ramp** — 미래에 broker로 옮길 때를 위한 격리: 워커가 큐를 폴링하는 코드는 `etlx_server/workers/queue.py` 한 파일에 격리 (interface = `claim_next() / heartbeat() / complete() / fail()`). 큐 백엔드 교체 = 이 한 파일 + Alembic 마이그레이션 한 번. `runs` 테이블의 도메인 컬럼(workspace_id / pipeline_id / status / started_at / finished_at)은 백엔드와 무관하게 유지.
+  3. **PoC 합격 기준** (Step 9.1 — 통과 못 하면 본 ADR을 supersede하고 Celery+Redis 또는 Temporal 재검토):
+     - 50 동시 워커 + 1000 enqueued runs 부하에서 deadlock·zombie 없이 모두 종료
+     - p95 enqueue→start latency < 2s
+     - 스케줄러(advisory lock leader) 강제 종료 시 30초 내 다른 인스턴스로 페일오버
+     - Worker 강제 SIGKILL 시 heartbeat 만료(60s) 후 다른 워커가 zombie run 회수해서 재시도
 
 - **References**: ROADMAP §9 (Execution Engine), §11 (운영 강화) · 코어의 `etl_plugins/runtime/runner.py`, ADR-0013(retry/DLQ)
 

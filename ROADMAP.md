@@ -58,12 +58,15 @@
 - [x] `python-dotenv`, `types-PyYAML` 의존성 추가
 - [x] 단위 테스트 49개
 
-### 1.6 Observability 베이스 (`etl_plugins/observability/`)  ← **다음 작업 (2026-05-14)**
-- [ ] `logging.py` — structlog JSON, 시크릿 마스킹 필터
-- [ ] `metrics.py` — OpenTelemetry/Prometheus 표준 메트릭
-- [ ] `tracing.py` — OTLP exporter
+### 1.6 Observability 베이스 (`etl_plugins/observability/`)
+- [x] `logging.py` — structlog JSON/dev 콘솔 + 시크릿 마스킹 processor (`make_secret_masker`) + `configure_logging`
+- [x] `metrics.py` — `Metrics`/`Counter`/`Histogram` ABC + NoOp + `get/set/reset_metrics` + 표준 메트릭 이름 상수
+- [x] `tracing.py` — `Tracer`/`Span` ABC + NoOp + 자동 record_exception on __exit__
+- [x] 단위 테스트 30개 (총 136)
+- [ ] OTel/Prometheus 실제 백엔드 구현 — **Step 6 강화로 이동**
+- [ ] Pipeline.run 내부 자동 metrics/span emit — **Step 3 retry+observability 통합**
 
-### 1.7 Utils (`etl_plugins/utils/`)
+### 1.7 Utils (`etl_plugins/utils/`)  ← **다음 작업 (2026-05-14)**
 - [ ] `retry.py` — `@retryable` (지수 백오프 + jitter)
 - [ ] `chunk.py`
 - [ ] `async_io.py`
@@ -180,3 +183,4 @@
 - 2026-05-14: Step 1.3 (CI) 완료. CI 워크플로 + release 워크플로 + tests 초기 구조 + dynamic version. 다음은 1.4 (Core 추상화).
 - 2026-05-14: Step 1.4 (Core 추상화) 완료. exceptions/record/schema/connector/registry/context/pipeline + 57 unit tests. ADR-0003 추가. 다음은 1.5 (Config 로더).
 - 2026-05-14: Step 1.5 (Config 로더) 완료. models/secrets/loader + 49 unit tests (총 106). ADR-0004 추가. 다음은 1.6 (Observability).
+- 2026-05-14: Step 1.6 (Observability 베이스) 완료. logging/metrics/tracing ABC + NoOp + 30 unit tests (총 136). ADR-0005 추가. OTel 실제 구현은 Step 6로 이동, Pipeline 자동 계측은 Step 3로 이동. 다음은 1.7 (Utils).

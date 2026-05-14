@@ -126,4 +126,28 @@
 
 ---
 
+## ADR-0005: Step 1.6 Observability 베이스 — 설계 결정
+
+- **Date**: 2026-05-14
+- **Status**: Accepted
+- **Context**:
+  SPEC.md §9.2는 structlog 로깅 + OpenTelemetry/Prometheus 메트릭 + OTLP 트레이싱을 요구한다. 동시에 §9.3은 시크릿 로그 노출 금지. Step 1.6에서 어디까지 구현할지, 외부 의존성(opentelemetry-sdk ~수십 MB)을 어떻게 다룰지가 결정 필요.
+- **Decision**:
+  1. **ABC + NoOp 기본 패턴 유지** (core/Connector와 동일 결). `Metrics`/`Counter`/`Histogram` ABC, `Tracer`/`Span` ABC, 기본은 NoOp. 호출자가 `set_metrics`/`set_tracer`로 실제 백엔드 주입.
+  2. **structlog는 기본 의존성** (이미 deps에 있음). JSON 렌더러를 기본, dev 콘솔 렌더러는 선택. `configure_logging`은 idempotent.
+  3. **시크릿 마스킹은 키 substring 매칭** (regex word-boundary 대신). 보안은 보수적으로 — 거짓 양성(과도 마스킹)이 거짓 음성(누설)보다 안전. 기본 키워드: password, passphrase, secret, token, api_key, apikey, access_key, accesskey, private_key, privatekey, credential, credentials, authorization, sasl_password. `make_secret_masker(keywords)`로 커스터마이즈 가능.
+  4. **Counter + Histogram만 제공**. Gauge는 Step 1.6 범위에 포함하지 않음 — 필요 시점에 추가. 이름 상수(`RECORDS_READ_TOTAL` 등)는 SPEC.md §9.2를 따르며 `etl_plugins.` 네임스페이스 prefix.
+  5. **실제 OTel/Prometheus 백엔드 구현은 Step 6(강화)로 미룸**. 인터페이스만 동결하고 `[project.optional-dependencies] observability` 자리를 `pyproject.toml`에 비워둠. 이렇게 해야 라이브러리 코어가 무거운 의존성을 끌고 다니지 않음.
+  6. **Pipeline 내부 통합도 후순위**. 현재 `Pipeline.run`이 records_read/written을 RunResult로 반환하므로 외부에서 metrics emit 가능. 자동 emit/span 시작은 Step 3 retry+observability 통합 시 다룸.
+  7. **`Span.__exit__`가 자동으로 `record_exception` 호출**. 호출자가 try/except로 명시 호출하지 않아도 예외 경로 캡처. 안전한 디폴트.
+- **Consequences**:
+  - (+) 라이브러리 사용자는 observability 백엔드 미설정 시에도 동일한 코드 작동 (NoOp).
+  - (+) opentelemetry 의존성을 핵심에서 분리해 install footprint 작음.
+  - (+) 시크릿 마스킹이 기본 활성 — 실수 노출 위험 작음.
+  - (−) 마스킹 키워드가 너무 광범위하면 정상 필드도 가려짐 (예: `customer_credentials_id`). 사용자가 `make_secret_masker`로 좁힐 수 있음.
+  - (−) Pipeline 자동 계측이 없어 사용자가 명시적으로 metrics/tracer 호출해야 — Step 3에서 보완.
+- **References**: SPEC.md §9.2, §9.3 · `etl_plugins/observability/` · `tests/unit/observability/`
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

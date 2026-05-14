@@ -310,6 +310,37 @@
 ### Milestone
 - **Step 5.1b — SQLite 커넥터 완료 (2026-05-14)**: 세 번째 RDBMS connector. RDBMS 슬롯에 3/5 채움(postgres/mysql/sqlite). 32 신규 unit tests (321 unit + 3 skip + 111 it = 435 total). 다음은 Step 5.x 추가 connectors.
 
+- **서비스화 방향 확정** [Step 7~11 신설]
+  - `SPEC.md` — 코어 위에 얹는 **별도 패키지 (`services/etlx-server` FastAPI + `services/etlx-web` Next.js)** 도입. §1 (목적), §2 (아키텍처 9-layer), §3 (디렉토리: `services/` 추가), §8.5 (서비스 경계 규칙), §10 (Steps 7~11 추가) 패치. **단방향 의존** — `etl_plugins/`은 `services/`를 절대 import하지 않음.
+  - `ROADMAP.md` — Step 7~11 추가:
+    - 7: Service Foundation (Metadata DB / Secret / YAML↔DB 양방향)
+    - 8: API Server (FastAPI, OIDC + JWT, RBAC, audit, CRUD/Action 엔드포인트)
+    - 9: Execution Engine 통합 (Dagster/Prefect/자체 PoC + 스케줄러 + Run 라이프사이클 + Stream worker manager)
+    - 10: Web UI (Next.js + React Flow Pipeline Builder + 다크/라이트, DESIGN.md §13 진행 순서 따름)
+    - 11: 운영 강화 (Helm chart, 멀티테넌시 부하 테스트, 운영 메트릭 대시보드)
+  - `CLAUDE.md` — 코어/서비스 이중 트랙 명시, 의존 규칙 명문화, 금기사항에 "서비스 패키지 격리" 섹션 + `DESIGN.md` 토큰 외 사용 금지 추가.
+  - 코드 변경 없음 (코어 라이브러리는 그대로). 모든 결정은 ADR-0017로 기록.
+
+- **디자인 시스템 채택** [Step 10 사전 준비]
+  - `DESIGN.md` 신규 (662줄) — `services/etlx-web`의 디자인 SSOT.
+    - Arc Browser 영감 (사이드바 중심 + Command Palette + 워크스페이스 컬러 인디케이터)
+    - 컬러: 깊은 네이비 베이스 (`#0A1228` / `#0F1730` / `#15203F`) + 팝핑크 강조 (`#FF3D8B`)
+    - 타이포: Inter Variable + Pretendard Variable + JetBrains Mono (self-host)
+    - 레이아웃: 8pt grid, 사이드바 240/64, max width 1280
+    - 컴포넌트 베이스: shadcn/ui (토큰 치환), React Flow Pipeline node 테마
+    - 모션: Framer Motion (fast 120 / default 200 / slow 320ms), `prefers-reduced-motion` 존중
+    - 토큰 단일 진실 (CSS variables → Tailwind config → shadcn/ui), Storybook + Chromatic + axe-core가 CI 게이트
+    - A11y: AA 의무, 핵심 페이지 AAA 권장
+    - 적용 우선순위 §13 (Step 10.0~10.8 단계별 진행 순서) 명시
+  - `SPEC.md` §9.7 / `CLAUDE.md` 금기사항에 디자인 규칙 통합
+
+### Decisions
+- ADR-0017: 서비스화 전략 — 코어 라이브러리 위에 별도 패키지로 웹 UI/API 분리. 모노레포(`etl_plugins/` + `services/etlx-server/` + `services/etlx-web/`), 단방향 의존(서비스 → 코어), CI 분리(`ci-core.yml` / `ci-server.yml` / `ci-web.yml`), 세부 기술 스택은 Step 7.0에서 ADR-0019~0023으로 확정.
+- ADR-0018: 디자인 시스템 — Arc 영감, 네이비 베이스 + 팝핑크 강조. shadcn/ui + Tailwind v4 + Storybook + Chromatic/Playwright visual regression + axe-core a11y가 CI 게이트. 프론트엔드 스택(Next.js/TS/React Flow) 결정도 함께 포함되어 ROADMAP §7.0의 "프론트엔드 스택 ADR"은 별도 두지 않음.
+
+### Milestone
+- **서비스화 방향 + 디자인 시스템 확정 (2026-05-14)**: 코어 라이브러리(Steps 1~6) 위에 얹는 서비스 계층(Steps 7~11)을 별도 패키지로 분리하는 결정 — ADR-0017. UI 디자인은 ADR-0018 + DESIGN.md로 단일 진실 확립. 코드 변경 없음 (문서만). 다음 작업은 (a) Step 5 추가 connectors / (b) Step 6 강화 (mkdocs, v0.1.0 릴리스) / (c) Step 7.0 ADR-0019~0023 착수 중 우선순위 선택.
+
 ### Changed
 - (없음)
 

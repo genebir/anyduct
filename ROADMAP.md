@@ -2,11 +2,18 @@
 
 > Step 단위 진행 상태. 체크박스로 관리. 작업 중단 시 해당 항목에 `← 작업 중 (YYYY-MM-DD, 다음 할 일: ...)` 표시.
 > 모든 커밋 메시지에 Step 번호 포함 (예: `feat(connector): add postgres source [Step 2.1]`).
-> 전체 설계 근거는 [`SPEC.md`](./SPEC.md) §10 참조.
+> 전체 설계 근거는 [`SPEC.md`](SPEC.md) §10 참조.
 
 ---
 
-## Step 1 — Foundation  ← **현재 단계 (착수: 2026-05-14)**
+## 현재 상태 (2026-05-14)
+
+**Steps 1–4 완료 + Step 5.1 RDBMS 일부(MySQL, SQLite). 321 단위 + 3 skip + 111 통합 = 435 테스트, 16 ADR.**
+**서비스화 방향 확정**: Step 7 이후로 `services/etlx-server` (FastAPI) + `services/etlx-web` (Next.js) 별도 패키지로 진행. 코어와 서비스는 단방향 의존 (서비스 → 코어). 자세한 결정은 ADR-0017.
+
+---
+
+## Step 1 — Foundation ✅ (2026-05-14 완료)
 
 ### 1.0 Harness 문서
 - [x] `SPEC.md` 분리 (기존 CLAUDE.md → SPEC.md)
@@ -17,180 +24,102 @@
 - [x] `CHANGELOG.md` 초기화
 
 ### 1.1 프로젝트 스캐폴딩
-- [x] `pyproject.toml` (uv, `requires-python>=3.11`, 패키지 메타, ADR-0002)
+- [x] `pyproject.toml` (uv, `requires-python>=3.11`, ADR-0002)
 - [x] `.python-version` (3.11)
-- [x] `uv.lock` 커밋
-- [x] `.gitignore` (`.env`, `__pycache__`, `dist/`, `.venv`, ...)
-- [x] `.editorconfig`
+- [x] `uv.lock`, `.gitignore`, `.editorconfig`
 - [x] `.pre-commit-config.yaml` + `.yamllint.yaml`
-- [x] `Makefile` (`setup`, `test`, `lint`, `fmt`, `up`, `down`, `clean`, ...)
-- [x] `README.md`
-- [x] `etl_plugins/__init__.py`, `py.typed` (패키지 placeholder)
+- [x] `Makefile`, `README.md`
+- [x] `etl_plugins/__init__.py`, `py.typed`
 
 ### 1.2 환경 재현
-- [x] `.env.example`
-- [x] `scripts/bootstrap.sh`
+- [x] `.env.example`, `scripts/bootstrap.sh`
 - [x] `docker/docker-compose.dev.yml` (postgres 16, kafka 3.7 KRaft, minio, redis 7)
-- [ ] `.devcontainer/devcontainer.json`  *(optional, 나중에)*
+- [ ] `.devcontainer/devcontainer.json` *(optional, 나중에)*
 
 ### 1.3 CI
 - [x] `.github/workflows/ci.yml` (lint, mypy, yamllint, detect-secrets, unit matrix py3.11/3.12, integration, build)
-- [x] `.github/workflows/release.yml` (태그 트리거, 버전 검증, uv build, PyPI Trusted Publishing, GitHub release)
-- [x] `.secrets.baseline` 초기 생성
-- [x] `tests/` 초기 구조 + 패키지 sanity test (`tests/test_package.py`)
-- [x] Dynamic version (`etl_plugins/__init__.py`가 단일 진실)
+- [x] `.github/workflows/release.yml` (태그 트리거, PyPI Trusted Publishing)
+- [x] `.secrets.baseline`, `tests/` 초기 구조, Dynamic version
 
-### 1.4 Core 추상화 (`etl_plugins/core/`)
-- [x] `exceptions.py` — ETLError 계층 (Config/Registry/Connector/Pipeline/...)
-- [x] `record.py` — Pydantic `Record` (extra=forbid)
-- [x] `schema.py` — `Field`, `Schema` (minimal, frozen)
-- [x] `connector.py` — `Connector`, `BatchSource/Sink`, `StreamSource/Sink` (ABC)
-- [x] `registry.py` — `ConnectorRegistry` + entry-point 자동 로드 (fail-soft)
-- [x] `context.py` — `Context` (uuid run_id, structlog bound logger)
-- [x] `pipeline.py` — `Pipeline` + `Task` (fluent builder) + `RunResult` + hooks
-- [x] `etl_plugins/{__init__.py, core/__init__.py}` re-exports
-- [x] 단위 테스트 57개 (`tests/unit/core/`) — mypy strict / ruff / pytest 통과
+### 1.4 Core 추상화
+- [x] exceptions / record / schema / connector / registry / context / pipeline
+- [x] 57 unit tests, mypy strict / ruff / pytest 통과
 
-### 1.5 Config (`etl_plugins/config/`)
-- [x] `models.py` — Pydantic 설정 모델 (Connections/Pipeline/Source/Sink/Transform/Retry/Observability/Commit/Buffer)
-- [x] `secrets.py` — SecretBackend ABC + Env/Static + vault/aws_sm/gcp_sm 스텁 + 팩토리
-- [x] `loader.py` — YAML + `${VAR}` 치환 + `!secret <path>` 태그 + load_connections/load_pipeline/load_dotenv
-- [x] `python-dotenv`, `types-PyYAML` 의존성 추가
-- [x] 단위 테스트 49개
+### 1.5 Config
+- [x] models / secrets / loader, 49 unit tests
 
-### 1.6 Observability 베이스 (`etl_plugins/observability/`)
-- [x] `logging.py` — structlog JSON/dev 콘솔 + 시크릿 마스킹 processor (`make_secret_masker`) + `configure_logging`
-- [x] `metrics.py` — `Metrics`/`Counter`/`Histogram` ABC + NoOp + `get/set/reset_metrics` + 표준 메트릭 이름 상수
-- [x] `tracing.py` — `Tracer`/`Span` ABC + NoOp + 자동 record_exception on __exit__
-- [x] 단위 테스트 30개 (총 136)
-- [ ] OTel/Prometheus 실제 백엔드 구현 — **Step 6 강화로 이동**
-- [ ] Pipeline.run 내부 자동 metrics/span emit — **Step 3 retry+observability 통합**
+### 1.6 Observability 베이스
+- [x] logging (structlog + secret masker) / metrics / tracing ABC + NoOp, 30 unit tests
+- [ ] OTel/Prometheus 실제 백엔드 → Step 6
+- [ ] Pipeline 자동 emit → Step 3.3에서 통합 완료
 
-### 1.7 Utils (`etl_plugins/utils/`)
-- [x] `retry.py` — `@retryable` (sync+async, 지수 백오프 + jitter, tenacity 래핑, observability 자동 연동)
-- [x] `chunk.py` — `chunked` / `take` / `drop`
-- [x] `async_io.py` — `run_sync_in_thread`, `gather_with_concurrency`, `iter_to_async`
-- [x] 단위 테스트 42개 (총 178)
+### 1.7 Utils
+- [x] retry / chunk / async_io, 42 unit tests
 
 ### 1.8 테스트 인프라
-- [x] `tests/conftest.py` 글로벌 `sample_records` fixture
-- [x] `tests/fixtures/records.py` (sample / large / mixed_types) + `tests/fixtures/connectors.py` (InMemory 3종)
-- [x] `tests/contracts/batch.py` — `_BatchSourceContract` / `_BatchSinkContract` / `_BatchRoundTripContract` (subclass-able mixin)
-- [x] `tests/contracts/_helpers.py` — `normalize_payloads` (order-independent equality)
-- [x] `tests/contracts/test_inmem.py` — InMemory로 contract suite 자체 검증 (15 tests)
-- [x] 기존 `tests/unit/core/conftest.py` 슬림화 (InMemory를 fixtures로 이동)
-- [ ] Stream contract (`_StreamSourceContract` 등) — **Step 2.3 (Kafka)에서 추가**
+- [x] fixtures + contracts (Batch) + InMemory 자체 검증 15 tests
+- [ ] Stream contract → Step 2.3에서 추가됨
 
 ---
 
-## **Step 1 — Foundation: 완료 (2026-05-14)**
+## Step 2 — Reference Connectors ✅ (2026-05-14 완료)
 
-총 193 단위 테스트, 7개 ADR, 라이브러리 코어/Config/Observability/Utils/테스트 인프라까지 완비.
-**다음은 Step 2: Reference Connectors.**
+### 2.1 `postgres` (BatchSource + BatchSink) — ADR-0008
+- [x] psycopg 3, server-side cursor, COPY/TRUNCATE+COPY/ON CONFLICT
+- [x] 29 통합 테스트 (testcontainers postgres:16)
 
----
+### 2.2 `s3` — ADR-0009
+- [x] boto3 + pyarrow, jsonl/csv/parquet, MinIO 호환
+- [x] 21 unit + 35 integration tests
 
-## Step 2 — Reference Connectors (각 카테고리 1개씩 먼저)
-
-### 2.1 `postgres` (BatchSource + BatchSink)
-- [x] 드라이버 결정 (psycopg 3) — ADR-0008
-- [x] `BatchSource.read` (server-side named cursor + chunk_size + uuid 충돌 회피)
-- [x] `BatchSink.write` (append=COPY, overwrite=TRUNCATE+COPY, upsert=INSERT ON CONFLICT)
-- [x] health_check / connect / close / context manager
-- [x] `sql.Identifier` 기반 안전한 식별자 quoting (schema.table 지원)
-- [x] Registry `@register("postgres")` + entry-point 자동 발견
-- [x] Contract test 통과 (BatchSource 7 + BatchSink 5 + RoundTrip 3)
-- [x] Integration test 14개 (testcontainers + postgres:16-alpine) — 총 29 통합 테스트
-- [x] `[postgres]` extra + dev group + `contracts/batch.py`에 `read_kwargs`/`write_kwargs` fixture 추가
-
-### 2.2 `s3` (BatchSource + BatchSink)
-- [x] 드라이버 결정 (boto3) — ADR-0009
-- [x] parquet / csv / jsonl 포맷 (pyarrow + 순수 함수 `_serialize_*` / `_parse_*`)
-- [x] `detect_format(key)`로 확장자 기반 자동 감지 + 명시적 override
-- [x] MinIO 호환 (`endpoint_url` 파라미터 — testcontainers로 통합 테스트)
-- [x] BatchSource.read (`query`=prefix, paginated list + per-object parse)
-- [x] BatchSink.write (single object PUT, mode=append/overwrite, upsert 거부)
-- [x] Registry `@register("s3")` + entry-point 자동 발견
-- [x] Contract test 통과 (BatchSource 7 + BatchSink 5 + RoundTrip 3)
-- [x] 21 unit tests (포맷 helpers, no boto3) + 35 integration tests (MinIO)
-- [x] `[s3]` extra = `boto3>=1.34, pyarrow>=16.0`
-- [ ] multipart upload (큰 파일) — **Step 6 강화로 이동**
-
-### 2.3 `kafka` (StreamSource + StreamSink)
-- [x] 드라이버 결정 (aiokafka — native async) — ADR-0010
-- [x] StreamSource.subscribe (group_id, auto_offset_reset, async generator with finally cleanup)
-- [x] StreamSink.publish / flush (lazy producer)
-- [x] Sync `connect/close` flag-only + async `aclose()` 명시적 cleanup
-- [x] 메타데이터에 Kafka 위치(topic/partition/offset/key/timestamp) 포함
-- [x] Registry + entry-point 자동 발견
-- [x] **Stream Contract 신규 도입** (`tests/contracts/stream.py`): `_StreamSourceContract`/`_StreamSinkContract`/`_StreamRoundTripContract`
-- [x] 16 통합 테스트 (testcontainers Kafka KRaft mode)
-- [x] `[kafka]` extra = `aiokafka>=0.11`
-- [ ] StreamSource.commit (`at_least_once` 보장) — **Step 3 Pipeline runtime에서 구현**
-- [ ] Schema Registry 연동 (Avro/Protobuf) — **Step 5로 이동**
+### 2.3 `kafka` — ADR-0010
+- [x] aiokafka StreamSource + StreamSink, Stream Contract 신규 도입
+- [x] 16 통합 테스트 (KRaft mode)
 
 ---
 
-## **Step 2 — Reference Connectors: 완료 (2026-05-14)**
+## Step 3 — Pipeline 실행기 + CLI ✅ (2026-05-14 완료)
 
-세 카테고리 각 1종 (RDBMS=postgres, Object=s3, Stream=kafka) 모두 구현 및 통합 테스트 통과.
-80 통합 테스트 (postgres 29 + s3 35 + kafka 16). Batch Contract + Stream Contract 양쪽 패턴 확립.
-**다음은 Step 3: Pipeline 실행기 + CLI.**
+### 3.1 YAML 빌더 + Transforms + CLI (batch) — ADR-0011
+- [x] runtime/transforms.py (rename / cast / filter sandbox / python)
+- [x] runtime/builder.py, runtime/runner.py
+- [x] Typer CLI: `version`, `list-connectors`, `validate`, `run`, `test-connection`
+- [x] 38 unit tests
 
+### 3.2 Stream runtime — ADR-0012
+- [x] `Pipeline.arun_stream`, `etlx run-stream` + `--stop-after-*`
+- [x] Kafka async `commit()` (ABC sync→async 보정)
+- [x] Stream sink 버퍼 (`buffer.max_records` / `buffer.max_seconds`)
+- [x] 17 unit + 2 Kafka integration tests
 
-
----
-
-## Step 3 — Pipeline 실행기 + CLI  ← **현재 단계 (착수: 2026-05-14)**
-
-### 3.1 YAML 빌더 + Transforms + CLI (batch only)
-- [x] `etl_plugins/runtime/transforms.py` — `@register_transform` + 빌트인 4종 (rename / cast / filter sandbox / python)
-- [x] `etl_plugins/runtime/builder.py` — `build_connector` / `build_connectors` / `build_pipeline` / `build_pipeline_from_yaml`
-- [x] `etl_plugins/runtime/runner.py` — `run_pipeline_yaml`
-- [x] `etl_plugins/cli.py` — Typer app + 5 서브커맨드 (`version`, `list-connectors`, `validate`, `run`, `test-connection`)
-- [x] `pyproject.toml` console_scripts: `etlx = "etl_plugins.cli:main"`
-- [x] 38 unit tests (transforms 23 + builder 8 + CLI 7) — 총 252 unit
-- [x] ADR-0011
-
-### 3.2 Stream runtime
-- [x] `Pipeline.arun_stream` async 메서드 (mode='stream')
-- [x] `etlx run-stream` 서브커맨드 (+ `--stop-after-records` / `--stop-after-seconds`)
-- [x] `commit.strategy: after_sink_flush` (Kafka `StreamSource.commit` 구현 — async commit signature)
-- [x] Stream sink 버퍼링 (`buffer.max_records` / `buffer.max_seconds` in sink_options)
-- [x] InMemoryStreamSource/Sink 추가 (`tests/fixtures/connectors.py`)
-- [x] 17 신규 unit tests + 2 Kafka integration tests (commit이 실제로 group에 반영되는지 검증)
-- [x] ADR-0012 (commit ABC sync→async SPEC 보정 포함)
-
-### 3.3 Retry / DLQ / Observability
-- [x] Retry `@retryable` 통합 (RetryConfig → tenacity). Batch는 task-level, stream은 publish-level.
-- [x] Dead Letter Queue 라우팅 (DlqConfig: connection + table/topic + mode). Transform 실패만 라우팅 (sink 실패는 retry/propagate). Best-effort with `contextlib.suppress`.
-- [x] Pipeline.run 내부 자동 metrics emit (RECORDS_READ/WRITTEN_TOTAL, ERRORS_TOTAL, DURATION_SECONDS) — NoOp 기본
-- [x] CLI logging 통합 (`--log-format json|console` + `--log-level`) — Typer global callback
-- [x] 13 신규 unit tests (총 282 unit + 82 it = 364)
-- [x] ADR-0013
-- [ ] Checkpoint / Cursor 저장 hook (BatchSource cursor, StreamSource offset) — **Step 6 강화로 이동** (현재는 `Pipeline.on("post_run", ...)` 훅으로 사용자가 처리)
-- [ ] Pipeline span emit (Tracer 통합) — **Step 6 강화로 이동**
+### 3.3 Retry / DLQ / Observability — ADR-0013
+- [x] Retry: batch task-level, stream publish-level
+- [x] DLQ: transform 실패 라우팅, best-effort
+- [x] Pipeline.run 내부 자동 metrics emit
+- [x] CLI global `--log-format json|console` / `--log-level`
+- [x] 13 unit tests
+- [ ] Checkpoint / Cursor → Step 6
+- [ ] Pipeline span emit → Step 6
 
 ---
 
-## Step 4 — Orchestrator Adapters — **완료 (2026-05-14)**
+## Step 4 — Orchestrator Adapters ✅ (2026-05-14 완료) — ADR-0014
 
-- [x] Airflow `ETLPluginsOperator` (lazy via PEP 562 `__getattr__`)
+- [x] Airflow `ETLPluginsOperator`
 - [x] Dagster `EtlPluginsResource` + `etl_plugins_op`
-- [x] Prefect `run_etl_pipeline_flow` + `run_etl_pipeline_task`
-- [x] 3 optional-dependencies extras (`airflow`, `dagster`, `prefect`)
-- [x] Structural tests (7) + orchestrator-conditional delegation tests (3) — `pytest.importorskip` pattern
-- [x] ADR-0014
+- [x] Prefect `run_etl_pipeline_flow` + `task`
+- [x] PEP 562 lazy 로딩 — orchestrator 미설치 환경에서도 모듈 import 성공
+- [x] 3 optional-dependencies extras + structural tests 7 + conditional tests 3
 
 ---
 
-## Step 5 — Connector 확장
+## Step 5 — Connector 확장 🔄 (진행 중)
 
 ### 5.1 RDBMS
-- [x] MySQL/MariaDB (PyMySQL, server-side cursor, executemany INSERT, ON DUPLICATE KEY UPDATE, 29 it tests) — ADR-0015
+- [x] MySQL/MariaDB (PyMySQL) — ADR-0015, 29 it tests
+- [x] SQLite (stdlib) — ADR-0016, 32 unit tests
 - [ ] MSSQL
 - [ ] Oracle
-- [x] SQLite (stdlib sqlite3, executemany, INSERT ON CONFLICT DO UPDATE, 32 unit tests, Docker zero) — ADR-0016
 
 ### 5.2 Data Warehouse
 - [ ] Snowflake (PUT/COPY INTO bulk load)
@@ -226,28 +155,219 @@
 ## Step 6 — 강화
 
 - [ ] OpenLineage 이벤트 emit
-- [ ] Contract test suite 완성 (read→write→read 일치 등)
+- [ ] OTel / Prometheus 실제 백엔드 구현
+- [ ] Checkpoint / Cursor abstraction + Pipeline span emit
+- [ ] Contract test suite 완성
 - [ ] mkdocs 문서 사이트
-- [ ] v0.1.0 릴리스 (CHANGELOG + GitHub release workflow)
+- [ ] v0.1.0 PyPI 릴리스 (CHANGELOG + GitHub release workflow)
+
+---
+
+> **여기까지가 코어 라이브러리 (`etl_plugins`).** 아래부터는 그 위에 얹는 **별도 서비스 패키지 (`services/`)**. 코어는 서비스를 모른다 — 단방향 의존, SPEC.md §8.5 참조. 진행 전제: ADR-0017 (서비스화 전략 채택).
+
+---
+
+## Step 7 — Service Foundation (Metadata + Secret + YAML 양방향)
+
+### 7.0 기술 스택 결정 (ADR 추가)
+> ADR-0018은 이미 디자인 시스템에 사용되었으므로 이 그룹은 **ADR-0019~0023**으로 예약 (ADR-0017 본문과 일치).
+> 프론트엔드 스택(Next.js / TypeScript / Tailwind v4 / shadcn/ui / React Flow)은 ADR-0018(디자인 시스템)에서 함께 결정되었으므로 별도 ADR을 두지 않는다.
+
+- [ ] **ADR-0019**: API 프레임워크 = FastAPI 채택 사유 정리
+- [ ] **ADR-0020**: 메타데이터 저장소 = PostgreSQL + Alembic 채택 사유
+- [ ] **ADR-0021**: 실행 엔진 통합 전략 — Dagster 임베드 / Prefect 임베드 / 자체 구현 중 택1
+- [ ] **ADR-0022**: 모노레포 구조 — `services/etlx-server`, `services/etlx-web` 패키지 경계, 의존 방향, CI 분리 정책
+- [ ] **ADR-0023**: 인증·인가 정책 — OIDC 일반화 + 로컬 fallback + RBAC 역할 정의
+
+### 7.1 모노레포 스캐폴딩
+- [ ] `services/etlx-server/pyproject.toml` (코어 의존: `etl-plugins>=X.Y,<X+1`)
+- [ ] `services/etlx-web/package.json` (Next.js + TS)
+- [ ] 루트 README/CONTRIBUTING에 서비스 디렉토리 안내
+- [ ] CI 매트릭스 분리: `ci-core.yml` / `ci-server.yml` / `ci-web.yml`
+- [ ] **import-graph 검사**: `etl_plugins/*`가 `services/*`를 import하지 않음을 자동 검증 (CI에 lint step)
+
+### 7.2 메타데이터 DB 스키마
+- [ ] SQLAlchemy 2.x async 모델 정의
+  - `workspaces`, `users`, `roles`, `memberships`
+  - `connections` (workspace_id, type, config_json, secret_refs)
+  - `pipelines`, `pipeline_versions` (이력)
+  - `schedules` (cron / stream-active)
+  - `runs`, `run_logs`, `run_metrics`
+  - `audit_log` (actor + before/after JSON)
+- [ ] Alembic 초기 마이그레이션 (`alembic init`, `alembic revision --autogenerate`)
+- [ ] 테스트: testcontainers Postgres + factory_boy fixture
+
+### 7.3 YAML ↔ DB 양방향
+- [ ] `services/etlx-server/etlx_server/io/yaml_sync.py` — `configs/*.yaml` 읽어 DB upsert, 역방향 export
+- [ ] CLI 확장: `etlx import <yaml_dir> --workspace=<id>`, `etlx export --workspace=<id> --to=<dir>`
+- [ ] Pydantic 모델 재사용: `etl_plugins.config.models`의 `ConnectionConfig` / `PipelineConfig`을 그대로 DB 컬럼 검증에 사용
+
+### 7.4 Secret backend UI 통합
+- [ ] 입력 즉시 metadata DB에는 평문 저장 금지 — 시크릿 백엔드(Vault / AWS SM / GCP SM)에 저장하고 ref만 보관
+- [ ] `EnvSecretBackend`의 NotImplemented 스텁 3종(`VaultSecretBackend`, `AwsSmSecretBackend`, `GcpSmSecretBackend`) 실제 구현
+- [ ] 로컬 dev용 `FileSecretBackend` (path: file) — 평문 파일이지만 git 무시
+
+---
+
+## Step 8 — API Server (FastAPI)
+
+### 8.1 부트스트랩
+- [ ] FastAPI 앱 (`services/etlx-server/etlx_server/main.py`)
+- [ ] uvicorn / gunicorn 진입점
+- [ ] OpenAPI 자동 생성 + `/docs` / `/redoc`
+- [ ] 헬스체크 `/health`, `/ready`
+
+### 8.2 인증
+- [ ] OIDC (Google / Azure AD / Okta 일반화) — authlib
+- [ ] 로컬 계정 fallback (email + password, bcrypt)
+- [ ] JWT 발급/검증 (RS256)
+- [ ] `/auth/login`, `/auth/refresh`, `/auth/logout`
+
+### 8.3 RBAC
+- [ ] 역할: Owner / Editor / Viewer / Runner
+- [ ] 워크스페이스 단위 격리: 모든 리소스에 workspace_id, 쿼리 자동 필터
+- [ ] 의존성 주입: `Depends(require_role("editor"))`
+
+### 8.4 Audit log
+- [ ] 미들웨어: 모든 mutating 요청에 actor + path + before/after JSON 저장
+- [ ] `/audit?resource=...&actor=...` 조회 API
+
+### 8.5 CRUD 엔드포인트
+- [ ] `/workspaces` `/users` `/roles`
+- [ ] `/connections` (CRUD + `POST /{id}/test`)
+- [ ] `/pipelines` (CRUD + 버전 관리, `GET /{id}/versions`)
+- [ ] `/schedules` (CRUD + 활성화 토글)
+- [ ] `/runs` (목록/상세/로그/메트릭 조회)
+
+### 8.6 Action 엔드포인트
+- [ ] `POST /pipelines/{id}/dry-run` — 파이프라인 빌드 검증 + 첫 100 record 샘플
+- [ ] `POST /pipelines/{id}/trigger` — 즉시 실행 큐잉
+- [ ] `POST /runs/{id}/retry` — 실패 run 재시도
+- [ ] `GET /runs/{id}/logs` — 스트리밍 로그
+
+### 8.7 테스트
+- [ ] pytest + httpx async client
+- [ ] testcontainers Postgres + fixtures
+- [ ] 시나리오 테스트: 회원가입 → 워크스페이스 생성 → 연결 등록 → 파이프라인 생성 → 실행 → 결과 조회
+
+---
+
+## Step 9 — Execution Engine 통합
+
+### 9.1 엔진 선택 확정 (ADR-0021)
+- [ ] Dagster 임베드 / Prefect 임베드 / 자체 구현 비교 PoC
+- [ ] 결정 후 의존성 추가, 코어의 기존 adapter 재활용 검증
+
+### 9.2 스케줄러
+- [ ] DB `schedules` 테이블 → 실행엔진의 schedule API로 동기화 (CRUD 시 트리거)
+- [ ] cron 표현식 검증 (`croniter`)
+- [ ] 일시정지 / 재개
+
+### 9.3 Run 라이프사이클
+- [ ] 트리거 → 실행엔진에 작업 제출
+- [ ] 상태 변화 webhook 또는 polling → `runs` 테이블 갱신
+- [ ] 로그 수집: 표준 출력 → `run_logs` (또는 Loki) 적재
+- [ ] 메트릭 수집: 코어가 emit하는 OTel 메트릭을 Prometheus로
+
+### 9.4 Stream worker manager
+- [ ] long-running stream pipeline은 별도 process/Pod로 관리
+- [ ] K8s 모드: `Deployment` per pipeline, healthcheck, graceful shutdown
+- [ ] Docker Compose 모드 (로컬 dev): supervisor
+
+### 9.5 정책 UI 노출
+- [ ] retry / DLQ / 타임아웃 / 동시성 정책을 메타데이터 DB → UI에서 편집 가능
+
+---
+
+## Step 10 — Web UI (Next.js)
+
+> 디자인 단일 진실은 `DESIGN.md`. 토큰 외 임의 값 금지. 진행 순서는 `DESIGN.md` §13.
+
+### 10.0 디자인 토큰 구현
+- [ ] `services/etlx-web/styles/globals.css` (CSS variables, DESIGN.md §11.1)
+- [ ] `services/etlx-web/tailwind.config.ts` (DESIGN.md §11.2)
+- [ ] 폰트 self-host (Inter Variable + Pretendard Variable + JetBrains Mono)
+- [ ] Storybook 초기화 + 토큰 sanity stories (Colors / Typography / Spacing / Radius / Motion)
+- [ ] Chromatic 또는 Playwright visual baseline
+
+### 10.1 기초 컴포넌트 (shadcn/ui → 토큰 치환)
+- [ ] Button / Input / Card / Badge / Tooltip / Tabs / Select / Dropdown / Separator
+- [ ] Toast (Sonner)
+- [ ] Sidebar (Arc-style, workspace 4px 컬러 bar)
+- [ ] Header (검색 진입 + 액션 + theme toggle)
+- [ ] Command Palette (cmdk, Cmd+K — DESIGN.md §7.5)
+- [ ] 모든 컴포넌트 Storybook story 작성
+
+### 10.2 레이아웃 셸
+- [ ] Sidebar + Header + Content slot
+- [ ] 워크스페이스 전환 (컬러 인디케이터 슬라이드)
+- [ ] 다크/라이트 토글 + system preference + 로컬 저장
+- [ ] 페이지 전환 motion preset 적용
+
+### 10.3 Connection 관리
+- [ ] 목록 / 생성 / 편집 / 삭제
+- [ ] 시크릿 입력 폼 (값은 즉시 backend, DB에 평문 저장 금지)
+- [ ] Test connection 버튼 + 결과 인디케이터
+
+### 10.4 Pipeline Builder
+- [ ] React Flow + 커스텀 노드 테마 (DESIGN.md §7.6, §11.4)
+- [ ] 노드 타입: source / transform / sink / dlq
+- [ ] Properties 패널 (Pydantic schema → 자동 폼)
+- [ ] 저장 = metadata DB의 PipelineConfig JSON
+
+### 10.5 Schedule + Run 모니터링
+- [ ] cron 표현식 빌더 + cronstrue 자연어 해설
+- [ ] 다음 N회 실행 예상 시각 미리보기
+- [ ] Run 목록 (Data Table, status badge)
+- [ ] Run 상세 (timeline + 로그 + 메트릭 차트)
+- [ ] DLQ 조회 + 재처리
+
+### 10.6 관리자 화면
+- [ ] Workspace 관리 (생성/멤버/색)
+- [ ] 멤버 + 역할 (Owner / Editor / Viewer / Runner)
+- [ ] Audit log 뷰어 (필터, 시간 범위)
+
+### 10.7 빈 상태 / 에러 / 로딩 패스 점검
+- [ ] 전 페이지 empty state (DESIGN.md §7.11)
+- [ ] 전역 error boundary
+- [ ] Skeleton + 핑크 shimmer
+
+### 10.8 품질 게이트
+- [ ] axe-core a11y 검사 (AA 통과)
+- [ ] Chromatic/Playwright visual regression baseline 5개 페이지
+- [ ] keyboard-only 시나리오 테스트
+
+---
+
+## Step 11 — 운영 강화
+
+- [ ] 멀티 테넌시 격리 부담 테스트 (workspace 100개 시뮬레이션)
+- [ ] Helm chart (`services/charts/etlx/`) — postgres, vault, server, web, prometheus 일괄
+- [ ] `services/docker-compose.services.yml` — 로컬 풀스택 실행
+- [ ] 백업 가이드: metadata DB dump + 시크릿 백엔드 export
+- [ ] 운영 메트릭 Grafana 대시보드 템플릿
+- [ ] 첫 서비스 릴리스 (v1.0 — 코어는 0.x여도 서비스는 별도 SemVer)
 
 ---
 
 ## 변경 이력
 
 - 2026-05-14: 최초 작성. Step 1 착수.
-- 2026-05-14: Step 1.0 (Harness 문서), 1.1 (스캐폴딩), 1.2 (환경 재현) 완료. 다음은 1.3 (CI).
-- 2026-05-14: Step 1.3 (CI) 완료. CI 워크플로 + release 워크플로 + tests 초기 구조 + dynamic version. 다음은 1.4 (Core 추상화).
-- 2026-05-14: Step 1.4 (Core 추상화) 완료. exceptions/record/schema/connector/registry/context/pipeline + 57 unit tests. ADR-0003 추가. 다음은 1.5 (Config 로더).
-- 2026-05-14: Step 1.5 (Config 로더) 완료. models/secrets/loader + 49 unit tests (총 106). ADR-0004 추가. 다음은 1.6 (Observability).
-- 2026-05-14: Step 1.6 (Observability 베이스) 완료. logging/metrics/tracing ABC + NoOp + 30 unit tests (총 136). ADR-0005 추가. OTel 실제 구현은 Step 6로 이동, Pipeline 자동 계측은 Step 3로 이동. 다음은 1.7 (Utils).
-- 2026-05-14: Step 1.7 (Utils) 완료. retry/chunk/async_io + 42 unit tests (총 178). ADR-0006 추가. Circuit Breaker/Rate Limiter/DLQ는 Step 3으로 이동. 다음은 1.8 (테스트 인프라).
-- 2026-05-14: **Step 1.8 (테스트 인프라) + Step 1 전체 완료.** tests/fixtures/ + tests/contracts/ + 15 contract tests (총 193). ADR-0007 추가. 다음은 Step 2.1 (postgres 커넥터).
-- 2026-05-14: **Step 2.1 (PostgreSQL 커넥터) 완료.** psycopg 3 기반 BatchSource + BatchSink (append=COPY / overwrite / upsert). 29 통합 테스트 (193 unit + 29 it = 222 total). ADR-0008 추가. contracts/batch.py에 read_kwargs/write_kwargs fixture 추가. 다음은 Step 2.2 (s3).
-- 2026-05-14: **Step 2.2 (S3 커넥터) 완료.** boto3 기반 BatchSource + BatchSink (jsonl/csv/parquet). 21 unit + 35 integration tests (총 214 unit + 64 it = 278 tests). ADR-0009 추가. MinIO testcontainers 통합 — 같은 코드가 AWS S3/MinIO/R2 호환. 다음은 Step 2.3 (kafka).
-- 2026-05-14: **Step 2.3 (Kafka 커넥터) + Step 2 전체 완료.** aiokafka 기반 StreamSource + StreamSink. Stream Contract 신규 도입(`_StreamSourceContract`/`_StreamSinkContract`/`_StreamRoundTripContract`). 16 통합 테스트 (총 214 unit + 80 it = 294 tests). ADR-0010 추가. 다음은 Step 3 (Pipeline 실행기 + CLI).
-- 2026-05-14: **Step 3.1 (YAML 빌더 + Transforms + `etlx` CLI) 완료.** `etl_plugins/runtime/` (transforms/builder/runner) + Typer CLI 5 서브커맨드. 38 신규 unit tests (총 252 unit + 80 it = 332). ADR-0011 추가. 다음은 Step 3.2 (stream runtime + commit).
-- 2026-05-14: **Step 3.2 (Stream runtime) 완료.** `Pipeline.arun_stream` + Kafka async `commit()` (ABC sync→async 보정) + buffer + `etlx run-stream`. 17 신규 unit + 2 Kafka integration tests (총 269 unit + 82 it = 351). ADR-0012 추가. 다음은 Step 3.3 (Retry / DLQ / Checkpoint).
-- 2026-05-14: **Step 3.3 (Retry / DLQ / 자동 메트릭 / CLI logging) + Step 3 전체 완료.** Pipeline 자동 retry+DLQ+metrics, CLI global `--log-format/--log-level`. 13 신규 unit tests (총 282 unit + 82 it = 364). ADR-0013 추가. Checkpoint/Span은 Step 6 강화로 이동. 다음은 Step 4 (Orchestrator Adapters) 또는 Step 5 (커넥터 확장).
-- 2026-05-14: **Step 4 (Orchestrator Adapters) 완료.** Airflow/Dagster/Prefect adapters with PEP 562 lazy loading. 10 신규 tests (총 289 unit + 3 skip + 82 it = 374). ADR-0014 추가. 다음은 Step 5 (커넥터 확장).
-- 2026-05-14: **Step 5.1 (MySQL 커넥터) 완료.** PyMySQL 기반 BatchSource + BatchSink (append=executemany / overwrite=TRUNCATE+INSERT / upsert=ON DUPLICATE KEY UPDATE). 29 신규 통합 테스트 (총 289 unit + 3 skip + 111 it = 403). ADR-0015 추가. 다음은 Step 5.x (다른 RDBMS / NoSQL / DW).
-- 2026-05-14: **Step 5.1b (SQLite 커넥터) 완료.** stdlib sqlite3 — 외부 dep 0. ON CONFLICT DO UPDATE upsert. 32 신규 unit tests (총 321 unit + 3 skip + 111 it = 435). ADR-0016 추가. 다음은 Step 5.x.
+- 2026-05-14: Step 1.0 (Harness 문서), 1.1 (스캐폴딩), 1.2 (환경 재현) 완료.
+- 2026-05-14: Step 1.3 (CI) 완료.
+- 2026-05-14: Step 1.4 (Core 추상화) 완료. ADR-0003.
+- 2026-05-14: Step 1.5 (Config 로더) 완료. ADR-0004.
+- 2026-05-14: Step 1.6 (Observability 베이스) 완료. ADR-0005.
+- 2026-05-14: Step 1.7 (Utils) 완료. ADR-0006.
+- 2026-05-14: **Step 1.8 (테스트 인프라) + Step 1 전체 완료.** ADR-0007.
+- 2026-05-14: **Step 2.1 (PostgreSQL) 완료.** ADR-0008.
+- 2026-05-14: **Step 2.2 (S3) 완료.** ADR-0009.
+- 2026-05-14: **Step 2.3 (Kafka) + Step 2 전체 완료.** ADR-0010.
+- 2026-05-14: **Step 3.1 (YAML 빌더 + Transforms + CLI) 완료.** ADR-0011.
+- 2026-05-14: **Step 3.2 (Stream runtime) 완료.** ADR-0012.
+- 2026-05-14: **Step 3.3 (Retry/DLQ/메트릭) + Step 3 전체 완료.** ADR-0013.
+- 2026-05-14: **Step 4 (Orchestrator Adapters) 완료.** ADR-0014.
+- 2026-05-14: **Step 5.1 (MySQL) 완료.** ADR-0015.
+- 2026-05-14: **Step 5.1b (SQLite) 완료.** ADR-0016.
+- 2026-05-14: **서비스화 방향 확정 — ADR-0017.** Step 7~11 추가 (Service Foundation / API Server / Execution Engine / Web UI / 운영 강화). 코어와 서비스는 단방향 의존, 모노레포 구조 (`services/etlx-server`, `services/etlx-web`). Step 7.0에서 세부 기술 스택 ADR(0019~0023) 확정 예정. 다음 작업은 Step 5 계속 또는 Step 7.0 착수 — 우선순위 선택 필요.
+- 2026-05-14: **디자인 시스템 채택 — ADR-0018.** `DESIGN.md` 신규 (Arc 영감, 네이비 베이스 + 팝핑크 강조, shadcn/ui + Tailwind v4 + Storybook). Step 10이 디자인 토큰 우선 순서(10.0)로 세부화됨. SPEC.md §3/§9.7/§10 패치. 다음 작업은 Step 5 계속 또는 Step 7.0 착수.

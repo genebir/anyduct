@@ -24,6 +24,7 @@
 - [x] **Step 5.1 — Additional RDBMS**: MySQL(PyMySQL), SQLite(stdlib)
 - [ ] Step 5.2~5.7: DW / NoSQL / Streaming / CDC / Object 추가 / HTTP — 미착수
 - [ ] Step 6: OpenLineage, OTel/Prometheus 실구현, mkdocs, v0.1.0 릴리스
+**다음 분기**: 서비스 계층 착수(Step 7~) 예정. UI 디자인은 `DESIGN.md`에 확정 — Arc Browser 영감, 깊은 네이비 베이스 + 팝한 핫핑크 강조.
 
 상세 진행은 [`ROADMAP.md`](./ROADMAP.md), 설계 결정은 [`DECISIONS.md`](./DECISIONS.md).
 
@@ -39,6 +40,7 @@
 | [`DECISIONS.md`](./DECISIONS.md) | ADR — 모든 설계 결정 |
 | [`DEVELOPMENT.md`](./DEVELOPMENT.md) | 신규 환경 인계 / bootstrap / 트러블슈팅 |
 | [`CHANGELOG.md`](./CHANGELOG.md) | Keep a Changelog 형식 변경 이력 |
+| [`DESIGN.md`](DESIGN.md) | `etlx-web` 디자인 시스템 (Step 10 진행 시 SSOT) |
 
 ---
 

@@ -3,7 +3,7 @@
 > 이 문서는 프로젝트의 **마스터 설계 명세서**다. 세션 시작 시 읽는 요약 컨텍스트는 `CLAUDE.md`에 있다.
 > 항목 변경 시 **반드시 `DECISIONS.md`에 ADR로 사유를 남기고** 이 문서를 갱신한다.
 
-> **목적**: 모든 데이터 소스/싱크(RDBMS, NoSQL, DW, Stream, Object Storage 등)에 대해 통일된 인터페이스를 제공하고, 어떤 파이프라인 솔루션(Airflow, Dagster, Prefect, Luigi, 사내 워크플로우 등) 위에서도 그대로 재사용할 수 있는 **Python 기반 ETL 플러그인 라이브러리**를 구축한다. 또한 **여러 개발 환경에서 끊김 없이 작업을 이어갈 수 있도록** 모든 상태·결정·진행상황을 코드와 함께 관리한다.
+> **목적**: 모든 데이터 소스/싱크(RDBMS, NoSQL, DW, Stream, Object Storage 등)에 대해 통일된 인터페이스를 제공하고, 어떤 파이프라인 솔루션(Airflow, Dagster, Prefect, Luigi, 사내 워크플로우 등) 위에서도 그대로 재사용할 수 있는 **Python 기반 ETL 플러그인 라이브러리**를 구축한다. 추가로, 이 라이브러리 위에 **웹 UI 기반 ETL 서비스**(파이프라인·연결·스케줄을 시각적으로 만들고 모니터링)를 별도 패키지로 얹어 비개발자도 사용 가능하게 한다. 또한 **여러 개발 환경에서 끊김 없이 작업을 이어갈 수 있도록** 모든 상태·결정·진행상황을 코드와 함께 관리한다.
 
 ---
 
@@ -19,6 +19,7 @@
 | **Type-safe** | Pydantic 기반 스키마/설정 검증 |
 | **Observable** | 표준 로깅·메트릭·트레이싱 hook 내장 |
 | **Portable (Harness)** | 어떤 PC/환경에서든 동일하게 재현·이어작업 가능 |
+| **Service-layer optional** | 웹 UI/API/실행엔진은 별도 패키지. **코어는 service 패키지를 import하지 않는다.** 라이브러리 단독으로 완전히 동작. |
 
 ---
 
@@ -26,7 +27,23 @@
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  Orchestrator Adapters (선택적)                         │
+│  Web UI (services/etlx-web, Next.js)            ← Step 10│
+│  파이프라인 빌더 · 스케줄 · 모니터링 · 연결 관리          │
+├─────────────────────────────────────────────────────────┤
+│  REST API (services/etlx-server, FastAPI)       ← Step 8 │
+│  Auth / RBAC / Audit / CRUD / Test-connection           │
+├─────────────────────────────────────────────────────────┤
+│  Metadata Store (PostgreSQL + Alembic)          ← Step 7 │
+│  + Secret Backend (Vault / AWS SM / GCP SM)             │
+├─────────────────────────────────────────────────────────┤
+│  Execution Engine                               ← Step 9 │
+│  ├─ Batch:  Dagster or Prefect (임베드, 미확정)         │
+│  └─ Stream: 자체 워커 매니저 (K8s Deployment)           │
+├─════════════════════════════════════════════════════════┤
+│  ↑ 위 4개 층은 선택적. 아래 5개 층(= etl_plugins 코어)는 │
+│    서비스 없이도 단독으로 완전 동작한다.                │
+├─════════════════════════════════════════════════════════┤
+│  Orchestrator Adapters (선택적)                          │
 │  ├─ AirflowOperator   ├─ DagsterResource                │
 │  ├─ PrefectBlock      └─ Plain Python (CLI/Function)    │
 ├─────────────────────────────────────────────────────────┤
@@ -40,7 +57,7 @@
 │  └─ Record / Schema / Cursor                            │
 ├─────────────────────────────────────────────────────────┤
 │  Connector Implementations (플러그인)                   │
-│  ├─ RDBMS:  postgres, mysql, oracle, mssql, sqlite      │
+│  ├─ RDBMS:  postgres, mysql, sqlite, oracle, mssql      │
 │  ├─ NoSQL:  mongo, redis, dynamodb, cassandra           │
 │  ├─ DW:     snowflake, bigquery, redshift, clickhouse   │
 │  ├─ Stream: kafka, kinesis, pulsar, rabbitmq, nats      │
@@ -54,80 +71,98 @@
 └─────────────────────────────────────────────────────────┘
 ```
 
+상하 단방향 의존: 위 층은 아래 층을 import해도 되지만, 아래 층은 위 층을 **절대** import하지 않는다. 즉 `etl_plugins/*`는 `services/etlx-server/*`나 `services/etlx-web/*`를 모른다. 서비스 패키지가 통째로 사라져도 코어 라이브러리는 그대로 동작해야 한다.
+
 ---
 
 ## 3. 디렉토리 구조
 
 ```
-etl-plugins/
-├── CLAUDE.md                     # Claude Code 컨텍스트 (필수)
-├── DEVELOPMENT.md                # 개발 환경 인계 문서
-├── ROADMAP.md                    # 단계별 작업 계획 + 진행 상태
-├── DECISIONS.md                  # 설계 결정 기록 (ADR)
+etl-plugins/                          # 리포 루트 (모노레포)
+├── CLAUDE.md                         # Claude Code 컨텍스트 (필수)
+├── DESIGN.md                         # etlx-web 디자인 시스템 (Step 10 SSOT)
+├── DEVELOPMENT.md                    # 개발 환경 인계 문서
+├── ROADMAP.md                        # 단계별 작업 계획 + 진행 상태
+├── DECISIONS.md                      # 설계 결정 기록 (ADR)
 ├── CHANGELOG.md
 ├── README.md
-├── pyproject.toml
-├── uv.lock                       # 또는 poetry.lock
+├── pyproject.toml                    # 코어 라이브러리 메타
+├── uv.lock
 ├── .env.example
 ├── .editorconfig
 ├── .pre-commit-config.yaml
 ├── .gitignore
-├── Makefile                      # 또는 Taskfile.yaml
+├── Makefile
 ├── .devcontainer/
-│   └── devcontainer.json
 ├── docker/
-│   ├── docker-compose.dev.yml    # 로컬 DB/Stream 일괄 기동
+│   ├── docker-compose.dev.yml        # 로컬 DB/Stream 일괄 기동
 │   └── Dockerfile
-├── .github/workflows/
-│   ├── ci.yml
-│   └── release.yml
+├── .github/workflows/                # ci.yml, release.yml
 ├── configs/
-│   ├── connections.yaml          # 모든 연결 정의
+│   ├── connections.yaml
 │   ├── pipelines/
-│   │   └── orders_to_dw.yaml
 │   └── logging.yaml
 ├── scripts/
-│   ├── bootstrap.sh              # 원커맨드 환경 셋업
+│   ├── bootstrap.sh
 │   └── reset_state.sh
-├── etl_plugins/
+│
+├── etl_plugins/                      # ─── 코어 라이브러리 (Steps 1~6)
 │   ├── __init__.py
-│   ├── core/
-│   │   ├── connector.py
-│   │   ├── record.py
-│   │   ├── schema.py
-│   │   ├── pipeline.py
-│   │   ├── context.py
-│   │   ├── registry.py
-│   │   └── exceptions.py
-│   ├── config/
-│   │   ├── loader.py
-│   │   ├── models.py
-│   │   └── secrets.py
+│   ├── core/                         # connector, record, schema, pipeline, context, registry, exceptions
+│   ├── config/                       # loader, models, secrets
 │   ├── connectors/
-│   │   ├── rdbms/                # postgres.py, mysql.py, ...
+│   │   ├── rdbms/                    # postgres.py, mysql.py, sqlite.py, ...
 │   │   ├── nosql/
 │   │   ├── warehouse/
-│   │   ├── stream/               # kafka.py, kinesis.py, ...
+│   │   ├── stream/                   # kafka.py, kinesis.py, ...
 │   │   └── object_storage/
-│   ├── adapters/                 # Orchestrator 통합
-│   │   ├── airflow.py
-│   │   ├── dagster.py
-│   │   └── prefect.py
-│   ├── observability/
-│   │   ├── logging.py
-│   │   ├── metrics.py
-│   │   └── tracing.py
-│   ├── utils/
-│   │   ├── retry.py
-│   │   ├── chunk.py
-│   │   └── async_io.py
-│   └── cli.py                    # `etlx ...` CLI
-└── tests/
+│   ├── adapters/                     # airflow.py, dagster.py, prefect.py (PEP 562 lazy)
+│   ├── observability/                # logging, metrics, tracing
+│   ├── runtime/                      # transforms, builder, runner
+│   ├── utils/                        # retry, chunk, async_io
+│   └── cli.py                        # `etlx ...` CLI
+│
+├── services/                         # ─── 서비스 패키지 (Steps 7~11, 별도 pyproject.toml)
+│   ├── etlx-server/                  # FastAPI 백엔드
+│   │   ├── pyproject.toml            # etl-plugins(코어)에 의존, 코어는 이걸 모름
+│   │   ├── etlx_server/
+│   │   │   ├── __init__.py
+│   │   │   ├── main.py               # FastAPI app
+│   │   │   ├── api/                  # /connections, /pipelines, /runs, /schedules, /auth
+│   │   │   ├── db/                   # SQLAlchemy 모델 + Alembic 마이그레이션
+│   │   │   ├── auth/                 # OIDC/JWT, RBAC, audit
+│   │   │   ├── scheduler/            # 스케줄러 동기화 (DB → 실행엔진)
+│   │   │   ├── workers/              # Stream worker manager
+│   │   │   └── execution/            # Dagster/Prefect 통합 또는 자체 실행기
+│   │   └── tests/
+│   ├── etlx-web/                     # Next.js 프론트엔드
+│   │   ├── package.json
+│   │   ├── tailwind.config.ts        # DESIGN.md §11.2 토큰 import
+│   │   ├── app/                      # App Router
+│   │   ├── components/
+│   │   │   ├── ui/                   # shadcn/ui 기반 (토큰 치환됨)
+│   │   │   ├── pipeline-builder/     # React Flow 기반 노드 에디터
+│   │   │   ├── schedule-editor/      # cron 빌더
+│   │   │   ├── connection-form/
+│   │   │   └── run-viewer/
+│   │   ├── styles/globals.css        # DESIGN.md §11.1 CSS variables
+│   │   ├── .storybook/               # 컴포넌트 카탈로그
+│   │   ├── lib/                      # API client (OpenAPI generated)
+│   │   └── tests/
+│   └── docker-compose.services.yml   # server + web + metadata DB 일괄 기동
+│
+└── tests/                            # 코어 테스트 (단위/통합/contracts/fixtures)
     ├── unit/
-    ├── integration/              # testcontainers 기반
+    ├── integration/                  # testcontainers 기반
+    ├── contracts/                    # _BatchSourceContract, _StreamSourceContract, ...
     ├── fixtures/
     └── conftest.py
 ```
+
+**중요한 의존 규칙**:
+- `etl_plugins/`는 `services/`를 `import` 금지.
+- `services/etlx-server/`는 `etl_plugins`(PyPI 패키지로)를 의존성으로 install.
+- `services/etlx-web/`는 백엔드와 HTTP로만 통신. Python 코어 직접 호출 금지.
 
 ---
 
@@ -255,6 +290,8 @@ pipeline.run(context=Context(run_id="...", logger=...))
 
 원칙: **시크릿은 `.env` 또는 외부 시크릿 백엔드에만**, **구조는 YAML에만**. YAML은 git에 커밋, `.env`는 절대 커밋 금지(`.env.example`만 커밋).
 
+> **서비스화 이후**: UI에서 만든 파이프라인은 metadata DB에 저장되지만, YAML import/export는 양방향 지원해야 한다 (개발자는 git, 비개발자는 UI). 시크릿은 UI에서 입력받아도 metadata DB에는 **참조만** 저장하고 실제 값은 시크릿 백엔드에 위임. 자세한 내용은 §12.
+
 ### 5.2 `.env.example`
 
 ```bash
@@ -351,7 +388,7 @@ connections:
 
 ```yaml
 name: orders_to_dw
-schedule: "0 */1 * * *"        # 오케스트레이터가 사용
+schedule: "0 */1 * * *"        # 오케스트레이터/스케줄러가 사용
 mode: batch                    # batch | stream
 
 source:
@@ -380,6 +417,10 @@ retry:
   backoff: exponential
   initial_delay_seconds: 5
 
+dlq:
+  connection: dlq_sink
+  table: failed_orders
+
 observability:
   metrics: { enabled: true, namespace: etl_plugins }
   tracing: { enabled: true, exporter: otlp }
@@ -395,7 +436,7 @@ source:
   connection: kafka_events
   topic: user.events.v1
   group_id: etl-plugins-events
-  format: json                 # json | avro | protobuf
+  format: json
   schema_registry:
     url: https://schemas.internal
     subject: user.events.v1
@@ -422,48 +463,52 @@ commit:
 
 | 카테고리 | 대상 | 비고 |
 |---|---|---|
-| **RDBMS** | PostgreSQL, MySQL/MariaDB, Oracle, MSSQL, SQLite | SQLAlchemy + 네이티브 드라이버 병행 |
+| **RDBMS** | PostgreSQL ✅, MySQL ✅, SQLite ✅, Oracle, MSSQL | SQLAlchemy + 네이티브 드라이버 병행 |
 | **NoSQL** | MongoDB, Redis, Cassandra, DynamoDB | |
 | **Data Warehouse** | Snowflake, BigQuery, Redshift, ClickHouse | bulk load API 우선 |
-| **Streaming** | Kafka, Kinesis, Pulsar, RabbitMQ, NATS | exactly-once는 best-effort, at-least-once 보장 |
+| **Streaming** | Kafka ✅, Kinesis, Pulsar, RabbitMQ, NATS | exactly-once는 best-effort, at-least-once 보장 |
 | **CDC** | Debezium(Kafka 위), PostgreSQL logical replication | StreamSource로 래핑 |
-| **Object Storage** | S3, GCS, Azure Blob, Local FS | parquet/csv/jsonl 지원 |
+| **Object Storage** | S3 ✅, GCS, Azure Blob, Local FS | parquet/csv/jsonl 지원 |
 | **HTTP/REST** | 일반 REST API source | pagination 추상화 포함 |
+
+✅ = 2026-05-14 현재 구현 완료. 자세한 진행은 `ROADMAP.md`.
 
 ---
 
 ## 7. 파이프라인 솔루션 통합 (Orchestrator 무관성)
 
-코어는 **순수 Python**이며 아래 어댑터는 얇은 래퍼만 제공한다.
+코어는 **순수 Python**이며 아래 어댑터는 얇은 래퍼만 제공한다. 세 어댑터 모두 PEP 562 lazy 로딩 — orchestrator 미설치 시에도 모듈 import는 성공.
 
 ### 7.1 Airflow
 
 ```python
-# etl_plugins/adapters/airflow.py
-from airflow.models import BaseOperator
-from etl_plugins.core.pipeline import Pipeline
+from airflow import DAG
+from etl_plugins.adapters.airflow import ETLPluginsOperator
 
-class ETLPluginsOperator(BaseOperator):
-    def __init__(self, pipeline_yaml: str, **kw):
-        super().__init__(**kw); self.pipeline_yaml = pipeline_yaml
-    def execute(self, context):
-        Pipeline.from_yaml(self.pipeline_yaml).run()
+with DAG("etl_demo", schedule="@hourly", ...) as dag:
+    ETLPluginsOperator(
+        task_id="orders_to_dw",
+        pipeline_yaml="configs/pipelines/orders_to_dw.yaml",
+        connections="configs/connections.yaml",
+    )
 ```
 
 ### 7.2 Dagster
 
 ```python
-@op(required_resource_keys={"etl_plugins"})
-def run_etl(context, pipeline_yaml: str):
-    context.resources.etl_plugins.run(pipeline_yaml)
+from dagster import job
+from etl_plugins.adapters.dagster import EtlPluginsResource, etl_plugins_op
+
+@job(resource_defs={"etl_plugins": EtlPluginsResource(connections_path="configs/connections.yaml")})
+def my_job():
+    etl_plugins_op()
 ```
 
 ### 7.3 Prefect
 
 ```python
-@flow
-def etl_flow(pipeline_yaml: str):
-    Pipeline.from_yaml(pipeline_yaml).run()
+from etl_plugins.adapters.prefect import run_etl_pipeline_flow
+run_etl_pipeline_flow("configs/pipelines/orders_to_dw.yaml", "configs/connections.yaml")
 ```
 
 ### 7.4 CLI / Plain Python
@@ -473,6 +518,8 @@ etlx run configs/pipelines/orders_to_dw.yaml
 etlx run-stream configs/pipelines/events_stream.yaml
 etlx test-connection pg_prod
 etlx list-connectors
+etlx validate <config.yaml>
+etlx --log-format console run ...
 ```
 
 ---
@@ -483,69 +530,44 @@ etlx list-connectors
 
 ### 8.1 환경 재현 (Reproducibility)
 
-1. **단일 패키지 매니저 고정**: `uv`(권장) 또는 `poetry`. `uv.lock` / `poetry.lock`은 **반드시 커밋**.
-2. **Python 버전 고정**: `.python-version` 파일 + `pyproject.toml`의 `requires-python`.
-3. **Devcontainer 제공**: `.devcontainer/devcontainer.json` 으로 VS Code / Cursor에서 원클릭 동일 환경.
-4. **Docker Compose for dev**: `docker/docker-compose.dev.yml` 에 Postgres, MySQL, Kafka, Redis, MinIO(S3 호환) 등 일괄 정의 → 로컬 통합 테스트 즉시 가능.
-5. **`scripts/bootstrap.sh`** (원커맨드 셋업):
-   ```bash
-   #!/usr/bin/env bash
-   set -euo pipefail
-   command -v uv >/dev/null || curl -LsSf https://astral.sh/uv/install.sh | sh
-   uv sync --all-extras
-   cp -n .env.example .env || true
-   uv run pre-commit install
-   docker compose -f docker/docker-compose.dev.yml up -d
-   uv run etlx test-connection --all
-   echo "✅ Ready. See ROADMAP.md for next steps."
-   ```
+1. **단일 패키지 매니저 고정**: `uv`. `uv.lock`은 **반드시 커밋**.
+2. **Python 버전 고정**: `.python-version` (3.11) + `pyproject.toml`의 `requires-python>=3.11`.
+3. **Devcontainer 제공** (optional): `.devcontainer/devcontainer.json`.
+4. **Docker Compose for dev**: `docker/docker-compose.dev.yml`에 Postgres, MySQL, Kafka, Redis, MinIO 일괄 정의.
+5. **`scripts/bootstrap.sh`** 원커맨드 셋업.
 6. **Makefile** 표준 타깃: `setup`, `test`, `lint`, `fmt`, `up`, `down`, `clean`, `docs`.
 
 ### 8.2 작업 상태의 코드화 (State as Code)
 
-다른 환경/다른 작업자가 이어가려면 **머릿속에 있는 컨텍스트를 파일로 남겨야** 한다.
-
-- **`CLAUDE.md`** — Claude Code가 매 세션 처음에 읽는 컨텍스트.
-  - 프로젝트 목적, 아키텍처 요약, 명령어, 디렉토리 규약, 현재 단계, 금기사항.
-  - 예: "현재 Step 3 진행 중. 새 커넥터 추가 시 반드시 Registry 데코레이터 사용. `connections.yaml`에 평문 시크릿 금지."
-- **`ROADMAP.md`** — 단계별 작업 + 체크박스로 진행 상태.
-  ```markdown
-  ## Step 1: Foundation
-  - [x] Core abstractions (Connector, Record, Registry)
-  - [x] Config loader (.env + YAML)
-  - [ ] Logging / metrics
-  ## Step 2: RDBMS connectors
-  - [ ] PostgreSQL  ← **현재 작업 중 (2025-05-14)**
-  - [ ] MySQL
-  ```
-- **`DECISIONS.md`** — ADR(Architecture Decision Records).
-  ```markdown
-  ## ADR-0003: Pydantic v2 채택
-  - Date: 2025-05-10
-  - Status: Accepted
-  - Context: 설정 검증 라이브러리 선택
-  - Decision: Pydantic v2
-  - Consequences: Python 3.10+ 필수
-  ```
-- **`DEVELOPMENT.md`** — 다른 PC에서 처음 시작하는 사람을 위한 인계 문서.
-  - prerequisite, bootstrap, troubleshooting, 자주 쓰는 명령어.
-- **`CHANGELOG.md`** — Keep a Changelog 포맷.
+- **`CLAUDE.md`** — 세션 시작 시 컨텍스트.
+- **`ROADMAP.md`** — Step 진행 체크박스.
+- **`DECISIONS.md`** — ADR.
+- **`DEVELOPMENT.md`** — 신규 환경 인계.
+- **`CHANGELOG.md`** — Keep a Changelog.
 
 ### 8.3 Claude Code 친화 규약
 
-- **`CLAUDE.md`는 반드시 루트에 둘 것** — Claude Code가 자동으로 인지.
-- **작업 단위(commit)는 작게**: 하나의 커넥터 / 하나의 기능 단위. 이어받는 쪽이 git log만 봐도 흐름 파악 가능.
-- **모든 PR/커밋 메시지에 ROADMAP의 Step 번호 참조**: `feat(connector): add postgres source [Step 2.1]`.
-- **TODO 주석에는 컨텍스트 포함**: `# TODO(Step 3.2): chunked upsert via MERGE` 처럼.
-- **장기 작업 중단 시**: `ROADMAP.md`의 해당 항목에 `← 작업 중 (YYYY-MM-DD, 다음 할 일: ...)` 메모 남기기.
-- **세션 종료 시 체크리스트**: ① ROADMAP 갱신 ② DECISIONS 추가 ③ CHANGELOG 메모 ④ 커밋·푸시.
+- `CLAUDE.md` 루트 배치.
+- 커밋 단위 작게, 메시지에 Step 번호.
+- TODO 주석에 Step 번호.
+- 장기 중단 시 `← 작업 중 (YYYY-MM-DD, 다음 할 일: ...)`.
+- 세션 종료 시: ① ROADMAP 갱신 ② DECISIONS 추가 ③ CHANGELOG 메모 ④ 커밋·푸시.
 
 ### 8.4 품질 게이트 (모든 환경에서 동일)
 
-- **`.pre-commit-config.yaml`**: `ruff`(lint+format), `mypy`, `detect-secrets`, `yamllint`.
-- **CI (`.github/workflows/ci.yml`)**: lint → type check → unit → integration(testcontainers) → 커버리지 리포트.
-- **`.editorconfig`**: 들여쓰기/개행 통일.
-- **버전 동기화**: `pyproject.toml`의 버전과 `CHANGELOG.md`가 일치하도록 release workflow에서 검증.
+- `.pre-commit-config.yaml`: `ruff`, `mypy`, `detect-secrets`, `yamllint`.
+- CI: lint → type check → unit → integration(testcontainers) → 커버리지.
+- `.editorconfig`, 버전 동기화 검증.
+
+### 8.5 서비스 패키지 격리 원칙 (서비스화 이후)
+
+`services/etlx-server`와 `services/etlx-web`이 추가되어도 다음 원칙을 강제한다:
+
+1. **단방향 의존**: 서비스 → 코어만 허용. 코어 → 서비스 금지. CI에서 import-graph 검사로 자동 검증.
+2. **별도 pyproject.toml**: `services/etlx-server/pyproject.toml`이 `etl-plugins`을 의존성으로 install. 모노레포지만 패키지 경계는 명확.
+3. **독립 실행 가능**: 서비스 없이도 `etlx` CLI / orchestrator adapter / 라이브러리 import만으로 모든 ETL 기능 사용 가능해야 함.
+4. **CI 분리**: 코어 CI는 서비스 dep 설치 없이 통과. 서비스 CI는 별도 잡으로 분리.
+5. **버전 호환**: 서비스가 의존하는 코어 버전은 `etl-plugins>=X.Y,<X+1`로 SemVer 명시. 코어 breaking change는 major 버전 bump.
 
 ---
 
@@ -553,91 +575,159 @@ etlx list-connectors
 
 ### 9.1 신뢰성
 
-- **Retry**: 지수 백오프 + jitter. 데코레이터 `@retryable(max_attempts=, on=...)`.
+- **Retry**: 지수 백오프 + jitter. 데코레이터 `@retryable`. Pipeline에 자동 통합.
 - **Circuit Breaker**: 외부 시스템 연속 실패 시 차단.
 - **Idempotency**: 모든 sink write에 `idempotency_key` 옵션. upsert는 `key_columns` 필수.
-- **Checkpoint / Cursor**: BatchSource는 `last_run_at`/`max_id` 등 커서 저장 hook 제공. StreamSource는 offset commit 전략 명시.
-- **Dead Letter Queue**: 변환·sink 실패 레코드를 별도 sink로 라우팅.
+- **Checkpoint / Cursor**: BatchSource cursor + StreamSource offset commit. (Step 6 강화)
+- **Dead Letter Queue**: 변환 실패 레코드를 별도 sink로 라우팅. ✅ Step 3.3 구현 완료.
 
 ### 9.2 관찰성 (Observability)
 
-- **로깅**: `structlog` 기반 JSON 구조화 로그. `run_id`, `pipeline`, `task`, `connector`를 모든 라인에 포함.
-- **메트릭**: OpenTelemetry / Prometheus. 표준 메트릭: `records_read_total`, `records_written_total`, `errors_total`, `lag_seconds`, `duration_seconds`.
+- **로깅**: `structlog` JSON 구조화 + 시크릿 마스킹.
+- **메트릭**: OpenTelemetry/Prometheus. 표준: `records_read_total`, `records_written_total`, `errors_total`, `lag_seconds`, `duration_seconds`. Pipeline 자동 emit ✅.
 - **트레이싱**: OTLP exporter. 각 Task가 하나의 span.
-- **데이터 라인리지** (선택): OpenLineage 이벤트 emit.
+- **데이터 라인리지**: OpenLineage 이벤트 emit (Step 6).
 
 ### 9.3 보안
 
 - 시크릿은 절대 로그/예외 메시지에 노출 금지 — 로깅 필터로 마스킹.
-- TLS/SSL 기본 활성화, 옵션으로만 비활성.
-- 시크릿 백엔드 추상화: `env` / `vault` / `aws_sm` / `gcp_sm` 인터페이스 통일.
-- `detect-secrets` pre-commit hook으로 사고 방지.
+- TLS/SSL 기본 활성화.
+- 시크릿 백엔드 추상화: `env` / `vault` / `aws_sm` / `gcp_sm`.
+- `detect-secrets` pre-commit hook.
 
 ### 9.4 성능
 
-- Chunk/Batch 사이즈 설정 가능, 메모리 안전한 iterator/generator 기반.
+- Chunk/Batch 사이즈 설정 가능, 메모리 안전한 iterator/generator.
 - 대용량 sink는 **bulk load API 우선** (`COPY`, `MERGE`, Snowflake `PUT/COPY INTO`, BigQuery load job).
-- I/O 바운드 작업은 `asyncio` 또는 thread pool 선택 가능.
-- Stream consumer는 백프레셔(backpressure) 지원.
+- I/O 바운드 작업은 `asyncio` 또는 thread pool.
+- Stream consumer 백프레셔 지원.
 
 ### 9.5 테스트 전략
 
 - **Unit**: 추상 인터페이스 / 변환 / 설정 로더. 외부 의존 없이.
-- **Integration**: `testcontainers-python`으로 실제 Postgres/Kafka/MinIO 컨테이너 띄워 검증.
-- **Contract test**: 새 커넥터는 공통 contract test suite 통과 필수 (read 후 write 후 read 일치 등).
-- **Fixture**: 표준 샘플 데이터셋을 `tests/fixtures/`에 두고 모든 커넥터 테스트가 동일 데이터 사용.
+- **Integration**: `testcontainers-python`으로 실제 Postgres/Kafka/MinIO/MySQL 검증.
+- **Contract test**: 새 커넥터는 공통 contract 통과 필수. Batch + Stream 두 패밀리.
+- **Fixture**: `tests/fixtures/`에 표준 샘플 데이터셋 공유.
 
 ### 9.6 CLI (`etlx`)
 
 ```bash
-etlx run <pipeline.yaml>            # 배치 실행
-etlx run-stream <pipeline.yaml>     # 스트림 실행
-etlx test-connection <name|--all>   # 연결 점검
-etlx list-connectors                # 등록된 커넥터 목록
-etlx schema <connection> <table>    # 원격 스키마 조회
-etlx validate <config.yaml>         # 설정 검증만
+etlx run <pipeline.yaml>             # 배치 실행
+etlx run-stream <pipeline.yaml>      # 스트림 실행
+etlx test-connection <name|--all>    # 연결 점검
+etlx list-connectors                 # 등록된 커넥터 목록
+etlx schema <connection> <table>     # 원격 스키마 조회 (Step 5+)
+etlx validate <config.yaml>          # 설정 검증만
+etlx --log-format console|json
+etlx --log-level DEBUG|INFO|...
 etlx version
 ```
+
+### 9.7 서비스화 추가 고려 (Steps 7~11)
+
+웹 UI / API / 실행엔진을 얹을 때 추가되는 횡단 관심사:
+
+- **인증**: OIDC/SAML SSO + 로컬 계정 fallback. JWT 세션.
+- **인가 (RBAC)**: Owner / Editor / Viewer / Runner. 워크스페이스 단위.
+- **멀티테넌시**: Workspace/Team 단위 데이터 격리. 모든 리소스에 workspace_id.
+- **감사 로그**: 모든 변경(connection/pipeline/schedule CRUD, run trigger)에 actor + before/after.
+- **시크릿**: UI에서 입력받아도 metadata DB에는 평문 저장 금지. 입력 즉시 시크릿 백엔드(Vault/AWS SM/GCP SM)에 저장하고 ref만 보관. 코어 §9.3 원칙을 서비스 계층에서도 유지.
+- **스케줄러**: 메타데이터 DB의 schedules → 실행엔진 동기화. 외부 cron이 아닌 내부 관리.
+- **실행 이력**: runs 테이블 + 로그/메트릭 별도 저장(Loki/Prometheus 또는 DB).
+- **API 안정성**: REST + OpenAPI 자동 생성. 프론트는 generated client만 사용.
+- **디자인 시스템**: `DESIGN.md`가 단일 진실. 토큰(컬러·타이포·간격·반경·모션) → Tailwind config → shadcn/ui 컴포넌트로 흐름. 디자인 의사결정은 ADR-0018부터. 토큰 외 임의 값(arbitrary color/spacing/font) 사용 금지.
 
 ---
 
 ## 10. 구현 로드맵 (`ROADMAP.md` 시드)
 
-### Step 1 — Foundation
-- [ ] 프로젝트 스캐폴딩 (`pyproject.toml`, `uv.lock`, pre-commit, CI)
-- [ ] `CLAUDE.md` / `DEVELOPMENT.md` / `ROADMAP.md` / `DECISIONS.md` 초기 작성
-- [ ] `scripts/bootstrap.sh`, `docker-compose.dev.yml`
-- [ ] Core 추상화 (Connector, Record, Registry, Pipeline, Context)
-- [ ] Config loader (.env + YAML + 시크릿 리졸버)
-- [ ] Logging / Metrics / Tracing 베이스
+**현재 상태 (2026-05-14)**: Steps 1~4 완료 + Step 5.1 (MySQL, SQLite) 완료. 16 ADR. 435 테스트.
 
-### Step 2 — Reference Connectors (각 카테고리 1개씩 먼저)
-- [ ] `postgres` (BatchSource + BatchSink)
-- [ ] `s3` (BatchSource + BatchSink, parquet/csv/jsonl)
-- [ ] `kafka` (StreamSource + StreamSink)
+### Step 1 — Foundation ✅
+- 스캐폴딩, Harness 문서, Core/Config/Observability/Utils, Contract test infra.
 
-### Step 3 — Pipeline 실행기 + CLI
-- [ ] YAML → Pipeline 빌더
-- [ ] `etlx` CLI
-- [ ] Retry / DLQ / Checkpoint
+### Step 2 — Reference Connectors ✅
+- `postgres`, `s3`, `kafka` (각 카테고리 1개).
 
-### Step 4 — Orchestrator Adapters
-- [ ] Airflow operator
-- [ ] Dagster resource/op
-- [ ] Prefect block/flow
+### Step 3 — Pipeline 실행기 + CLI ✅
+- YAML→Pipeline 빌더, `etlx` CLI, Stream runtime, Retry/DLQ/자동 메트릭.
 
-### Step 5 — Connector 확장
-- [ ] MySQL, MSSQL, Oracle, SQLite
-- [ ] Snowflake, BigQuery, Redshift, ClickHouse
-- [ ] MongoDB, Redis, DynamoDB, Cassandra
-- [ ] Kinesis, Pulsar, RabbitMQ, NATS
-- [ ] GCS, Azure Blob
+### Step 4 — Orchestrator Adapters ✅
+- Airflow / Dagster / Prefect, PEP 562 lazy.
+
+### Step 5 — Connector 확장 🔄
+- 5.1 RDBMS: MySQL ✅, SQLite ✅, MSSQL/Oracle 남음
+- 5.2 DW: Snowflake / BigQuery / Redshift / ClickHouse
+- 5.3 NoSQL: MongoDB / Redis / DynamoDB / Cassandra
+- 5.4 Streaming: Kinesis / Pulsar / RabbitMQ / NATS
+- 5.5 CDC: Debezium / PG logical replication
+- 5.6 Object: GCS / Azure Blob
+- 5.7 HTTP/REST
 
 ### Step 6 — 강화
-- [ ] OpenLineage 이벤트
-- [ ] Contract test suite 완성
-- [ ] 문서 사이트 (mkdocs)
-- [ ] 첫 릴리스 (v0.1.0)
+- OpenLineage 이벤트
+- OTel/Prometheus 실제 백엔드 구현
+- Checkpoint/Cursor abstraction + Pipeline span emit
+- Contract test suite 완성
+- mkdocs 문서 사이트
+- v0.1.0 PyPI 릴리스
+
+---
+
+> **여기까지가 코어 라이브러리 (etl_plugins).** Step 7부터는 그 위에 얹는 **별도 서비스 패키지**다. ADR-0017 참고.
+
+### Step 7 — Service Foundation (Metadata + Secret + YAML 양방향)
+- 7.0 기술 스택 결정 ADR (FastAPI / Postgres / Alembic / Dagster vs Prefect vs 자체)
+- 7.1 `services/etlx-server/` 모노레포 패키지 스캐폴딩 (별도 pyproject)
+- 7.2 메타데이터 DB 스키마: `workspaces`, `users`, `connections`, `pipelines`, `pipeline_versions`, `schedules`, `runs`, `run_logs`, `audit_log`
+- 7.3 Alembic 마이그레이션
+- 7.4 YAML ↔ DB 양방향 변환 (`etlx import`, `etlx export` CLI 확장)
+- 7.5 Secret backend UI 통합 (UI 입력 → Vault/AWS SM, metadata DB에는 ref만)
+
+### Step 8 — API Server (FastAPI)
+- 8.1 FastAPI 앱 부트스트랩 + OpenAPI 스펙 자동 생성
+- 8.2 인증: OIDC + 로컬 계정 + JWT
+- 8.3 RBAC: Owner/Editor/Viewer/Runner, 워크스페이스 단위
+- 8.4 Audit log (모든 변경에 actor + before/after)
+- 8.5 CRUD: `/connections`, `/pipelines`, `/schedules`, `/runs`
+- 8.6 Action 엔드포인트: `/test-connection`, `/dry-run`, `/trigger-run`
+- 8.7 통합 테스트 (httpx + testcontainers Postgres)
+
+### Step 9 — Execution Engine 통합
+- 9.1 실행 엔진 선택 ADR 확정 (Dagster 임베드 / Prefect 임베드 / 자체)
+- 9.2 스케줄러: metadata DB schedules → 실행 엔진 동기화
+- 9.3 Run 라이프사이클: 트리거 → 실행 → 상태/로그/메트릭 수집 → DB 기록
+- 9.4 Stream worker manager: long-running stream pipeline을 K8s Deployment 또는 docker-compose process로 관리
+- 9.5 실패/재시도/타임아웃 정책의 UI 노출
+
+### Step 10 — Web UI (Next.js, DESIGN.md 기반)
+
+> 디자인 시스템 단일 진실은 `DESIGN.md`. 토큰 외 임의 값 사용 금지.
+
+- 10.0 디자인 토큰 구현
+  - `services/etlx-web/styles/globals.css` (CSS variables, DESIGN.md §11.1)
+  - `tailwind.config.ts` (DESIGN.md §11.2)
+  - 폰트 self-host (Inter Variable + Pretendard Variable + JetBrains Mono)
+  - Storybook 초기화 + 토큰 검증 stories
+- 10.1 기초 컴포넌트 (shadcn/ui 토큰 치환)
+  - Button / Input / Card / Badge / Tooltip / Tabs / Select / Dropdown / Separator / Toast(Sonner)
+  - Sidebar (Arc-style, workspace 컬러 인디케이터)
+  - Header (검색 + 액션 + theme toggle)
+  - Command Palette (cmdk, Cmd+K, DESIGN.md §7.5)
+- 10.2 레이아웃 셸 + 워크스페이스 전환 + 다크/라이트 토글
+- 10.3 Connection 관리 화면 (CRUD + Test connection)
+- 10.4 Pipeline Builder (React Flow + 커스텀 노드, DESIGN.md §7.6)
+- 10.5 Schedule 에디터 + Run 모니터링 (Data Table, DESIGN.md §7.8)
+- 10.6 관리자 화면 (Workspace / RBAC / Audit log)
+- 10.7 빈 상태 / 에러 / 로딩 패스 점검 (전 페이지)
+- 10.8 A11y AA 통과 + visual regression baseline (Chromatic 또는 Playwright)
+
+### Step 11 — 운영 강화
+- 11.1 멀티 테넌시 검증 (workspace 격리 부담 테스트)
+- 11.2 Helm chart + Docker Compose 배포본 (`services/docker-compose.services.yml`)
+- 11.3 백업·복구 가이드 (metadata DB + secret backend)
+- 11.4 운영 메트릭 대시보드 (Grafana 템플릿)
+- 11.5 첫 서비스 릴리스 (v0.x → v1.0)
 
 ---
 
@@ -645,10 +735,11 @@ etlx version
 
 이 문서를 Claude Code에 넘길 때 다음 순서를 따르도록 안내한다.
 
-1. **`CLAUDE.md`부터 만들 것** — 이후 모든 세션의 컨텍스트가 됨.
+1. **`CLAUDE.md`부터 읽을 것** — 이후 모든 세션의 컨텍스트가 됨.
 2. **Step 단위로 PR 단위 작업** — 한 번에 여러 Step을 섞지 말 것.
 3. **새 커넥터 추가 시 contract test 통과 필수**.
 4. **`.env`에 들어갈 값은 절대 코드/YAML에 하드코딩 금지**.
 5. **모든 결정 사항은 `DECISIONS.md`에 ADR로 기록**.
-6. **작업 종료 시 `ROADMAP.md`의 체크박스와 "현재 작업 중" 마커 갱신** — 다음 환경/세션이 이어받을 수 있도록.
+6. **작업 종료 시 `ROADMAP.md`의 체크박스와 "현재 작업 중" 마커 갱신**.
 7. **세션 시작 시 반드시 `CLAUDE.md` → `ROADMAP.md` → 최근 커밋 로그 순서로 확인**.
+8. **서비스 패키지 작업(`services/`) 시 §8.5 격리 원칙 준수** — 코어가 서비스를 import하지 않도록 import-graph 검증.

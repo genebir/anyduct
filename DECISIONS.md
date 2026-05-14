@@ -496,6 +496,105 @@
   - (−) `:memory:` 기본은 connect/close 후 데이터 사라짐 — 실 use case에선 항상 파일 경로 지정 필요. docstring으로 명시.
 - **References**: SPEC.md §6 · `etl_plugins/connectors/rdbms/sqlite.py` · `tests/unit/connectors/rdbms/test_sqlite.py`
 
+
 ---
+
+
+## ADR-0017: 서비스화 전략 — 코어 라이브러리 위에 별도 패키지로 웹 UI/API 분리
+
+- **Date**: 2026-05-14
+- **Status**: Accepted
+- **Context**:
+  Steps 1–4 + Step 5.1까지 완료된 시점에 "UI로 파이프라인·스케줄을 시각적으로 만들고 모니터링하는 ETL 서비스"를 얹고 싶다는 요구가 생겼다. 세 가지 선택지:
+  1. **하지 않는다** — 현재처럼 CLI + YAML + git만 사용. orchestrator UI(Airflow/Dagster/Prefect)와 Grafana로 모니터링 위임.
+  2. **코어에 합쳐서 만든다** — `etl_plugins`에 FastAPI 서버 + 프론트 묶어 단일 패키지.
+  3. **별도 패키지로 만든다** — `etl_plugins`(라이브러리) + `services/etlx-server`(FastAPI) + `services/etlx-web`(Next.js)을 모노레포의 별도 패키지로.
+
+  비개발자(분석가/기획자/운영팀)가 직접 파이프라인을 만들고 모니터링하길 원하고, 파이프라인이 수십 개를 넘어가면 YAML + git만으로는 가시성이 떨어진다 — 1번은 장기적으로 부적합. 2번은 코어의 "라이브러리로서의 가치"(orchestrator-agnostic, Service-layer optional)를 손상시킨다.
+
+- **Decision**:
+  1. **3번(별도 패키지) 채택.** 모노레포 구조로 다음 세 패키지를 둔다:
+     - `etl_plugins/` — PyPI 배포 가능한 코어 라이브러리. 자체 pyproject.toml. Steps 1~6.
+     - `services/etlx-server/` — FastAPI 백엔드. 자체 pyproject.toml. 코어를 `etl-plugins>=X.Y,<X+1`로 의존.
+     - `services/etlx-web/` — Next.js + TypeScript 프론트엔드. 자체 package.json. 백엔드와 HTTP REST로만 통신.
+  2. **단방향 의존 강제.** `etl_plugins/*` 어디서도 `services/*`를 import 금지. CI의 import-graph 검사가 자동 검증.
+  3. **CI 분리.** `ci-core.yml` + `ci-server.yml` + `ci-web.yml`.
+  4. **서비스 단계는 Steps 7~11**로 ROADMAP에 추가.
+  5. **세부 기술 스택은 Step 7.0에서 별도 ADR로 확정** (ADR-0019~0023 예약).
+  6. **시크릿 처리 원칙 유지·강화.** UI에서 입력받아도 metadata DB에는 ref만, 평문은 시크릿 백엔드에.
+  7. **YAML과 DB 양방향 지원.** workspace 단위 SSOT 명시.
+  8. **버전 호환.** 서비스는 코어 SemVer `~=X.Y`로 의존.
+
+- **Consequences**:
+  - (+) 코어의 "Orchestrator-agnostic" 정체성 보존.
+  - (+) 점진적 도입 가능 — 라이브러리만 쓰다가 서비스로 옮길 수 있음.
+  - (+) 기존 ADR-0001~0016 영향 없음.
+  - (+) 코어 재사용 (Pipeline/Connector/Config models/SecretBackend/adapters).
+  - (−) 모노레포 복잡도. uv workspace + pnpm workspace 학습.
+  - (−) 첫 서비스 릴리스까지 분기 단위 작업.
+  - (−) import-graph 검사 운영 비용.
+  - (−) YAML/DB 동기화 충돌 가능 — workspace 단위 SSOT 정책으로 완화.
+  - (−) 실행 엔진 결정 보류 (Step 9.1에서 ADR-0021).
+
+- **References**:
+  - `SPEC.md` §1, §2, §3, §8.5, §9.7, §10 (Steps 7~11)
+  - `ROADMAP.md` Steps 7~11
+  - `CLAUDE.md` §1, §6, §7
+
+---
+
+## ADR-0018: 디자인 시스템 — Arc 영감, 네이비 베이스 + 팝핑크 강조
+
+- **Date**: 2026-05-14
+- **Status**: Accepted
+- **Context**:
+  Step 10(Web UI)을 시작하기 전에 디자인 방향을 확정해야 한다. ETL 도구의 기존 웹 UI(Airflow / Dagster / NiFi / Prefect)는 기능 위주로 디자인 후순위였고, 비개발자가 진입하기 어려워 보인다. 반대로 디자인이 장난스럽거나 캐주얼하면 "데이터 신뢰성"이라는 본질에 어긋난다.
+
+  세 가지를 동시에 만족해야 한다:
+  1. **신뢰감** — 운영팀이 매일 보는 콘솔. 진지함.
+  2. **간결함** — 정보 밀도 높지만 한눈에 잡힘.
+  3. **차별화** — 기존 데이터 도구와 시각적으로 다르고 매일 보고 싶음.
+
+  레퍼런스 후보: Linear(엔지니어링 도구), Raycast(키보드 친화), Cron(차분함), Arc Browser(공간 메타포 + Command Palette + Spaces). 톤 결정도 필요했다: 다크/라이트 둘 다 vs 다크 우선, 강조 컬러 단일 vs 그라데이션 다용.
+
+- **Decision**:
+  1. **Arc Browser 디자인 언어 차용** (DESIGN.md §2):
+     - 좌측 사이드바 중심, 상단 메뉴 최소화
+     - Workspace = Arc의 Space — 좌측 4px 컬러 인디케이터로 컨텍스트 구분
+     - Command Palette (Cmd+K) — 모든 액션의 진입점
+     - 부드러운 translucent surface (모달·드롭다운), 단 본 캔버스는 불투명
+     - 그림자 대신 surface 톤 차이로 깊이감
+     - 큰 corner radius (카드 14px, 모달 20px)
+     - 200ms 부드러운 마이크로 인터랙션
+     - Arc의 자유로운 색 커스터마이즈(Boost), squircle, 캐주얼한 톤은 **버린다** — ETL 도구에는 과함
+  2. **컬러 톤**:
+     - 베이스 = 깊은 네이비 (`#0A1228`, `#0F1730`, `#15203F`로 위계)
+     - 강조 = 팝한 핫핑크 단일색 (`#FF3D8B`). 그라데이션은 메인 CTA / 로딩만.
+     - 의미 컬러(success/warning/error/info)는 핑크와 충돌하지 않는 차분한 톤 (mint/amber/coral/sky).
+     - 다크 모드가 기본, 라이트도 지원.
+  3. **타이포**: Inter Variable + Pretendard Variable (한글) + JetBrains Mono (코드). self-host. 1.25 modular scale, body 14/22.
+  4. **레이아웃**: 8pt grid, 사이드바 240/64, 헤더 56, 본 컨텐츠 max 1280.
+  5. **컴포넌트 베이스**: shadcn/ui — 토큰만 우리 것으로 갈아 끼움. 새 컴포넌트도 토큰만 사용.
+  6. **모션**: Framer Motion. fast 120 / default 200 / slow 320ms. `prefers-reduced-motion` 존중.
+  7. **단일 진실(SSOT)**: `DESIGN.md`. Figma Variables → Tailwind config로 sync. 토큰 외 임의 색·간격·폰트는 PR reject. Storybook + Chromatic/Playwright visual regression + axe-core a11y가 CI 게이트.
+  8. **A11y AA 의무, 핵심 페이지 AAA 권장.** 작은 본문에 핑크 색 글씨 금지(대비 부족). 색만으로 의미 전달 금지.
+
+- **Consequences**:
+  - (+) 기존 ETL 도구(Airflow/Dagster) 대비 명확한 시각 차별화. 비개발자가 진입하기 편하면서도 데이터 도구의 진지함 유지.
+  - (+) 토큰 → Tailwind → shadcn/ui 체인이 자동화돼 디자인 표류 방지.
+  - (+) Storybook이 단일 진실로 살아있어 PR마다 visual diff.
+  - (+) Step 10 진행 시 컴포넌트만 조립하면 됨 — 토큰을 매번 정하지 않음.
+  - (+) Command Palette + 키보드 우선은 ETL 같은 반복 작업 도구에 자연스럽다.
+  - (−) 디자이너 1명이 시안을 끌고 가야 일관성 유지. 토큰 변경이 잦으면 Tailwind config + Figma variables 양쪽 sync 비용 발생.
+  - (−) 핑크가 강해서 워크스페이스 컬러를 핑크로 두면 강조 충돌 — default workspace는 핑크 외 색 권장.
+  - (−) Arc style은 "공간 메타포"가 강해서 단일 워크스페이스 사용자에게는 과한 추상화. Step 10.2에서 single-workspace UX 별도 검증.
+  - (−) Tailwind v4 가정. shadcn/ui도 v4 호환 버전 필요 (2026-05 기준 호환 가능).
+  - (−) Inter/Pretendard self-host 시 폰트 파일 용량 추가(약 250KB compressed). 다만 CDN 의존 제거로 안정성 ↑.
+
+- **References**:
+  - `DESIGN.md` (전체)
+  - `SPEC.md` §9.7, §10 (Step 10 적용 우선순위)
+  - `ROADMAP.md` Step 10.0~10.8
+  - Arc Browser 디자인 언어, Linear, Raycast, Cron, Refactoring UI
 
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

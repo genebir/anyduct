@@ -66,12 +66,13 @@
 - [ ] OTel/Prometheus 실제 백엔드 구현 — **Step 6 강화로 이동**
 - [ ] Pipeline.run 내부 자동 metrics/span emit — **Step 3 retry+observability 통합**
 
-### 1.7 Utils (`etl_plugins/utils/`)  ← **다음 작업 (2026-05-14)**
-- [ ] `retry.py` — `@retryable` (지수 백오프 + jitter)
-- [ ] `chunk.py`
-- [ ] `async_io.py`
+### 1.7 Utils (`etl_plugins/utils/`)
+- [x] `retry.py` — `@retryable` (sync+async, 지수 백오프 + jitter, tenacity 래핑, observability 자동 연동)
+- [x] `chunk.py` — `chunked` / `take` / `drop`
+- [x] `async_io.py` — `run_sync_in_thread`, `gather_with_concurrency`, `iter_to_async`
+- [x] 단위 테스트 42개 (총 178)
 
-### 1.8 테스트 인프라
+### 1.8 테스트 인프라  ← **다음 작업 (2026-05-14)**
 - [ ] `tests/conftest.py` (공통 fixture)
 - [ ] `tests/fixtures/` (표준 샘플 데이터셋)
 - [ ] Contract test 베이스 (`tests/contracts/`)
@@ -184,3 +185,4 @@
 - 2026-05-14: Step 1.4 (Core 추상화) 완료. exceptions/record/schema/connector/registry/context/pipeline + 57 unit tests. ADR-0003 추가. 다음은 1.5 (Config 로더).
 - 2026-05-14: Step 1.5 (Config 로더) 완료. models/secrets/loader + 49 unit tests (총 106). ADR-0004 추가. 다음은 1.6 (Observability).
 - 2026-05-14: Step 1.6 (Observability 베이스) 완료. logging/metrics/tracing ABC + NoOp + 30 unit tests (총 136). ADR-0005 추가. OTel 실제 구현은 Step 6로 이동, Pipeline 자동 계측은 Step 3로 이동. 다음은 1.7 (Utils).
+- 2026-05-14: Step 1.7 (Utils) 완료. retry/chunk/async_io + 42 unit tests (총 178). ADR-0006 추가. Circuit Breaker/Rate Limiter/DLQ는 Step 3으로 이동. 다음은 1.8 (테스트 인프라).

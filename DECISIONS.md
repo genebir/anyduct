@@ -150,4 +150,29 @@
 
 ---
 
+## ADR-0006: Step 1.7 Utils — 설계 결정
+
+- **Date**: 2026-05-14
+- **Status**: Accepted
+- **Context**:
+  SPEC.md §9.1은 `@retryable(max_attempts, on=...)` 데코레이터 + 지수 백오프 + jitter를 요구한다. §9.4는 메모리 안전 청크 처리 + asyncio/스레드 풀 혼용을 요구한다. 동기/비동기 양쪽을 한 데코레이터로 지원해야 하며, observability와의 연동 위치(데코레이터 안 vs 호출자)도 결정 필요.
+- **Decision**:
+  1. **tenacity 위에 얇은 래퍼**: `tenacity.Retrying` / `AsyncRetrying`을 직접 노출하지 않고, `@retryable(...)`이라는 우리 시그니처로 감싼다. tenacity 직접 의존을 호출자 코드에서 제거 가능.
+  2. **단일 데코레이터로 sync + async 모두 지원**: `inspect.iscoroutinefunction`으로 분기. 사용자 코드에서 별도 import 불필요.
+  3. **`reraise=True` 강제**: tenacity 기본은 `RetryError`로 래핑하지만 우리 데코레이터는 원래 예외 타입 그대로 propagate. 호출자가 except 절을 평소처럼 작성 가능.
+  4. **`@retryable` 무인자 형태도 지원** (`@retryable` 그대로 데코레이션). 기본 설정 사용. `overload` 시그니처로 mypy strict 호환.
+  5. **observability 자동 연동**: `before_sleep` 콜백에서 structlog warning + `ERRORS_TOTAL` 카운터 증가. metrics 미설정 시(NoOp) 비용 0. utils → observability 단방향 의존만 허용 (역방향은 순환 위험).
+  6. **chunked는 list 청크만 제공**. `chunked_lazy`(iterator-of-iterators)는 footgun이라 보류. take/drop은 itertools.islice 보조.
+  7. **async_io는 stdlib 위 얇은 wrapper**. `run_sync_in_thread`는 `asyncio.to_thread`, `gather_with_concurrency`는 semaphore 패턴, `iter_to_async`는 옵션으로 `in_thread=True` 지원 (blocking iterator → 이벤트 루프 안 막힘).
+  8. **Circuit Breaker / Rate Limiter / DLQ는 Step 1.7 범위 밖** — Step 3 retry+observability 통합에서 다룸.
+- **Consequences**:
+  - (+) 사용자는 한 데코레이터로 sync/async 통일. tenacity 학습 없이도 사용 가능.
+  - (+) 재시도 시 자동으로 메트릭/로그 — observability 설정만 하면 추적 가능.
+  - (+) `reraise=True` 덕분에 기존 try/except 패턴이 그대로 작동.
+  - (−) tenacity의 고급 기능(`retry_if_result`, `before`, `after` 등) 노출 안됨. 필요해지면 ADR로 확장.
+  - (−) `iter_to_async(in_thread=True)`는 thread 생성 비용이 항목당 발생 — 진짜 무거운 blocking 호출에만 사용 권장.
+- **References**: SPEC.md §9.1, §9.4 · `etl_plugins/utils/` · `tests/unit/utils/`
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

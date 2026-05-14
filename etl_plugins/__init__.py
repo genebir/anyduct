@@ -61,6 +61,13 @@ from etl_plugins.observability import (
     set_metrics,
     set_tracer,
 )
+from etl_plugins.utils import (
+    chunked,
+    gather_with_concurrency,
+    iter_to_async,
+    retryable,
+    run_sync_in_thread,
+)
 
 __version__ = "0.0.1"
 
@@ -105,17 +112,22 @@ __all__ = [
     "TransformFn",
     "WriteError",
     "__version__",
+    "chunked",
     "configure_logging",
     "expand_env",
+    "gather_with_concurrency",
     "get_metrics",
     "get_secret_backend",
     "get_tracer",
+    "iter_to_async",
     "load_config",
     "load_connections",
     "load_dotenv",
     "load_pipeline",
     "load_yaml",
     "resolve_secrets",
+    "retryable",
+    "run_sync_in_thread",
     "set_metrics",
     "set_tracer",
 ]

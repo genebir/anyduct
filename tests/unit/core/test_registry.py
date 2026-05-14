@@ -79,7 +79,10 @@ def test_duplicate_registration_with_replace() -> None:
 def test_list_connectors_sorted() -> None:
     ConnectorRegistry.register("zzz")(_DummySource)
     ConnectorRegistry.register("aaa")(_AltSource)
-    assert ConnectorRegistry.list_connectors() == ["aaa", "zzz"]
+    names = ConnectorRegistry.list_connectors()
+    # list_connectors는 entry-point도 함께 로드하므로 다른 등록된 커넥터가 더 있을 수 있음
+    assert "aaa" in names and "zzz" in names
+    assert names == sorted(names)
 
 
 def test_decorator_returns_class() -> None:

@@ -201,4 +201,40 @@
 
 ---
 
+## ADR-0008: Step 2.1 PostgreSQL 커넥터 — 드라이버 및 설계 결정
+
+- **Date**: 2026-05-14
+- **Status**: Accepted
+- **Context**:
+  Step 2.1은 SPEC.md §6에 따라 PostgreSQL용 BatchSource + BatchSink 구현. 드라이버 선택(`psycopg[binary]` vs `asyncpg`), bulk insert 전략, write 모드(append/overwrite/upsert) 의미론, 신규 커넥터를 contract suite에 어떻게 끼울지가 결정 필요.
+- **Decision**:
+  1. **드라이버: psycopg 3 (`psycopg[binary]>=3.1`)**. 이유:
+     - SPEC.md의 batch 모드는 동기 iterator → 동기 드라이버가 자연스러움.
+     - psycopg 3는 binary wheel + 네이티브 COPY 지원 + named cursor (server-side) 지원.
+     - 필요해지면 psycopg 자체에 async API도 있으므로 추후 stream 모드에 활용 가능.
+     - asyncpg는 빠르지만 sync wrapper 없음 + COPY 인터페이스 더 번거로움.
+  2. **읽기는 server-side cursor (`cur(name=...)` + `itersize=chunk_size`) 사용**. 메모리 안전 — 백만 행 SELECT도 안전. cursor 이름은 uuid4 hex로 충돌 방지.
+  3. **쓰기 모드별 구현**:
+     - `append` (default) — `COPY <table> FROM STDIN` (가장 빠름)
+     - `overwrite` — `TRUNCATE` + COPY
+     - `upsert` — `INSERT ... ON CONFLICT (<keys>) DO UPDATE SET ...`. `key_columns` 필수.
+     - 모든 행을 메모리에 적재하지 않고 iterator로 스트리밍.
+     - 실패 시 commit 안 하고 rollback → 부분 적재 없음.
+  4. **`sql.Identifier` 기반 식별자 quoting** — SQL 인젝션 방지. `public.orders`처럼 점 구분 이름도 분리해서 quote.
+  5. **`@ConnectorRegistry.register("postgres")` + `pyproject.toml` entry-point 등록 병행**. 사용자가 `from etl_plugins.connectors.rdbms.postgres import ...`로 직접 import할 수도, `ConnectorRegistry.get("postgres")`로 lazy 발견할 수도 있음.
+  6. **`[project.optional-dependencies] postgres = ["psycopg[binary]>=3.1"]`** — 사용자는 `pip install etl-plugins[postgres]`로만 드라이버 설치. 코어는 가벼움 유지. dev group에도 별도 추가 — 통합 테스트 실행 위해.
+  7. **`contracts/batch.py`에 `read_kwargs` / `write_kwargs` fixture 추가**. 후방 호환 (default `{}`). postgres는 `query` / `table`을 fixture로 주입.
+  8. **`tests/integration/`로 testcontainers 기반 통합 테스트 격리**. 모듈 단위 `pytestmark = pytest.mark.it`. 단위 테스트에서는 자동 제외. CI는 별도 잡으로 실행.
+  9. **`pg_conn_params` vs `pg_raw_kwargs` 두 fixture 분리** — 우리 커넥터는 `database=`를, 원시 psycopg는 `dbname=`를 받음. 번역 fixture로 명시적 처리.
+  10. **`PostgresConnector.connection` property** — 테스트/마이그레이션에서 원시 cursor가 필요할 때 escape hatch 제공. 파이프라인 코드는 read/write만 사용 권장.
+- **Consequences**:
+  - (+) 29 통합 테스트 모두 통과 (~5.6s). BatchSource/Sink/RoundTrip contract + upsert/overwrite/error/schema-qualified/streaming.
+  - (+) `Contract subclass + 2개 fixture` 패턴이 검증됨 — 다음 커넥터(s3, kafka)도 동일 방식으로 추가 가능.
+  - (+) optional-dependencies 덕분에 etl-plugins 코어 설치 시 psycopg 안 끌고 옴.
+  - (−) asyncpg 사용자에게는 별도 어댑터가 필요할 수 있음 (현재 미지원).
+  - (−) `_extra` libpq 옵션은 검증 없이 그대로 전달됨 — 오타 시 psycopg가 런타임에 에러. SPEC compliant.
+- **References**: SPEC.md §6, §9.5 · `etl_plugins/connectors/rdbms/postgres.py` · `tests/integration/test_postgres.py`
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

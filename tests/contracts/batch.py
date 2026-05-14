@@ -36,6 +36,10 @@ class _BatchSourceContract:
     Required fixtures (subclass):
       * ``source`` — an unconnected :class:`BatchSource` instance
       * ``seeded_records`` — the records ``source.read()`` will yield once connected
+
+    Optional fixture (subclass):
+      * ``read_kwargs`` — kwargs forwarded to every ``source.read(**kwargs)`` call.
+        Default ``{}``. Useful for connectors that need a query / topic / etc.
     """
 
     # ---------- abstract fixtures (subclass overrides) -----------------
@@ -47,6 +51,10 @@ class _BatchSourceContract:
     @pytest.fixture
     def seeded_records(self) -> list[Record]:
         raise NotImplementedError("subclass must provide a 'seeded_records' fixture")
+
+    @pytest.fixture
+    def read_kwargs(self) -> dict[str, object]:
+        return {}
 
     # ---------- contract -----------------------------------------------
 
@@ -67,29 +75,45 @@ class _BatchSourceContract:
             assert source.health_check() is True
         assert source.health_check() is False
 
-    def test_read_returns_iterator(self, source: BatchSource, seeded_records: list[Record]) -> None:
+    def test_read_returns_iterator(
+        self,
+        source: BatchSource,
+        seeded_records: list[Record],
+        read_kwargs: dict[str, object],
+    ) -> None:
         with source:
-            result = source.read()
+            result = source.read(**read_kwargs)
             assert isinstance(result, Iterator)
 
-    def test_read_yields_records(self, source: BatchSource, seeded_records: list[Record]) -> None:
+    def test_read_yields_records(
+        self,
+        source: BatchSource,
+        seeded_records: list[Record],
+        read_kwargs: dict[str, object],
+    ) -> None:
         with source:
-            result = list(source.read())
+            result = list(source.read(**read_kwargs))
         assert all(isinstance(r, Record) for r in result)
 
     def test_read_returns_seeded_data(
-        self, source: BatchSource, seeded_records: list[Record]
+        self,
+        source: BatchSource,
+        seeded_records: list[Record],
+        read_kwargs: dict[str, object],
     ) -> None:
         with source:
-            result = list(source.read())
+            result = list(source.read(**read_kwargs))
         assert normalize_payloads(result) == normalize_payloads(seeded_records)
 
     def test_read_is_consumable_multiple_times(
-        self, source: BatchSource, seeded_records: list[Record]
+        self,
+        source: BatchSource,
+        seeded_records: list[Record],
+        read_kwargs: dict[str, object],
     ) -> None:
         with source:
-            first = list(source.read())
-            second = list(source.read())
+            first = list(source.read(**read_kwargs))
+            second = list(source.read(**read_kwargs))
         assert normalize_payloads(first) == normalize_payloads(second)
 
 
@@ -98,12 +122,19 @@ class _BatchSinkContract:
 
     Required fixtures (subclass):
       * ``sink`` — an unconnected :class:`BatchSink` instance (mutated by tests)
-      * ``records`` — records to write (defaults to ``sample_records`` via global fixture)
+
+    Optional fixture (subclass):
+      * ``write_kwargs`` — kwargs forwarded to every ``sink.write(records, **kwargs)``.
+        Default ``{}``. Useful for connectors that need a target table / topic / etc.
     """
 
     @pytest.fixture
     def sink(self) -> BatchSink:
         raise NotImplementedError("subclass must provide a 'sink' fixture")
+
+    @pytest.fixture
+    def write_kwargs(self) -> dict[str, object]:
+        return {}
 
     def test_is_a_batchsink(self, sink: BatchSink) -> None:
         assert isinstance(sink, BatchSink)
@@ -116,26 +147,34 @@ class _BatchSinkContract:
         sink.close()
         assert sink.health_check() is False
 
-    def test_write_returns_int_count(self, sink: BatchSink, sample_records: list[Record]) -> None:
+    def test_write_returns_int_count(
+        self,
+        sink: BatchSink,
+        sample_records: list[Record],
+        write_kwargs: dict[str, object],
+    ) -> None:
         with sink:
-            n = sink.write(iter(sample_records))
+            n = sink.write(iter(sample_records), **write_kwargs)
         assert isinstance(n, int)
         assert n == len(sample_records)
 
-    def test_write_empty_returns_zero(self, sink: BatchSink) -> None:
+    def test_write_empty_returns_zero(
+        self, sink: BatchSink, write_kwargs: dict[str, object]
+    ) -> None:
         with sink:
-            n = sink.write(iter([]))
+            n = sink.write(iter([]), **write_kwargs)
         assert n == 0
 
-    def test_write_iterates_generator(self, sink: BatchSink) -> None:
+    def test_write_iterates_generator(
+        self, sink: BatchSink, write_kwargs: dict[str, object], sample_records: list[Record]
+    ) -> None:
         # 일부 sink가 list 전체를 한 번에 받는다고 가정하지 않도록
         def gen() -> Iterator[Record]:
-            for i in range(5):
-                yield Record(data={"id": i})
+            yield from sample_records
 
         with sink:
-            n = sink.write(gen())
-        assert n == 5
+            n = sink.write(gen(), **write_kwargs)
+        assert n == len(sample_records)
 
 
 class _BatchRoundTripContract:
@@ -145,6 +184,10 @@ class _BatchRoundTripContract:
     Required fixture (subclass):
       * ``round_trip_connector`` — instance implementing both BatchSource and BatchSink,
         backed by a single shared store
+
+    Optional fixtures (subclass):
+      * ``read_kwargs`` — kwargs passed to ``.read()``
+      * ``write_kwargs`` — kwargs passed to ``.write()``
     """
 
     @pytest.fixture
@@ -154,27 +197,43 @@ class _BatchRoundTripContract:
             "(instance implementing both BatchSource and BatchSink)"
         )
 
+    @pytest.fixture
+    def read_kwargs(self) -> dict[str, object]:
+        return {}
+
+    @pytest.fixture
+    def write_kwargs(self) -> dict[str, object]:
+        return {}
+
     def test_round_trip_is_both_source_and_sink(self, round_trip_connector: BatchSource) -> None:
         assert isinstance(round_trip_connector, BatchSource)
         assert isinstance(round_trip_connector, BatchSink)
 
     def test_round_trip_preserves_count(
-        self, round_trip_connector: BatchSource, sample_records: list[Record]
+        self,
+        round_trip_connector: BatchSource,
+        sample_records: list[Record],
+        read_kwargs: dict[str, object],
+        write_kwargs: dict[str, object],
     ) -> None:
         c = round_trip_connector
         assert isinstance(c, BatchSink)
         with c:
-            n = c.write(iter(sample_records))
-            read_back = list(c.read())
+            n = c.write(iter(sample_records), **write_kwargs)
+            read_back = list(c.read(**read_kwargs))
         assert n == len(sample_records)
         assert len(read_back) == len(sample_records)
 
     def test_round_trip_preserves_payloads(
-        self, round_trip_connector: BatchSource, sample_records: list[Record]
+        self,
+        round_trip_connector: BatchSource,
+        sample_records: list[Record],
+        read_kwargs: dict[str, object],
+        write_kwargs: dict[str, object],
     ) -> None:
         c = round_trip_connector
         assert isinstance(c, BatchSink)
         with c:
-            c.write(iter(sample_records))
-            read_back = list(c.read())
+            c.write(iter(sample_records), **write_kwargs)
+            read_back = list(c.read(**read_kwargs))
         assert normalize_payloads(read_back) == normalize_payloads(sample_records)

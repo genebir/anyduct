@@ -1,0 +1,63 @@
+"""Config layer: YAML loader + Pydantic models + secret backend."""
+
+from etl_plugins.config.loader import (
+    ETLYAMLLoader,
+    SecretRef,
+    expand_env,
+    has_unresolved_secrets,
+    load_config,
+    load_connections,
+    load_dotenv,
+    load_pipeline,
+    load_yaml,
+    resolve_secrets,
+)
+from etl_plugins.config.models import (
+    BufferConfig,
+    CommitConfig,
+    ConnectionConfig,
+    ConnectionsConfig,
+    MetricsConfig,
+    ObservabilityConfig,
+    PipelineConfig,
+    RetryConfig,
+    SinkConfig,
+    SourceConfig,
+    TracingConfig,
+    TransformConfig,
+)
+from etl_plugins.config.secrets import (
+    EnvSecretBackend,
+    SecretBackend,
+    StaticSecretBackend,
+    get_secret_backend,
+)
+
+__all__ = [
+    "BufferConfig",
+    "CommitConfig",
+    "ConnectionConfig",
+    "ConnectionsConfig",
+    "ETLYAMLLoader",
+    "EnvSecretBackend",
+    "MetricsConfig",
+    "ObservabilityConfig",
+    "PipelineConfig",
+    "RetryConfig",
+    "SecretBackend",
+    "SecretRef",
+    "SinkConfig",
+    "SourceConfig",
+    "StaticSecretBackend",
+    "TracingConfig",
+    "TransformConfig",
+    "expand_env",
+    "get_secret_backend",
+    "has_unresolved_secrets",
+    "load_config",
+    "load_connections",
+    "load_dotenv",
+    "load_pipeline",
+    "load_yaml",
+    "resolve_secrets",
+]

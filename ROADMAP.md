@@ -51,12 +51,14 @@
 - [x] `etl_plugins/{__init__.py, core/__init__.py}` re-exports
 - [x] 단위 테스트 57개 (`tests/unit/core/`) — mypy strict / ruff / pytest 통과
 
-### 1.5 Config (`etl_plugins/config/`)  ← **다음 작업 (2026-05-14)**
-- [ ] `loader.py` — YAML + `${VAR}` 치환 + `!secret` 태그
-- [ ] `models.py` — Pydantic 설정 모델
-- [ ] `secrets.py` — `env` / `vault` / `aws_sm` / `gcp_sm` 추상화
+### 1.5 Config (`etl_plugins/config/`)
+- [x] `models.py` — Pydantic 설정 모델 (Connections/Pipeline/Source/Sink/Transform/Retry/Observability/Commit/Buffer)
+- [x] `secrets.py` — SecretBackend ABC + Env/Static + vault/aws_sm/gcp_sm 스텁 + 팩토리
+- [x] `loader.py` — YAML + `${VAR}` 치환 + `!secret <path>` 태그 + load_connections/load_pipeline/load_dotenv
+- [x] `python-dotenv`, `types-PyYAML` 의존성 추가
+- [x] 단위 테스트 49개
 
-### 1.6 Observability 베이스 (`etl_plugins/observability/`)
+### 1.6 Observability 베이스 (`etl_plugins/observability/`)  ← **다음 작업 (2026-05-14)**
 - [ ] `logging.py` — structlog JSON, 시크릿 마스킹 필터
 - [ ] `metrics.py` — OpenTelemetry/Prometheus 표준 메트릭
 - [ ] `tracing.py` — OTLP exporter
@@ -177,3 +179,4 @@
 - 2026-05-14: Step 1.0 (Harness 문서), 1.1 (스캐폴딩), 1.2 (환경 재현) 완료. 다음은 1.3 (CI).
 - 2026-05-14: Step 1.3 (CI) 완료. CI 워크플로 + release 워크플로 + tests 초기 구조 + dynamic version. 다음은 1.4 (Core 추상화).
 - 2026-05-14: Step 1.4 (Core 추상화) 완료. exceptions/record/schema/connector/registry/context/pipeline + 57 unit tests. ADR-0003 추가. 다음은 1.5 (Config 로더).
+- 2026-05-14: Step 1.5 (Config 로더) 완료. models/secrets/loader + 49 unit tests (총 106). ADR-0004 추가. 다음은 1.6 (Observability).

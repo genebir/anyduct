@@ -98,4 +98,32 @@
 
 ---
 
+## ADR-0004: Step 1.5 Config 로더 — 설계 결정
+
+- **Date**: 2026-05-14
+- **Status**: Accepted
+- **Context**:
+  SPEC.md §5는 `.env` / `connections.yaml` / `pipelines/*.yaml` 세 종류의 설정 파일을 정의한다. 시크릿이 평문으로 YAML에 들어가면 안 되며, `${VAR}`와 `!secret <path>` 두 형식을 모두 지원해야 한다. 동시에 connections.yaml의 각 connection은 커넥터별로 임의 필드를 가지며(host/account/bootstrap_servers/...) Pydantic 검증을 강제하면 유연성을 잃는다.
+- **Decision**:
+  1. **로드 순서**: `yaml.load` (custom loader, `!secret` 태그 인식) → `expand_env` (`${VAR}` 치환, 미설정 시 ConfigError) → `resolve_secrets` (SecretBackend 호출, 옵션) → Pydantic `model_validate`. 이 순서로 SecretRef 객체가 env 치환을 거치고도 안전하게 보존된다.
+  2. **`${VAR}` 문법은 단순화**: `[A-Z_][A-Z0-9_]*`만 매치, 미설정 시 즉시 ConfigError. bash의 `${VAR:-default}` 등은 일단 미지원 (필요해지면 ADR로 추가).
+  3. **`!secret` 태그는 SecretRef로 머문다**. `SecretBackend`를 받아야만 plaintext로 변환. backend가 없고 SecretRef가 남아있으면 ConfigError (`require_secrets_resolved=True`가 기본).
+  4. **`extra=` 정책의 이중 기준**:
+     - 최상위 (`ConnectionsConfig`, `PipelineConfig`): `extra="forbid"` — 오탐 차단.
+     - 커넥터/스텝별 (`ConnectionConfig`, `SourceConfig`, `SinkConfig`, `TransformConfig`): `extra="allow"` — 커넥터별 임의 필드 통과.
+     `ConnectionConfig.options()`는 `type` 제외 dict를 반환해 Connector 인스턴스화에 그대로 전달 가능.
+  5. **SecretBackend는 ABC**. 내장: `EnvSecretBackend` (path를 env 이름으로 취급), `StaticSecretBackend` (테스트/스크립트용). `vault` / `aws_sm` / `gcp_sm`는 `NotImplementedError` 스텁 — 인터페이스는 동결, 구현은 이후 단계.
+  6. **`get_secret_backend(name=None)` 팩토리** — name 인자 → `$SECRET_BACKEND` env → `"env"` 순으로 결정.
+  7. **`load_dotenv`는 thin wrapper**. 라이브러리는 자동 로드하지 않음 — 호출자가 명시적으로 부른다.
+  8. **`python-dotenv` 직접 의존성으로 승격** (이전엔 testcontainers의 transitive).
+- **Consequences**:
+  - (+) 시크릿이 YAML에 평문으로 들어갈 통로가 두 곳뿐 (`${VAR}`로 env 우회, `!secret`으로 backend 우회) — 사고 가능성 작음.
+  - (+) 새 커넥터를 추가해도 ConnectionConfig 모델을 건드릴 필요 없음 (extra="allow").
+  - (+) Pydantic validator로 입력 형식 변경 발견이 즉시 가능.
+  - (−) `${VAR:-default}` 미지원 — 일부 사용자에게는 불편할 수 있음. 필요 시 ADR로 확장.
+  - (−) SecretRef를 그대로 보존하는 흐름 때문에 expand_env가 SecretRef도 descend해야 함 — 단순화 위해 `SecretRef.path`도 env 치환 대상.
+- **References**: SPEC.md §5, §9.3 · `etl_plugins/config/` · `tests/unit/config/`
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

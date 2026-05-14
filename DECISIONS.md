@@ -597,4 +597,238 @@
   - `ROADMAP.md` Step 10.0~10.8
   - Arc Browser 디자인 언어, Linear, Raycast, Cron, Refactoring UI
 
+## ADR-0019: API 프레임워크 = FastAPI
+
+- **Date**: 2026-05-14
+- **Status**: Accepted
+- **Context**:
+  `services/etlx-server`(Step 7~8)는 다음 요건을 동시에 만족해야 한다:
+  - **OpenAPI 자동 생성** — `etlx-web`이 type-safe API client를 자동 생성(openapi-typescript)할 수 있어야 함
+  - **Pydantic 통합** — 코어의 `etl_plugins.config.models.ConnectionConfig` / `PipelineConfig`를 그대로 REST body로 재사용
+  - **async 네이티브** — SQLAlchemy 2.x async + 외부 시크릿 백엔드(Vault) + Kafka commit hook 등 IO-bound
+  - **의존성 주입** — `Depends(require_role("editor"))` 같은 RBAC 가드를 선언적으로
+  - **production-ready** — 충분히 검증된 ASGI 프레임워크
+  후보: FastAPI / Starlette + 자체 라우팅 / Litestar / Flask + flask-smorest / Django REST framework / Quart.
+
+- **Decision**:
+  1. **FastAPI (`>=0.115`)** 채택. 위 5개 요건 모두 만족 + 생태계 성숙(authlib / fastapi-pagination / SQLAlchemy 통합 패턴 확립).
+  2. ASGI 서버: **uvicorn workers + gunicorn 진입점**. 로컬은 `uvicorn --reload`.
+  3. Pydantic v2 명시 — 코어와 동일 버전(`pydantic>=2.7`).
+  4. OpenAPI 스키마는 `/openapi.json`, 인터랙티브 문서는 `/docs`(Swagger) + `/redoc`. CI에서 `etlx-web`이 `openapi-typescript`로 client 코드 생성.
+  5. RBAC / 워크스페이스 격리는 의존성 주입으로 표현 — `Depends(get_current_user)` → `Depends(require_workspace_role("editor"))` 체이닝.
+  6. **코어를 import해서 직접 사용** (예: `from etl_plugins.runtime import run_pipeline_yaml`) — adapter 추가 불필요.
+  7. 에러 핸들링: `etl_plugins.core.exceptions.ETLError` → HTTP 4xx/5xx 매핑은 FastAPI exception handler 한 곳에 집중.
+
+- **Consequences**:
+  - (+) 코어의 Pydantic 모델을 REST body로 그대로 재사용 — 단일 진실, 검증 로직 한 번만 작성.
+  - (+) OpenAPI → TS client 자동 생성으로 프론트/백 시그니처 drift 방지.
+  - (+) `Depends(...)` 체이닝이 깔끔 — RBAC 가드를 보고서 권한 모델 추론 가능.
+  - (+) Step 4의 Orchestrator adapter 패턴과 동일하게 코어를 wrapping — 코어 API 표면이 다시 검증됨.
+  - (−) Starlette / Pydantic / FastAPI 3-way 버전 호환 관리 필요 — `pyproject.toml`에 pin 범위 명시.
+  - (−) async DB 드라이버(`asyncpg`) 필요 — 코어가 쓰는 `psycopg`(sync)와 별도 의존. 코어 코드 재사용 시 `run_in_thread`로 우회하는 경우 있을 수 있음.
+  - (−) WebSocket 기반 실시간 로그 스트리밍(Step 8.6)은 FastAPI도 지원하지만 별도 패턴 필요.
+
+- **References**: `SPEC.md` §7 (서비스 인프라), ROADMAP Step 8 · 코어의 `etl_plugins.config.models`, `etl_plugins.runtime.runner`
+
+---
+
+## ADR-0020: 메타데이터 저장소 = PostgreSQL 16+ + SQLAlchemy 2.x async + Alembic
+
+- **Date**: 2026-05-14
+- **Status**: Accepted
+- **Context**:
+  `services/etlx-server`가 관리할 도메인:
+  - `workspaces`, `users`, `roles`, `memberships`, `connections` (config_json + secret_refs), `pipelines`, `pipeline_versions` (이력), `schedules`, `runs`, `run_logs`, `run_metrics`, `audit_log`
+  특성:
+  - JSON-shaped config가 핵심(코어의 PipelineConfig dump 통째). 부분 인덱싱·검색 필요.
+  - audit_log는 시계열 + 텍스트 검색 일부 (`pg_trgm`).
+  - 단일 노드로 시작, 추후 HA(Step 11 운영 강화)에서 standby/replica 검토.
+  후보: PostgreSQL / MySQL / SQLite / CockroachDB / SurrealDB.
+
+- **Decision**:
+  1. **PostgreSQL 16+** 채택. 이유:
+     - **JSONB**로 ConnectionConfig / PipelineConfig 그대로 직렬화 + JSONB GIN 인덱스로 부분 쿼리 효율.
+     - **pg_trgm**으로 audit_log 본문/리소스 이름 검색.
+     - **advisory lock + `SELECT FOR UPDATE SKIP LOCKED`**가 Step 9 워커 큐의 기반(외부 큐 의존 회피, ADR-0021과 짝).
+     - 코어의 통합 테스트에 이미 `testcontainers[postgres]` 사용 — 인프라 학습·운영 재활용.
+  2. **SQLAlchemy 2.x async + `asyncpg`** — FastAPI(ADR-0019)와 자연스러운 짝.
+  3. **Alembic** 마이그레이션 — `services/etlx-server/alembic/`. 초기 마이그레이션은 `alembic revision --autogenerate`로 시작.
+  4. **워크스페이스 격리**는 모든 도메인 테이블의 `workspace_id` 외래키 + 쿼리 시 자동 필터. 응용 레벨로 보장 (RLS는 첫 릴리스 범위 밖).
+  5. UUID PK (uuid7 권장 — 시간순 정렬 + 인덱스 친화). `created_at` / `updated_at` 자동 stamping.
+  6. 시크릿은 **절대 DB에 평문 저장 금지** (ADR-0017 §6). `connections.config_json`에는 `${SECRET_REF}` 형태 placeholder만 보관. 실제 값은 backend(Vault / AWS SM / GCP SM, ADR-0017).
+  7. 백업: Step 11에서 `pg_dump` 가이드. 메타 DB 자체는 ETL 대상 postgres와는 다른 인스턴스 권장.
+
+- **Consequences**:
+  - (+) 코어 / 메타 DB / 워커 큐 모두 PostgreSQL — 인프라 단순화. testcontainers 재활용.
+  - (+) JSONB로 스키마 진화에 유연 (예: connector별 옵션 추가가 alembic migration 없이 동작).
+  - (+) `SKIP LOCKED`로 Celery/Redis 없이 멀티 워커 fan-out (ADR-0021).
+  - (−) PG 운영 부담 — 백업·인덱스·VACUUM 등. Step 11에서 Helm chart + 가이드.
+  - (−) 첫 릴리스에 멀티 리전 / HA 없음. 단일 노드 + cold standby 권장.
+  - (−) SQLAlchemy 2.x async가 sync 코드 대비 학습 곡선 있음 — 기존 코어가 sync라 mental model 두 개 공존.
+
+- **References**: ROADMAP §7.2 메타 DB 스키마, §9.2 스케줄러, §9.3 Run 라이프사이클 · 코어 통합 테스트 `tests/integration/conftest.py`(postgres fixtures)
+
+---
+
+## ADR-0021: 실행 엔진 = 자체 PostgreSQL-backed worker queue (Dagster/Prefect 임베드 거부)
+
+- **Date**: 2026-05-14
+- **Status**: Accepted
+- **Context**:
+  Step 9가 풀어야 할 문제:
+  - **스케줄링**: cron 표현식 → 다음 실행 시각 계산 + 트리거.
+  - **Fan-out**: 동시 N개 워커가 큐에서 작업을 잡아 실행.
+  - **Run 라이프사이클**: 큐잉 → 실행 → 상태/로그/메트릭 수집 → 상태 갱신.
+  - **Stream pipeline**: 장기 실행, 별도 worker process / Pod (Step 9.4).
+  - **재시도 / DLQ**: 코어가 이미 처리(ADR-0013). 워커는 invoke만.
+  세 가지 선택:
+  1. **Dagster 임베드** — 풍부한 UI/스케줄러/observability. 단점: 우리 UI(Step 10)와 중복. dagster의 Asset/Op 모델로 다시 풀어야 함. 거대 dep.
+  2. **Prefect 임베드** — flow API + Cloud/OSS server. 단점: 1번과 유사.
+  3. **자체 실행기** — `etl_plugins.runtime.{run_pipeline_yaml, arun_stream_pipeline_yaml}`을 직접 호출하는 워커. 큐는 PostgreSQL `SKIP LOCKED`.
+
+  코어가 이미 **Pipeline + run + retry + DLQ + metrics emit**을 갖춰서 외부 엔진의 task graph가 불필요하다. UI(Step 10)가 별도로 있어 외부 엔진 UI는 중복.
+
+- **Decision**:
+  1. **자체 실행기 채택**. 핵심 컴포넌트:
+     - **`runs` 테이블** = 큐 역할도 겸함. 상태: `pending` → `running` → `succeeded`/`failed`/`cancelled`.
+     - **워커 프로세스 풀** — `services/etlx-server/etlx_server/workers/batch_worker.py`. 루프:
+       ```
+       SELECT ... FROM runs
+       WHERE status='pending' AND scheduled_at <= now()
+       ORDER BY scheduled_at
+       FOR UPDATE SKIP LOCKED LIMIT 1;
+       ```
+       → 잡으면 상태 `running`으로 → `run_pipeline_yaml(...)` 직접 호출 → 결과를 runs/run_logs/run_metrics에 기록.
+     - **스케줄러** — 별도 process. cron 표현식(croniter) 평가 → 다음 실행 시각이 도래한 schedule의 새 run row 생성.
+     - **Stream worker manager** — `arun_stream_pipeline_yaml`을 별도 process(K8s `Deployment` per pipeline)로 띄움. supervisor가 graceful shutdown + health 관리.
+  2. **외부 엔진 어댑터는 그대로 유지** — Step 4의 `etl_plugins.adapters.{airflow, dagster, prefect}`. 사용자가 자기 Airflow에 우리 pipeline을 얹고 싶으면 그대로 동작.
+  3. **DB 큐 폴링 간격**: 1초(기본). 짧지만 PG의 `SKIP LOCKED`는 컨테션 없이 fan-out하므로 부담 없음.
+  4. **장기 실행 / heartbeat**: `runs.heartbeat_at`을 워커가 30초마다 갱신. 누락된 row는 다른 워커가 picks up (zombie reclaim).
+  5. **PoC 우선** — Step 9.1에서 자체 실행기 PoC(소규모 부하 테스트) 후 본 구현. 부정적 결과가 나오면 본 ADR을 supersede하고 Prefect 임베드로 전환.
+
+- **Consequences**:
+  - (+) 거대 의존 0. PG 하나로 메타·큐·도메인 DB 통합.
+  - (+) 코어의 `Pipeline.run` / `arun_stream` / retry / DLQ / metrics가 그대로 작동 — 코드 중복 없음.
+  - (+) UI(Step 10)와의 매핑이 1:1 — runs 테이블이 SSOT.
+  - (+) Step 4의 adapter들은 그대로 유지 → 사용자가 외부 엔진을 선호하면 우회 가능.
+  - (−) Distributed scheduling 정교화(우선순위 큐, fair-share, 자원 예약)는 우리가 직접 만들어야. 첫 릴리스는 단순 FIFO + per-workspace concurrency cap.
+  - (−) Cron이 정확히 한 번 트리거되는지(스케줄러 SPOF)는 운영 이슈. advisory lock으로 단일 leader 보장.
+  - (−) 추후 100k+ runs/day 규모에서 PG 큐 한계가 보이면 별도 broker(Redis Streams / NATS JetStream)로 마이그레이션 필요.
+
+- **References**: ROADMAP §9 (Execution Engine), §11 (운영 강화) · 코어의 `etl_plugins/runtime/runner.py`, ADR-0013(retry/DLQ)
+
+---
+
+## ADR-0022: 모노레포 구조 = uv workspace + pnpm workspace, CI 3분리, import-graph 검사
+
+- **Date**: 2026-05-14
+- **Status**: Accepted
+- **Context**:
+  ADR-0017에서 세 패키지 분리를 결정했다:
+  - `etl_plugins/` (코어, Python)
+  - `services/etlx-server/` (FastAPI, Python)
+  - `services/etlx-web/` (Next.js, TypeScript)
+  실현 방법 선택지: 단일 pyproject + 서브패키지 / uv workspace + pnpm workspace / Bazel·Pants 등 거대 빌드 시스템 / 분리된 repo 3개.
+
+- **Decision**:
+  1. **단일 git repo + uv workspace + pnpm workspace** 채택. 다음 구조:
+     ```
+     etl-plugins/
+     ├── pyproject.toml                # 코어 (etl-plugins)
+     ├── etl_plugins/
+     ├── services/
+     │   ├── etlx-server/
+     │   │   ├── pyproject.toml        # uv workspace member, deps: etl-plugins~=0.X
+     │   │   └── etlx_server/
+     │   ├── etlx-web/
+     │   │   └── package.json          # pnpm workspace member
+     │   └── docker-compose.services.yml
+     ├── pnpm-workspace.yaml           # 서비스 web만 포함
+     └── tests/                        # 코어 테스트
+     ```
+  2. **uv workspace** (`[tool.uv.workspace] members = ["services/etlx-server"]`) — server는 코어를 path dep로 개발 시 사용, 릴리스 후엔 PyPI version으로 핀.
+  3. **CI 3 분리**:
+     - `.github/workflows/ci-core.yml` — `pyproject.toml`(root) / `etl_plugins/` / `tests/` 변경 시 트리거. unit + integration + lint + mypy + build.
+     - `.github/workflows/ci-server.yml` — `services/etlx-server/` 변경 시. 코어 wheel을 install 후 server 테스트.
+     - `.github/workflows/ci-web.yml` — `services/etlx-web/` 변경 시. pnpm install + typecheck + test + Storybook build + Chromatic.
+     `paths:` 필터로 cross-package 트리거 회피.
+  4. **import-graph 검사** — `ci-core.yml`에 [`import-linter`](https://github.com/seddonym/import-linter) step. 규칙:
+     - `etl_plugins` 패키지는 `services` import 금지.
+     - `etl_plugins.core`는 `etl_plugins.connectors` / `etl_plugins.adapters` / `etl_plugins.runtime` import 금지(역방향만 허용).
+     - 위반 시 CI 실패.
+  5. **버전 정책**:
+     - 코어 `etl-plugins`: SemVer. 0.x 동안은 minor 단위 breaking 허용.
+     - `etlx-server` / `etlx-web`: 별도 SemVer. 코어는 `~=X.Y`로 의존(같은 minor 라인).
+     - 서비스 첫 안정 릴리스 = `etlx-server 1.0` + `etlx-web 1.0` (코어가 0.x여도).
+  6. **릴리스 워크플로** 분리:
+     - `release-core.yml` — git tag `core-vX.Y.Z` → PyPI Trusted Publishing.
+     - `release-server.yml` — `server-vX.Y.Z` → Docker image push.
+     - `release-web.yml` — `web-vX.Y.Z` → Docker image push.
+  7. **공통 dev 도구**(ruff / mypy / pre-commit / .editorconfig)는 root에서 관리.
+
+- **Consequences**:
+  - (+) 단일 PR로 코어+서비스 동시 변경 가능 (예: 코어 API 추가 + server에서 사용).
+  - (+) IDE에서 코어 코드로 즉시 점프 (path dep).
+  - (+) CI 3분리로 비관련 변경에 불필요한 잡 실행 없음.
+  - (+) import-graph 검사로 ADR-0017 §6 "단방향 의존"이 사람의 규율이 아닌 CI 자동 검증.
+  - (−) uv workspace 학습 — 팀이 처음.
+  - (−) Renovate / Dependabot이 monorepo path 인식 설정 필요.
+  - (−) 릴리스 채널 3개 운영 비용 — 매뉴얼·자동화 충분히 정비 필요.
+
+- **References**: ADR-0017 §6 단방향 의존 · ROADMAP §7.1 모노레포 스캐폴딩 · `pyproject.toml` (코어)
+
+---
+
+## ADR-0023: 인증·인가 정책 = OIDC + 로컬 fallback + JWT RS256 + 4-role RBAC
+
+- **Date**: 2026-05-14
+- **Status**: Accepted
+- **Context**:
+  비개발자 사용자가 직접 들어와 파이프라인·연결·스케줄을 만들고 monitoring할 예정. 요건:
+  - **SSO**: 회사가 Google Workspace / Azure AD / Okta / GitHub Enterprise 등을 쓸 가능성 → OIDC 일반화.
+  - **로컬 fallback**: 사내 환경 / 로컬 dev / SSO 미도입 조직.
+  - **워크스페이스 다중 테넌시**: 모든 도메인 리소스가 workspace에 속함.
+  - **역할 분리**: 운영자가 실행만 트리거하고 설계 변경은 못 하게.
+  - **감사**: 누가 언제 무엇을 바꿨는지 추적 (audit_log).
+  - **API 호출**: 머신·CI/CD 사용도 가정 — bearer token / service account.
+
+- **Decision**:
+  1. **OIDC 일반화** ([authlib](https://docs.authlib.org/) 사용). Google / Azure AD / Okta / GitHub / 커스텀 OIDC provider 모두 동일 코드 경로.
+  2. **로컬 fallback**: email + password (bcrypt cost 12). `users.password_hash`는 `auth_method='local'`일 때만 채움.
+  3. **세션 = JWT RS256**:
+     - Access token TTL 15분, Refresh token TTL 7일(rotation).
+     - 키페어는 secret backend(Vault / file)에 보관. 키 회전은 운영 매뉴얼.
+     - 클레임: `sub`(user_id) / `email` / `name` / `auth_method` / `iat` / `exp`. 워크스페이스/역할은 매 요청 DB에서 조회(stale token 안전).
+  4. **API 호출용 PAT** (Personal Access Token) — 별도 테이블, prefix `etlx_pat_*`. `Authorization: Bearer <pat>`. UI에서 발급/회수.
+  5. **RBAC 4 역할** (워크스페이스 단위):
+     | 역할 | 가능한 작업 |
+     |---|---|
+     | **Owner** | 멤버 관리 + 모든 리소스 CRUD + 워크스페이스 삭제 |
+     | **Editor** | 모든 리소스 CRUD (멤버 관리 제외) |
+     | **Runner** | Pipeline 트리거 + Run 조회 + DLQ 재처리. CRUD 불가. |
+     | **Viewer** | 읽기 전용 (대시보드/로그/메트릭 조회) |
+  6. **글로벌 역할** = `SuperAdmin` (서비스 운영자) — 모든 워크스페이스에 접근 가능. audit_log에서 명확히 구분.
+  7. **FastAPI 의존성**:
+     ```python
+     Depends(get_current_user)
+       → Depends(get_current_workspace)
+         → Depends(require_workspace_role("editor"))
+     ```
+     모든 엔드포인트가 명시적으로 역할 선언. 미선언 = CI 실패(별도 lint check).
+  8. **시크릿/패스워드 로깅 금지** — 기존 secret masker(`etl_plugins.observability.logging.mask_sensitive_values`)에 `password` / `token` / `pat` / `authorization` 추가.
+  9. **Audit log**: 모든 mutating endpoint가 `audit_log` row를 남김. actor / workspace / action / resource_type / resource_id / before_json / after_json / ip / user_agent / created_at.
+
+- **Consequences**:
+  - (+) SSO와 로컬 모두 가능 — 사내·외 모두 대응.
+  - (+) RBAC를 FastAPI Depends로 선언적 표현 → 권한 모델이 코드 리뷰 시 한 줄로 보임.
+  - (+) audit_log가 ADR-0017의 "감사 추적" 요건 충족.
+  - (+) PAT로 CI/CD 통합 자연스러움.
+  - (−) JWT 키 회전 / refresh rotation / blacklist 처리는 직접 구현해야 — 첫 릴리스는 단순 회전(서버 재시작 시 모든 토큰 무효화) + 향후 강화.
+  - (−) OIDC provider별 미세한 차이(예: Azure AD의 `tid` 클레임 처리) — 테스트 케이스 추가 필요.
+  - (−) 4 역할이 부족한 사용자가 있을 수 있음 — 첫 릴리스 후 피드백 수렴.
+
+- **References**: ROADMAP §8.2 인증, §8.3 RBAC, §8.4 Audit · ADR-0017 §6 시크릿 처리 · 코어의 `etl_plugins.observability.logging.make_secret_masker`
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

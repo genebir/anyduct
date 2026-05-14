@@ -169,15 +169,15 @@
 
 ## Step 7 — Service Foundation (Metadata + Secret + YAML 양방향)
 
-### 7.0 기술 스택 결정 (ADR 추가)
+### 7.0 기술 스택 결정 (ADR 추가) ✅ (2026-05-14)
 > ADR-0018은 이미 디자인 시스템에 사용되었으므로 이 그룹은 **ADR-0019~0023**으로 예약 (ADR-0017 본문과 일치).
 > 프론트엔드 스택(Next.js / TypeScript / Tailwind v4 / shadcn/ui / React Flow)은 ADR-0018(디자인 시스템)에서 함께 결정되었으므로 별도 ADR을 두지 않는다.
 
-- [ ] **ADR-0019**: API 프레임워크 = FastAPI 채택 사유 정리
-- [ ] **ADR-0020**: 메타데이터 저장소 = PostgreSQL + Alembic 채택 사유
-- [ ] **ADR-0021**: 실행 엔진 통합 전략 — Dagster 임베드 / Prefect 임베드 / 자체 구현 중 택1
-- [ ] **ADR-0022**: 모노레포 구조 — `services/etlx-server`, `services/etlx-web` 패키지 경계, 의존 방향, CI 분리 정책
-- [ ] **ADR-0023**: 인증·인가 정책 — OIDC 일반화 + 로컬 fallback + RBAC 역할 정의
+- [x] **ADR-0019**: API 프레임워크 = FastAPI (>=0.115), Pydantic v2 통합, uvicorn+gunicorn, OpenAPI 자동
+- [x] **ADR-0020**: 메타데이터 저장소 = PostgreSQL 16+ + SQLAlchemy 2.x async + Alembic, JSONB로 config 직렬화, UUID PK
+- [x] **ADR-0021**: 실행 엔진 = **자체 PG-backed worker queue** (Dagster/Prefect 임베드 거부). `SKIP LOCKED` fan-out, `runs` 테이블이 큐 겸함. Step 9.1 PoC 후 본 구현.
+- [x] **ADR-0022**: 모노레포 = uv workspace + pnpm workspace + CI 3분리 (`ci-core` / `ci-server` / `ci-web`) + `import-linter`로 단방향 의존 자동 검증
+- [x] **ADR-0023**: 인증·인가 = OIDC 일반화(authlib) + 로컬 fallback(bcrypt) + JWT RS256(15min/7d) + PAT + 4 역할 RBAC(Owner/Editor/Runner/Viewer) + SuperAdmin + audit_log
 
 ### 7.1 모노레포 스캐폴딩
 - [ ] `services/etlx-server/pyproject.toml` (코어 의존: `etl-plugins>=X.Y,<X+1`)
@@ -371,3 +371,4 @@
 - 2026-05-14: **Step 5.1b (SQLite) 완료.** ADR-0016.
 - 2026-05-14: **서비스화 방향 확정 — ADR-0017.** Step 7~11 추가 (Service Foundation / API Server / Execution Engine / Web UI / 운영 강화). 코어와 서비스는 단방향 의존, 모노레포 구조 (`services/etlx-server`, `services/etlx-web`). Step 7.0에서 세부 기술 스택 ADR(0019~0023) 확정 예정. 다음 작업은 Step 5 계속 또는 Step 7.0 착수 — 우선순위 선택 필요.
 - 2026-05-14: **디자인 시스템 채택 — ADR-0018.** `DESIGN.md` 신규 (Arc 영감, 네이비 베이스 + 팝핑크 강조, shadcn/ui + Tailwind v4 + Storybook). Step 10이 디자인 토큰 우선 순서(10.0)로 세부화됨. SPEC.md §3/§9.7/§10 패치. 다음 작업은 Step 5 계속 또는 Step 7.0 착수.
+- 2026-05-14: **Step 7.0 (서비스 기술 스택 ADR) 완료.** ADR-0019(FastAPI) / ADR-0020(PostgreSQL+SQLAlchemy async+Alembic) / ADR-0021(자체 PG-backed worker queue) / ADR-0022(uv+pnpm workspace, CI 3분리, import-linter) / ADR-0023(OIDC+로컬 fallback+JWT RS256+4-role RBAC). 코드 변경 없음, 결정 문서만. 다음은 Step 7.1 모노레포 스캐폴딩.

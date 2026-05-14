@@ -120,6 +120,19 @@ def test_help_shows_subcommands() -> None:
         assert sub in result.stdout
 
 
+def test_global_log_format_option_accepted() -> None:
+    # version subcommand works with both formats
+    for fmt in ("json", "console"):
+        result = runner.invoke(app, ["--log-format", fmt, "version"])
+        assert result.exit_code == 0, result.stdout
+        assert __version__ in result.stdout
+
+
+def test_global_log_format_invalid_rejects() -> None:
+    result = runner.invoke(app, ["--log-format", "xml", "version"])
+    assert result.exit_code == 2
+
+
 def test_run_stream_smoke(tmp_path: Path) -> None:
     """Stream-mode pipeline must run via CLI with stop-after-records bound."""
     # Register stable globals so YAML connection types resolve to our InMemory

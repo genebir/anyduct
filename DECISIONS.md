@@ -366,4 +366,39 @@
 
 ---
 
+## ADR-0013: Step 3.3 Retry / DLQ / 자동 메트릭 / CLI logging
+
+- **Date**: 2026-05-14
+- **Status**: Accepted
+- **Context**:
+  Step 3.3은 SPEC.md §9.1/§9.2의 신뢰성·관찰성을 Pipeline에 통합. 결정: retry는 어느 granularity에 적용하는가(task vs record), DLQ는 어떻게 라우팅(transform 실패만 vs sink 실패도), 자동 metrics 호출 시점, CLI logging은 global option vs 서브커맨드별.
+- **Decision**:
+  1. **Retry 적용 단위 — batch는 task-level, stream은 publish-level**.
+     - Batch: `Pipeline.run`이 `_run_task`를 `retryable(...)`로 감싸 호출. 실패 시 task 전체 재실행(source 재read + sink 재write). idempotency는 caller 책임 — `mode=upsert` 또는 멱등 source 권장.
+     - Stream: `_arun_stream_task` 안에서 `sink.publish`만 retry 래핑. 무한 스트림에서 task 전체 재시도는 의미 없음. transient publish 실패 흡수.
+     - 동일 `RetryConfig` (max_attempts/backoff/initial_delay/max_delay) 사용. `on`은 기본 `Exception` (모든 예외 retry).
+  2. **DLQ는 transform 실패 라우팅 전용** (sink 실패는 retry 또는 propagate). 이유: sink 실패는 batch 전체 영향 → DLQ가 무한 루프 위험. transform 실패는 per-record 격리 가능. SPEC.md §9.1의 "변환·sink 실패 레코드 별도 sink 라우팅" 중 변환만 우선.
+  3. **DlqConfig를 `PipelineConfig.dlq`로 추가**: `{connection, table?, topic?, mode='append'}`. table은 BatchSink DLQ용, topic은 StreamSink DLQ용 — builder가 connection을 connectors dict에서 찾음, missing이면 ConfigError. Pipeline에는 `dlq: DlqConfig | None` 필드만 — 실제 sink 조회는 run 시점에 connectors dict에서.
+  4. **`_dlq_route_batch` / `_dlq_route_stream`은 best-effort + `contextlib.suppress(Exception)`**. DLQ 자체가 실패해도 main run은 계속. 메트릭(`ERRORS_TOTAL{routed=dlq}`)으로 가시성 확보.
+  5. **자동 메트릭 emit — Pipeline.run / arun_stream 둘 다**. 표준 메트릭 이름(observability.metrics 상수) 그대로 사용:
+     - `RECORDS_READ_TOTAL` / `RECORDS_WRITTEN_TOTAL`: 각 task 끝에서 누적 add. attributes={pipeline, mode}.
+     - `ERRORS_TOTAL`: 예외 캐치 시 phase 속성으로(run/transform). DLQ 라우팅 시 `routed=dlq` 추가.
+     - `DURATION_SECONDS`: finally에서 histogram record.
+     - 기본 backend는 NoOp이므로 cost는 zero. OTel/Prom backend 연결 시 그대로 작동.
+  6. **CLI `--log-format` / `--log-level`은 Typer global callback**으로 도입. 모든 서브커맨드 전에 `configure_logging(level=..., json=...)` 호출. `json` (default) | `console`. 잘못된 값은 exit 2 + 빨간 에러. structlog `configure_logging`가 idempotent라 안전.
+  7. **Pipeline 데이터클래스에 `retry: RetryConfig | None` + `dlq: DlqConfig | None` 필드 추가**. builder가 `PipelineConfig.retry` / `.dlq`를 그대로 복사 — config models를 core가 import. 이전엔 core가 config를 모르고 살았으나, retry/dlq 모델은 datatype-only로 사용하므로 순환 import 없음 (config는 core를 import하지 않음).
+  8. **Cursor / Checkpoint는 Step 3.3 범위에서 제외**, Step 6 강화로 이동. 이유: 파일 기반 state 관리, ETag/lsn/sequence 등 source-specific 추적, schedule 통합(다음 run의 `last_run_at` 주입) 모두 별도 슬라이스. 현재 `Pipeline.on("post_run", ...)` 훅으로 사용자가 커스텀 cursor 저장 가능.
+- **Consequences**:
+  - (+) Production 신뢰성 첫 마일스톤: transient 실패는 retry, bad 레코드는 DLQ, observability 자동. 13 신규 unit tests 검증.
+  - (+) DLQ가 별도 sink → BatchSink든 StreamSink든 사용자가 선택(parquet to S3 / Kafka topic / Postgres table 등) — 기존 connector 재사용.
+  - (+) CLI `--log-format console`로 로컬 디버깅이 편해짐, prod는 `json` 기본.
+  - (+) 표준 메트릭 자동 emit → OTel/Prometheus backend 연결만 하면 즉시 dashboard 가능. Step 6 강화의 단축경로.
+  - (−) Batch task 단위 retry는 부분 진행 후 재시도 시 idempotency 보장 필요 — sink가 upsert 또는 source가 cursor 기반이 아니면 중복 가능. 문서로 보완.
+  - (−) Sink 실패 DLQ는 미구현 — 큰 batch가 무한 retry로 멈출 위험은 retry max_attempts로만 제어. Step 6에서 sink chunk-level DLQ 검토.
+  - (−) Stream retry가 publish만 감쌈 — transform 실패는 즉시 DLQ로 가거나 raise. transform retry가 필요한 use case는 사용자가 transform 함수 내부에서 처리.
+  - (−) Cursor/Checkpoint 부재 → 매 run이 전체 read 또는 사용자 hook 의존. Step 6에서 cursor abstraction (file/dict state + before/after_run hook 표준화).
+- **References**: SPEC.md §9.1, §9.2, §9.6 · `etl_plugins/core/pipeline.py` · `etl_plugins/config/models.py` (DlqConfig) · `etl_plugins/cli.py` (global callback) · `tests/unit/runtime/test_resilience.py`
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

@@ -217,6 +217,30 @@
 ### Milestone
 - **Step 3.2 — Stream runtime 완료 (2026-05-14)**: `Pipeline.arun_stream` + Kafka async commit + buffer + `etlx run-stream`. 17 신규 unit + 2 신규 integration tests (269 unit + 82 it = 351 total). **다음은 Step 3.3 (Retry / DLQ / Checkpoint)**.
 
+- **Retry / DLQ / 자동 메트릭** [Step 3.3]
+  - `etl_plugins/config/models.py` — `DlqConfig {connection, table?, topic?, mode='append'}` 추가. `PipelineConfig.dlq: DlqConfig | None` 필드.
+  - `etl_plugins/core/pipeline.py`:
+    - `Pipeline.retry: RetryConfig | None` / `Pipeline.dlq: DlqConfig | None` 필드 추가
+    - `Pipeline.run`: `self.retry` 있으면 `_run_task`를 `@retryable(**retry_kwargs)`로 감싸 호출 — task 전체 재시도 (caller가 idempotency 책임)
+    - `_run_task`: transform 예외 발생 시 DLQ가 설정되어 있으면 raw 레코드를 DLQ로 라우팅하고 continue. 아니면 TransformError로 propagate.
+    - `Pipeline.arun_stream`: `sink.publish`만 retry 래핑 (per-record). transform 예외도 DLQ 라우팅 가능 (StreamSink로 publish).
+    - 자동 metrics emit: 각 task 끝에 `RECORDS_READ_TOTAL` / `RECORDS_WRITTEN_TOTAL` counter add (attrs: pipeline, mode). 예외 시 `ERRORS_TOTAL{phase=run|transform}`. finally에서 `DURATION_SECONDS` histogram record. NoOp 기본이라 cost zero.
+  - `etl_plugins/runtime/builder.py` — `PipelineConfig.dlq.connection`이 connectors에 없으면 `ConfigError`. retry / dlq을 Pipeline에 그대로 전달.
+- **CLI 글로벌 로깅 옵션** [Step 3.3]
+  - `etl_plugins/cli.py` — `@app.callback()`이 `--log-format json|console` + `--log-level DEBUG|INFO|...`를 모든 서브커맨드 전에 `configure_logging`에 전달. 잘못된 format은 exit 2.
+- **테스트** [Step 3.3]
+  - `tests/unit/runtime/test_resilience.py` — 11 tests (batch metrics 2 + batch retry 2 + batch DLQ 3 + stream metrics 1 + stream DLQ 1 + stream retry 1 + NoOp safety 1)
+  - `tests/unit/test_cli.py` — 2 신규 (--log-format ok/invalid)
+  - 총 282 unit + 82 it = 364 tests
+- **Cursor / Checkpoint 미구현** [Step 3.3]
+  - Step 6 강화로 이동. 현재 `Pipeline.on("post_run", ...)` 훅으로 사용자가 커스텀 cursor 저장 가능 — abstraction은 후속.
+
+### Decisions
+- ADR-0013: Step 3.3 Retry / DLQ / 자동 메트릭 / CLI logging (batch는 task-level retry / stream은 publish-level retry, DLQ는 transform 실패만 라우팅 best-effort, 표준 metrics 자동 emit, Typer global callback으로 logging 설정, Checkpoint는 Step 6로 이동)
+
+### Milestone
+- **Step 3.3 — Resilience + Observability 통합 완료 (2026-05-14)**: Retry 정책 + DLQ 라우팅 + 자동 메트릭 + CLI 로깅 옵션. **Step 3 전체 완료 (3.1+3.2+3.3)**. 다음은 Step 4 (Orchestrator Adapters) 또는 Step 5 (커넥터 확장).
+
 ### Changed
 - (없음)
 

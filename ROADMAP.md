@@ -161,12 +161,15 @@
 - [x] 17 신규 unit tests + 2 Kafka integration tests (commit이 실제로 group에 반영되는지 검증)
 - [x] ADR-0012 (commit ABC sync→async SPEC 보정 포함)
 
-### 3.3 Retry / DLQ / Checkpoint / Observability  ← **다음**
-- [ ] Retry `@retryable` 통합 (RetryConfig → tenacity)
-- [ ] Dead Letter Queue 라우팅 (transform/sink 실패 → 별도 sink)
-- [ ] Checkpoint / Cursor 저장 hook (BatchSource cursor, StreamSource offset)
-- [ ] Pipeline.run 내부 자동 metrics/span emit (Step 1.6 ABC 연결)
-- [ ] CLI logging 통합 (`--log-format json|console`)
+### 3.3 Retry / DLQ / Observability
+- [x] Retry `@retryable` 통합 (RetryConfig → tenacity). Batch는 task-level, stream은 publish-level.
+- [x] Dead Letter Queue 라우팅 (DlqConfig: connection + table/topic + mode). Transform 실패만 라우팅 (sink 실패는 retry/propagate). Best-effort with `contextlib.suppress`.
+- [x] Pipeline.run 내부 자동 metrics emit (RECORDS_READ/WRITTEN_TOTAL, ERRORS_TOTAL, DURATION_SECONDS) — NoOp 기본
+- [x] CLI logging 통합 (`--log-format json|console` + `--log-level`) — Typer global callback
+- [x] 13 신규 unit tests (총 282 unit + 82 it = 364)
+- [x] ADR-0013
+- [ ] Checkpoint / Cursor 저장 hook (BatchSource cursor, StreamSource offset) — **Step 6 강화로 이동** (현재는 `Pipeline.on("post_run", ...)` 훅으로 사용자가 처리)
+- [ ] Pipeline span emit (Tracer 통합) — **Step 6 강화로 이동**
 
 ---
 
@@ -242,3 +245,4 @@
 - 2026-05-14: **Step 2.3 (Kafka 커넥터) + Step 2 전체 완료.** aiokafka 기반 StreamSource + StreamSink. Stream Contract 신규 도입(`_StreamSourceContract`/`_StreamSinkContract`/`_StreamRoundTripContract`). 16 통합 테스트 (총 214 unit + 80 it = 294 tests). ADR-0010 추가. 다음은 Step 3 (Pipeline 실행기 + CLI).
 - 2026-05-14: **Step 3.1 (YAML 빌더 + Transforms + `etlx` CLI) 완료.** `etl_plugins/runtime/` (transforms/builder/runner) + Typer CLI 5 서브커맨드. 38 신규 unit tests (총 252 unit + 80 it = 332). ADR-0011 추가. 다음은 Step 3.2 (stream runtime + commit).
 - 2026-05-14: **Step 3.2 (Stream runtime) 완료.** `Pipeline.arun_stream` + Kafka async `commit()` (ABC sync→async 보정) + buffer + `etlx run-stream`. 17 신규 unit + 2 Kafka integration tests (총 269 unit + 82 it = 351). ADR-0012 추가. 다음은 Step 3.3 (Retry / DLQ / Checkpoint).
+- 2026-05-14: **Step 3.3 (Retry / DLQ / 자동 메트릭 / CLI logging) + Step 3 전체 완료.** Pipeline 자동 retry+DLQ+metrics, CLI global `--log-format/--log-level`. 13 신규 unit tests (총 282 unit + 82 it = 364). ADR-0013 추가. Checkpoint/Span은 Step 6 강화로 이동. 다음은 Step 4 (Orchestrator Adapters) 또는 Step 5 (커넥터 확장).

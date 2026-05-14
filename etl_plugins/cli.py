@@ -27,6 +27,7 @@ from etl_plugins.config.loader import load_connections, load_dotenv, load_pipeli
 from etl_plugins.config.secrets import get_secret_backend
 from etl_plugins.core.exceptions import ConfigError, ETLError
 from etl_plugins.core.registry import ConnectorRegistry
+from etl_plugins.observability.logging import configure_logging
 from etl_plugins.runtime.builder import build_connectors
 from etl_plugins.runtime.runner import arun_stream_pipeline_yaml, run_pipeline_yaml
 
@@ -35,6 +36,31 @@ app = typer.Typer(
     help="ETL Plugins CLI — run YAML pipelines, validate config, inspect connectors.",
     no_args_is_help=True,
 )
+
+
+@app.callback()
+def _global_options(
+    log_format: Annotated[
+        str,
+        typer.Option(
+            "--log-format",
+            help="Log output format: 'json' (default, structured) or 'console' (dev-friendly)",
+        ),
+    ] = "json",
+    log_level: Annotated[
+        str,
+        typer.Option("--log-level", help="Log level (DEBUG, INFO, WARNING, ERROR)"),
+    ] = "INFO",
+) -> None:
+    """Configure structlog before any subcommand runs."""
+    if log_format not in ("json", "console"):
+        typer.secho(
+            f"error: --log-format must be 'json' or 'console', got {log_format!r}",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=2)
+    configure_logging(level=log_level, json=log_format == "json")
 
 
 # ---------- generic helpers -------------------------------------------------

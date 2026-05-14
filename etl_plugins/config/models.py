@@ -111,6 +111,22 @@ class CommitConfig(BaseModel):
     strategy: str = "after_sink_flush"  # at_least_once | after_sink_flush | ...
 
 
+class DlqConfig(BaseModel):
+    """Dead-letter queue routing (SPEC.md §9.1).
+
+    ``connection`` references a sink in ``connections.yaml``. Records whose
+    transforms raise are routed here instead of failing the pipeline. ``table``
+    is used for BatchSink DLQs; ``topic`` is used for StreamSink DLQs.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    connection: str
+    table: str | None = None
+    topic: str | None = None
+    mode: str = "append"
+
+
 class PipelineConfig(BaseModel):
     """Top-level structure of ``configs/pipelines/*.yaml``."""
 
@@ -125,3 +141,4 @@ class PipelineConfig(BaseModel):
     retry: RetryConfig | None = None
     observability: ObservabilityConfig | None = None
     commit: CommitConfig | None = None
+    dlq: DlqConfig | None = None

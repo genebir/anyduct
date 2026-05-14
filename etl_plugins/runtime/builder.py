@@ -91,10 +91,17 @@ def build_pipeline(
     commit_strategy = (
         pipeline_config.commit.strategy if pipeline_config.commit else "after_sink_flush"
     )
+    if pipeline_config.dlq is not None and pipeline_config.dlq.connection not in connectors:
+        raise ConfigError(
+            f"pipeline {pipeline_config.name!r}: dlq connection "
+            f"{pipeline_config.dlq.connection!r} not in available connectors {sorted(connectors)}"
+        )
     pipeline = Pipeline(
         name=pipeline_config.name,
         mode=pipeline_config.mode,
         commit_strategy=commit_strategy,
+        retry=pipeline_config.retry,
+        dlq=pipeline_config.dlq,
     )
     pipeline.add(task)
     return pipeline, connectors

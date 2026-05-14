@@ -2,7 +2,7 @@
 
 Batch execution is via the sync :meth:`Pipeline.run`. Stream execution is via
 the async :meth:`Pipeline.arun_stream` (Step 3.2).
-Retry / DLQ wiring arrives in Step 3.3.
+Retry, DLQ routing, and auto-metrics emit are wired in Step 3.3.
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from typing import Any
 
+from etl_plugins.config.models import DlqConfig, RetryConfig
 from etl_plugins.core.connector import (
     BatchSink,
     BatchSource,
@@ -23,6 +24,14 @@ from etl_plugins.core.connector import (
 from etl_plugins.core.context import Context
 from etl_plugins.core.exceptions import PipelineError, TaskError, TransformError
 from etl_plugins.core.record import Record
+from etl_plugins.observability.metrics import (
+    DURATION_SECONDS,
+    ERRORS_TOTAL,
+    RECORDS_READ_TOTAL,
+    RECORDS_WRITTEN_TOTAL,
+    get_metrics,
+)
+from etl_plugins.utils.retry import retryable
 
 TransformFn = Callable[[Record], Record | None]
 """Transform: takes a Record, returns the (possibly modified) Record, or None to drop it."""
@@ -103,6 +112,8 @@ class Pipeline:
     mode: str = "batch"  # batch | stream
     tasks: list[Task] = field(default_factory=list)
     commit_strategy: str = "after_sink_flush"  # used by stream runtime; see SPEC.md §5.5
+    retry: RetryConfig | None = None  # if set, wrap each task with @retryable
+    dlq: DlqConfig | None = None  # if set, route TransformError records to this sink
     _hooks: dict[str, list[Hook]] = field(default_factory=dict)
 
     def add(self, task: Task) -> Pipeline:
@@ -128,24 +139,33 @@ class Pipeline:
         ctx = context or Context(pipeline_name=self.name)
         conns = connectors or {}
         start = time.monotonic()
+        metrics = get_metrics()
+        attrs = {"pipeline": self.name, "mode": self.mode}
 
         result = RunResult(run_id=ctx.run_id, pipeline_name=self.name, success=False)
+        task_runner = self._run_task
+        if self.retry is not None:
+            task_runner = retryable(**self._retry_kwargs())(task_runner)
 
         self._fire("pre_run", ctx)
         try:
             for task in self.tasks:
                 self._fire("on_task_start", ctx, task)
-                read_count, write_count = self._run_task(task, conns)
+                read_count, write_count = task_runner(task, conns)
                 result.records_read += read_count
                 result.records_written += write_count
+                metrics.counter(RECORDS_READ_TOTAL).add(read_count, attrs)
+                metrics.counter(RECORDS_WRITTEN_TOTAL).add(write_count, attrs)
                 self._fire("on_task_end", ctx, task, write_count)
             result.success = True
         except Exception as exc:
             result.error = exc
+            metrics.counter(ERRORS_TOTAL).add(1, {**attrs, "phase": "run"})
             self._fire("on_error", ctx, exc)
             raise
         finally:
             result.duration_seconds = time.monotonic() - start
+            metrics.histogram(DURATION_SECONDS).record(result.duration_seconds, attrs)
             self._fire("post_run", ctx, result)
 
         return result
@@ -172,19 +192,27 @@ class Pipeline:
             raise TaskError(f"Sink '{task.sink}' is not a BatchSink")
 
         records_read = 0
+        dlq_enabled = self.dlq is not None
+        metrics = get_metrics()
 
         def _read_and_transform() -> Iterator[Record]:
             nonlocal records_read
             for raw in source.read(query=task.query, **task.source_options):
                 records_read += 1
                 record: Record | None = raw
-                for fn in task.transforms:
-                    if record is None:
-                        break
-                    try:
+                try:
+                    for fn in task.transforms:
+                        if record is None:
+                            break
                         record = fn(record)
-                    except Exception as exc:
-                        raise TransformError(f"transform {fn!r} failed on record {raw!r}") from exc
+                except Exception as exc:
+                    if dlq_enabled:
+                        metrics.counter(ERRORS_TOTAL).add(
+                            1, {"pipeline": self.name, "phase": "transform", "routed": "dlq"}
+                        )
+                        self._dlq_route_batch(connectors, raw)
+                        continue
+                    raise TransformError(f"transform {fn!r} failed on record {raw!r}") from exc
                 if record is not None:
                     yield record
 
@@ -199,6 +227,51 @@ class Pipeline:
     def _fire(self, event: str, *args: Any) -> None:
         for hook in self._hooks.get(event, []):
             hook(*args)
+
+    # ---------- internal helpers ------------------------------------------
+
+    def _retry_kwargs(self) -> dict[str, Any]:
+        """Translate ``self.retry`` (RetryConfig) into ``@retryable`` kwargs."""
+        rc = self.retry
+        if rc is None:
+            return {}
+        out: dict[str, Any] = {
+            "max_attempts": rc.max_attempts,
+            "backoff": rc.backoff,
+            "initial_delay_seconds": rc.initial_delay_seconds,
+        }
+        if rc.max_delay_seconds is not None:
+            out["max_delay_seconds"] = rc.max_delay_seconds
+        return out
+
+    def _dlq_route_batch(
+        self,
+        connectors: dict[str, Connector],
+        record: Record,
+    ) -> None:
+        """Best-effort write the offending record to the DLQ BatchSink."""
+        if self.dlq is None:
+            return
+        sink = connectors.get(self.dlq.connection)
+        if not isinstance(sink, BatchSink):
+            return
+        with contextlib.suppress(Exception):
+            sink.write([record], mode=self.dlq.mode)
+
+    async def _dlq_route_stream(
+        self,
+        connectors: dict[str, Connector],
+        record: Record,
+    ) -> None:
+        """Best-effort publish the offending record to the DLQ StreamSink."""
+        if self.dlq is None:
+            return
+        sink = connectors.get(self.dlq.connection)
+        if not isinstance(sink, StreamSink):
+            return
+        topic = self.dlq.topic or "dlq"
+        with contextlib.suppress(Exception):
+            await sink.publish(topic, record)
 
     # ---------------- stream runtime (Step 3.2) ---------------------------
 
@@ -224,6 +297,8 @@ class Pipeline:
         ctx = context or Context(pipeline_name=self.name)
         conns = connectors or {}
         start = time.monotonic()
+        metrics = get_metrics()
+        attrs = {"pipeline": self.name, "mode": self.mode}
         result = RunResult(run_id=ctx.run_id, pipeline_name=self.name, success=False)
 
         self._fire("pre_run", ctx)
@@ -239,14 +314,18 @@ class Pipeline:
                 )
                 result.records_read += read_count
                 result.records_written += write_count
+                metrics.counter(RECORDS_READ_TOTAL).add(read_count, attrs)
+                metrics.counter(RECORDS_WRITTEN_TOTAL).add(write_count, attrs)
                 self._fire("on_task_end", ctx, task, write_count)
             result.success = True
         except Exception as exc:
             result.error = exc
+            metrics.counter(ERRORS_TOTAL).add(1, {**attrs, "phase": "run"})
             self._fire("on_error", ctx, exc)
             raise
         finally:
             result.duration_seconds = time.monotonic() - start
+            metrics.histogram(DURATION_SECONDS).record(result.duration_seconds, attrs)
             self._fire("post_run", ctx, result)
         return result
 
@@ -295,6 +374,13 @@ class Pipeline:
         records_written = 0
         pending = 0
         last_flush = time.monotonic()
+        dlq_enabled = self.dlq is not None
+        metrics = get_metrics()
+
+        # Optionally wrap sink.publish with a retry policy.
+        publish_fn = sink.publish
+        if self.retry is not None:
+            publish_fn = retryable(**self._retry_kwargs())(publish_fn)
 
         async def _flush_and_commit() -> None:
             nonlocal pending, last_flush
@@ -309,16 +395,23 @@ class Pipeline:
             async for raw in source.subscribe(topic_in, group_id=group_id):
                 records_read += 1
                 record: Record | None = raw
-                for fn in task.transforms:
-                    if record is None:
-                        break
-                    try:
+                try:
+                    for fn in task.transforms:
+                        if record is None:
+                            break
                         record = fn(record)
-                    except Exception as exc:
-                        raise TransformError(f"transform {fn!r} failed on record {raw!r}") from exc
+                except Exception as exc:
+                    if dlq_enabled:
+                        metrics.counter(ERRORS_TOTAL).add(
+                            1,
+                            {"pipeline": self.name, "phase": "transform", "routed": "dlq"},
+                        )
+                        await self._dlq_route_stream(connectors, raw)
+                        continue
+                    raise TransformError(f"transform {fn!r} failed on record {raw!r}") from exc
 
                 if record is not None:
-                    await sink.publish(topic_out, record)
+                    await publish_fn(topic_out, record)
                     records_written += 1
                     pending += 1
 

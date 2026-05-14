@@ -117,7 +117,7 @@ uv run mypy etl_plugins
 
 ## 5. 현재 단계
 
-**Step 7.0 완료 → 7.1 모노레포 스캐폴딩 차례** (2026-05-14 기준). Steps 1–4 + Step 5.1(MySQL, SQLite) + Step 7.0(서비스 기술 스택 ADR) 완료. **321 단위 + 3 skip + 111 통합 = 435 테스트** all green, **23 ADR**.
+**Step 7.0 완료 → 7.1 모노레포 스캐폴딩 차례** (2026-05-14 기준). Steps 1–4 + Step 5.1(MySQL, SQLite) + Step 7.0(서비스 기술 스택 ADR) 완료. **321 단위 + 3 skip + 111 통합 = 435 테스트** all green, **24 ADR**.
 
 추가로 **서비스화 방향 확정**(ADR-0017): `services/etlx-server`(FastAPI) + `services/etlx-web`(Next.js)을 별도 패키지로 Step 7부터 진행. 코어와 서비스는 단방향 의존.
 
@@ -132,7 +132,7 @@ Step별 산출물 요약:
 - 🔄 Step 5 (Connector Expansion):
   - 5.1 RDBMS: ✅ MySQL(ADR-0015) ✅ SQLite(ADR-0016). MSSQL/Oracle 남음
   - 5.2 DW / 5.3 NoSQL / 5.4 Streaming / 5.5 CDC / 5.6 Object / 5.7 HTTP — 미착수
-- ⏸ Step 6 (강화): OpenLineage, OTel/Prometheus 실구현, Checkpoint, mkdocs, v0.1.0 — 미착수
+- ⏸ Step 6 (Core 강화 — **Asset/Lineage/Cursor 1급 모델 추가**, ADR-0024): 9 서브슬라이스. v0.1.0=Cursor+OTel+mkdocs+PyPI / v0.2.0=Asset+Lineage+Catalog. 미착수
 - 🔄 Step 7 (Service Foundation):
   - 7.0 ✅ 기술 스택 ADR-0019~0023 작성 완료 — FastAPI / PostgreSQL+async+Alembic / 자체 PG worker queue / uv+pnpm 모노레포+CI 3분리 / OIDC+RBAC
   - 7.1~7.4 미착수 — 다음 슬라이스는 7.1 모노레포 스캐폴딩

@@ -152,14 +152,59 @@
 
 ---
 
-## Step 6 — 강화
+## Step 6 — Core 강화: Asset / Lineage / Cursor 1급 모델 추가 (ADR-0024)
 
-- [ ] OpenLineage 이벤트 emit
-- [ ] OTel / Prometheus 실제 백엔드 구현
-- [ ] Checkpoint / Cursor abstraction + Pipeline span emit
-- [ ] Contract test suite 완성
-- [ ] mkdocs 문서 사이트
-- [ ] v0.1.0 PyPI 릴리스 (CHANGELOG + GitHub release workflow)
+> 단순 "강화"가 아니라 **"데이터 통합 플랫폼"으로서의 모델 확장**.
+> 버전 분할: **v0.1.0** = Cursor + 강화 일반 + 릴리스, **v0.2.0** = Asset + Lineage + Catalog API.
+
+### 6.1 Cursor / Watermark abstraction → v0.1.0
+- [ ] `etl_plugins.core.cursor`: `Cursor` protocol, `CursorState` (in-memory / file / DB-backed)
+- [ ] `BatchSource.read_since(cursor=...)` 옵셔널 메서드 추가 (기본 구현은 query 그대로 — 기존 구현체 깨지지 않음)
+- [ ] `Pipeline.run(cursor_from=..., cursor_to=...)` 백필 헬퍼
+- [ ] postgres / mysql / sqlite 커넥터에 cursor 컬럼 활용 구현
+- [ ] `tests/contracts/cursor.py` — cursor idempotency contract
+
+### 6.2 OTel / Prometheus 실제 백엔드 → v0.1.0
+- [ ] `etl_plugins.observability.metrics`의 OTel 구현 (`[observability]` extra)
+- [ ] `etl_plugins.observability.tracing`의 OTel 구현 + `Pipeline.run` span emit
+- [ ] Prometheus exporter (NoOp 외의 두 번째 실구현)
+
+### 6.3 Contract test suite 완성 → v0.1.0
+- [ ] 기존 Batch / Stream contract 점검
+- [ ] Cursor contract 추가
+- [ ] 누락된 edge case 보강 (timeout, partial failure, schema drift)
+
+### 6.4 mkdocs 문서 사이트 → v0.1.0
+- [ ] mkdocs-material 사이트 (`docs/` 디렉토리)
+- [ ] API reference (mkdocstrings)
+- [ ] 사용 예시 + Connector contribution 가이드 + Cursor 사용 가이드
+
+### 6.5 v0.1.0 PyPI 릴리스 → v0.1.0
+- [ ] `pyproject.toml` 버전 0.1.0 bump
+- [ ] CHANGELOG 정리 (Keep a Changelog)
+- [ ] `release.yml` 워크플로 점검 (PyPI Trusted Publishing)
+- [ ] GitHub release + 태그 `core-v0.1.0`
+
+### 6.6 Asset 1급 모델 → v0.2.0
+- [ ] `etl_plugins.core.asset`: `Asset(name, schema, partitions, freshness_policy, deps)`, `AssetGroup`
+- [ ] `@Asset.register("orders")` 데코레이터
+- [ ] 기존 `Pipeline`을 "default Asset 1개를 materialize"하는 wrapper로 매핑 (backward compatible)
+- [ ] Asset materialization contract
+
+### 6.7 Lineage emit (OpenLineage) → v0.2.0
+- [ ] `etl_plugins.observability.lineage` 모듈 + `openlineage-python>=1.0` (`[lineage]` extra)
+- [ ] `Pipeline.run` / `arun_stream`에서 RunEvent (START/COMPLETE/FAIL/ABORT) 자동 emit
+- [ ] Inputs/outputs를 source/sink connector + table/topic에서 추출
+- [ ] 백엔드: NoOp 기본 / Marquez / 우리 자체 Catalog API
+
+### 6.8 Catalog API (core) → v0.2.0
+- [ ] `etl_plugins.catalog` — read-only API (`list_assets / get_asset / lineage(asset_name)`)
+- [ ] In-memory 구현 + DB-backed 구현 (서비스가 메타DB로 wrap)
+- [ ] Step 8의 REST API가 이 위에 얹힘
+
+### 6.9 v0.2.0 PyPI 릴리스 → v0.2.0
+- [ ] Asset/Lineage 사용 가이드 문서
+- [ ] v0.2.0 bump + 릴리스
 
 ---
 
@@ -372,3 +417,5 @@
 - 2026-05-14: **서비스화 방향 확정 — ADR-0017.** Step 7~11 추가 (Service Foundation / API Server / Execution Engine / Web UI / 운영 강화). 코어와 서비스는 단방향 의존, 모노레포 구조 (`services/etlx-server`, `services/etlx-web`). Step 7.0에서 세부 기술 스택 ADR(0019~0023) 확정 예정. 다음 작업은 Step 5 계속 또는 Step 7.0 착수 — 우선순위 선택 필요.
 - 2026-05-14: **디자인 시스템 채택 — ADR-0018.** `DESIGN.md` 신규 (Arc 영감, 네이비 베이스 + 팝핑크 강조, shadcn/ui + Tailwind v4 + Storybook). Step 10이 디자인 토큰 우선 순서(10.0)로 세부화됨. SPEC.md §3/§9.7/§10 패치. 다음 작업은 Step 5 계속 또는 Step 7.0 착수.
 - 2026-05-14: **Step 7.0 (서비스 기술 스택 ADR) 완료.** ADR-0019(FastAPI) / ADR-0020(PostgreSQL+SQLAlchemy async+Alembic) / ADR-0021(자체 PG-backed worker queue) / ADR-0022(uv+pnpm workspace, CI 3분리, import-linter) / ADR-0023(OIDC+로컬 fallback+JWT RS256+4-role RBAC). 코드 변경 없음, 결정 문서만. 다음은 Step 7.1 모노레포 스캐폴딩.
+- 2026-05-14: **ADR-0021 본문 강화.** Considered alternatives 표 + Operating envelope(~50 runs/sec, ~10k runs/day, p95 <2s) + Exit ramp(큐 폴링 코드를 한 파일에 격리) + PoC 합격 기준 4개 추가. 결정 자체는 유지 (자체 PG queue). 코드 변경 없음.
+- 2026-05-14: **Step 6 격상 — ADR-0024.** "강화" 일반 항목을 "Asset/Lineage/Cursor 1급 모델 코어 추가"로 재구성. 9 서브슬라이스(6.1~6.9)로 분할, v0.1.0(Cursor+릴리스)과 v0.2.0(Asset+Lineage+Catalog) 두 단계로 쪼갬. 코드 변경 없음.

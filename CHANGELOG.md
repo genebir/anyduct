@@ -359,6 +359,26 @@
 ### Milestone
 - **Step 7.0 — 서비스 기술 스택 확정 (2026-05-14)**: 5개 ADR(0019~0023)로 FastAPI / PostgreSQL+async / 자체 PG worker queue / uv+pnpm 모노레포 / OIDC+RBAC을 모두 못박음. 코드 변경 없음. **다음 슬라이스는 Step 7.1 (모노레포 스캐폴딩) — `services/etlx-server/pyproject.toml` + `services/etlx-web/package.json` + workspace 설정 + CI 3분리 워크플로 + `import-linter` 규칙 추가**.
 
+- **ADR-0021 본문 강화** [실행 엔진 결정 보강, 코드 변경 없음]
+  - Considered alternatives 표 추가: 7개 후보(자체 PG / Dagster 임베드 / Prefect 임베드 / Celery+Redis / arq / APScheduler / Temporal)를 broker 의존 / task model / 코어 재사용 / UI 중복 / 거부 사유 5축으로 비교. 결정적 기준 명시: (1) 코어 재사용 100% + (2) 인프라 추가 0 + (3) UI 중복 없음 — 자체 PG queue만 동시 만족.
+  - Operating envelope 정량화: ~50 runs/sec / ~10k runs/day / p95 enqueue→start <2s / 동시 워커 ~50.
+  - Exit ramp 명시: 큐 폴링 코드를 `etlx_server/workers/queue.py` 한 파일에 격리(interface = claim_next/heartbeat/complete/fail). 백엔드 교체 = 그 한 파일 + Alembic 한 번.
+  - PoC 합격 기준 4개(Step 9.1) — 통과 못 하면 본 ADR을 supersede하고 broker 재검토.
+
+- **Step 6 격상 — Asset/Lineage/Cursor 1급 모델로 재구성** [장기 운영 관점, 코드 변경 없음]
+  - **결정**: 부하(runs/sec)는 broker 교체로 풀리는 후순위 문제고, 진짜 비싼 비용은 **(1) Asset 1급 모델** + **(2) Lineage 추적** + **(3) Cursor/Watermark**. 1~2년 뒤 사용자가 lineage·sensor·백필을 요구할 때 이 세 가지가 코어에 1급으로 있어야 마이그레이션 없이 대응 가능.
+  - **ROADMAP §6 재구성**: 9 서브슬라이스(6.1~6.9). 두 버전으로 분할:
+    - **v0.1.0**: 6.1 Cursor abstraction + 6.2 OTel/Prometheus 실구현 + 6.3 Contract test suite 완성 + 6.4 mkdocs + 6.5 PyPI 릴리스
+    - **v0.2.0**: 6.6 Asset 1급 모델 + 6.7 OpenLineage emit + 6.8 Catalog API + 6.9 v0.2.0 릴리스
+  - **호환성**: 기존 `Pipeline + Task + Record + Connector` API는 그대로 유지. Asset/Cursor/Lineage는 위에 얹는 layer.
+  - **시장 정렬**: Dagster Software-Defined Assets / Airflow Datasets / OpenLineage spec과 매핑 가능한 모델.
+
+### Decisions
+- ADR-0024: Step 6 격상 — Asset/Lineage/Cursor 1급 모델 코어 추가. v0.1.0(Cursor만)과 v0.2.0(Asset+Lineage+Catalog) 두 단계 분할.
+
+### Milestone
+- **장기 플랫폼 방향 정렬 (2026-05-14)**: ADR-0021 강화 + ADR-0024로 "데이터 통합 플랫폼"으로서의 모델 결정을 미리 못박음. 코드 변경 없음, 결정 + 계획 문서만. **다음 슬라이스는 Step 7.1 (모노레포 스캐폴딩)** — Step 6 격상 작업은 추후 슬라이스로 진입.
+
 ### Changed
 - (없음)
 

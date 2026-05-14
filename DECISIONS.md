@@ -854,4 +854,51 @@
 
 ---
 
+## ADR-0024: Step 6 격상 — Asset / Lineage / Cursor를 코어의 1급 모델로
+
+- **Date**: 2026-05-14
+- **Status**: Accepted
+- **Context**:
+  ADR-0021(자체 PG-backed worker queue) 확정 직후 "장기적으로 데이터 통합 및 파이프라인 플랫폼으로서 어떤 방향이 나을까"를 재검토했다. 결론은 명확했다:
+  - **부하 수치(runs/sec)는 후순위 문제** — broker 교체로 풀린다 (ADR-0021 Exit ramp 참조).
+  - **진짜 비싼 비용은 모델 결정**:
+    1. **Asset(데이터 산출물) 1급 모델** — "이 테이블은 어떤 파이프라인이 만들었나"
+    2. **Lineage(계보)** — upstream/downstream 추적
+    3. **Cursor / Watermark** — 멱등 재실행 / 백필
+  - 1~2년 뒤 사용자가 lineage·sensor·백필을 요구하기 시작하면, 그 시점에 코어를 뜯어 위 3개를 박는 비용은 매우 크다.
+  - 시장 정통(Dagster Asset, Airflow Datasets, OpenLineage)도 이 방향.
+
+  현재 ROADMAP의 Step 6는 "강화" 일반 항목들(OpenLineage emit / OTel/Prometheus 백엔드 / Checkpoint / mkdocs / v0.1.0)로 묶여 있어 위 3개 모델 결정이 명시되지 않았다.
+
+- **Decision**:
+  1. **Step 6를 "Core 강화 — Asset/Lineage/Cursor 1급 모델 추가"로 격상** (ROADMAP §6 재구성). 강화 일반 항목(OTel 백엔드, mkdocs, v0.1.0)은 그 안에 흡수.
+  2. **세 가지 추상화를 코어에 1급으로 추가** (`etl_plugins/`):
+     - **Cursor**: `Cursor` protocol + `CursorState` (in-memory / file / DB backend). `BatchSource.read_since(cursor=...)`를 옵션 메서드로 추가 (기본 구현은 query 그대로). Pipeline은 `cursor_from` / `cursor_to`로 백필 가능.
+     - **Asset**: `Asset(name, schema, partitions, freshness_policy, deps)` 데이터클래스 + `AssetGroup`(의존 그래프). 기존 `Pipeline`은 "default Asset 1개를 materialize"하는 wrapper로 매핑되어 **backward compatible**. `@Asset.register("orders")` 데코레이터.
+     - **Lineage**: `etl_plugins.observability.lineage` 모듈. `Pipeline.run` / `arun_stream`이 OpenLineage RunEvent(START/COMPLETE/FAIL/ABORT)를 자동 emit. Inputs/outputs는 source/sink connector + table/topic에서 추출. 기본 backend는 NoOp + Marquez + 우리 자체 catalog API.
+  3. **`etl_plugins.catalog` 모듈** — read-only API (`list_assets / get_asset / lineage(asset_name)`). 서비스(Step 8)가 이 API를 wrap해서 REST로 노출.
+  4. **기존 Pipeline + Task + Record + Connector API는 그대로 유지** — Asset/Cursor/Lineage는 모두 위에 얹는 layer. v0 사용자는 알 필요 없음.
+  5. **외부 의존 최소화**: OpenLineage 클라이언트(`openlineage-python>=1.0`)는 `[lineage]` extra. OTel은 `[observability]` extra(이미 있음). 코어 본체는 추가 의존 0.
+  6. **버전 분할**:
+     - **v0.1.0** (Step 6 1차 완료) = Pipeline + 5 connectors + adapters + retry/DLQ + **Cursor abstraction** + mkdocs + PyPI 릴리스. Asset/Lineage는 미포함.
+     - **v0.2.0** (Step 6 2차) = Asset 1급 모델 + Lineage emit + Catalog API. 1차 사용자 피드백 후 확정.
+  7. **인터페이스 우선, 구현 점진적**: Asset ABC + Cursor protocol을 먼저 못박고, 실제 BatchSource 구현체는 점진적으로 cursor 채택(postgres/mysql 우선). 한 번에 다 안 해도 됨.
+
+- **Consequences**:
+  - (+) 1~2년 뒤 lineage / 백필 / sensor 요구에 코어 변경 없이 대응. 시장 정통(Dagster/Airflow) 모델과 매핑 가능.
+  - (+) Step 4 Dagster adapter에 Asset ↔ Dagster Asset 양방향 변환을 추가할 수 있는 기반(향후 슬라이스).
+  - (+) "단순한 ETL 도구"에서 **"데이터 카탈로그까지 가진 플랫폼"**으로 포지셔닝 가능. ETL 시장의 Hightouch/Census/Fivetran/Airbyte와 다른 차별점.
+  - (+) Cursor abstraction은 retry/DLQ만큼 자주 쓰이는 기능 → v0.1.0에 들어가는 게 사용자 가치 큼.
+  - (−) Step 6 작업 범위가 2~3배. v0.1.0이 늦어질 수 있어 두 단계(v0.1=Cursor만, v0.2=Asset+Lineage)로 쪼갬.
+  - (−) Asset 모델 추상화는 한 번 잘못 잡으면 후세에 부담. v0.2 진입 전 PoC 슬라이스로 검증.
+  - (−) OpenLineage 표준이 진화 중 — 우리 구현이 spec 변경에 따라 갱신 필요.
+  - (−) Asset/Cursor/Lineage가 들어오면 코어가 무거워져 "라이브러리로만 쓰는 단순 사용자"가 학습할 표면이 늘어남. 문서에서 "기본 사용은 Pipeline까지만"을 명시.
+
+- **References**:
+  - ADR-0021 (실행 엔진 — 부하는 broker로 풀고 모델은 별도) · ADR-0017 (서비스화 — Catalog API가 서비스 REST의 베이스가 됨)
+  - Dagster Software-Defined Assets, Airflow Datasets, OpenLineage spec
+  - ROADMAP §6 (재구성됨)
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

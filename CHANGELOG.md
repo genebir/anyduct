@@ -241,6 +241,27 @@
 ### Milestone
 - **Step 3.3 — Resilience + Observability 통합 완료 (2026-05-14)**: Retry 정책 + DLQ 라우팅 + 자동 메트릭 + CLI 로깅 옵션. **Step 3 전체 완료 (3.1+3.2+3.3)**. 다음은 Step 4 (Orchestrator Adapters) 또는 Step 5 (커넥터 확장).
 
+- **Orchestrator Adapters** [Step 4]
+  - `etl_plugins/adapters/airflow.py` — `ETLPluginsOperator(BaseOperator)` (lazy). `execute()` → `run_pipeline_yaml(...)` → XCom-friendly dict 반환.
+  - `etl_plugins/adapters/dagster.py` — `EtlPluginsResource(ConfigurableResource)` + `etl_plugins_op` (`required_resource_keys={"etl_plugins"}`).
+  - `etl_plugins/adapters/prefect.py` — `run_etl_pipeline_task` + `run_etl_pipeline_flow` (`@task` + `@flow`).
+  - 모두 PEP 562 `__getattr__`로 lazy: orchestrator 미설치 상태에서도 모듈 import 성공. 심볼 접근 시 helpful `ImportError("... pip install 'etl-plugins[airflow|dagster|prefect]'")` 발생.
+- **Optional-dependencies 확장** [Step 4]
+  - `airflow = ["apache-airflow>=2.10"]`
+  - `dagster = ["dagster>=1.9"]`
+  - `prefect = ["prefect>=3.0"]`
+- **테스트** [Step 4]
+  - `tests/unit/adapters/test_lazy_imports.py` — 10 tests (structural 7 + orchestrator-conditional 3 via `pytest.importorskip`). Conditional 테스트는 orchestrator extra 설치 시 monkeypatch로 `run_pipeline_yaml` delegation 검증.
+- **lint/typing** [Step 4]
+  - `pyproject.toml` `[tool.mypy.overrides]`에 airflow/dagster/prefect ignore_missing_imports + adapter 모듈에 `disallow_untyped_decorators = false`.
+  - `[tool.ruff.lint.per-file-ignores]`에 adapter 모듈 F822 silence (`__getattr__` 동적 노출).
+
+### Decisions
+- ADR-0014: Step 4 Orchestrator Adapters (PEP 562 `__getattr__` lazy 노출, 모두 `run_pipeline_yaml`로 위임, 3 optional extras, structural + conditional 테스트, Airflow operator는 batch 전용)
+
+### Milestone
+- **Step 4 — Orchestrator Adapters 완료 (2026-05-14)**: Airflow/Dagster/Prefect adapters + 10 신규 tests (289 unit + 3 skip + 82 it). 다음은 Step 5 (커넥터 확장).
+
 ### Changed
 - (없음)
 

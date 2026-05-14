@@ -401,4 +401,39 @@
 
 ---
 
+## ADR-0014: Step 4 Orchestrator Adapters — lazy-loaded thin wrappers
+
+- **Date**: 2026-05-14
+- **Status**: Accepted
+- **Context**:
+  Step 4는 SPEC.md §7의 Airflow / Dagster / Prefect 통합. 세 orchestrator는 거대한 dep tree(apache-airflow 단독 ~250MB)를 가져 etl-plugins 본체에 강제 install하면 부담. 그러나 단순히 `try: import` 후 None 처리하면 사용자가 `from etl_plugins.adapters.airflow import ETLPluginsOperator`가 안 됨. 결정: 모듈 import는 항상 성공, 심볼 접근 시 lazy import.
+- **Decision**:
+  1. **각 orchestrator마다 별도 모듈**: `etl_plugins/adapters/{airflow,dagster,prefect}.py`. 한 줄짜리 README + 사용 예시 docstring 포함.
+  2. **PEP 562 `__getattr__` 기반 lazy public symbol exposure**.
+     - 모듈 자체는 orchestrator dep 없이도 import 성공
+     - `from etl_plugins.adapters.airflow import ETLPluginsOperator` → `__getattr__("ETLPluginsOperator")` 실행 → 그 안에서 `from airflow.models import BaseOperator` 호출 → 미설치면 helpful `ImportError("... pip install 'etl-plugins[airflow]'")` 발생.
+     - 한 번 빌드되면 `globals()[name] = cls`로 캐시.
+  3. **Thin wrappers — 모두 `run_pipeline_yaml`에 위임**:
+     - Airflow: `ETLPluginsOperator(BaseOperator)`. `execute()` → `run_pipeline_yaml(...)` → XCom-friendly dict 반환.
+     - Dagster: `EtlPluginsResource(ConfigurableResource)` + `etl_plugins_op` (`required_resource_keys={"etl_plugins"}`). resource.run() → `run_pipeline_yaml(...)`.
+     - Prefect: `@flow` + `@task` 페어. flow가 task 호출하는 표준 패턴. 두 심볼 모두 lazy.
+  4. **`__all__`는 노출하지만 ruff F822 per-file ignore**. ruff는 `__getattr__`로 만든 심볼을 보지 못함 — false positive를 pyproject.toml의 `per-file-ignores`로 명시적 silence.
+  5. **mypy override**: orchestrator 라이브러리는 `ignore_missing_imports = true`. adapter 모듈은 `disallow_untyped_decorators = false` + `warn_unused_ignores = false` — Airflow BaseOperator / Dagster @op / Prefect @flow는 strict 호환이 어렵다. 우리는 delegation 컨트랙트를 단위 테스트로 검증.
+  6. **테스트: 두 단계**.
+     - (a) **Structural** (orchestrator 미설치 상태에서도 실행): 모듈 import 성공, missing dep 시 helpful ImportError, unknown attr 시 정상 AttributeError. 5 tests, 항상 통과.
+     - (b) **Real orchestrator** (`pytest.importorskip`로 자동 skip): operator 인스턴스화 + `execute()` 호출이 `run_pipeline_yaml`에 정확한 인자로 위임하는지 monkeypatch로 검증. 3 tests, 로컬에선 skip, CI가 extra 설치 시 활성.
+  7. **Stream mode는 Airflow에선 일반적으로 안 맞음** (operator는 batch). `arun_stream_pipeline_yaml` adapter는 도입하지 않음 — Prefect는 async flow 지원하므로 미래 별 슬라이스에서 가능.
+  8. **Optional-dependencies 추가**: `airflow = ["apache-airflow>=2.10"]`, `dagster = ["dagster>=1.9"]`, `prefect = ["prefect>=3.0"]`. dev 그룹에는 추가하지 않음 — 로컬 dev에서 install하고 싶은 사람만 install.
+- **Consequences**:
+  - (+) etl-plugins 본체 install이 가벼움(orchestrator 0). 사용자는 자기 환경에 맞는 extra만.
+  - (+) 사용자 코드는 자연스러운 `from etl_plugins.adapters.X import Y` 그대로.
+  - (+) Structural 테스트가 helpful ImportError 메시지를 검증 — 실수로 dep 없는 모듈을 쓰는 사용자에게 즉시 안내.
+  - (+) 7 신규 structural unit tests + 3 conditional tests (real orchestrator 설치 시) → 289 unit + 3 skip + 82 it = 374.
+  - (−) `__getattr__` 패턴은 IDE 자동완성에서 안 보일 수 있음(IDE가 PEP 562 지원 안 하면). 사용자가 명시적 import는 잘 작동하지만 dir() 결과에 안 보임. 문서에 사용 예시 명시.
+  - (−) CI 미실행 — 3 conditional 테스트는 orchestrator extra 설치된 환경에서만. GitHub Actions에 별도 matrix job 추가 권장(Step 6 강화에서).
+  - (−) Stream을 Airflow operator로 쓰려면 사용자가 직접 `arun_stream_pipeline_yaml`을 호출하는 PythonOperator로 우회.
+- **References**: SPEC.md §7 · `etl_plugins/adapters/` · `tests/unit/adapters/test_lazy_imports.py` · `pyproject.toml` [project.optional-dependencies]
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

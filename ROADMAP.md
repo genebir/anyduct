@@ -173,12 +173,14 @@
 
 ---
 
-## Step 4 — Orchestrator Adapters
+## Step 4 — Orchestrator Adapters — **완료 (2026-05-14)**
 
-- [ ] Airflow `ETLPluginsOperator`
-- [ ] Dagster resource / op
-- [ ] Prefect block / flow
-- [ ] 각 어댑터 통합 예시 + 테스트
+- [x] Airflow `ETLPluginsOperator` (lazy via PEP 562 `__getattr__`)
+- [x] Dagster `EtlPluginsResource` + `etl_plugins_op`
+- [x] Prefect `run_etl_pipeline_flow` + `run_etl_pipeline_task`
+- [x] 3 optional-dependencies extras (`airflow`, `dagster`, `prefect`)
+- [x] Structural tests (7) + orchestrator-conditional delegation tests (3) — `pytest.importorskip` pattern
+- [x] ADR-0014
 
 ---
 
@@ -246,3 +248,4 @@
 - 2026-05-14: **Step 3.1 (YAML 빌더 + Transforms + `etlx` CLI) 완료.** `etl_plugins/runtime/` (transforms/builder/runner) + Typer CLI 5 서브커맨드. 38 신규 unit tests (총 252 unit + 80 it = 332). ADR-0011 추가. 다음은 Step 3.2 (stream runtime + commit).
 - 2026-05-14: **Step 3.2 (Stream runtime) 완료.** `Pipeline.arun_stream` + Kafka async `commit()` (ABC sync→async 보정) + buffer + `etlx run-stream`. 17 신규 unit + 2 Kafka integration tests (총 269 unit + 82 it = 351). ADR-0012 추가. 다음은 Step 3.3 (Retry / DLQ / Checkpoint).
 - 2026-05-14: **Step 3.3 (Retry / DLQ / 자동 메트릭 / CLI logging) + Step 3 전체 완료.** Pipeline 자동 retry+DLQ+metrics, CLI global `--log-format/--log-level`. 13 신규 unit tests (총 282 unit + 82 it = 364). ADR-0013 추가. Checkpoint/Span은 Step 6 강화로 이동. 다음은 Step 4 (Orchestrator Adapters) 또는 Step 5 (커넥터 확장).
+- 2026-05-14: **Step 4 (Orchestrator Adapters) 완료.** Airflow/Dagster/Prefect adapters with PEP 562 lazy loading. 10 신규 tests (총 289 unit + 3 skip + 82 it = 374). ADR-0014 추가. 다음은 Step 5 (커넥터 확장).

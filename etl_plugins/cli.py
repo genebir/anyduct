@@ -14,6 +14,7 @@ runtime and connector schema introspection.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import sys
 from pathlib import Path
@@ -27,7 +28,7 @@ from etl_plugins.config.secrets import get_secret_backend
 from etl_plugins.core.exceptions import ConfigError, ETLError
 from etl_plugins.core.registry import ConnectorRegistry
 from etl_plugins.runtime.builder import build_connectors
-from etl_plugins.runtime.runner import run_pipeline_yaml
+from etl_plugins.runtime.runner import arun_stream_pipeline_yaml, run_pipeline_yaml
 
 app = typer.Typer(
     name="etlx",
@@ -116,6 +117,61 @@ def run(
 
     typer.secho(
         f"run {result.run_id}: success={result.success} "
+        f"read={result.records_read} written={result.records_written} "
+        f"duration={result.duration_seconds:.3f}s",
+        fg=typer.colors.GREEN if result.success else typer.colors.RED,
+    )
+
+
+@app.command("run-stream")
+def run_stream(
+    pipeline_yaml: Annotated[Path, typer.Argument(help="Pipeline YAML (mode: stream)")],
+    connections: Annotated[
+        Path | None,
+        typer.Option("--connections", "-c", help="connections.yaml"),
+    ] = None,
+    env_file: Annotated[
+        Path | None,
+        typer.Option("--env-file", help="Load env vars from this .env file before running"),
+    ] = None,
+    stop_after_records: Annotated[
+        int | None,
+        typer.Option(
+            "--stop-after-records",
+            help="Exit after consuming this many records (useful for tests / dry runs)",
+        ),
+    ] = None,
+    stop_after_seconds: Annotated[
+        float | None,
+        typer.Option(
+            "--stop-after-seconds",
+            help="Exit after this many seconds of wall time",
+        ),
+    ] = None,
+) -> None:
+    """Run a streaming pipeline. Runs until a ``--stop-after-*`` limit or until interrupted."""
+    if env_file is not None:
+        load_dotenv(env_file)
+    try:
+        result = asyncio.run(
+            arun_stream_pipeline_yaml(
+                pipeline_yaml,
+                connections_path=connections,
+                secret_backend=get_secret_backend(),
+                stop_after_records=stop_after_records,
+                stop_after_seconds=stop_after_seconds,
+            )
+        )
+    except ETLError as exc:
+        _err(f"stream pipeline failed: {exc}")
+    except KeyboardInterrupt:
+        typer.secho("interrupted", fg=typer.colors.YELLOW, err=True)
+        raise typer.Exit(code=130) from None
+    except Exception as exc:
+        _err(f"unexpected: {type(exc).__name__}: {exc}")
+
+    typer.secho(
+        f"stream {result.run_id}: success={result.success} "
         f"read={result.records_read} written={result.records_written} "
         f"duration={result.duration_seconds:.3f}s",
         fg=typer.colors.GREEN if result.success else typer.colors.RED,

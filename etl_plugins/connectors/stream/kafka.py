@@ -67,6 +67,7 @@ class KafkaConnector(StreamSource, StreamSink):
         self.acks = acks
         self._extra: dict[str, Any] = extra
         self._producer: AIOKafkaProducer | None = None
+        self._consumer: AIOKafkaConsumer | None = None
         self._connected = False
 
     # ---------- sync lifecycle (flag-only) ---------------------------------
@@ -91,6 +92,11 @@ class KafkaConnector(StreamSource, StreamSink):
                 await self._producer.stop()
             finally:
                 self._producer = None
+        if self._consumer is not None:
+            try:
+                await self._consumer.stop()
+            finally:
+                self._consumer = None
         self._connected = False
 
     # ---------- StreamSource ----------------------------------------------
@@ -134,6 +140,7 @@ class KafkaConnector(StreamSource, StreamSink):
         except KafkaError as exc:
             raise ConnectError(f"kafka subscribe (consumer start) failed: {exc}") from exc
 
+        self._consumer = consumer
         try:
             async for msg in consumer:
                 try:
@@ -155,13 +162,29 @@ class KafkaConnector(StreamSource, StreamSink):
                     },
                 )
         finally:
-            await consumer.stop()
+            try:
+                await consumer.stop()
+            finally:
+                if self._consumer is consumer:
+                    self._consumer = None
 
-    def commit(self, offsets: Any) -> None:
-        """Not implemented in Step 2.3 — see Step 3 retry+observability integration."""
-        raise NotImplementedError(
-            "Explicit offset commit arrives with the Pipeline runtime in Step 3."
-        )
+    async def commit(self, offsets: Any = None) -> None:
+        """Commit current consumer offsets.
+
+        ``offsets`` is currently ignored — aiokafka commits whatever the
+        consumer believes is its current position. Pipeline runtime calls this
+        after each sink flush when ``commit.strategy: after_sink_flush``.
+
+        Raises :class:`ConnectError` if called without an active subscribe loop.
+        """
+        if self._consumer is None:
+            raise ConnectError(
+                "kafka commit called without an active subscribe() — no consumer to commit"
+            )
+        try:
+            await self._consumer.commit()
+        except KafkaError as exc:
+            raise ConnectError(f"kafka commit failed: {exc}") from exc
 
     # ---------- StreamSink ------------------------------------------------
 

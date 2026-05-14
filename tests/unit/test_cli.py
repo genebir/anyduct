@@ -11,22 +11,31 @@ from typer.testing import CliRunner
 from etl_plugins import __version__
 from etl_plugins.cli import app
 from etl_plugins.core.registry import ConnectorRegistry
-from tests.fixtures.connectors import InMemoryBatchSink, InMemoryBatchSource
+from tests.fixtures.connectors import (
+    InMemoryBatchSink,
+    InMemoryBatchSource,
+    InMemoryStreamSink,
+    InMemoryStreamSource,
+)
 
 runner = CliRunner()
 
 
 @pytest.fixture(autouse=True)
 def _ensure_inmem_registered() -> Iterator[None]:
-    src_orig = ConnectorRegistry._registry.get("cli-inmem-source")
-    snk_orig = ConnectorRegistry._registry.get("cli-inmem-sink")
-    ConnectorRegistry.register("cli-inmem-source", replace=True)(InMemoryBatchSource)
-    ConnectorRegistry.register("cli-inmem-sink", replace=True)(InMemoryBatchSink)
+    names = {
+        "cli-inmem-source": InMemoryBatchSource,
+        "cli-inmem-sink": InMemoryBatchSink,
+        "cli-stream-source": InMemoryStreamSource,
+        "cli-stream-sink": InMemoryStreamSink,
+    }
+    originals = {n: ConnectorRegistry._registry.get(n) for n in names}
+    for n, klass in names.items():
+        ConnectorRegistry.register(n, replace=True)(klass)
     yield
-    if src_orig is None:
-        ConnectorRegistry._registry.pop("cli-inmem-source", None)
-    if snk_orig is None:
-        ConnectorRegistry._registry.pop("cli-inmem-sink", None)
+    for n, orig in originals.items():
+        if orig is None:
+            ConnectorRegistry._registry.pop(n, None)
 
 
 def test_version() -> None:
@@ -100,5 +109,63 @@ source: { connection: x }
 def test_help_shows_subcommands() -> None:
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    for sub in ("run", "validate", "version", "list-connectors", "test-connection"):
+    for sub in (
+        "run",
+        "run-stream",
+        "validate",
+        "version",
+        "list-connectors",
+        "test-connection",
+    ):
         assert sub in result.stdout
+
+
+def test_run_stream_smoke(tmp_path: Path) -> None:
+    """Stream-mode pipeline must run via CLI with stop-after-records bound."""
+    # Register stable globals so YAML connection types resolve to our InMemory
+    # stream classes — and seed the source with 3 records via the registry.
+    src = InMemoryStreamSource(
+        [
+            __import__("etl_plugins.core.record", fromlist=["Record"]).Record(data={"i": i})
+            for i in range(3)
+        ]
+    )
+    snk = InMemoryStreamSink()
+    # Replace the class-bound registry entry with a factory returning our seeded instances.
+    ConnectorRegistry.register("cli-stream-source-seeded", replace=True)(lambda **_: src)
+    ConnectorRegistry.register("cli-stream-sink-seeded", replace=True)(lambda **_: snk)
+
+    p = tmp_path / "pipe.yaml"
+    p.write_text(
+        """\
+name: cli-stream-test
+mode: stream
+source: { connection: src, topic: in }
+sink: { connection: snk, topic: out, buffer: { max_records: 1 } }
+"""
+    )
+    c = tmp_path / "conn.yaml"
+    c.write_text(
+        """\
+connections:
+  src: { type: cli-stream-source-seeded }
+  snk: { type: cli-stream-sink-seeded }
+"""
+    )
+    result = runner.invoke(
+        app,
+        [
+            "run-stream",
+            str(p),
+            "--connections",
+            str(c),
+            "--stop-after-records",
+            "3",
+        ],
+    )
+    assert result.exit_code == 0, result.stdout
+    assert "read=3" in result.stdout
+    assert "written=3" in result.stdout
+    # Clean up the seeded registrations
+    ConnectorRegistry._registry.pop("cli-stream-source-seeded", None)
+    ConnectorRegistry._registry.pop("cli-stream-sink-seeded", None)

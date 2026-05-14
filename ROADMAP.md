@@ -152,14 +152,16 @@
 - [x] 38 unit tests (transforms 23 + builder 8 + CLI 7) — 총 252 unit
 - [x] ADR-0011
 
-### 3.2 Stream runtime  ← **다음**
-- [ ] `Pipeline.run`에 stream mode 분기 (async)
-- [ ] `etlx run-stream` 서브커맨드
-- [ ] `commit.strategy: after_sink_flush` (Kafka `StreamSource.commit` 구현)
-- [ ] Stream sink 버퍼링 (`max_records`/`max_seconds` BufferConfig)
-- [ ] Stream integration test (`testcontainers[kafka]` + Pipeline.run)
+### 3.2 Stream runtime
+- [x] `Pipeline.arun_stream` async 메서드 (mode='stream')
+- [x] `etlx run-stream` 서브커맨드 (+ `--stop-after-records` / `--stop-after-seconds`)
+- [x] `commit.strategy: after_sink_flush` (Kafka `StreamSource.commit` 구현 — async commit signature)
+- [x] Stream sink 버퍼링 (`buffer.max_records` / `buffer.max_seconds` in sink_options)
+- [x] InMemoryStreamSource/Sink 추가 (`tests/fixtures/connectors.py`)
+- [x] 17 신규 unit tests + 2 Kafka integration tests (commit이 실제로 group에 반영되는지 검증)
+- [x] ADR-0012 (commit ABC sync→async SPEC 보정 포함)
 
-### 3.3 Retry / DLQ / Checkpoint / Observability
+### 3.3 Retry / DLQ / Checkpoint / Observability  ← **다음**
 - [ ] Retry `@retryable` 통합 (RetryConfig → tenacity)
 - [ ] Dead Letter Queue 라우팅 (transform/sink 실패 → 별도 sink)
 - [ ] Checkpoint / Cursor 저장 hook (BatchSource cursor, StreamSource offset)
@@ -239,3 +241,4 @@
 - 2026-05-14: **Step 2.2 (S3 커넥터) 완료.** boto3 기반 BatchSource + BatchSink (jsonl/csv/parquet). 21 unit + 35 integration tests (총 214 unit + 64 it = 278 tests). ADR-0009 추가. MinIO testcontainers 통합 — 같은 코드가 AWS S3/MinIO/R2 호환. 다음은 Step 2.3 (kafka).
 - 2026-05-14: **Step 2.3 (Kafka 커넥터) + Step 2 전체 완료.** aiokafka 기반 StreamSource + StreamSink. Stream Contract 신규 도입(`_StreamSourceContract`/`_StreamSinkContract`/`_StreamRoundTripContract`). 16 통합 테스트 (총 214 unit + 80 it = 294 tests). ADR-0010 추가. 다음은 Step 3 (Pipeline 실행기 + CLI).
 - 2026-05-14: **Step 3.1 (YAML 빌더 + Transforms + `etlx` CLI) 완료.** `etl_plugins/runtime/` (transforms/builder/runner) + Typer CLI 5 서브커맨드. 38 신규 unit tests (총 252 unit + 80 it = 332). ADR-0011 추가. 다음은 Step 3.2 (stream runtime + commit).
+- 2026-05-14: **Step 3.2 (Stream runtime) 완료.** `Pipeline.arun_stream` + Kafka async `commit()` (ABC sync→async 보정) + buffer + `etlx run-stream`. 17 신규 unit + 2 Kafka integration tests (총 269 unit + 82 it = 351). ADR-0012 추가. 다음은 Step 3.3 (Retry / DLQ / Checkpoint).

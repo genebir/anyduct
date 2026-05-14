@@ -1,17 +1,25 @@
 """Pipeline + Task: the in-Python orchestration API. SPEC.md §4.4.
 
-Step 1.4 covers batch execution only. Stream execution (StreamSource/StreamSink),
-retry, DLQ, and YAML-based pipeline building arrive in Step 3.
+Batch execution is via the sync :meth:`Pipeline.run`. Stream execution is via
+the async :meth:`Pipeline.arun_stream` (Step 3.2).
+Retry / DLQ wiring arrives in Step 3.3.
 """
 
 from __future__ import annotations
 
+import contextlib
 import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from typing import Any
 
-from etl_plugins.core.connector import BatchSink, BatchSource, Connector
+from etl_plugins.core.connector import (
+    BatchSink,
+    BatchSource,
+    Connector,
+    StreamSink,
+    StreamSource,
+)
 from etl_plugins.core.context import Context
 from etl_plugins.core.exceptions import PipelineError, TaskError, TransformError
 from etl_plugins.core.record import Record
@@ -92,8 +100,9 @@ class Pipeline:
     """
 
     name: str
-    mode: str = "batch"  # batch | stream — only "batch" is implemented in Step 1.4.
+    mode: str = "batch"  # batch | stream
     tasks: list[Task] = field(default_factory=list)
+    commit_strategy: str = "after_sink_flush"  # used by stream runtime; see SPEC.md §5.5
     _hooks: dict[str, list[Hook]] = field(default_factory=dict)
 
     def add(self, task: Task) -> Pipeline:
@@ -113,8 +122,7 @@ class Pipeline:
     ) -> RunResult:
         if self.mode != "batch":
             raise PipelineError(
-                f"Pipeline mode '{self.mode}' not implemented yet — "
-                f"stream pipelines arrive in Step 3."
+                f"Pipeline.run is batch-only — for mode={self.mode!r} use arun_stream()"
             )
 
         ctx = context or Context(pipeline_name=self.name)
@@ -191,3 +199,144 @@ class Pipeline:
     def _fire(self, event: str, *args: Any) -> None:
         for hook in self._hooks.get(event, []):
             hook(*args)
+
+    # ---------------- stream runtime (Step 3.2) ---------------------------
+
+    async def arun_stream(
+        self,
+        context: Context | None = None,
+        *,
+        connectors: dict[str, Connector] | None = None,
+        stop_after_records: int | None = None,
+        stop_after_seconds: float | None = None,
+    ) -> RunResult:
+        """Run a stream pipeline (mode=='stream') until a stop condition fires.
+
+        Stop conditions (any of):
+          * ``stop_after_records`` — total records consumed across all tasks
+          * ``stop_after_seconds`` — wall time since the call started
+          * The async iterator returned by ``source.subscribe`` is exhausted
+          * The task is cancelled (``KeyboardInterrupt`` / ``CancelledError``)
+        """
+        if self.mode != "stream":
+            raise PipelineError(f"arun_stream is stream-only — for mode={self.mode!r} use run()")
+
+        ctx = context or Context(pipeline_name=self.name)
+        conns = connectors or {}
+        start = time.monotonic()
+        result = RunResult(run_id=ctx.run_id, pipeline_name=self.name, success=False)
+
+        self._fire("pre_run", ctx)
+        try:
+            for task in self.tasks:
+                self._fire("on_task_start", ctx, task)
+                read_count, write_count = await self._arun_stream_task(
+                    task,
+                    conns,
+                    stop_after_records=stop_after_records,
+                    stop_after_seconds=stop_after_seconds,
+                    started_at=start,
+                )
+                result.records_read += read_count
+                result.records_written += write_count
+                self._fire("on_task_end", ctx, task, write_count)
+            result.success = True
+        except Exception as exc:
+            result.error = exc
+            self._fire("on_error", ctx, exc)
+            raise
+        finally:
+            result.duration_seconds = time.monotonic() - start
+            self._fire("post_run", ctx, result)
+        return result
+
+    async def _arun_stream_task(
+        self,
+        task: Task,
+        connectors: dict[str, Connector],
+        *,
+        stop_after_records: int | None,
+        stop_after_seconds: float | None,
+        started_at: float,
+    ) -> tuple[int, int]:
+        if not task.source:
+            raise TaskError(f"Stream task missing source: {task!r}")
+        if not task.sink:
+            raise TaskError(f"Stream task missing sink: {task!r}")
+
+        source = connectors.get(task.source)
+        sink = connectors.get(task.sink)
+        if source is None:
+            raise TaskError(f"No connector instance provided for source '{task.source}'")
+        if sink is None:
+            raise TaskError(f"No connector instance provided for sink '{task.sink}'")
+        if not isinstance(source, StreamSource):
+            raise TaskError(f"Source '{task.source}' is not a StreamSource")
+        if not isinstance(sink, StreamSink):
+            raise TaskError(f"Sink '{task.sink}' is not a StreamSink")
+
+        topic_in = task.source_options.get("topic") or task.query
+        if not topic_in:
+            raise TaskError(
+                f"stream source '{task.source}' requires 'topic' (in source.topic or source.query)"
+            )
+        group_id = task.source_options.get("group_id")
+        topic_out = task.sink_options.get("topic") or task.sink_table
+        if not topic_out:
+            raise TaskError(
+                f"stream sink '{task.sink}' requires 'topic' (in sink.topic or sink.table)"
+            )
+
+        buffer = task.sink_options.get("buffer") or {}
+        max_records = int(buffer.get("max_records", 1) or 1)
+        max_seconds = float(buffer.get("max_seconds", 0.0) or 0.0)
+
+        records_read = 0
+        records_written = 0
+        pending = 0
+        last_flush = time.monotonic()
+
+        async def _flush_and_commit() -> None:
+            nonlocal pending, last_flush
+            await sink.flush()
+            pending = 0
+            last_flush = time.monotonic()
+            if self.commit_strategy == "after_sink_flush":
+                with contextlib.suppress(NotImplementedError):
+                    await source.commit()
+
+        try:
+            async for raw in source.subscribe(topic_in, group_id=group_id):
+                records_read += 1
+                record: Record | None = raw
+                for fn in task.transforms:
+                    if record is None:
+                        break
+                    try:
+                        record = fn(record)
+                    except Exception as exc:
+                        raise TransformError(f"transform {fn!r} failed on record {raw!r}") from exc
+
+                if record is not None:
+                    await sink.publish(topic_out, record)
+                    records_written += 1
+                    pending += 1
+
+                if pending >= max_records or (
+                    max_seconds > 0 and (time.monotonic() - last_flush) >= max_seconds
+                ):
+                    await _flush_and_commit()
+
+                if stop_after_records is not None and records_read >= stop_after_records:
+                    break
+                if (
+                    stop_after_seconds is not None
+                    and (time.monotonic() - started_at) >= stop_after_seconds
+                ):
+                    break
+        finally:
+            if pending:
+                with contextlib.suppress(Exception):
+                    await _flush_and_commit()
+
+        return records_read, records_written

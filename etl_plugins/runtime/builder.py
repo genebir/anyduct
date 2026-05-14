@@ -88,7 +88,14 @@ def build_pipeline(
     for tc in pipeline_config.transforms:
         task.transform(build_transform(tc))
 
-    pipeline = Pipeline(name=pipeline_config.name, mode=pipeline_config.mode)
+    commit_strategy = (
+        pipeline_config.commit.strategy if pipeline_config.commit else "after_sink_flush"
+    )
+    pipeline = Pipeline(
+        name=pipeline_config.name,
+        mode=pipeline_config.mode,
+        commit_strategy=commit_strategy,
+    )
     pipeline.add(task)
     return pipeline, connectors
 

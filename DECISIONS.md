@@ -334,4 +334,36 @@
 
 ---
 
+## ADR-0012: Step 3.2 Stream runtime — `Pipeline.arun_stream`, async commit, buffering
+
+- **Date**: 2026-05-14
+- **Status**: Accepted
+- **Context**:
+  Step 3.2는 SPEC.md §4.4/§5.5의 streaming pipeline 실현. 결정: sync `Pipeline.run`과 async stream 실행을 어떻게 공존시킬지, `StreamSource.commit` 시그니처(sync vs async), buffer/commit 정책을 어디에 두는지, integration test가 진짜 Kafka에서 commit 동작을 검증하는지.
+- **Decision**:
+  1. **`Pipeline.run`(sync) + `Pipeline.arun_stream`(async) 분리**. 단일 메서드에 mode 분기 후 `asyncio.run()` 내부 호출하는 패턴은 이벤트 루프 안에서 깨지므로 거부. caller(Airflow/Dagster/CLI)가 자기 컨텍스트에 맞춰 둘 중 하나 호출. `Pipeline.run`이 mode='stream'이면 `arun_stream`을 안내하는 `PipelineError`만 발생.
+  2. **`StreamSource.commit`을 async로 변경** (이전 ADR-0010에서 sync로 정의). 이유: `subscribe`/`publish`가 모두 async인데 commit만 sync면 Kafka처럼 진짜 비동기 client에서 `asyncio.run()` wrapping이 필요 → 깨지기 쉽다. 또한 `offsets` 파라미터를 옵셔널(`None`은 "현재 위치 commit")로 기본값 부여 → 일반적 사용은 `await source.commit()`. ABC 변경은 SPEC.md §4.1 시그니처 한 줄 보정과 함께(ADR가 기록).
+  3. **`KafkaConnector._consumer` 참조 보존**. `subscribe()` 진입 시 `self._consumer = consumer`, 종료 또는 `aclose()`에서 정리. `commit()`은 이 ref가 None이면 `ConnectError` ("active subscribe 없음"). 단일 subscribe 가정 — 동시 다중 subscribe는 Step 5의 multi-task pipeline에서 필요해지면 dict화.
+  4. **`Pipeline.commit_strategy: str = "after_sink_flush"`** 필드를 추가. PipelineConfig.commit.strategy → builder.py가 채움. stream task의 buffer flush 후 `commit_strategy == "after_sink_flush"`일 때만 `await source.commit()` 호출. 그 외 값(예: "manual")은 commit skip — 미래의 다른 전략(예: "at_least_once_per_batch")과 호환되는 확장 지점.
+  5. **Buffer 정책은 `sink_options["buffer"]` dict**: `{max_records: int, max_seconds: float}`. SinkConfig가 `extra=allow`이므로 추가 모델 정의 없이도 YAML에서 사용 가능. `max_records=1` (기본)이면 record-당 즉시 flush+commit. `max_seconds=0` (기본)이면 시간 기반 flush 비활성.
+  6. **`stop_after_records` / `stop_after_seconds` 명시적 stop 조건**. SIGINT 외에 "테스트에서 확정적으로 종료"가 필요 → CLI(`--stop-after-*`) + 테스트 호출 모두에서 사용. 실 운영에서는 둘 다 `None`(무한 실행). 인터럽트는 별도 KeyboardInterrupt 분기로 CLI에서 처리(exit 130).
+  7. **`finally` 블록에서 잔여 pending flush + commit**. stop 조건으로 break하면 `pending > 0`이 남을 수 있음 — at-least-once 보장을 위해 마지막 flush 보장. `contextlib.suppress(Exception)`으로 cleanup 안전.
+  8. **`commit()`의 `NotImplementedError`는 `contextlib.suppress`로 흡수**. 다른 StreamSource 구현체가 commit을 지원하지 않을 때도 pipeline은 동작. Kafka는 실제로 raise하지 않음 (ADR-0010의 NIE 약속을 이번 ADR이 superseded).
+  9. **`arun_stream_pipeline_yaml` async 헬퍼**: sync `run_pipeline_yaml`의 mirror. cleanup이 `aclose()`(async, Kafka가 제공) → `close()`(sync) fallback 순서.
+  10. **`etlx run-stream` CLI 서브커맨드**: `asyncio.run(arun_stream_pipeline_yaml(...))`. KeyboardInterrupt를 catch → exit 130 + "interrupted" 메시지. ETLError는 빨간 에러로 exit 1.
+  11. **`InMemoryStreamSource/Sink` 추가** (`tests/fixtures/connectors.py`). InMemory의 `commit()`은 `self.commits.append(offsets)` — 호출 횟수/내용 검증에 사용. 17 신규 unit tests (16 stream pipeline + 1 CLI smoke).
+  12. **Kafka commit 통합 검증**: `test_stream_pipeline_commits_offsets`가 (a) pipeline run, (b) 동일 group_id로 새 consumer attach, (c) 메시지 없음(즉 offset 모두 commit됨)을 확인. 진짜 Kafka에서 at-least-once + commit이 작동하는지 직접 검증.
+- **Consequences**:
+  - (+) YAML 한 줄(`mode: stream` + `commit.strategy`)로 stream pipeline 가능. CLI `etlx run-stream <yaml> --stop-after-records 1000`로 dry-run 친화.
+  - (+) Kafka commit이 실제로 작동(integration test) — at-least-once delivery 보장 첫 마일스톤.
+  - (+) 17 new unit tests (총 269 unit), 2 new integration tests (총 82 it). All green incl. mypy strict + ruff.
+  - (+) `Pipeline.arun_stream`은 transform/filter/buffer/commit/stop을 한 함수에서 처리 — 다음 슬라이스(Retry/DLQ)는 명확한 hook 지점을 가진다.
+  - (−) SPEC.md §4.1의 `def commit(...) -> None` 시그니처 보정 필요. SPEC 업데이트는 별도 small PR로.
+  - (−) ADR-0010이 commit을 "Step 3로 이동"이라고 했으나 그땐 sync로 가정. 이번 ADR가 그 결정 보정.
+  - (−) 단일 consumer 가정 — 다중 task / 다중 partition 병렬 subscribe는 Step 5+에서. 현재 stream task는 한 source/sink/topic이 표준 use case.
+  - (−) Retry/DLQ/Checkpoint는 여전히 미구현. Step 3.3에서.
+- **References**: SPEC.md §4.1, §4.4, §5.5 · `etl_plugins/core/{pipeline,connector}.py` · `etl_plugins/connectors/stream/kafka.py` · `etl_plugins/runtime/runner.py` · `etl_plugins/cli.py` · `tests/unit/runtime/test_pipeline_stream.py` · `tests/integration/test_stream_pipeline.py`
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

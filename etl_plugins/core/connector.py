@@ -85,7 +85,16 @@ class StreamSource(Connector):
     ) -> AsyncIterator[Record]: ...
 
     @abstractmethod
-    def commit(self, offsets: Any) -> None: ...
+    async def commit(self, offsets: Any = None) -> None:
+        """Commit progress (e.g., Kafka offsets, Kinesis sequence numbers).
+
+        Async because real client libs (aiokafka, ...) are async. ``offsets``
+        is connector-specific: ``None`` means "commit the current internal
+        position", a dict means "commit these specific positions". Pipeline
+        runtime invokes ``await source.commit()`` after each successful sink
+        flush when ``commit.strategy: after_sink_flush``.
+        """
+        ...
 
 
 class StreamSink(Connector):

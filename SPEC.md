@@ -172,7 +172,7 @@ class StreamSource(Connector):
     def subscribe(self, topic: str, *, group_id: str | None = None
                  ) -> AsyncIterator["Record"]: ...
     @abstractmethod
-    def commit(self, offsets) -> None: ...
+    async def commit(self, offsets=None) -> None: ...   # async per ADR-0012
 
 class StreamSink(Connector):
     @abstractmethod

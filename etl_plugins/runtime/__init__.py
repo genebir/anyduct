@@ -10,7 +10,7 @@ from etl_plugins.runtime.builder import (
     build_pipeline,
     build_pipeline_from_yaml,
 )
-from etl_plugins.runtime.runner import run_pipeline_yaml
+from etl_plugins.runtime.runner import arun_stream_pipeline_yaml, run_pipeline_yaml
 from etl_plugins.runtime.transforms import (
     BuiltinTransform,
     build_transform,
@@ -19,6 +19,7 @@ from etl_plugins.runtime.transforms import (
 
 __all__ = [
     "BuiltinTransform",
+    "arun_stream_pipeline_yaml",
     "build_connector",
     "build_connectors",
     "build_pipeline",

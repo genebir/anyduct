@@ -198,9 +198,9 @@ def test_transform_error_wrapped(
     assert isinstance(info.value.__cause__, ValueError)
 
 
-def test_stream_mode_not_implemented() -> None:
+def test_stream_mode_run_routes_to_arun_stream() -> None:
     p = Pipeline("p", mode="stream")
-    with pytest.raises(PipelineError, match="not implemented"):
+    with pytest.raises(PipelineError, match="arun_stream"):
         p.run(connectors={})
 
 

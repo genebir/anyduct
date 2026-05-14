@@ -102,10 +102,11 @@ async def test_publish_without_connect_raises(kafka_bootstrap: str) -> None:
         await kc.publish("x", Record(data={"a": 1}))
 
 
-async def test_commit_not_implemented(kafka_connector: KafkaConnector) -> None:
+async def test_commit_without_active_subscribe_raises(kafka_connector: KafkaConnector) -> None:
+    """Without a live subscribe() loop, commit() has no consumer and must fail."""
     kafka_connector.connect()
-    with pytest.raises(NotImplementedError):
-        kafka_connector.commit({})
+    with pytest.raises(ConnectError):
+        await kafka_connector.commit()
 
 
 async def test_publish_invalid_record_raises_write_error_on_bad_json(

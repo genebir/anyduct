@@ -103,14 +103,20 @@
 - [x] Integration test 14개 (testcontainers + postgres:16-alpine) — 총 29 통합 테스트
 - [x] `[postgres]` extra + dev group + `contracts/batch.py`에 `read_kwargs`/`write_kwargs` fixture 추가
 
-### 2.2 `s3` (BatchSource + BatchSink)  ← **다음 작업 (2026-05-14)**
-- [ ] parquet / csv / jsonl 포맷
-- [ ] MinIO 호환 (로컬 테스트)
-- [ ] BatchSource.read (key prefix → stream)
-- [ ] BatchSink.write (multipart upload)
-- [ ] Contract + integration test
+### 2.2 `s3` (BatchSource + BatchSink)
+- [x] 드라이버 결정 (boto3) — ADR-0009
+- [x] parquet / csv / jsonl 포맷 (pyarrow + 순수 함수 `_serialize_*` / `_parse_*`)
+- [x] `detect_format(key)`로 확장자 기반 자동 감지 + 명시적 override
+- [x] MinIO 호환 (`endpoint_url` 파라미터 — testcontainers로 통합 테스트)
+- [x] BatchSource.read (`query`=prefix, paginated list + per-object parse)
+- [x] BatchSink.write (single object PUT, mode=append/overwrite, upsert 거부)
+- [x] Registry `@register("s3")` + entry-point 자동 발견
+- [x] Contract test 통과 (BatchSource 7 + BatchSink 5 + RoundTrip 3)
+- [x] 21 unit tests (포맷 helpers, no boto3) + 35 integration tests (MinIO)
+- [x] `[s3]` extra = `boto3>=1.34, pyarrow>=16.0`
+- [ ] multipart upload (큰 파일) — **Step 6 강화로 이동**
 
-### 2.3 `kafka` (StreamSource + StreamSink)
+### 2.3 `kafka` (StreamSource + StreamSink)  ← **다음 작업 (2026-05-14)**
 - [ ] 드라이버 결정 (confluent-kafka vs aiokafka) — ADR
 - [ ] StreamSource.subscribe (group_id, offset 관리)
 - [ ] StreamSource.commit (`at_least_once` 보장)
@@ -201,3 +207,4 @@
 - 2026-05-14: Step 1.7 (Utils) 완료. retry/chunk/async_io + 42 unit tests (총 178). ADR-0006 추가. Circuit Breaker/Rate Limiter/DLQ는 Step 3으로 이동. 다음은 1.8 (테스트 인프라).
 - 2026-05-14: **Step 1.8 (테스트 인프라) + Step 1 전체 완료.** tests/fixtures/ + tests/contracts/ + 15 contract tests (총 193). ADR-0007 추가. 다음은 Step 2.1 (postgres 커넥터).
 - 2026-05-14: **Step 2.1 (PostgreSQL 커넥터) 완료.** psycopg 3 기반 BatchSource + BatchSink (append=COPY / overwrite / upsert). 29 통합 테스트 (193 unit + 29 it = 222 total). ADR-0008 추가. contracts/batch.py에 read_kwargs/write_kwargs fixture 추가. 다음은 Step 2.2 (s3).
+- 2026-05-14: **Step 2.2 (S3 커넥터) 완료.** boto3 기반 BatchSource + BatchSink (jsonl/csv/parquet). 21 unit + 35 integration tests (총 214 unit + 64 it = 278 tests). ADR-0009 추가. MinIO testcontainers 통합 — 같은 코드가 AWS S3/MinIO/R2 호환. 다음은 Step 2.3 (kafka).

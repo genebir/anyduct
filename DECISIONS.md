@@ -237,4 +237,33 @@
 
 ---
 
+## ADR-0009: Step 2.2 S3 (object storage) 커넥터 — 설계 결정
+
+- **Date**: 2026-05-14
+- **Status**: Accepted
+- **Context**:
+  Step 2.2는 SPEC.md §6 따라 S3 (object storage) BatchSource + BatchSink. 핵심 결정: 드라이버, 포맷, S3-compatible 백엔드 통합 방식, write 모드의 의미론(S3는 row 정체성 없음), 통합 테스트 백엔드 (MinIO).
+- **Decision**:
+  1. **드라이버: boto3 (`boto3>=1.34`)**. 가장 널리 쓰이는 AWS SDK. 모든 S3-compatible 서비스(MinIO, R2, DO Spaces, ...)와 호환. async 필요해지면 `aioboto3` 어댑터 별도 추가 가능.
+  2. **포맷: jsonl / csv / parquet 모두 지원**. SPEC.md §6 명시. 모듈 단위 `SUPPORTED_FORMATS` 상수 + `detect_format(key)` (확장자 매핑). 키 확장자에서 자동 감지 + `format=...` 명시적 override 모두 지원.
+  3. **포맷별 직렬화/역직렬화는 순수 함수로 분리** (`_serialize_*`, `_parse_*`). boto3 client 없이 단위 테스트 가능. 21 unit tests (`tests/unit/connectors/object_storage/test_s3_helpers.py`).
+  4. **`query`를 prefix로 재해석**. BatchSource ABC의 `query` 파라미터는 RDBMS에는 SQL, 객체 스토리지에는 키 prefix로 자연스럽게 매핑. 동일 ABC 시그니처 유지.
+  5. **`mode` 의미론**: `append`(default), `overwrite` 두 가지만 허용. `upsert`는 S3에 row 정체성이 없으므로 명시적으로 거부 (WriteError). PUT은 본질적으로 idempotent overwrite이지만 사용자 의도를 분명히 하기 위해 mode 인자 유지.
+  6. **한 번의 write() = 한 개의 object PUT**. 파티셔닝 / 멀티 파일 분할은 호출자가 여러 번 write 호출로 처리 — 단순한 책임 분리. multipart upload는 큰 파일이 필요해지면 Step 6에서 검토.
+  7. **`endpoint_url` 파라미터로 S3-compatible 서비스 통합**. MinIO/R2/DO Spaces 모두 동일 코드. AWS S3 사용 시 None.
+  8. **`pyarrow>=16.0`을 `[s3]` extra의 일부로**. parquet 지원에 필수. 가벼움을 원하면 jsonl/csv만 쓰면 됨 (pyarrow import 시점에만 발생).
+  9. **통합 테스트: MinIO via `testcontainers[minio]`**. 진짜 S3 API와 호환되므로 AWS 비용 없이 모든 동작 검증 가능. 29 postgres tests에 더해 35 S3 integration tests (총 64 it).
+  10. **MinIO + 최신 boto3 호환성 패치**: boto3 1.36+가 batch `DeleteObjects`의 Content-MD5를 기본 생략 → MinIO가 거부. fixture cleanup을 batch delete 대신 per-object `delete_object` 루프로 우회. 우리 커넥터의 PUT 자체는 영향 없음.
+  11. **`@pytest.mark.it` 모듈 단위 마커 + testcontainers fixture chain** 기존 postgres 패턴과 동일 — 일관성.
+- **Consequences**:
+  - (+) Contract suite + 2개 fixture로 모든 표준 케이스 자동 통과. postgres + s3 두 커넥터가 동일 패턴 → s3, GCS, Azure Blob 등 후속 object storage 추가 시 모델로 활용.
+  - (+) 같은 코드가 AWS S3 / MinIO / R2 등에 그대로 작동 (검증된 부분: MinIO).
+  - (+) CSV/Parquet/JSONL 세 포맷 모두 round-trip 검증됨. parquet은 타입 보존 (int/bool/null), CSV는 string으로 변환 (예상 동작, 문서화됨).
+  - (−) parquet 지원으로 pyarrow가 `[s3]` extra에 포함 — 약 30 MiB. jsonl/csv만 쓰는 사용자는 약간의 오버헤드.
+  - (−) `mode="upsert"`를 거부함 — 사용자가 row-level 업데이트가 필요하면 별도 처리 필요 (e.g., 임시 영역에 partial 쓰고 sweep). 의도된 제한.
+  - (−) parquet 읽기는 전체 객체를 메모리에 적재 (pyarrow가 random access 요구). 매우 큰 parquet은 row group 단위 처리가 필요 → 필요해지면 Step 6.
+- **References**: SPEC.md §6, §9.4 · `etl_plugins/connectors/object_storage/s3.py` · `tests/integration/test_s3.py` · `tests/unit/connectors/object_storage/test_s3_helpers.py`
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

@@ -11,10 +11,13 @@ from collections.abc import Iterator
 from typing import Any
 from uuid import uuid4
 
+import boto3
 import psycopg
 import pytest
+from testcontainers.minio import MinioContainer
 from testcontainers.postgres import PostgresContainer
 
+from etl_plugins.connectors.object_storage.s3 import S3Connector
 from etl_plugins.connectors.rdbms.postgres import PostgresConnector
 from etl_plugins.core.record import Record
 
@@ -91,3 +94,83 @@ def pg_connector(pg_conn_params: dict[str, Any]) -> Iterator[PostgresConnector]:
     pg = PostgresConnector(**pg_conn_params)
     yield pg
     pg.close()
+
+
+# =============================================================================
+# MinIO (S3-compatible) — Step 2.2
+# =============================================================================
+
+
+@pytest.fixture(scope="session")
+def minio_container() -> Iterator[MinioContainer]:
+    """Long-lived MinIO container shared across the test session."""
+    with MinioContainer() as container:
+        yield container
+
+
+@pytest.fixture(scope="session")
+def s3_conn_params(minio_container: MinioContainer) -> dict[str, Any]:
+    """Params for ``S3Connector(**params)`` (excluding bucket)."""
+    cfg = minio_container.get_config()
+    return {
+        "region": "us-east-1",
+        "endpoint_url": f"http://{cfg['endpoint']}",
+        "access_key": cfg["access_key"],
+        "secret_key": cfg["secret_key"],
+    }
+
+
+@pytest.fixture(scope="session")
+def s3_boto_kwargs(s3_conn_params: dict[str, Any]) -> dict[str, Any]:
+    """boto3.client('s3', ...) kwargs (different naming from our connector params)."""
+    return {
+        "region_name": s3_conn_params["region"],
+        "endpoint_url": s3_conn_params["endpoint_url"],
+        "aws_access_key_id": s3_conn_params["access_key"],
+        "aws_secret_access_key": s3_conn_params["secret_key"],
+    }
+
+
+@pytest.fixture
+def s3_bucket(s3_boto_kwargs: dict[str, Any]) -> Iterator[str]:
+    """Create a fresh bucket per test. Drops all contents and the bucket on teardown.
+
+    Per-object delete (instead of batch DeleteObjects) — MinIO requires
+    Content-MD5 for batch deletes, which modern boto3 omits by default.
+    """
+    bucket = f"etl-test-{uuid4().hex[:8]}"
+    client = boto3.client("s3", **s3_boto_kwargs)
+    client.create_bucket(Bucket=bucket)
+    try:
+        yield bucket
+    finally:
+        paginator = client.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=bucket):
+            for obj in page.get("Contents", []):
+                client.delete_object(Bucket=bucket, Key=obj["Key"])
+        client.delete_bucket(Bucket=bucket)
+
+
+@pytest.fixture
+def s3_connector(s3_conn_params: dict[str, Any], s3_bucket: str) -> Iterator[S3Connector]:
+    """Unconnected S3Connector pointed at ``s3_bucket``. Closed on teardown."""
+    conn = S3Connector(bucket=s3_bucket, **s3_conn_params)
+    yield conn
+    conn.close()
+
+
+@pytest.fixture
+def s3_seeded(
+    s3_boto_kwargs: dict[str, Any], s3_bucket: str, sample_records: list[Record]
+) -> dict[str, str]:
+    """Seed ``s3_bucket`` with sample_records as JSONL under prefix 'seed/'.
+
+    Returns ``{"bucket": ..., "prefix": "seed/"}``.
+    """
+    import json
+
+    prefix = "seed/"
+    body = ("\n".join(json.dumps(r.data) for r in sample_records) + "\n").encode()
+    client = boto3.client("s3", **s3_boto_kwargs)
+    client.put_object(Bucket=s3_bucket, Key=f"{prefix}data.jsonl", Body=body)
+    return {"bucket": s3_bucket, "prefix": prefix}

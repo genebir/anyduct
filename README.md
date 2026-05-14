@@ -12,16 +12,18 @@
 
 ## 현재 상태 (2026-05-14)
 
-**Step 1 — Foundation 완료. 193 단위 테스트 / 7 ADR.** 다음은 Step 2 (레퍼런스 커넥터).
+**Steps 1–4 완료 + Step 5 진행 중. 321 단위 + 3 skip + 111 통합 = 435 테스트, 16 ADR.**
 
-- [x] Harness 문서 · 스캐폴딩 · 환경 재현 · CI [Step 1.0–1.3]
-- [x] **Core 추상화** [Step 1.4] — `Connector` / `BatchSource` / `BatchSink` / `StreamSource` / `StreamSink`, `Record` (Pydantic), `Schema`, `Pipeline` + `Task` (fluent builder), `Context`, `ConnectorRegistry`
-- [x] **Config 로더** [Step 1.5] — `${VAR}` + `!secret <path>` YAML + Pydantic 모델 + SecretBackend (env/static/vault·aws·gcp 스텁)
-- [x] **Observability 베이스** [Step 1.6] — structlog + 시크릿 마스킹 / `Metrics`·`Tracer` ABC + NoOp
-- [x] **Utils** [Step 1.7] — `@retryable` (sync+async), `chunked`, `gather_with_concurrency`, `iter_to_async`
-- [x] **테스트 인프라** [Step 1.8] — `tests/fixtures/` 표준 데이터셋 + `tests/contracts/` subclass-able contract mixin (새 커넥터는 fixture 두 개로 contract 통과)
-- [ ] 레퍼런스 커넥터 3종 (postgres, s3, kafka) [Step 2]
-- [ ] CLI + Orchestrator adapters + 추가 커넥터 + 강화 [Step 3–6]
+- [x] **Step 1 — Foundation**: 스캐폴딩, Harness 문서, Core/Config/Observability/Utils, Contract test infra
+- [x] **Step 2 — Reference Connectors**: `postgres`(psycopg3), `s3`(boto3+pyarrow, MinIO 호환), `kafka`(aiokafka, Stream Contract 신규 도입)
+- [x] **Step 3 — Pipeline 실행기 + CLI**
+  - 3.1 YAML→Pipeline 빌더 + `etlx` CLI (`version`, `list-connectors`, `validate`, `run`, `run-stream`, `test-connection`) + transforms(rename/cast/filter sandbox/python)
+  - 3.2 Stream runtime (`Pipeline.arun_stream` + Kafka async `commit()` + buffer policy + `--stop-after-*`)
+  - 3.3 Retry + DLQ 라우팅 + 자동 메트릭 emit + 글로벌 `--log-format json|console` / `--log-level`
+- [x] **Step 4 — Orchestrator Adapters**: Airflow `ETLPluginsOperator`, Dagster `EtlPluginsResource`+`etl_plugins_op`, Prefect `run_etl_pipeline_flow`+`task`. PEP 562 lazy 로딩으로 orchestrator 미설치 환경에서도 모듈 import 성공.
+- [x] **Step 5.1 — Additional RDBMS**: MySQL(PyMySQL), SQLite(stdlib)
+- [ ] Step 5.2~5.7: DW / NoSQL / Streaming / CDC / Object 추가 / HTTP — 미착수
+- [ ] Step 6: OpenLineage, OTel/Prometheus 실구현, mkdocs, v0.1.0 릴리스
 
 상세 진행은 [`ROADMAP.md`](./ROADMAP.md), 설계 결정은 [`DECISIONS.md`](./DECISIONS.md).
 
@@ -52,7 +54,65 @@ cd ETL
 
 ---
 
-## 사용 예 (Step 1.4 기준 — 동작하는 in-Python API)
+## 설치
+
+```bash
+# 코어만 (CLI / runtime / Pipeline ABC)
+pip install etl-plugins                          # PyPI 릴리스는 Step 6에서
+
+# 필요한 커넥터/오케스트레이터 extra 추가
+pip install 'etl-plugins[postgres]'              # psycopg 3
+pip install 'etl-plugins[mysql]'                 # PyMySQL
+pip install 'etl-plugins[s3]'                    # boto3 + pyarrow
+pip install 'etl-plugins[kafka]'                 # aiokafka
+pip install 'etl-plugins[airflow]'               # apache-airflow
+pip install 'etl-plugins[dagster]'               # dagster
+pip install 'etl-plugins[prefect]'               # prefect
+# sqlite는 stdlib — extra 불필요
+```
+
+---
+
+## 사용 예 1: YAML + `etlx` CLI
+
+```yaml
+# configs/connections.yaml
+connections:
+  pg_prod:    { type: postgres, host: db, port: 5432, database: app,    user: etl, password: ${PG_PASSWORD} }
+  warehouse:  { type: postgres, host: dw, port: 5432, database: analytics, user: etl, password: ${DW_PASSWORD} }
+  dlq_sink:   { type: sqlite,   database: /var/etl/dlq.db }
+```
+
+```yaml
+# configs/pipelines/orders_to_dw.yaml
+name: orders_to_dw
+mode: batch
+source: { connection: pg_prod, query: "SELECT * FROM orders WHERE updated_at > :ts" }
+transforms:
+  - { type: rename, mapping: { user_id: customer_id } }
+  - { type: cast,   columns: { order_total: float, created_at: timestamp } }
+  - { type: filter, expr: "data['order_total'] > 0" }
+sink: { connection: warehouse, table: analytics.orders, mode: upsert, key_columns: [order_id] }
+retry: { max_attempts: 3, backoff: exponential, initial_delay_seconds: 1.0 }
+dlq:   { connection: dlq_sink, table: failed_orders }
+```
+
+```bash
+uv run etlx list-connectors                              # postgres, mysql, sqlite, s3, kafka
+uv run etlx validate  configs/pipelines/orders_to_dw.yaml  --connections configs/connections.yaml
+uv run etlx test-connection --all                         --connections configs/connections.yaml
+uv run etlx run       configs/pipelines/orders_to_dw.yaml --connections configs/connections.yaml
+uv run etlx --log-format console run configs/pipelines/orders_to_dw.yaml --connections configs/connections.yaml
+
+# 스트리밍
+uv run etlx run-stream configs/pipelines/events_to_kafka.yaml \
+  --connections configs/connections.yaml \
+  --stop-after-records 10000
+```
+
+---
+
+## 사용 예 2: in-Python API
 
 ```python
 from collections.abc import Iterable, Iterator
@@ -67,27 +127,23 @@ class MySource(BatchSource):
     def close(self) -> None: ...
     def health_check(self) -> bool: return True
 
-    def read(self, query: str | None = None, **opts) -> Iterator[Record]:
+    def read(self, query=None, **opts) -> Iterator[Record]:
         yield Record(data={"id": 1, "name": "Alice"})
         yield Record(data={"id": 2, "name": "Bob"})
 
 
 @ConnectorRegistry.register("inmem-snk")
 class MySink(BatchSink):
-    def __init__(self) -> None: self.rows: list[Record] = []
+    def __init__(self): self.rows: list[Record] = []
     def connect(self) -> None: ...
     def close(self) -> None: ...
     def health_check(self) -> bool: return True
 
-    def write(self, records: Iterable[Record], *, mode="append",
-              key_columns=None, **opts) -> int:
-        before = len(self.rows)
-        self.rows.extend(records)
-        return len(self.rows) - before
+    def write(self, records: Iterable[Record], *, mode="append", key_columns=None, **opts):
+        before = len(self.rows); self.rows.extend(records); return len(self.rows) - before
 
 
 src, snk = MySource(), MySink()
-
 pipeline = (
     Pipeline("orders_to_dw")
     .add(
@@ -95,48 +151,61 @@ pipeline = (
             .transform(lambda r: Record(data={**r.data, "name": r.data["name"].upper()}))
             .load("inmem-snk", mode="upsert", key_columns=["id"])
     )
-    .on("post_run",
-        lambda ctx, result: ctx.logger.info(
-            "done", rows=result.records_written, took=result.duration_seconds))
+    .on("post_run", lambda ctx, result:
+        ctx.logger.info("done", rows=result.records_written, took=result.duration_seconds))
 )
-
 result = pipeline.run(connectors={"inmem-src": src, "inmem-snk": snk})
-assert result.success
-assert [r.data["name"] for r in snk.rows] == ["ALICE", "BOB"]
 ```
 
-YAML 파이프라인 정의와 `etlx` CLI는 Step 3에서 도입 예정:
+---
 
-```yaml
-# configs/pipelines/orders_to_dw.yaml — Step 3 이후 동작
-name: orders_to_dw
-mode: batch
-source: { connection: pg_prod, query: "SELECT * FROM orders WHERE updated_at > :ts" }
-sink: { connection: snowflake_dw, table: ANALYTICS.ORDERS, mode: upsert, key_columns: [ORDER_ID] }
+## 사용 예 3: Orchestrator adapters
+
+```python
+# Airflow
+from airflow import DAG
+from etl_plugins.adapters.airflow import ETLPluginsOperator
+
+with DAG("etl_demo", schedule="@hourly", ...) as dag:
+    ETLPluginsOperator(
+        task_id="orders_to_dw",
+        pipeline_yaml="configs/pipelines/orders_to_dw.yaml",
+        connections="configs/connections.yaml",
+    )
+
+# Dagster
+from dagster import job
+from etl_plugins.adapters.dagster import EtlPluginsResource, etl_plugins_op
+
+@job(resource_defs={"etl_plugins": EtlPluginsResource(connections_path="configs/connections.yaml")})
+def my_job():
+    etl_plugins_op()
+
+# Prefect
+from etl_plugins.adapters.prefect import run_etl_pipeline_flow
+run_etl_pipeline_flow("configs/pipelines/orders_to_dw.yaml", "configs/connections.yaml")
 ```
 
-```bash
-uv run etlx run configs/pipelines/orders_to_dw.yaml     # Step 3
-uv run etlx test-connection --all                        # Step 3
-```
-
-Airflow / Dagster / Prefect 어댑터는 `SPEC.md` §7 참조 (Step 4).
+각 adapter는 PEP 562 lazy 로딩 — orchestrator가 설치되지 않은 환경에서도 모듈 import는 성공한다. 심볼 접근 시점에 helpful `ImportError`로 안내.
 
 ---
 
 ## 아키텍처 개요
 
 ```
-Orchestrator Adapters  (Airflow / Dagster / Prefect / CLI)        ← Step 4 / Step 3
+Orchestrator Adapters  (Airflow / Dagster / Prefect / etlx CLI)   ← ✅ Steps 3.1, 4
         ↑
-Pipeline Core          (Pipeline / Task / Context / Hooks)        ← Step 1.4 완료
+Pipeline Runtime       (YAML builder / transforms / arun_stream /
+                        retry / DLQ / auto-metrics)               ← ✅ Step 3
         ↑
-Connector Abstraction  (BatchSource/Sink, StreamSource/Sink)      ← Step 1.4 완료
+Pipeline Core          (Pipeline / Task / Context / Hooks)        ← ✅ Step 1.4
         ↑
-Connectors (plugins)   (postgres, s3, kafka, snowflake, ...)      ← Step 2~
+Connector Abstraction  (BatchSource/Sink, StreamSource/Sink)      ← ✅ Step 1.4
+        ↑
+Connectors (plugins)   (postgres, mysql, sqlite, s3, kafka, ...)  ← ✅ Steps 2 + 5.1
         ↑
 Foundation             (Config / Secrets / Logging / Metrics
-                        / Tracing / Retry / Chunk / async_io)     ← Step 1.5-1.7 완료
+                        / Tracing / Retry / Chunk / async_io)     ← ✅ Steps 1.5–1.7
 ```
 
 상세 다이어그램은 [`SPEC.md`](./SPEC.md) §2.

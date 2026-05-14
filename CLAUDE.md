@@ -84,17 +84,27 @@ uv run mypy etl_plugins
 
 ## 5. 현재 단계
 
-**Step 2 — Reference Connectors** (다음 시작 예정). **Step 1 (Foundation) 완료 (2026-05-14)** — 193 단위 테스트 통과, 7개 ADR.
+**Step 5 — Connector Expansion 진행 중** (2026-05-14 기준). Steps 1–4 + Step 5.1 RDBMS 일부(MySQL, SQLite)까지 완료. 321 단위 + 3 skip + 111 통합 = **435 테스트** all green, **16 ADR**.
 
 다음 할 일은 항상 `ROADMAP.md`의 첫 번째 **미체크 + "← 작업 중" 표시** 항목.
 
 Step별 산출물 요약:
-- ✅ Step 1: 스캐폴딩, Harness 문서, Core/Config/Observability/Utils/테스트 인프라
-- Step 2: 레퍼런스 커넥터 3종 (`postgres`, `s3`, `kafka`)
-- Step 3: YAML→Pipeline 빌더, `etlx` CLI, Retry/DLQ/Checkpoint, Pipeline observability 통합
-- Step 4: Orchestrator adapter (Airflow/Dagster/Prefect)
-- Step 5: 커넥터 확장 (DW/NoSQL/Stream/Object 추가)
-- Step 6: OpenLineage, OTel/Prometheus 실구현, mkdocs, v0.1.0 릴리스
+- ✅ Step 1 (Foundation): 스캐폴딩, Harness 문서, Core/Config/Observability/Utils/테스트 인프라 — ADR-0001~0007
+- ✅ Step 2 (Reference Connectors): `postgres`(psycopg3), `s3`(boto3+pyarrow, MinIO 호환), `kafka`(aiokafka, Stream Contract 신규 도입) — ADR-0008~0010
+- ✅ Step 3 (Pipeline 실행기 + CLI):
+  - 3.1 YAML→Pipeline 빌더 + `etlx` CLI 5 서브커맨드 + transforms(rename/cast/filter sandbox/python) — ADR-0011
+  - 3.2 Stream runtime(`Pipeline.arun_stream`, async Kafka commit, buffer policy) — ADR-0012
+  - 3.3 Retry + DLQ + 자동 메트릭 emit + `--log-format` 글로벌 옵션 — ADR-0013
+- ✅ Step 4 (Orchestrator Adapters): Airflow `ETLPluginsOperator`, Dagster resource+op, Prefect flow/task — PEP 562 lazy 로딩 — ADR-0014
+- 🔄 Step 5 (Connector Expansion):
+  - 5.1 RDBMS: ✅ MySQL(PyMySQL) — ADR-0015, ✅ SQLite(stdlib) — ADR-0016. MSSQL/Oracle 남음
+  - 5.2 DW (Snowflake/BigQuery/Redshift/ClickHouse) — 미착수
+  - 5.3 NoSQL (MongoDB/Redis/DynamoDB/Cassandra) — 미착수
+  - 5.4 Streaming (Kinesis/Pulsar/RabbitMQ/NATS) — 미착수
+  - 5.5 CDC (Debezium / PG logical) — 미착수
+  - 5.6 Object (GCS / Azure Blob) — 미착수
+  - 5.7 HTTP/REST — 미착수
+- Step 6 (강화): OpenLineage, OTel/Prometheus 실구현, mkdocs, v0.1.0 릴리스 — 미착수. Checkpoint/Cursor abstraction + Pipeline span emit도 여기로 이동.
 
 ---
 

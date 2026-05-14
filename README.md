@@ -3,7 +3,24 @@
 > Backend-agnostic, orchestrator-agnostic **Python ETL plugin library**.
 > 모든 데이터 소스/싱크(RDBMS, NoSQL, DW, Stream, Object Storage)에 대해 통일된 인터페이스를 제공하고, 어떤 오케스트레이터(Airflow / Dagster / Prefect / 사내 워크플로우) 위에서도 그대로 재사용할 수 있다.
 
-**현재 단계**: Step 1 — Foundation (in progress, 2026-05-14 착수). 상세는 [`ROADMAP.md`](./ROADMAP.md) 참조.
+[![CI](https://github.com/genebir/ETL/actions/workflows/ci.yml/badge.svg)](https://github.com/genebir/ETL/actions/workflows/ci.yml)
+[![Python](https://img.shields.io/badge/python-%E2%89%A53.11-blue)](https://www.python.org)
+[![License](https://img.shields.io/badge/license-Apache--2.0-green)](#라이선스)
+[![uv](https://img.shields.io/badge/managed%20by-uv-purple)](https://github.com/astral-sh/uv)
+
+---
+
+## 현재 상태 (2026-05-14)
+
+**Step 1 — Foundation 진행 중.** 다음과 같이 완료됨:
+
+- [x] Harness 문서 · 스캐폴딩 · 환경 재현 · CI [Step 1.0–1.3]
+- [x] **Core 추상화** [Step 1.4]: `Connector` / `BatchSource` / `BatchSink` / `StreamSource` / `StreamSink`, `Record` (Pydantic), `Schema`, `Pipeline` + `Task` (fluent builder), `Context`, `ConnectorRegistry` — **57 단위 테스트 통과**
+- [ ] Config 로더 · Observability · Utils · 테스트 인프라 [Step 1.5–1.8]
+- [ ] 레퍼런스 커넥터 3종 (postgres, s3, kafka) [Step 2]
+- [ ] CLI + Orchestrator adapters + 추가 커넥터 + 강화 [Step 3–6]
+
+상세 진행은 [`ROADMAP.md`](./ROADMAP.md), 설계 결정은 [`DECISIONS.md`](./DECISIONS.md).
 
 ---
 
@@ -23,7 +40,7 @@
 ## 빠른 시작
 
 ```bash
-git clone <repo-url>
+git clone git@github.com:genebir/ETL.git
 cd ETL
 ./scripts/bootstrap.sh        # uv sync + .env 복사 + pre-commit + docker compose up
 ```
@@ -32,32 +49,125 @@ cd ETL
 
 ---
 
-## 사용 예 (목표 인터페이스 — Step 2~3에서 구현)
+## 사용 예 (Step 1.4 기준 — 동작하는 in-Python API)
 
-**파이프라인 정의**(`configs/pipelines/orders_to_dw.yaml`):
+```python
+from collections.abc import Iterable, Iterator
+from etl_plugins import (
+    BatchSink, BatchSource, ConnectorRegistry, Pipeline, Record, Task,
+)
+
+
+@ConnectorRegistry.register("inmem-src")
+class MySource(BatchSource):
+    def connect(self) -> None: ...
+    def close(self) -> None: ...
+    def health_check(self) -> bool: return True
+
+    def read(self, query: str | None = None, **opts) -> Iterator[Record]:
+        yield Record(data={"id": 1, "name": "Alice"})
+        yield Record(data={"id": 2, "name": "Bob"})
+
+
+@ConnectorRegistry.register("inmem-snk")
+class MySink(BatchSink):
+    def __init__(self) -> None: self.rows: list[Record] = []
+    def connect(self) -> None: ...
+    def close(self) -> None: ...
+    def health_check(self) -> bool: return True
+
+    def write(self, records: Iterable[Record], *, mode="append",
+              key_columns=None, **opts) -> int:
+        before = len(self.rows)
+        self.rows.extend(records)
+        return len(self.rows) - before
+
+
+src, snk = MySource(), MySink()
+
+pipeline = (
+    Pipeline("orders_to_dw")
+    .add(
+        Task.extract("inmem-src", "SELECT * FROM orders")
+            .transform(lambda r: Record(data={**r.data, "name": r.data["name"].upper()}))
+            .load("inmem-snk", mode="upsert", key_columns=["id"])
+    )
+    .on("post_run",
+        lambda ctx, result: ctx.logger.info(
+            "done", rows=result.records_written, took=result.duration_seconds))
+)
+
+result = pipeline.run(connectors={"inmem-src": src, "inmem-snk": snk})
+assert result.success
+assert [r.data["name"] for r in snk.rows] == ["ALICE", "BOB"]
+```
+
+YAML 파이프라인 정의와 `etlx` CLI는 Step 3에서 도입 예정:
+
 ```yaml
+# configs/pipelines/orders_to_dw.yaml — Step 3 이후 동작
 name: orders_to_dw
 mode: batch
 source: { connection: pg_prod, query: "SELECT * FROM orders WHERE updated_at > :ts" }
 sink: { connection: snowflake_dw, table: ANALYTICS.ORDERS, mode: upsert, key_columns: [ORDER_ID] }
 ```
 
-**CLI**:
 ```bash
-uv run etlx run configs/pipelines/orders_to_dw.yaml
-uv run etlx test-connection --all
+uv run etlx run configs/pipelines/orders_to_dw.yaml     # Step 3
+uv run etlx test-connection --all                        # Step 3
 ```
 
-**Python**:
-```python
-from etl_plugins import Pipeline
-Pipeline.from_yaml("configs/pipelines/orders_to_dw.yaml").run()
+Airflow / Dagster / Prefect 어댑터는 `SPEC.md` §7 참조 (Step 4).
+
+---
+
+## 아키텍처 개요
+
+```
+Orchestrator Adapters  (Airflow / Dagster / Prefect / CLI)
+        ↑
+Pipeline Core          (Pipeline / Task / Context / Hooks)        ← Step 1.4 완료
+        ↑
+Connector Abstraction  (BatchSource/Sink, StreamSource/Sink)      ← Step 1.4 완료
+        ↑
+Connectors (plugins)   (postgres, s3, kafka, snowflake, ...)      ← Step 2~
+        ↑
+Foundation             (Config / Secrets / Logging / Retry)       ← Step 1.5~
 ```
 
-**Airflow / Dagster / Prefect**: 얇은 어댑터로 그대로 호출. SPEC.md §7 참조.
+상세 다이어그램은 [`SPEC.md`](./SPEC.md) §2.
+
+---
+
+## 핵심 설계 원칙
+
+| 원칙 | 설명 |
+|---|---|
+| **Backend-agnostic** | Connector 구현체만 추가하면 어떤 DB/스트림도 지원 |
+| **Orchestrator-agnostic** | 어떤 오케스트레이터에도 종속되지 않는 순수 Python 코어 |
+| **Config-driven** | 코드 변경 없이 `.env` + YAML만으로 동작 변경 |
+| **Batch + Stream 통합** | 동일한 추상화 위에서 배치/스트리밍 모두 지원 |
+| **Pluggable** | Entry point / Registry 패턴으로 외부 패키지에서 확장 가능 |
+| **Type-safe** | Pydantic 스키마 검증 + mypy strict |
+| **Observable** | 표준 로깅·메트릭·트레이싱 hook 내장 |
+| **Portable (Harness)** | 어떤 PC/환경에서든 동일하게 재현·이어작업 가능 |
+
+---
+
+## 개발
+
+```bash
+make help        # 사용 가능한 타깃 목록
+make test        # uv run pytest -m "not it"
+make lint        # ruff check + mypy
+make fmt         # ruff format + autofix
+make up / down   # docker compose dev infra
+```
+
+새 커넥터를 추가하는 절차는 [`DEVELOPMENT.md`](./DEVELOPMENT.md) §7.
 
 ---
 
 ## 라이선스
 
-Apache License 2.0. 자세한 내용은 (추후 추가될) `LICENSE` 파일 참조.
+Apache License 2.0. (`LICENSE` 파일은 첫 릴리스 전 추가)

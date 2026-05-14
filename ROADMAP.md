@@ -40,16 +40,18 @@
 - [x] `tests/` 초기 구조 + 패키지 sanity test (`tests/test_package.py`)
 - [x] Dynamic version (`etl_plugins/__init__.py`가 단일 진실)
 
-### 1.4 Core 추상화 (`etl_plugins/core/`)  ← **다음 작업 (2026-05-14)**
-- [ ] `connector.py` — `Connector`, `BatchSource/Sink`, `StreamSource/Sink`
-- [ ] `record.py` — Pydantic `Record`
-- [ ] `schema.py`
-- [ ] `registry.py` — `ConnectorRegistry` + entry-point 자동 로드
-- [ ] `context.py` — `Context(run_id, logger, ...)`
-- [ ] `pipeline.py` — `Pipeline`, `Task`, hooks (pre/post, on_error, on_retry)
-- [ ] `exceptions.py`
+### 1.4 Core 추상화 (`etl_plugins/core/`)
+- [x] `exceptions.py` — ETLError 계층 (Config/Registry/Connector/Pipeline/...)
+- [x] `record.py` — Pydantic `Record` (extra=forbid)
+- [x] `schema.py` — `Field`, `Schema` (minimal, frozen)
+- [x] `connector.py` — `Connector`, `BatchSource/Sink`, `StreamSource/Sink` (ABC)
+- [x] `registry.py` — `ConnectorRegistry` + entry-point 자동 로드 (fail-soft)
+- [x] `context.py` — `Context` (uuid run_id, structlog bound logger)
+- [x] `pipeline.py` — `Pipeline` + `Task` (fluent builder) + `RunResult` + hooks
+- [x] `etl_plugins/{__init__.py, core/__init__.py}` re-exports
+- [x] 단위 테스트 57개 (`tests/unit/core/`) — mypy strict / ruff / pytest 통과
 
-### 1.5 Config (`etl_plugins/config/`)
+### 1.5 Config (`etl_plugins/config/`)  ← **다음 작업 (2026-05-14)**
 - [ ] `loader.py` — YAML + `${VAR}` 치환 + `!secret` 태그
 - [ ] `models.py` — Pydantic 설정 모델
 - [ ] `secrets.py` — `env` / `vault` / `aws_sm` / `gcp_sm` 추상화
@@ -174,3 +176,4 @@
 - 2026-05-14: 최초 작성. Step 1 착수.
 - 2026-05-14: Step 1.0 (Harness 문서), 1.1 (스캐폴딩), 1.2 (환경 재현) 완료. 다음은 1.3 (CI).
 - 2026-05-14: Step 1.3 (CI) 완료. CI 워크플로 + release 워크플로 + tests 초기 구조 + dynamic version. 다음은 1.4 (Core 추상화).
+- 2026-05-14: Step 1.4 (Core 추상화) 완료. exceptions/record/schema/connector/registry/context/pipeline + 57 unit tests. ADR-0003 추가. 다음은 1.5 (Config 로더).

@@ -1,39 +1,31 @@
-"""ETL Plugins — backend-agnostic, orchestrator-agnostic Python ETL library.
+"""Core abstractions: Connector, Record, Schema, Registry, Context, Pipeline."""
 
-See SPEC.md for the full design and ROADMAP.md for the implementation status.
-"""
-
-from etl_plugins.core import (
+from etl_plugins.core.connector import (
     BatchSink,
     BatchSource,
-    ConfigError,
-    ConnectError,
     Connector,
-    ConnectorError,
-    ConnectorRegistry,
-    Context,
-    ETLError,
-    Field,
-    Hook,
-    Pipeline,
-    PipelineError,
-    ReadError,
-    Record,
-    RecordError,
-    RegistryError,
-    RunResult,
-    Schema,
-    SecretError,
     StreamSink,
     StreamSource,
-    Task,
+)
+from etl_plugins.core.context import Context
+from etl_plugins.core.exceptions import (
+    ConfigError,
+    ConnectError,
+    ConnectorError,
+    ETLError,
+    PipelineError,
+    ReadError,
+    RecordError,
+    RegistryError,
+    SecretError,
     TaskError,
     TransformError,
-    TransformFn,
     WriteError,
 )
-
-__version__ = "0.0.1"
+from etl_plugins.core.pipeline import Hook, Pipeline, RunResult, Task, TransformFn
+from etl_plugins.core.record import Record
+from etl_plugins.core.registry import ConnectorRegistry
+from etl_plugins.core.schema import Field, Schema
 
 __all__ = [
     "BatchSink",
@@ -63,5 +55,4 @@ __all__ = [
     "TransformError",
     "TransformFn",
     "WriteError",
-    "__version__",
 ]

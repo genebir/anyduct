@@ -38,9 +38,21 @@
   - `tests/` 초기 구조 (`__init__.py`, `conftest.py`, `test_package.py` 2 tests)
   - `pyproject.toml`: dynamic version (`etl_plugins/__init__.py.__version__` 단일 소스)
 
+- **Core 추상화** [Step 1.4]
+  - `etl_plugins/core/exceptions.py` — `ETLError` 계층 (12개)
+  - `etl_plugins/core/record.py` — Pydantic `Record` (extra="forbid")
+  - `etl_plugins/core/schema.py` — `Field`, `Schema` (frozen, minimal)
+  - `etl_plugins/core/connector.py` — `Connector` / `BatchSource` / `BatchSink` / `StreamSource` / `StreamSink` ABCs
+  - `etl_plugins/core/registry.py` — `ConnectorRegistry` 데코레이터 + entry-point 자동 로드 (fail-soft)
+  - `etl_plugins/core/context.py` — `Context` (uuid run_id, structlog bound logger)
+  - `etl_plugins/core/pipeline.py` — `Pipeline` + `Task` (fluent builder) + `RunResult` + hooks (pre_run/post_run/on_error/on_task_start/on_task_end)
+  - 패키지 루트 / `core/__init__.py` re-exports (28 public 심볼)
+  - 단위 테스트 57개 (`tests/unit/core/`) — mypy strict / ruff / pytest 일괄 통과
+
 ### Decisions
 - ADR-0001: SPEC.md와 CLAUDE.md 역할 분리
 - ADR-0002: Foundation 기술 스택 확정 (Python 3.11+, uv, Pydantic v2, Typer, structlog, hatchling, Apache-2.0)
+- ADR-0003: Step 1.4 Core 추상화 주요 결정 (fluent builder, caller-managed lifecycle, hooks via `.on(...)`, batch-only Step 1.4, `ConnectError` 명명, 등)
 
 ### Changed
 - (없음)

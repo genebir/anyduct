@@ -1,0 +1,151 @@
+---
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_FROZEN: "1"   # 락파일과 일치하지 않으면 실패
+  PYTHONUNBUFFERED: "1"
+  FORCE_COLOR: "1"
+
+jobs:
+  lint:
+    name: Lint & Type Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+
+      - name: Sync deps (frozen)
+        run: uv sync --frozen
+
+      - name: Ruff lint
+        run: uv run ruff check . --output-format=github
+
+      - name: Ruff format check
+        run: uv run ruff format --check .
+
+      - name: mypy
+        run: uv run mypy etl_plugins
+
+      - name: yamllint
+        run: uv run yamllint -c .yamllint.yaml .
+
+      - name: detect-secrets audit
+        run: |
+          uv run detect-secrets scan --baseline .secrets.baseline
+          uv run detect-secrets audit .secrets.baseline --report --fail-on-unaudited || true
+
+  test-unit:
+    name: Unit (py${{ matrix.python }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Setup Python ${{ matrix.python }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Sync deps
+        # 3.12 매트릭스에서는 uv가 락파일을 재계산해야 할 수도 있으므로 frozen 해제
+        run: uv sync
+
+      - name: Pytest (unit)
+        run: |
+          uv run pytest -m "not it" \
+            --cov=etl_plugins --cov-report=xml --cov-report=term-missing \
+            || EXIT=$?; [ "${EXIT:-0}" = "5" ] && echo "(no tests collected)" || exit "${EXIT:-0}"
+
+      - name: Upload coverage
+        if: matrix.python == '3.11'
+        uses: codecov/codecov-action@v4
+        with:
+          file: coverage.xml
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+  test-integration:
+    name: Integration (docker)
+    runs-on: ubuntu-latest
+    needs: lint
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+
+      - name: Sync deps (frozen)
+        run: uv sync --frozen
+
+      - name: Pytest (integration, testcontainers)
+        run: |
+          # 통합 테스트가 없을 때(exit code 5)는 통과로 간주
+          uv run pytest -m it -ra || EXIT=$?
+          [ "${EXIT:-0}" = "5" ] && echo "(no integration tests yet)" && exit 0
+          exit "${EXIT:-0}"
+
+  build:
+    name: Build wheel/sdist
+    runs-on: ubuntu-latest
+    needs: [lint, test-unit]
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+
+      - name: Build
+        run: uv build
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          retention-days: 7

@@ -1,0 +1,136 @@
+---
+name: Release
+
+# 태그 푸시(v*.*.*) 시 동작.
+# 사전 준비:
+#   1) PyPI 측에 Trusted Publisher 등록 (https://docs.pypi.org/trusted-publishers/)
+#      - PyPI Project: etl-plugins
+#      - GitHub repo + workflow: release.yml
+#      - Environment: pypi
+#   2) GitHub repo Settings → Environments → "pypi" 생성 (보호 규칙 권장)
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-*"  # pre-release: v0.1.0-rc1 등
+
+permissions:
+  contents: write   # GitHub release 생성
+  id-token: write   # PyPI trusted publishing (OIDC)
+
+jobs:
+  verify:
+    name: Verify version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.extract.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+
+      - name: Sync
+        run: uv sync --frozen
+
+      - name: Extract & verify version
+        id: extract
+        run: |
+          TAG_REF="${GITHUB_REF#refs/tags/v}"
+          PKG_VERSION="$(uv run python -c 'import etl_plugins; print(etl_plugins.__version__)')"
+          echo "Tag version : $TAG_REF"
+          echo "Pkg version : $PKG_VERSION"
+          if [ "$TAG_REF" != "$PKG_VERSION" ]; then
+            echo "::error::tag ($TAG_REF) does not match etl_plugins.__version__ ($PKG_VERSION)"
+            exit 1
+          fi
+          echo "version=$PKG_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Verify CHANGELOG has matching section
+        run: |
+          if ! grep -qE "^## \[?${{ steps.extract.outputs.version }}\]?" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md에 [${{ steps.extract.outputs.version }}] 섹션이 없습니다"
+            exit 1
+          fi
+
+  build:
+    name: Build distributions
+    runs-on: ubuntu-latest
+    needs: verify
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+
+      - name: Build (uv build)
+        run: uv build
+
+      - name: List artifacts
+        run: ls -la dist/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish-pypi:
+    name: Publish to PyPI
+    runs-on: ubuntu-latest
+    needs: build
+    environment:
+      name: pypi
+      url: https://pypi.org/p/etl-plugins
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish (Trusted Publishing)
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    name: GitHub Release
+    runs-on: ubuntu-latest
+    needs: [verify, build]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Extract release notes from CHANGELOG
+        run: |
+          VERSION="${{ needs.verify.outputs.version }}"
+          awk -v v="$VERSION" '
+            $0 ~ "^## \\[?"v"\\]?" {flag=1; next}
+            flag && /^## / {exit}
+            flag {print}
+          ' CHANGELOG.md > release_notes.md
+          if [ ! -s release_notes.md ]; then
+            echo "(see CHANGELOG.md)" > release_notes.md
+          fi
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: release_notes.md
+          files: dist/*
+          prerelease: ${{ contains(github.ref_name, '-') }}

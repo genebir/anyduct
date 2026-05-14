@@ -1,0 +1,56 @@
+# --- Secrets (시크릿 노출 방지: 절대 커밋 금지) ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p8
+secrets/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# --- Virtual envs ---
+.venv/
+venv/
+env/
+
+# --- Tool caches ---
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.cover
+
+# --- uv ---
+# uv.lock은 커밋 (재현성). .venv는 제외
+# (uv.lock 자체는 위 dist/build와 별개로 명시적으로 커밋)
+
+# --- Editor / OS ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# --- Logs / Local artifacts ---
+*.log
+logs/
+*.pid
+.cache/
+tmp/

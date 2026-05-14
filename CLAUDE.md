@@ -84,17 +84,17 @@ uv run mypy etl_plugins
 
 ## 5. 현재 단계
 
-**Step 1 — Foundation** 진행 중 (2026-05-14 착수).
+**Step 2 — Reference Connectors** (다음 시작 예정). **Step 1 (Foundation) 완료 (2026-05-14)** — 193 단위 테스트 통과, 7개 ADR.
 
 다음 할 일은 항상 `ROADMAP.md`의 첫 번째 **미체크 + "← 작업 중" 표시** 항목.
 
 Step별 산출물 요약:
-- Step 1: 스캐폴딩, Harness 문서(이 파일들), Core 추상화, Config 로더, 관찰성 베이스
+- ✅ Step 1: 스캐폴딩, Harness 문서, Core/Config/Observability/Utils/테스트 인프라
 - Step 2: 레퍼런스 커넥터 3종 (`postgres`, `s3`, `kafka`)
-- Step 3: YAML→Pipeline 빌더, `etlx` CLI, Retry/DLQ/Checkpoint
+- Step 3: YAML→Pipeline 빌더, `etlx` CLI, Retry/DLQ/Checkpoint, Pipeline observability 통합
 - Step 4: Orchestrator adapter (Airflow/Dagster/Prefect)
 - Step 5: 커넥터 확장 (DW/NoSQL/Stream/Object 추가)
-- Step 6: OpenLineage, contract test suite, mkdocs, v0.1.0 릴리스
+- Step 6: OpenLineage, OTel/Prometheus 실구현, mkdocs, v0.1.0 릴리스
 
 ---
 

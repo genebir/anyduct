@@ -175,4 +175,30 @@
 
 ---
 
+## ADR-0007: Step 1.8 테스트 인프라 — 설계 결정
+
+- **Date**: 2026-05-14
+- **Status**: Accepted
+- **Context**:
+  SPEC.md §9.5는 "새 커넥터는 공통 contract test suite 통과 필수 (read 후 write 후 read 일치 등)"와 "표준 샘플 데이터셋을 `tests/fixtures/`에 두고 모든 커넥터 테스트가 동일 데이터 사용"을 요구한다. 동시에 기존 InMemory 커넥터는 `tests/unit/core/conftest.py`에 묻혀 있어 contract suite와 공유하기 어려웠다.
+- **Decision**:
+  1. **Contract test = subclass-able mixin 클래스**. 베이스 클래스 이름이 `_`로 시작하면 pytest가 자동 수집하지 않으므로 추상 base가 됨. 신규 커넥터 테스트는 `class TestPostgresSource(_BatchSourceContract): @pytest.fixture def source(self): ...`만 작성하면 모든 inherited 테스트가 새 fixture로 실행됨.
+  2. **세 가지 contract**:
+     - `_BatchSourceContract` (7 tests) — interface / lifecycle / read() iterator + Record yield + seeded data 일치 + 반복 호출
+     - `_BatchSinkContract` (5 tests) — interface / lifecycle / write return count / empty input / generator 입력
+     - `_BatchRoundTripContract` (3 tests) — write → read 동등성 (정렬 무관)
+  3. **`normalize_payloads`로 order-independent 비교**. payload를 `(key, repr(value))` 튜플로 정규화 후 정렬 → 두 record 리스트가 순서 무관하게 같으면 같은 결과. nested dict/list도 repr로 직렬화하므로 동작.
+  4. **`InMemoryBatchSourceSink` (combined 커넥터)**. 단일 shared store 위에 read+write 모두 구현 — round-trip 테스트의 자연스러운 fixture. 실제 커넥터(예: postgres single connection)와 일치하는 패턴.
+  5. **`tests/fixtures/`로 데이터 + 커넥터 분리**. `records.py`는 plain factories (pytest 비의존), `connectors.py`는 InMemory 구현체. pytest fixture 래퍼는 conftest에 둠.
+  6. **`sample_records`를 `tests/conftest.py`(top-level)로 승격**. 전 디렉토리에서 사용 가능. 기존 `tests/unit/core/conftest.py`의 동일 fixture는 제거 (자동 상속).
+- **Consequences**:
+  - (+) 신규 커넥터를 추가할 때 contract 통과 = 한 줄짜리 subclass + fixture 두 개로 끝. 진입 비용 매우 낮음.
+  - (+) `tests/contracts/test_inmem.py`가 contract suite 자체의 검증 역할 — 깨지면 즉시 발견.
+  - (+) 표준 데이터셋(`sample_records`, `large_records`, `mixed_types_records`)으로 커넥터 간 동작 일관성 비교 가능.
+  - (−) 새 커넥터가 mixed_types_records의 모든 타입을 지원해야 한다는 의무는 없음 — 각 커넥터가 어떤 contract를 통과해야 할지는 그 커넥터의 책임 (Step 2 PR 단위 결정).
+  - (−) Stream contract (`_StreamSourceContract` 등)은 아직 없음 — Step 2.3 (Kafka) 도입 시 추가 예정.
+- **References**: SPEC.md §9.5 · `tests/contracts/` · `tests/fixtures/`
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

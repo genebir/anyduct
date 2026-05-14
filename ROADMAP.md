@@ -72,16 +72,27 @@
 - [x] `async_io.py` — `run_sync_in_thread`, `gather_with_concurrency`, `iter_to_async`
 - [x] 단위 테스트 42개 (총 178)
 
-### 1.8 테스트 인프라  ← **다음 작업 (2026-05-14)**
-- [ ] `tests/conftest.py` (공통 fixture)
-- [ ] `tests/fixtures/` (표준 샘플 데이터셋)
-- [ ] Contract test 베이스 (`tests/contracts/`)
+### 1.8 테스트 인프라
+- [x] `tests/conftest.py` 글로벌 `sample_records` fixture
+- [x] `tests/fixtures/records.py` (sample / large / mixed_types) + `tests/fixtures/connectors.py` (InMemory 3종)
+- [x] `tests/contracts/batch.py` — `_BatchSourceContract` / `_BatchSinkContract` / `_BatchRoundTripContract` (subclass-able mixin)
+- [x] `tests/contracts/_helpers.py` — `normalize_payloads` (order-independent equality)
+- [x] `tests/contracts/test_inmem.py` — InMemory로 contract suite 자체 검증 (15 tests)
+- [x] 기존 `tests/unit/core/conftest.py` 슬림화 (InMemory를 fixtures로 이동)
+- [ ] Stream contract (`_StreamSourceContract` 등) — **Step 2.3 (Kafka)에서 추가**
+
+---
+
+## **Step 1 — Foundation: 완료 (2026-05-14)**
+
+총 193 단위 테스트, 7개 ADR, 라이브러리 코어/Config/Observability/Utils/테스트 인프라까지 완비.
+**다음은 Step 2: Reference Connectors.**
 
 ---
 
 ## Step 2 — Reference Connectors (각 카테고리 1개씩 먼저)
 
-### 2.1 `postgres` (BatchSource + BatchSink)
+### 2.1 `postgres` (BatchSource + BatchSink)  ← **다음 작업 (2026-05-14)**
 - [ ] 드라이버 결정 (psycopg vs asyncpg) — ADR
 - [ ] `BatchSource.read` (chunked, server-side cursor)
 - [ ] `BatchSink.write` (append/overwrite/upsert via `INSERT ... ON CONFLICT`)
@@ -186,3 +197,4 @@
 - 2026-05-14: Step 1.5 (Config 로더) 완료. models/secrets/loader + 49 unit tests (총 106). ADR-0004 추가. 다음은 1.6 (Observability).
 - 2026-05-14: Step 1.6 (Observability 베이스) 완료. logging/metrics/tracing ABC + NoOp + 30 unit tests (총 136). ADR-0005 추가. OTel 실제 구현은 Step 6로 이동, Pipeline 자동 계측은 Step 3로 이동. 다음은 1.7 (Utils).
 - 2026-05-14: Step 1.7 (Utils) 완료. retry/chunk/async_io + 42 unit tests (총 178). ADR-0006 추가. Circuit Breaker/Rate Limiter/DLQ는 Step 3으로 이동. 다음은 1.8 (테스트 인프라).
+- 2026-05-14: **Step 1.8 (테스트 인프라) + Step 1 전체 완료.** tests/fixtures/ + tests/contracts/ + 15 contract tests (총 193). ADR-0007 추가. 다음은 Step 2.1 (postgres 커넥터).

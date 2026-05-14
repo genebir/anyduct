@@ -71,6 +71,15 @@
   - 단위 테스트 42개 (`tests/unit/utils/`)
   - 패키지 루트 re-exports: `retryable`, `chunked`, `run_sync_in_thread`, `gather_with_concurrency`, `iter_to_async`
 
+- **테스트 인프라** [Step 1.8]
+  - `tests/fixtures/records.py` — `sample_records` (3-row), `large_records(n)`, `mixed_types_records` 데이터 factory
+  - `tests/fixtures/connectors.py` — `InMemoryBatchSource` / `InMemoryBatchSink` / `InMemoryBatchSourceSink` (reference impls)
+  - `tests/contracts/batch.py` — `_BatchSourceContract` (7 tests) / `_BatchSinkContract` (5 tests) / `_BatchRoundTripContract` (3 tests) — subclass-able mixin pattern (`_` prefix로 자동 수집 회피)
+  - `tests/contracts/_helpers.py` — `normalize_payloads` (order-independent equality)
+  - `tests/contracts/test_inmem.py` — InMemory로 contract suite 자체 검증 (15 tests)
+  - `tests/conftest.py` — `sample_records` 글로벌 fixture
+  - `tests/unit/core/conftest.py` — InMemory를 fixtures로 이동 후 슬림화
+
 ### Decisions
 - ADR-0001: SPEC.md와 CLAUDE.md 역할 분리
 - ADR-0002: Foundation 기술 스택 확정 (Python 3.11+, uv, Pydantic v2, Typer, structlog, hatchling, Apache-2.0)
@@ -78,6 +87,10 @@
 - ADR-0004: Step 1.5 Config 로더 설계 결정 (로드 순서, `${VAR}` 단순 문법, `extra=allow/forbid` 이중 기준, SecretBackend ABC + 스텁)
 - ADR-0005: Step 1.6 Observability 설계 결정 (ABC+NoOp 패턴, structlog JSON 기본, substring 마스킹, OTel 실구현은 Step 6로 이동)
 - ADR-0006: Step 1.7 Utils 설계 결정 (tenacity 얇은 래퍼, sync+async 단일 데코레이터, observability 자동 연동, CB/RateLimiter는 Step 3로 이동)
+- ADR-0007: Step 1.8 테스트 인프라 설계 결정 (subclass-able contract mixin, normalize_payloads, InMemoryBatchSourceSink combined 커넥터)
+
+### Milestone
+- **Step 1 — Foundation 완료 (2026-05-14)**: 193 단위 테스트, 7 ADRs, 라이브러리 코어/Config/Observability/Utils/테스트 인프라 모두 완비.
 
 ### Changed
 - (없음)

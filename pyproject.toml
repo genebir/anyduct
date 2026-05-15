@@ -171,6 +171,12 @@ markers = [
     "slow: marks tests as slow",
 ]
 asyncio_mode = "auto"
+# Session-scoped async fixtures (e.g. testcontainers engine) require a
+# session-scoped event loop. Defaulting both fixture and test loop scope to
+# "session" lets the integration tests share the one Postgres container's
+# connection pool across the whole run.
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
 
 # === coverage ===
 [tool.coverage.run]

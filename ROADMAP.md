@@ -236,16 +236,20 @@
   - etl_plugins.core → connectors/adapters/runtime 차단
 - [x] 루트 README CI 뱃지 3개로 분리
 
-### 7.2 메타데이터 DB 스키마
-- [ ] SQLAlchemy 2.x async 모델 정의
-  - `workspaces`, `users`, `roles`, `memberships`
-  - `connections` (workspace_id, type, config_json, secret_refs)
-  - `pipelines`, `pipeline_versions` (이력)
-  - `schedules` (cron / stream-active)
-  - `runs`, `run_logs`, `run_metrics`
-  - `audit_log` (actor + before/after JSON)
-- [ ] Alembic 초기 마이그레이션 (`alembic init`, `alembic revision --autogenerate`)
-- [ ] 테스트: testcontainers Postgres + factory_boy fixture
+### 7.2 메타데이터 DB 스키마 ✅ (2026-05-16)
+- [x] SQLAlchemy 2.x async 모델 정의
+  - [x] `workspaces`, `users`, `memberships`, `personal_access_tokens` (ADR-0023)
+  - [x] `connections` (workspace_id+name unique, type, config_json, secret_refs — 평문 금지)
+  - [x] `pipelines`, `pipeline_versions` (immutable snapshot, version unique per pipeline)
+  - [x] `schedules` (cron_expr nullable for stream mode, config_overrides JSONB)
+  - [x] `runs`, `run_logs`, `run_metrics` — `runs`는 워커 큐 겸 결과 SSOT (ADR-0021)
+  - [x] `audit_logs` (actor SET NULL, before/after JSONB, GIN 인덱스)
+- [x] uuid7 PK (RFC 9562 — stdlib only, time-ordered) + TimestampMixin (server_default + onupdate)
+- [x] StrEnum → Postgres native ENUM 5종 (auth_method, workspace_role, pipeline_mode, run_status, log_level)
+- [x] Alembic 초기 마이그레이션 (`0001_initial_schema.py` — hand-written, 12 tables + 5 enums + indexes)
+- [x] 테스트: testcontainers Postgres + per-test rollback isolation — **18 통합 테스트 통과**
+  - workspace 모델 6 / connection 3 / pipeline 3 / run 4 (FOR UPDATE SKIP LOCKED 검증 포함) / audit 2
+- [x] pytest-asyncio `default_fixture_loop_scope = "session"` (session-scoped 엔진 + 테스트 공유 루프)
 
 ### 7.3 YAML ↔ DB 양방향
 - [ ] `services/etlx-server/etlx_server/io/yaml_sync.py` — `configs/*.yaml` 읽어 DB upsert, 역방향 export
@@ -425,3 +429,4 @@
 - 2026-05-14: **ADR-0021 본문 강화.** Considered alternatives 표 + Operating envelope(~50 runs/sec, ~10k runs/day, p95 <2s) + Exit ramp(큐 폴링 코드를 한 파일에 격리) + PoC 합격 기준 4개 추가. 결정 자체는 유지 (자체 PG queue). 코드 변경 없음.
 - 2026-05-14: **Step 6 격상 — ADR-0024.** "강화" 일반 항목을 "Asset/Lineage/Cursor 1급 모델 코어 추가"로 재구성. 9 서브슬라이스(6.1~6.9)로 분할, v0.1.0(Cursor+릴리스)과 v0.2.0(Asset+Lineage+Catalog) 두 단계로 쪼갬. 코드 변경 없음.
 - 2026-05-15: **Step 7.1 (모노레포 스캐폴딩) 완료.** `services/etlx-server`(uv workspace member, FastAPI `/health`+`/version` placeholder, 2 unit tests) + `services/etlx-web`(pnpm workspace, Next.js 15 placeholder) + `pnpm-workspace.yaml` + 루트 `[tool.uv.workspace]` + CI 3분리(`ci-core.yml`/`ci-server.yml`/`ci-web.yml`) + `.importlinter` 2 contracts(CI 자동 검증, KEPT). 코어 코드 변경 0. 다음은 Step 7.2 메타DB 스키마.
+- 2026-05-16: **Step 7.2 (메타데이터 DB 스키마) 완료.** `etlx_server/db/` 모듈 (uuid7 PK, TimestampMixin, 5종 PG ENUM, 12 테이블 모델: workspace/user/membership/PAT/connection/pipeline/pipelineVersion/schedule/run/runLog/runMetric/auditLog). Alembic 초기 마이그레이션 0001 (hand-written, 5 enum 타입 + 12 테이블 + 인덱스/UNIQUE). testcontainers Postgres + per-test rollback isolation + `default_fixture_loop_scope=session` 으로 **18 통합 테스트** 통과 — 워커 큐 `FOR UPDATE SKIP LOCKED` 패턴, 좀비 회수 인덱스(`ix_runs_heartbeat`), cascade/SET NULL FK 동작, JSONB 라운드트립 모두 검증. ADR-0020/0021/0023 결정 구현체 (신규 ADR 없음). 다음은 Step 7.3 YAML↔DB 동기화.

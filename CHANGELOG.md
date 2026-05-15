@@ -404,6 +404,28 @@
 ### Milestone
 - **Step 7.1 — 모노레포 스캐폴딩 완료 (2026-05-15)**: `services/etlx-server` + `services/etlx-web` 패키지 골격 + CI 3분리 + import-graph 자동 검증. 321 코어 + 2 server placeholder + 3 skip + 111 it = **437 tests** all green, `import-linter` 2 contracts KEPT. 다음 슬라이스는 **Step 7.2 (메타데이터 DB 스키마)** — SQLAlchemy 2.x async 모델 (workspaces / users / roles / connections / pipelines / schedules / runs / audit_log) + Alembic 초기 마이그레이션 + factory_boy fixture.
 
+- **메타데이터 DB 스키마** [Step 7.2]
+  - `services/etlx-server/etlx_server/db/uuid7.py` — RFC 9562 uuid7 (stdlib only, 시간 정렬 PK). 외부 라이브러리 의존 회피.
+  - `services/etlx-server/etlx_server/db/base.py` — `Base(DeclarativeBase)` + `UUIDMixin` (uuid7 PK) + `TimestampMixin` (`created_at`/`updated_at`, `server_default=now()` + `onupdate=func.now()`).
+  - `services/etlx-server/etlx_server/db/enums.py` — `StrEnum` 5종: `WorkspaceRole`(owner/editor/runner/viewer, ADR-0023) / `AuthMethod`(local/oidc) / `PipelineMode`(batch/stream) / `RunStatus`(pending→running→succeeded/failed/cancelled) / `LogLevel`. PG native ENUM 타입으로 컬럼 정의.
+  - `services/etlx-server/etlx_server/db/session.py` — `make_engine(url)` + `async_sessionmaker` + `get_session(factory)` 헬퍼. `DATABASE_URL` env var 우선.
+  - `services/etlx-server/etlx_server/db/models/workspace.py` — `Workspace`(slug unique, color_hex `#FF3D8B` default) + `User`(email unique, `auth_method`, `password_hash` nullable, `is_superadmin`) + `Membership`(`(workspace_id, user_id)` unique + role enum) + `PersonalAccessToken`(prefix unique, hash 저장, expires/last_used). ADR-0023.
+  - `services/etlx-server/etlx_server/db/models/connection.py` — `Connection`(`(workspace_id, name)` unique, type, `config_json` JSONB, `secret_refs` JSONB list — **`${SECRET_REF}` placeholders only**, 평문 시크릿 컬럼 없음 — Step 7.4 secret backend로 연동).
+  - `services/etlx-server/etlx_server/db/models/pipeline.py` — `Pipeline`(`(workspace_id, name)` unique) + `PipelineVersion`(immutable snapshot, `version` 1-based 정수, `is_current` bool, `config_json` JSONB) + `Schedule`(cron_expr nullable for stream, `config_overrides` JSONB).
+  - `services/etlx-server/etlx_server/db/models/run.py` — `Run` (ADR-0021 워커 큐 + 결과 SSOT): `status` / `scheduled_at` / `heartbeat_at` / `worker_id` / `records_read` / `records_written` / `duration_seconds` / `error_class` / `error_message` / `result_json` JSONB. 인덱스 3종: `ix_runs_queue_poll(status, scheduled_at)` (워커 폴링 핫패스) / `ix_runs_workspace_created` / `ix_runs_heartbeat` (좀비 회수). `RunLog`(`run_id`+`ts`+`level`+`message`+`context_json`) + `RunMetric`(`name`+`value`+`attrs_json`).
+  - `services/etlx-server/etlx_server/db/models/audit.py` — `AuditLog`(actor `SET NULL` on user delete, `workspace_id`, action, resource_type/id, before/after JSONB, IP, user_agent). GIN 인덱스 후보 (initial migration에선 B-tree 만).
+  - `services/etlx-server/alembic.ini` + `alembic/env.py`(async, `DATABASE_URL` env var) + `alembic/versions/0001_initial_schema.py` — hand-written 마이그레이션: 5 enum 타입 + 12 테이블 + 모든 FK/UNIQUE/INDEX 명시 (autogenerate는 첫 마이그레이션 우선 hand-written으로 명세 보존).
+- **통합 테스트 인프라** [Step 7.2]
+  - `services/etlx-server/tests/conftest.py` — session-scoped `metadata_db_container` (testcontainers `postgres:16-alpine`) → `_alembic_upgrade` (subprocess `uv run alembic upgrade head`) → session-scoped `metadata_engine` → per-test `session` (outer transaction + rollback isolation). `pytest_collection_modifyitems` 가 `tests/db/*` 를 자동으로 `pytest.mark.it` 부착.
+  - `services/etlx-server/tests/db/` — **18 통합 테스트**: workspace 모델 6 / connection 3 / pipeline 3 / run 4 / audit 2. `FOR UPDATE SKIP LOCKED` 패턴 검증 + cascade/SET NULL FK 동작 + JSONB 라운드트립 모두 커버.
+  - 루트 `pyproject.toml`: `asyncio_default_fixture_loop_scope = "session"` + `asyncio_default_test_loop_scope = "session"` 추가 — session-scoped 엔진과 테스트가 동일 event loop 공유.
+
+### Decisions
+- (이번 슬라이스에서 신규 ADR 없음 — ADR-0020/0021/0023의 결정을 구현체로 옮긴 것)
+
+### Milestone
+- **Step 7.2 — 메타데이터 DB 스키마 완료 (2026-05-16)**: 12 테이블 + 5 enum 타입 + 초기 Alembic 마이그레이션 + 18 통합 테스트 (testcontainers Postgres 16). 코어 321 unit (regression 0) + 서버 18 it = **변경 없는 코어 + 18 신규 it green**. `mypy strict` 통과(13 source files), `lint-imports` 2 contracts KEPT. 다음 슬라이스는 **Step 7.3 (YAML ↔ DB 양방향)** — `etl_plugins.config.models` 재사용해 `configs/*.yaml` ↔ metadata DB upsert/export + CLI `etlx import|export`.
+
 ### Changed
 - (없음)
 

@@ -117,7 +117,7 @@ uv run mypy etl_plugins
 
 ## 5. 현재 단계
 
-**Step 7.1 완료 → 7.2 메타DB 스키마 차례** (2026-05-15 기준). Steps 1–4 + Step 5.1(MySQL, SQLite) + Step 7.0(서비스 기술 스택 ADR) + **Step 7.1(모노레포 스캐폴딩)** 완료. **321 코어 단위 + 2 etlx-server 단위 + 3 skip + 111 통합 = 437 테스트** all green, **24 ADR**. `import-linter` 2 contracts KEPT.
+**Step 7.2 완료 → 7.3 YAML↔DB 양방향 차례** (2026-05-16 기준). Steps 1–4 + Step 5.1(MySQL, SQLite) + Step 7.0(서비스 기술 스택 ADR) + Step 7.1(모노레포 스캐폴딩) + **Step 7.2(메타데이터 DB 스키마)** 완료. **321 코어 단위 + 2 etlx-server 단위 + 3 skip + 111 코어 통합 + 18 서버 통합(testcontainers PG 16) = 455 테스트** all green, **24 ADR**. `mypy strict` 13 src files OK, `lint-imports` 2 contracts KEPT.
 
 추가로 **서비스화 방향 확정**(ADR-0017): `services/etlx-server`(FastAPI) + `services/etlx-web`(Next.js)을 별도 패키지로 Step 7부터 진행. 코어와 서비스는 단방향 의존.
 
@@ -136,7 +136,8 @@ Step별 산출물 요약:
 - 🔄 Step 7 (Service Foundation):
   - 7.0 ✅ 기술 스택 ADR-0019~0023 작성 완료 — FastAPI / PostgreSQL+async+Alembic / 자체 PG worker queue / uv+pnpm 모노레포+CI 3분리 / OIDC+RBAC
   - 7.1 ✅ 모노레포 스캐폴딩 완료 — `services/etlx-server`(uv workspace + FastAPI placeholder) + `services/etlx-web`(pnpm + Next.js placeholder) + CI 3분리 + `.importlinter`
-  - 7.2~7.4 미착수 — 다음 슬라이스는 7.2 메타DB 스키마
+  - 7.2 ✅ 메타데이터 DB 스키마 완료 — 12 테이블 + 5 PG enum + Alembic 초기 마이그레이션 + uuid7 PK + 18 testcontainers 통합 테스트(ADR-0020/0021/0023 구현)
+  - 7.3~7.4 미착수 — 다음 슬라이스는 7.3 YAML↔DB 양방향
 - 📋 Step 8 (API Server / FastAPI) — 미착수
 - 📋 Step 9 (Execution Engine 통합) — 미착수
 - 📋 Step 10 (Web UI / Next.js) — 미착수

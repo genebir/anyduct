@@ -3,6 +3,10 @@
   "version": "0.0.0",
   "private": true,
   "description": "etl-plugins web UI — Next.js. Step 7.1 placeholder; design tokens land in Step 10.0.",
+  "engines": {
+    "node": ">=22",
+    "pnpm": ">=9"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",

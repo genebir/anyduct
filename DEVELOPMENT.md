@@ -7,18 +7,28 @@
 
 ## 1. Prerequisites
 
+이 저장소는 **모노레포** 입니다 (ADR-0017 / ADR-0022). 코어 라이브러리만 만지는 경우는 (1)~(4)면 충분하고, 서비스(`services/etlx-server`, `services/etlx-web`)까지 만지려면 (5)(6)도 필요합니다.
+
 | 항목 | 버전 / 비고 |
 |---|---|
 | OS | Linux / macOS / WSL2 (Windows 네이티브는 미검증) |
-| Python | `.python-version` 파일 기준 (Step 1.1에서 확정) |
-| 패키지 매니저 | **`uv` 단일 사용**. `pip`/`poetry`/`conda` 혼용 금지 |
-| Docker | dev 컨테이너 및 통합 테스트용 (Postgres/Kafka/MinIO 등) |
-| Git | 2.30+ |
+| (1) Python | `.python-version` 기준 (현재 3.11) |
+| (2) `uv` | **유일한 Python 패키지 매니저**. `pip`/`poetry`/`conda` 혼용 금지 |
+| (3) Docker | dev 컨테이너 + 통합 테스트(testcontainers) |
+| (4) Git | 2.30+ |
+| (5) Node.js | **22+** (services/etlx-web). `nvm install 22` 권장 |
+| (6) pnpm | **9+** (services/etlx-web). `npm i -g pnpm@9` 또는 `corepack enable && corepack prepare pnpm@9 --activate` |
 | `make` | 표준 타깃 실행용 (선택) |
 
-`uv` 미설치 시:
+설치 안내:
 ```bash
+# uv
 curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Node + pnpm (services/etlx-web 만 만질 때 필요)
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/master/install.sh | bash
+nvm install 22
+npm i -g pnpm@9
 ```
 
 ---
@@ -26,25 +36,20 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 ## 2. Bootstrap (원커맨드)
 
 ```bash
-git clone <repo>
+git clone git@github.com:genebir/ETL.git
 cd ETL
-./scripts/bootstrap.sh        # uv sync + .env 복사 + pre-commit + docker compose up
+./scripts/bootstrap.sh
 ```
 
-`scripts/bootstrap.sh`가 하는 일:
+`scripts/bootstrap.sh`가 하는 일 (현재 구현):
 1. `uv` 설치 확인 (없으면 설치)
-2. `uv sync --all-extras` (의존성 + 락파일 적용)
+2. **`uv sync --all-packages`** — 코어 + `services/etlx-server` workspace member 의존성 일괄 설치
 3. `.env.example` → `.env` 복사 (이미 있으면 스킵)
 4. `uv run pre-commit install`
-5. `docker compose -f docker/docker-compose.dev.yml up -d`
-6. `uv run etlx test-connection --all`
-
-> Step 1.2에서 구현 예정. 그 전까지는 수동:
-> ```bash
-> uv venv && source .venv/bin/activate
-> uv pip install -e .
-> cp .env.example .env
-> ```
+5. `.secrets.baseline` 없으면 생성
+6. **`uv run lint-imports`** — 단방향 의존 검증 (ADR-0017/0022, `.importlinter`)
+7. Node ≥22 + pnpm 설치돼 있으면 **`pnpm install --frozen-lockfile`** (services/etlx-web 의존성)
+8. Docker 있으면 `docker compose -f docker/docker-compose.dev.yml up -d` (코어 통합 테스트용 인프라)
 
 ---
 
@@ -58,29 +63,61 @@ cd ETL
 
 ## 4. 표준 명령어
 
+### 4.1 코어 라이브러리 (`etl_plugins/`)
+
 ```bash
-# 의존성
-uv sync                              # 락파일 기준 동기화
-uv add <pkg>                         # 의존성 추가
+# 의존성 (workspace 전체)
+uv sync --all-packages               # 락파일 기준, 코어 + services/etlx-server
+uv add <pkg>                         # 코어에 의존성 추가
 uv lock --upgrade                    # 락파일 갱신
 
 # 품질 게이트
-uv run pre-commit run --all-files    # 전체 lint/format/secret 검사
+uv run pre-commit run --all-files
 uv run ruff check . && uv run ruff format .
 uv run mypy etl_plugins
-uv run pytest                        # unit only
-uv run pytest tests/integration -m it
+uv run lint-imports                  # ADR-0017/0022 단방향 의존 검증
+uv run pytest -m "not it"            # 코어 unit (321 + 3 skip)
+uv run pytest -m it                  # 코어 통합 (111, Docker 필요)
 uv run pytest --cov=etl_plugins --cov-report=term-missing
 
-# 로컬 dev 인프라
+# CLI
+uv run etlx run        configs/pipelines/<x>.yaml --connections configs/connections.yaml
+uv run etlx run-stream configs/pipelines/<x>.yaml --connections configs/connections.yaml --stop-after-records 1000
+uv run etlx test-connection --all                  --connections configs/connections.yaml
+uv run etlx list-connectors
+uv run etlx --log-format console --log-level DEBUG run ...
+```
+
+### 4.2 services/etlx-server (FastAPI, Step 7~)
+
+```bash
+uv sync --all-packages                                            # 코어와 함께 sync
+uv run --package etlx-server uvicorn etlx_server.main:app --reload --port 8000
+uv run pytest services/etlx-server/tests                          # placeholder 2 tests
+curl localhost:8000/health   # {"status":"ok"}
+curl localhost:8000/version  # {"server":"0.0.0","core":"0.0.1"}
+```
+
+> Step 7.2부터 `alembic upgrade head` 등이 추가됩니다.
+
+### 4.3 services/etlx-web (Next.js, Step 10)
+
+```bash
+pnpm install --frozen-lockfile                                    # 모노레포 루트에서
+pnpm --filter @etlx/web dev                                       # http://localhost:3000
+pnpm --filter @etlx/web typecheck
+pnpm --filter @etlx/web build
+```
+
+### 4.4 로컬 dev 인프라
+
+```bash
+# 코어 통합 테스트용 (postgres/kafka/minio/redis)
 docker compose -f docker/docker-compose.dev.yml up -d
 docker compose -f docker/docker-compose.dev.yml down
-docker compose -f docker/docker-compose.dev.yml logs -f <service>
 
-# CLI (Step 3 이후)
-uv run etlx run configs/pipelines/orders_to_dw.yaml
-uv run etlx test-connection pg_prod
-uv run etlx list-connectors
+# 서비스 풀스택 (Step 11에서 본격화)
+docker compose -f services/docker-compose.services.yml --profile server --profile web up
 ```
 
 `Makefile` 단축 (Step 1.1에서 구현):
@@ -95,14 +132,16 @@ make clean       # __pycache__, .pytest_cache, dist 삭제
 
 ---
 
-## 5. 새 작업 시작 체크리스트
+## 5. 새 작업 시작 체크리스트 (다른 PC에서 이어받을 때 포함)
 
-1. `git pull` 후 `uv sync`로 의존성 동기화.
-2. `CLAUDE.md` § 5 "현재 단계" 확인.
-3. `ROADMAP.md`에서 "← 작업 중" 표시 항목 또는 다음 미체크 항목 식별.
-4. 브랜치 생성 (Step 번호 포함 권장): `git checkout -b feat/step-2.1-postgres-source`
-5. 작업.
-6. 종료 시 §8.3 체크리스트.
+1. `git pull --rebase` — origin/main 최신화.
+2. **`./scripts/bootstrap.sh`** — 환경 차이 흡수 (uv sync, pnpm install, docker compose up 등). 처음이라면 (5)(6) prereq를 먼저 설치.
+3. **`CLAUDE.md §5 "현재 단계"** 확인** — 어디까지 갔는지 한 화면에 보임.
+4. **`ROADMAP.md`** — "← 작업 중" 표시가 있으면 그 항목, 없으면 첫 번째 미체크 항목.
+5. **최근 3~5개 커밋 로그** — `git log --oneline -8` 로 최근 컨텍스트.
+6. 의존 검증 한 번 — `uv run lint-imports`, `uv run pytest -m "not it" -q` 가 모두 green인지.
+7. 작업 시작. 브랜치는 Step 번호 포함 권장 (`git checkout -b feat/step-7.2-meta-db-schema`).
+8. 종료 시 §6 체크리스트.
 
 ---
 

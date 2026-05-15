@@ -54,3 +54,12 @@ logs/
 *.pid
 .cache/
 tmp/
+
+# --- Node / Next.js (services/etlx-web) ---
+node_modules/
+.next/
+out/
+.turbo/
+next-env.d.ts
+*.tsbuildinfo
+.pnpm-store/

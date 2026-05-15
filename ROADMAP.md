@@ -258,10 +258,15 @@
 - [x] Secret 처리: `!secret <path>` → DB에 `${SECRET:<path>}` placeholder + `connections.secret_refs` 리스트만 저장 (평문 금지). 역방향 export에서 다시 `!secret` 태그로 복원
 - [x] 9 통합 테스트 추가 (round-trip + idempotent + 버전 증가 + 스케줄 추가/삭제 + 스트림 모드)
 
-### 7.4 Secret backend UI 통합
-- [ ] 입력 즉시 metadata DB에는 평문 저장 금지 — 시크릿 백엔드(Vault / AWS SM / GCP SM)에 저장하고 ref만 보관
-- [ ] `EnvSecretBackend`의 NotImplemented 스텁 3종(`VaultSecretBackend`, `AwsSmSecretBackend`, `GcpSmSecretBackend`) 실제 구현
-- [ ] 로컬 dev용 `FileSecretBackend` (path: file) — 평문 파일이지만 git 무시
+### 7.4 Secret backend 구현 ✅ (2026-05-16)
+- [x] `SecretBackend` 추상에 write 메서드 추가 — `.set(path, value)` + `.delete(path)`; read-only 백엔드는 `NotImplementedError`
+- [x] 평문 0 약속: 메타데이터 DB 컬럼은 placeholder + ref 리스트만(Step 7.3에서 이미 구현). 실제 값은 항상 이 모듈의 backend가 보관/조회
+- [x] `VaultSecretBackend` 실제 구현 — `hvac` KV v2, `${"value": ...}` 스키마, `url`/`token`/`mount_point` 인자 또는 `VAULT_*` env vars
+- [x] `AwsSmSecretBackend` 실제 구현 — `boto3` Secrets Manager, ResourceExists면 `put_secret_value` fallback, `ForceDeleteWithoutRecovery=True`
+- [x] `GcpSmSecretBackend` 실제 구현 — `google-cloud-secret-manager`, AlreadyExists면 새 version만 추가, `project_id` 인자 또는 `GCP_PROJECT`/`GOOGLE_CLOUD_PROJECT` env
+- [x] `FileSecretBackend` (로컬 dev) — JSON 파일, atomic write(tmp + `os.replace`), `chmod 0600`, threading.Lock, **반드시 git-ignore 대상**
+- [x] 신규 pyproject extras: `etl-plugins[vault|aws-sm|gcp-sm]`. 클라이언트 라이브러리는 lazy import — 모듈 import만으로는 무거운 SDK 안 끌어옴
+- [x] 35 unit (Env read-only 검증 / Static set+delete / 9 File / GCP 풀 mock 6 / Vault constructor / AWS constructor / factory 4) + 4 Vault testcontainers it + 4 AWS SM LocalStack it
 
 ---
 
@@ -433,3 +438,4 @@
 - 2026-05-15: **Step 7.1 (모노레포 스캐폴딩) 완료.** `services/etlx-server`(uv workspace member, FastAPI `/health`+`/version` placeholder, 2 unit tests) + `services/etlx-web`(pnpm workspace, Next.js 15 placeholder) + `pnpm-workspace.yaml` + 루트 `[tool.uv.workspace]` + CI 3분리(`ci-core.yml`/`ci-server.yml`/`ci-web.yml`) + `.importlinter` 2 contracts(CI 자동 검증, KEPT). 코어 코드 변경 0. 다음은 Step 7.2 메타DB 스키마.
 - 2026-05-16: **Step 7.2 (메타데이터 DB 스키마) 완료.** `etlx_server/db/` 모듈 (uuid7 PK, TimestampMixin, 5종 PG ENUM, 12 테이블 모델: workspace/user/membership/PAT/connection/pipeline/pipelineVersion/schedule/run/runLog/runMetric/auditLog). Alembic 초기 마이그레이션 0001 (hand-written, 5 enum 타입 + 12 테이블 + 인덱스/UNIQUE). testcontainers Postgres + per-test rollback isolation + `default_fixture_loop_scope=session` 으로 **18 통합 테스트** 통과 — 워커 큐 `FOR UPDATE SKIP LOCKED` 패턴, 좀비 회수 인덱스(`ix_runs_heartbeat`), cascade/SET NULL FK 동작, JSONB 라운드트립 모두 검증. ADR-0020/0021/0023 결정 구현체 (신규 ADR 없음). 다음은 Step 7.3 YAML↔DB 동기화.
 - 2026-05-16: **Step 7.3 (YAML ↔ DB 양방향) 완료.** `etlx_server/io/yaml_sync.py` + `etlx-server` 새 console script (`import-yaml`/`export-yaml`). 코어 `etl_plugins.config.models`를 SSOT로 재사용. `!secret <path>` 태그는 DB에 `${SECRET:<path>}` placeholder + `secret_refs` 리스트만 저장(평문 0); export 시 다시 `!secret` 로 복원되어 round-trip. `${VAR}` env-var placeholder는 import 시점에 절대 expand 하지 않고 그대로 보관. PipelineVersion은 config_json diff 시에만 증가(idempotent). 9 신규 통합 테스트 — 누적 27 server it + 변동 없는 core 321 unit + 2 server unit = **350 테스트** all green. ADR-0017 단방향 의존 유지(`etlx`는 core, `etlx-server`는 service). 다음은 Step 7.4 secret backend 구현.
+- 2026-05-16: **Step 7.4 (Secret backend 구현) 완료.** `SecretBackend`에 write API 추가(`set`/`delete`, read-only면 NotImplementedError). 4종 실제 구현: `FileSecretBackend`(JSON, atomic write, 0600), `VaultSecretBackend`(hvac KV v2), `AwsSmSecretBackend`(boto3 SM, ResourceExists handling, ForceDelete), `GcpSmSecretBackend`(google-cloud-secret-manager, AlreadyExists handling). pyproject extras 3종(`vault`/`aws-sm`/`gcp-sm`) — 클라이언트 라이브러리는 lazy import. 35 신규 unit(File 9, GCP 풀-mock 6, Env/Static 확장, factory 4) + 4 Vault testcontainers it + 4 AWS SM LocalStack it. 누적 **코어 344 unit + 2 server unit + 코어 119 it + 27 server it = 492 테스트** all green. 신규 ADR 없음 — 기존 SecretBackend ABC를 확장한 것. 다음은 Step 8 (API Server / FastAPI) 또는 Step 5 코어 확장(MSSQL/Oracle/HTTP 등).

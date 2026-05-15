@@ -457,6 +457,36 @@
 ### Milestone
 - **Step 7.3 — YAML ↔ DB 양방향 완료 (2026-05-16)**: `etlx-server` 새 CLI + `yaml_sync.py` 양방향 + 9 신규 it 통합 테스트. 누적 코어 321 unit + 서버 2 unit + 서버 **27 it** (18 + 9) = **350 tests** all green. `mypy strict` 16 source files OK, `lint-imports` 2 contracts KEPT. 다음 슬라이스는 **Step 7.4 (Secret backend UI 통합)** — `EnvSecretBackend` 외 3종(Vault/AWS SM/GCP SM) 실제 구현 + 로컬 dev용 `FileSecretBackend`.
 
+- **Secret backend 구현** [Step 7.4]
+  - `etl_plugins/config/secrets.py` — `SecretBackend` ABC에 write API 추가 (`set(path, value)` + `delete(path)`). 베이스 구현은 read-only 시 `NotImplementedError("…is read-only…")` 를 던지고 write 가능한 백엔드만 override.
+    * `FileSecretBackend` — JSON 파일(`{path: value}` 평면 맵). 쓰기는 tmp + `os.replace` atomic + `chmod 0600`. 미존재 파일은 빈 맵으로 취급. `threading.Lock` 으로 멀티스레드 안전. **dev only — 반드시 git 무시.**
+    * `VaultSecretBackend` — `hvac` KV v2. 각 path에 `{"value": ...}` 구조로 단일 string 저장(우리 contract는 "secret = opaque string"). 인자 또는 `VAULT_ADDR`/`VAULT_TOKEN`/`VAULT_KV_MOUNT` env. 인증 실패 시 `SecretError`. delete는 `delete_metadata_and_all_versions` (영구 삭제).
+    * `AwsSmSecretBackend` — `boto3` Secrets Manager. `create_secret` → `ResourceExistsException` 이면 `put_secret_value`로 fallback (멱등). `endpoint_url` 지원해서 LocalStack/VPC endpoint 사용 가능. delete는 `ForceDeleteWithoutRecovery=True` (recovery 윈도우 0).
+    * `GcpSmSecretBackend` — `google-cloud-secret-manager`. set은 `create_secret`(AlreadyExists 흡수) + `add_secret_version`. get은 `versions/latest` 로 access. delete는 `delete_secret`. `project_id` 인자 또는 `GCP_PROJECT`/`GOOGLE_CLOUD_PROJECT` env.
+  - `get_secret_backend` factory 확장 — `"file"` / `"vault"` / `"aws_sm"` / `"gcp_sm"` 추가, 각 백엔드 생성자 인자를 그대로 forward. `_NotImplementedBackend` placeholder 제거 (실제 구현으로 대체).
+  - **클라이언트 라이브러리 lazy import** — 각 백엔드 생성자에서만 import. `etl_plugins.config.secrets` 모듈 import는 hvac/boto3/google.cloud.secretmanager 어떤 것도 요구하지 않음. 누락된 extra 사용 시 친절한 ConfigError 메시지("pip install etl-plugins[vault]" 등).
+- **신규 pyproject extras** [Step 7.4]
+  - 루트 `pyproject.toml` `[project.optional-dependencies]`: `vault = ["hvac>=2.0"]`, `aws-sm = ["boto3>=1.34"]`, `gcp-sm = ["google-cloud-secret-manager>=2.20"]`. 사용자가 필요한 백엔드만 설치.
+  - dev group에 `hvac` + `google-cloud-secret-manager` 추가 (unit mock + 통합 테스트 동시 필요). `testcontainers[...]` 에 `vault`/`localstack` extras 추가.
+  - mypy override 추가: `hvac.*` / `google.cloud.secretmanager.*` / `google.api_core.*` → `ignore_missing_imports = true` (stub 없거나 gRPC 생성 코드라 strict 검사 미흡).
+- **테스트 확장** [Step 7.4]
+  - `tests/unit/config/test_secrets.py` — 35 unit 케이스로 확장:
+    * Env read-only 검증 (set/delete → NotImplementedError)
+    * Static delete + missing 케이스
+    * File 9 케이스 (round-trip, atomic-no-tmp-left, chmod 0600 검증, corrupt JSON, non-object, path 누락 ConfigError, env var fallback)
+    * Vault 생성자 config 검증
+    * AWS SM 생성자 (boto3 patch, network 없이)
+    * GCP SM 풀-mock 6 케이스 — 로컬 emulator 없는 백엔드라 mock으로만 검증 (get/set/delete/AlreadyExists/NotFound 모두)
+    * factory에 file/vault/aws_sm/gcp_sm 추가 검증
+  - `tests/integration/test_secrets_vault.py` — testcontainers `hashicorp/vault:1.18` (dev mode, root_token="root") + 4 it 케이스 (round-trip, overwrite-new-version, missing → SecretError, delete).
+  - `tests/integration/test_secrets_aws_sm.py` — testcontainers `localstack/localstack:3.8` (Secrets Manager만 활성화) + 4 it 케이스 (round-trip, overwrite-via-put_secret_value fallback, missing → SecretError, delete).
+
+### Decisions
+- (이번 슬라이스에서 신규 ADR 없음 — Step 1.5의 `SecretBackend` ABC 위에 write API 추가 + 기존 `_NotImplementedBackend` placeholder를 실제 구현체로 교체)
+
+### Milestone
+- **Step 7.4 — Secret backend 구현 완료 (2026-05-16)**: 4 신규 백엔드(File/Vault/AWS SM/GCP SM) + write API(set/delete) + 3 pyproject extras. 누적 코어 344 unit + 2 server unit + 코어 **119 it** (111 + 8 secret backend) + 27 server it = **492 tests** all green. testcontainers Vault + LocalStack 모두 실제 Docker 컨테이너로 검증, 컨테이너는 매 세션 후 sweep. `mypy strict` 39+16 source files OK, `lint-imports` 2 contracts KEPT. **Step 7 (Service Foundation) 전 슬라이스 완료**. 다음은 **Step 8 (API Server / FastAPI)** — 부트스트랩 → 인증 → 워크스페이스/연결/파이프라인 CRUD → 실행 트리거 → SSE/WebSocket 로그.
+
 ### Changed
 - (없음)
 

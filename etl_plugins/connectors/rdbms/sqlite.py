@@ -208,9 +208,7 @@ class SQLiteConnector(BatchSource, BatchSink):
         placeholders = ", ".join(["?"] * len(columns))
         key_list = ", ".join(_ident(k) for k in key_columns)
         if non_key:
-            update_clause = ", ".join(
-                f"{_ident(c)} = excluded.{_ident(c)}" for c in non_key
-            )
+            update_clause = ", ".join(f"{_ident(c)} = excluded.{_ident(c)}" for c in non_key)
             action = f"DO UPDATE SET {update_clause}"
         else:
             action = "DO NOTHING"

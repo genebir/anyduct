@@ -1,0 +1,67 @@
+---
+name: CI Server
+
+# services/etlx-server (FastAPI) — Step 7.1 placeholder + 이후 슬라이스에서
+# DB schema, auth, CRUD가 추가되면 점진적으로 잡 추가. 코어 변경에는 트리거
+# 안 됨 (path filter). ADR-0022.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "services/etlx-server/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/ci-server.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "services/etlx-server/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/ci-server.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONUNBUFFERED: "1"
+  FORCE_COLOR: "1"
+
+jobs:
+  test:
+    name: Lint + Unit (etlx-server)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+
+      # uv workspace이므로 root sync로 코어 + etlx-server 모두 설치된다.
+      - name: Sync deps (workspace)
+        run: uv sync --frozen
+
+      - name: Ruff lint (server)
+        run: uv run ruff check services/etlx-server --output-format=github
+
+      - name: Ruff format check (server)
+        run: uv run ruff format --check services/etlx-server
+
+      - name: Pytest (etlx-server placeholder)
+        working-directory: services/etlx-server
+        run: |
+          uv run pytest -ra || EXIT=$?
+          # placeholder 단계에서 테스트가 0개여도 통과 처리
+          [ "${EXIT:-0}" = "5" ] && echo "(no server tests yet)" && exit 0
+          exit "${EXIT:-0}"

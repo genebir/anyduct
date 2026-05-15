@@ -54,17 +54,14 @@ def sqlite_table(db_path: Path) -> Iterator[str]:
     name = "test_table"
     with sqlite3.connect(db_path) as conn:
         conn.execute(
-            f"CREATE TABLE {name} "
-            f"(id INTEGER PRIMARY KEY, name TEXT, age INTEGER, active INTEGER)"
+            f"CREATE TABLE {name} (id INTEGER PRIMARY KEY, name TEXT, age INTEGER, active INTEGER)"
         )
         conn.commit()
     yield name
 
 
 @pytest.fixture
-def sqlite_seeded(
-    db_path: Path, sqlite_table: str, sample_records: list[Record]
-) -> str:
+def sqlite_seeded(db_path: Path, sqlite_table: str, sample_records: list[Record]) -> str:
     with sqlite3.connect(db_path) as conn:
         for r in sample_records:
             conn.execute(
@@ -255,9 +252,7 @@ def test_read_streams_through_chunked_fetch(
     assert {r.data["id"] for r in rows} == set(range(500))
 
 
-def test_metadata_includes_source(
-    sqlite_connector: SQLiteConnector, sqlite_seeded: str
-) -> None:
+def test_metadata_includes_source(sqlite_connector: SQLiteConnector, sqlite_seeded: str) -> None:
     with sqlite_connector:
         records = list(sqlite_connector.read(f"SELECT * FROM {sqlite_seeded} LIMIT 1"))
     assert records[0].metadata.get("source") == "sqlite"

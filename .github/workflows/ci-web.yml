@@ -1,0 +1,51 @@
+---
+name: CI Web
+
+# services/etlx-web (Next.js) — Step 7.1 placeholder. Storybook /
+# Chromatic / axe-core 등은 Step 10.0에서 추가. ADR-0022.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "services/etlx-web/**"
+      - "pnpm-workspace.yaml"
+      - ".github/workflows/ci-web.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "services/etlx-web/**"
+      - "pnpm-workspace.yaml"
+      - ".github/workflows/ci-web.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Typecheck + Build (etlx-web)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "pnpm"
+
+      - name: Install
+        run: pnpm --filter @etlx/web install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm --filter @etlx/web typecheck
+
+      - name: Build
+        run: pnpm --filter @etlx/web build

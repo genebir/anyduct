@@ -1,0 +1,33 @@
+; import-linter 설정 — ADR-0017 §6, ADR-0022 §4.
+;
+; 두 가지 단방향 의존 규칙을 CI에서 자동 검증한다:
+;   (1) etl_plugins/* 는 services/* (etlx_server / etlx_web)를 import 금지.
+;       라이브러리는 서비스를 모른다.
+;   (2) etl_plugins.core 는 상위 layer(connectors / adapters / runtime)를
+;       import 금지. core → foundation(config/observability/utils) 방향만
+;       허용.
+;
+; 위반 시 ci-core.yml 의 import-linter step 이 실패한다.
+
+[importlinter]
+root_packages =
+    etl_plugins
+include_external_packages = True
+
+[importlinter:contract:no-services-from-core]
+name = etl_plugins must not import from any services package
+type = forbidden
+source_modules =
+    etl_plugins
+forbidden_modules =
+    etlx_server
+
+[importlinter:contract:core-must-not-import-upper-layers]
+name = etl_plugins.core must not import connectors / adapters / runtime
+type = forbidden
+source_modules =
+    etl_plugins.core
+forbidden_modules =
+    etl_plugins.connectors
+    etl_plugins.adapters
+    etl_plugins.runtime

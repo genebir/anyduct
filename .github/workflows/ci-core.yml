@@ -1,11 +1,29 @@
 ---
-name: CI
+name: CI Core
+
+# Core library (etl_plugins/) tests + lint + import-graph guard.
+# Service packages live under services/ and are tested by ci-server.yml /
+# ci-web.yml. See ADR-0022.
 
 on:
   push:
     branches: [main]
+    paths:
+      - "etl_plugins/**"
+      - "tests/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".importlinter"
+      - ".github/workflows/ci-core.yml"
   pull_request:
     branches: [main]
+    paths:
+      - "etl_plugins/**"
+      - "tests/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".importlinter"
+      - ".github/workflows/ci-core.yml"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -46,6 +64,9 @@ jobs:
 
       - name: mypy
         run: uv run mypy etl_plugins
+
+      - name: import-linter (ADR-0017 / ADR-0022 단방향 의존)
+        run: uv run lint-imports
 
       - name: yamllint
         run: uv run yamllint -c .yamllint.yaml .

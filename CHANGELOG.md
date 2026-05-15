@@ -379,6 +379,31 @@
 ### Milestone
 - **장기 플랫폼 방향 정렬 (2026-05-14)**: ADR-0021 강화 + ADR-0024로 "데이터 통합 플랫폼"으로서의 모델 결정을 미리 못박음. 코드 변경 없음, 결정 + 계획 문서만. **다음 슬라이스는 Step 7.1 (모노레포 스캐폴딩)** — Step 6 격상 작업은 추후 슬라이스로 진입.
 
+- **모노레포 스캐폴딩** [Step 7.1]
+  - `services/etlx-server/pyproject.toml` — uv workspace member, `etl-plugins` path dep, FastAPI/SQLAlchemy/asyncpg/Alembic/authlib/passlib/pyjwt/croniter 의존성(ADR-0019~0023 기준)
+  - `services/etlx-server/etlx_server/main.py` — FastAPI app placeholder, `/health` + `/version` 2개 엔드포인트. `etl_plugins.__version__`을 그대로 노출하여 코어 통합 검증.
+  - `services/etlx-server/tests/test_health.py` — TestClient 기반 2 unit tests
+  - `services/etlx-web/package.json` — pnpm workspace member, Next.js 15 + React 19 + TS 5.6
+  - `services/etlx-web/{tsconfig.json, next.config.ts, app/{layout,page}.tsx}` — Next.js App Router 최소 placeholder
+  - `pnpm-workspace.yaml` (root) + 루트 `pyproject.toml`에 `[tool.uv.workspace] members = ["services/etlx-server"]` 추가
+  - `services/docker-compose.services.yml` — etlx-server / etlx-web / metadata-db(별도 5433 포트로 dev compose의 5432 회피) profile 분리 placeholder
+- **단방향 의존 자동 검증** [Step 7.1]
+  - `.importlinter` 추가 — 두 contract:
+    1. `etl_plugins` → `etlx_server` import 차단 (ADR-0017 §6)
+    2. `etl_plugins.core` → `connectors/adapters/runtime` import 차단 (ADR-0022 §4)
+  - `import-linter>=2.0`을 dev group에 추가. 현재 코어가 두 contract 모두 KEPT (위반 0).
+- **CI 3분리** [Step 7.1]
+  - `.github/workflows/ci.yml` → **`ci-core.yml`** rename (git mv로 이력 보존) + `paths:` 필터(etl_plugins/, tests/, pyproject.toml, uv.lock, .importlinter) + `lint-imports` step 추가
+  - `.github/workflows/ci-server.yml` 신규 — `services/etlx-server/**` path filter, uv workspace sync + ruff + pytest
+  - `.github/workflows/ci-web.yml` 신규 — `services/etlx-web/**` path filter, pnpm install + typecheck + build
+- **README 갱신** — CI 뱃지 3개로 분리(`ci-core` / `ci-server` / `ci-web`)
+
+### Decisions
+- (이번 슬라이스에서 신규 ADR 없음 — ADR-0017/0022가 가이드한 구조 그대로 구현)
+
+### Milestone
+- **Step 7.1 — 모노레포 스캐폴딩 완료 (2026-05-15)**: `services/etlx-server` + `services/etlx-web` 패키지 골격 + CI 3분리 + import-graph 자동 검증. 321 코어 + 2 server placeholder + 3 skip + 111 it = **437 tests** all green, `import-linter` 2 contracts KEPT. 다음 슬라이스는 **Step 7.2 (메타데이터 DB 스키마)** — SQLAlchemy 2.x async 모델 (workspaces / users / roles / connections / pipelines / schedules / runs / audit_log) + Alembic 초기 마이그레이션 + factory_boy fixture.
+
 ### Changed
 - (없음)
 

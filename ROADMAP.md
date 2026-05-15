@@ -224,12 +224,17 @@
 - [x] **ADR-0022**: 모노레포 = uv workspace + pnpm workspace + CI 3분리 (`ci-core` / `ci-server` / `ci-web`) + `import-linter`로 단방향 의존 자동 검증
 - [x] **ADR-0023**: 인증·인가 = OIDC 일반화(authlib) + 로컬 fallback(bcrypt) + JWT RS256(15min/7d) + PAT + 4 역할 RBAC(Owner/Editor/Runner/Viewer) + SuperAdmin + audit_log
 
-### 7.1 모노레포 스캐폴딩
-- [ ] `services/etlx-server/pyproject.toml` (코어 의존: `etl-plugins>=X.Y,<X+1`)
-- [ ] `services/etlx-web/package.json` (Next.js + TS)
-- [ ] 루트 README/CONTRIBUTING에 서비스 디렉토리 안내
-- [ ] CI 매트릭스 분리: `ci-core.yml` / `ci-server.yml` / `ci-web.yml`
-- [ ] **import-graph 검사**: `etl_plugins/*`가 `services/*`를 import하지 않음을 자동 검증 (CI에 lint step)
+### 7.1 모노레포 스캐폴딩 ✅ (2026-05-15)
+- [x] `services/etlx-server/pyproject.toml` (uv workspace member, `etl-plugins` path dep + FastAPI/SQLAlchemy/asyncpg/Alembic/authlib/passlib/pyjwt/croniter)
+- [x] `services/etlx-server/etlx_server/main.py` placeholder — `/health`, `/version` 2개 엔드포인트 + 2 unit tests (TestClient)
+- [x] `services/etlx-web/package.json` (pnpm workspace, Next.js 15 + React 19 + TS 5.6) + `tsconfig.json` + `next.config.ts` + `app/{layout,page}.tsx` placeholder
+- [x] 루트 `pnpm-workspace.yaml` + 루트 `pyproject.toml`에 `[tool.uv.workspace] members = ["services/etlx-server"]`
+- [x] `services/docker-compose.services.yml` (etlx-server / etlx-web / metadata-db placeholder, profile별 분리)
+- [x] CI 3분리: `.github/workflows/ci-core.yml` (rename from `ci.yml`, path filter + `import-linter` step) / `ci-server.yml` (lint+pytest, path filter) / `ci-web.yml` (pnpm typecheck+build, path filter)
+- [x] **`.importlinter`** (ADR-0017 §6, ADR-0022 §4) — 2 contracts CI에서 자동 검증:
+  - etl_plugins → services 차단
+  - etl_plugins.core → connectors/adapters/runtime 차단
+- [x] 루트 README CI 뱃지 3개로 분리
 
 ### 7.2 메타데이터 DB 스키마
 - [ ] SQLAlchemy 2.x async 모델 정의
@@ -419,3 +424,4 @@
 - 2026-05-14: **Step 7.0 (서비스 기술 스택 ADR) 완료.** ADR-0019(FastAPI) / ADR-0020(PostgreSQL+SQLAlchemy async+Alembic) / ADR-0021(자체 PG-backed worker queue) / ADR-0022(uv+pnpm workspace, CI 3분리, import-linter) / ADR-0023(OIDC+로컬 fallback+JWT RS256+4-role RBAC). 코드 변경 없음, 결정 문서만. 다음은 Step 7.1 모노레포 스캐폴딩.
 - 2026-05-14: **ADR-0021 본문 강화.** Considered alternatives 표 + Operating envelope(~50 runs/sec, ~10k runs/day, p95 <2s) + Exit ramp(큐 폴링 코드를 한 파일에 격리) + PoC 합격 기준 4개 추가. 결정 자체는 유지 (자체 PG queue). 코드 변경 없음.
 - 2026-05-14: **Step 6 격상 — ADR-0024.** "강화" 일반 항목을 "Asset/Lineage/Cursor 1급 모델 코어 추가"로 재구성. 9 서브슬라이스(6.1~6.9)로 분할, v0.1.0(Cursor+릴리스)과 v0.2.0(Asset+Lineage+Catalog) 두 단계로 쪼갬. 코드 변경 없음.
+- 2026-05-15: **Step 7.1 (모노레포 스캐폴딩) 완료.** `services/etlx-server`(uv workspace member, FastAPI `/health`+`/version` placeholder, 2 unit tests) + `services/etlx-web`(pnpm workspace, Next.js 15 placeholder) + `pnpm-workspace.yaml` + 루트 `[tool.uv.workspace]` + CI 3분리(`ci-core.yml`/`ci-server.yml`/`ci-web.yml`) + `.importlinter` 2 contracts(CI 자동 검증, KEPT). 코어 코드 변경 0. 다음은 Step 7.2 메타DB 스키마.

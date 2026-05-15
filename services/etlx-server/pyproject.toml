@@ -1,0 +1,34 @@
+[project]
+name = "etlx-server"
+version = "0.0.0"
+description = "etl-plugins service — FastAPI backend (Steps 7~9, 11)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+authors = [{ name = "duarl" }]
+
+# 코어 라이브러리 의존 — uv workspace 안에서는 path dep로 작동 (아래 [tool.uv.sources] 참조).
+# 외부 install 시점에는 PyPI version 으로 핀 (~=0.X.Y 같은 범위). 첫 PyPI 릴리스 전이므로 ">=0".
+dependencies = [
+    "etl-plugins>=0",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "sqlalchemy>=2.0",        # ADR-0020 async ORM
+    "asyncpg>=0.29",          # ADR-0020 async PG driver
+    "alembic>=1.13",          # ADR-0020 migrations
+    "authlib>=1.3",           # ADR-0023 OIDC
+    "passlib[bcrypt]>=1.7",   # ADR-0023 local auth fallback
+    "pyjwt>=2.9",             # ADR-0023 JWT
+    "croniter>=2.0",          # cron schedule evaluation
+]
+
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["etlx_server"]
+
+# In the uv workspace, resolve etl-plugins from the repo root rather than PyPI.
+[tool.uv.sources]
+etl-plugins = { workspace = true }

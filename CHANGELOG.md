@@ -487,6 +487,26 @@
 ### Milestone
 - **Step 7.4 — Secret backend 구현 완료 (2026-05-16)**: 4 신규 백엔드(File/Vault/AWS SM/GCP SM) + write API(set/delete) + 3 pyproject extras. 누적 코어 344 unit + 2 server unit + 코어 **119 it** (111 + 8 secret backend) + 27 server it = **492 tests** all green. testcontainers Vault + LocalStack 모두 실제 Docker 컨테이너로 검증, 컨테이너는 매 세션 후 sweep. `mypy strict` 39+16 source files OK, `lint-imports` 2 contracts KEPT. **Step 7 (Service Foundation) 전 슬라이스 완료**. 다음은 **Step 8 (API Server / FastAPI)** — 부트스트랩 → 인증 → 워크스페이스/연결/파이프라인 CRUD → 실행 트리거 → SSE/WebSocket 로그.
 
+- **FastAPI 부트스트랩 / OOP 재구성** [Step 8.1]
+  - `services/etlx-server/etlx_server/settings.py` — `Settings(BaseSettings)`, `Environment` StrEnum, env/`.env` 기반 + `get_settings()` `lru_cache`. 필드: `service_name`/`environment`/`database_url`/`database_echo`/`cors_origins` + 파생 프로퍼티 `docs_enabled`(prod이면 False).
+  - `services/etlx-server/etlx_server/app_factory.py` — `create_app(settings: Settings | None = None) -> FastAPI`. **Composition root**: lifespan 핸들러 빌드 → engine + session_factory를 `app.state`에 attach → 라우터 include → CORS는 origins 있을 때만. `main.py`는 `app = create_app()` thin shim.
+  - `services/etlx-server/etlx_server/dependencies.py` — DI 헬퍼: `get_settings`/`get_engine`/`get_session_factory`/`get_session` (per-request 세션, 예외 시 자동 rollback).
+  - `services/etlx-server/etlx_server/routers/health.py` — `/health`(외부 의존 0 liveness) + `/ready`(DB `SELECT 1` 실패 시 503 + `database: error` + 에러 클래스명 노출). Pydantic `HealthStatus`/`ReadinessStatus` response model.
+  - `services/etlx-server/etlx_server/routers/meta.py` — `/version` (server/core/service/environment 4-tuple). `VersionInfo` response model.
+  - `services/etlx-server/etlx_server/main.py` — thin shim(`app = create_app()`). uvicorn은 변함없이 `uvicorn etlx_server.main:app`.
+- **신규 의존성** [Step 8.1]
+  - `services/etlx-server/pyproject.toml`: `pydantic-settings>=2.5`. 다른 cloud SDK / 인증 라이브러리는 Step 8.2+ 에서 추가.
+- **테스트 정규화** [Step 8.1]
+  - `services/etlx-server/tests/test_settings.py` — Settings 6 unit (env var fallback, default development, prod hides docs, invalid env raises, lru_cache, empty CORS).
+  - `services/etlx-server/tests/test_health.py` — 6 unit으로 재작성: `TestClient(create_app(settings=...))` 패턴, prod/dev docs 가시성, CORS preflight 헤더, OpenAPI 스키마에 `/health`/`/ready`/`/version` 등장.
+  - `services/etlx-server/tests/db/test_health_ready.py` — testcontainers PG로 실제 readiness 검증 (`httpx.AsyncClient(ASGITransport(app))` + `app.router.lifespan_context` 직접 enter). degraded path는 closed local port로 검증(503 + detail).
+
+### Decisions
+- (이번 슬라이스에서 신규 ADR 없음 — ADR-0019(FastAPI) 결정의 OOP 구현체)
+
+### Milestone
+- **Step 8.1 — API Server 부트스트랩 + OOP 재구성 완료 (2026-05-16)**: 모듈 글로벌 0 (factory 패턴 + `app.state` + `Depends`). 누적 코어 344 unit + 서버 **8 unit** (7.1 placeholder 2 + 8.1 6) + 서버 **29 it** (7.2~7.4 27 + 8.1 readiness 2) + 코어 119 it = **500 tests** all green. mypy strict 22 server src files OK, import-linter 2 contracts KEPT. 다음 슬라이스는 **Step 8.2 (인증)** — OIDC(authlib) + 로컬 fallback(bcrypt) + JWT(pyjwt RS256) + `/auth/login` `/auth/refresh` `/auth/logout` (ADR-0023 구현).
+
 ### Changed
 - (없음)
 

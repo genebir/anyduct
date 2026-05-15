@@ -117,7 +117,7 @@ uv run mypy etl_plugins
 
 ## 5. 현재 단계
 
-**Step 7 (Service Foundation) 전 슬라이스 완료 → Step 8 (API Server) 또는 Step 5/6 코어 확장 차례** (2026-05-16 기준). Steps 1–4 + Step 5.1(MySQL, SQLite) + Step 7.0~7.4 완료. **344 코어 단위 + 2 etlx-server 단위 + 3 skip + 119 코어 통합(testcontainers PG/MinIO/Kafka/MySQL/Vault/LocalStack) + 27 서버 통합 = 492 테스트** all green, **24 ADR**. `mypy strict` 코어 39 + 서버 16 src files OK, `lint-imports` 2 contracts KEPT. 신규: `etlx-server` admin CLI + 4 secret backends 실제 구현(File/Vault/AWS SM/GCP SM).
+**Step 8.1 완료 → 8.2 인증 차례** (2026-05-16 기준). Steps 1–4 + Step 5.1(MySQL, SQLite) + Step 7.0~7.4 + **Step 8.1(FastAPI 부트스트랩 + OOP 재구성)** 완료. **344 코어 단위 + 8 etlx-server 단위 + 3 skip + 119 코어 통합(testcontainers PG/MinIO/Kafka/MySQL/Vault/LocalStack) + 29 서버 통합 = 500 테스트** all green, **24 ADR**. `mypy strict` 코어 39 + 서버 22 src files OK, `lint-imports` 2 contracts KEPT. **OOP 정규화 적용**: factory 패턴(`create_app`), `Settings(BaseSettings)`, routers 도메인 분리, `Depends`-기반 DI, lifespan-managed engine.
 
 추가로 **서비스화 방향 확정**(ADR-0017): `services/etlx-server`(FastAPI) + `services/etlx-web`(Next.js)을 별도 패키지로 Step 7부터 진행. 코어와 서비스는 단방향 의존.
 

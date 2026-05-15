@@ -13,6 +13,7 @@ dependencies = [
     "etl-plugins>=0",
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
+    "pydantic-settings>=2.5",  # Settings class (Step 8.1)
     "sqlalchemy>=2.0",        # ADR-0020 async ORM
     "asyncpg>=0.29",          # ADR-0020 async PG driver
     "alembic>=1.13",          # ADR-0020 migrations

@@ -272,11 +272,17 @@
 
 ## Step 8 — API Server (FastAPI)
 
-### 8.1 부트스트랩
-- [ ] FastAPI 앱 (`services/etlx-server/etlx_server/main.py`)
-- [ ] uvicorn / gunicorn 진입점
-- [ ] OpenAPI 자동 생성 + `/docs` / `/redoc`
-- [ ] 헬스체크 `/health`, `/ready`
+### 8.1 부트스트랩 ✅ (2026-05-16)
+- [x] FastAPI 앱 — **factory 패턴** (`etlx_server.app_factory.create_app(settings)`)으로 재구성. `main.py`는 thin shim(`app = create_app()`)만 노출 → `uvicorn etlx_server.main:app` 그대로 동작
+- [x] **Settings 클래스** (`etlx_server.settings.Settings`, Pydantic `BaseSettings`) — `database_url`/`environment`/`cors_origins`/`database_echo`/`service_name`. `.env` 파일 + env vars 둘 다 지원, `get_settings()` lru_cache
+- [x] **라우터 분리**: `routers/health.py`(liveness+readiness), `routers/meta.py`(version). 도메인 단위로 분리해 향후 확장(`auth`, `workspaces`, ...) 시 main.py 변경 0
+- [x] **Lifespan 핸들러**: 엔진 + session_factory를 `app.state`에 attach, shutdown 시 dispose. 인스턴스마다 별도 엔진(테스트별로 독립)
+- [x] **DI 헬퍼**: `dependencies.py`의 `get_settings`/`get_engine`/`get_session_factory`/`get_session` — 엔드포인트가 모듈 글로벌 손대지 않고 `Depends`로 받음
+- [x] `/health` (liveness, 외부 의존 없음) + `/ready` (readiness, `SELECT 1` DB ping → 실패 시 503 + `database: error` + 에러 클래스명)
+- [x] `/version` (server / core / service / environment 4-tuple)
+- [x] OpenAPI auto `/docs` + `/redoc` — `environment=production`이면 404로 숨김
+- [x] CORS 미들웨어 — `cors_origins`가 비어있지 않으면만 attach (불필요할 땐 미들웨어 0)
+- [x] 14 신규 unit(`test_health.py` 6 + `test_settings.py` 6 + factory/CORS 2) + 2 신규 it(`test_health_ready.py`, testcontainers Postgres 16)
 
 ### 8.2 인증
 - [ ] OIDC (Google / Azure AD / Okta 일반화) — authlib
@@ -439,3 +445,4 @@
 - 2026-05-16: **Step 7.2 (메타데이터 DB 스키마) 완료.** `etlx_server/db/` 모듈 (uuid7 PK, TimestampMixin, 5종 PG ENUM, 12 테이블 모델: workspace/user/membership/PAT/connection/pipeline/pipelineVersion/schedule/run/runLog/runMetric/auditLog). Alembic 초기 마이그레이션 0001 (hand-written, 5 enum 타입 + 12 테이블 + 인덱스/UNIQUE). testcontainers Postgres + per-test rollback isolation + `default_fixture_loop_scope=session` 으로 **18 통합 테스트** 통과 — 워커 큐 `FOR UPDATE SKIP LOCKED` 패턴, 좀비 회수 인덱스(`ix_runs_heartbeat`), cascade/SET NULL FK 동작, JSONB 라운드트립 모두 검증. ADR-0020/0021/0023 결정 구현체 (신규 ADR 없음). 다음은 Step 7.3 YAML↔DB 동기화.
 - 2026-05-16: **Step 7.3 (YAML ↔ DB 양방향) 완료.** `etlx_server/io/yaml_sync.py` + `etlx-server` 새 console script (`import-yaml`/`export-yaml`). 코어 `etl_plugins.config.models`를 SSOT로 재사용. `!secret <path>` 태그는 DB에 `${SECRET:<path>}` placeholder + `secret_refs` 리스트만 저장(평문 0); export 시 다시 `!secret` 로 복원되어 round-trip. `${VAR}` env-var placeholder는 import 시점에 절대 expand 하지 않고 그대로 보관. PipelineVersion은 config_json diff 시에만 증가(idempotent). 9 신규 통합 테스트 — 누적 27 server it + 변동 없는 core 321 unit + 2 server unit = **350 테스트** all green. ADR-0017 단방향 의존 유지(`etlx`는 core, `etlx-server`는 service). 다음은 Step 7.4 secret backend 구현.
 - 2026-05-16: **Step 7.4 (Secret backend 구현) 완료.** `SecretBackend`에 write API 추가(`set`/`delete`, read-only면 NotImplementedError). 4종 실제 구현: `FileSecretBackend`(JSON, atomic write, 0600), `VaultSecretBackend`(hvac KV v2), `AwsSmSecretBackend`(boto3 SM, ResourceExists handling, ForceDelete), `GcpSmSecretBackend`(google-cloud-secret-manager, AlreadyExists handling). pyproject extras 3종(`vault`/`aws-sm`/`gcp-sm`) — 클라이언트 라이브러리는 lazy import. 35 신규 unit(File 9, GCP 풀-mock 6, Env/Static 확장, factory 4) + 4 Vault testcontainers it + 4 AWS SM LocalStack it. 누적 **코어 344 unit + 2 server unit + 코어 119 it + 27 server it = 492 테스트** all green. 신규 ADR 없음 — 기존 SecretBackend ABC를 확장한 것. 다음은 Step 8 (API Server / FastAPI) 또는 Step 5 코어 확장(MSSQL/Oracle/HTTP 등).
+- 2026-05-16: **Step 8.1 (API Server 부트스트랩 / OOP 재구성) 완료.** `services/etlx-server`를 정규화된 OOP 구조로 재배치 — **factory 패턴** `app_factory.create_app(settings)`, **Settings** 클래스(`pydantic-settings`), **routers** 도메인 분리(`health`/`meta`), **DI 헬퍼** `dependencies.py`(`get_engine`/`get_session_factory`/`get_session`), **lifespan-managed engine**(인스턴스마다 별도 엔진, shutdown dispose). `/ready`는 진짜 DB `SELECT 1` ping (실패 시 503 + degraded). 14 신규 server unit + 2 readiness it(testcontainers PG 16). 누적 **코어 344 unit + 서버 **8 unit** + 코어 119 it + 서버 **29 it** = 500 테스트** all green. 신규 dep `pydantic-settings>=2.5`. 신규 ADR 없음 — ADR-0019(FastAPI) 구현체. 다음은 Step 8.2 (인증 — OIDC + JWT + bcrypt fallback, ADR-0023 구현).

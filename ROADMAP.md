@@ -251,10 +251,12 @@
   - workspace 모델 6 / connection 3 / pipeline 3 / run 4 (FOR UPDATE SKIP LOCKED 검증 포함) / audit 2
 - [x] pytest-asyncio `default_fixture_loop_scope = "session"` (session-scoped 엔진 + 테스트 공유 루프)
 
-### 7.3 YAML ↔ DB 양방향
-- [ ] `services/etlx-server/etlx_server/io/yaml_sync.py` — `configs/*.yaml` 읽어 DB upsert, 역방향 export
-- [ ] CLI 확장: `etlx import <yaml_dir> --workspace=<id>`, `etlx export --workspace=<id> --to=<dir>`
-- [ ] Pydantic 모델 재사용: `etl_plugins.config.models`의 `ConnectionConfig` / `PipelineConfig`을 그대로 DB 컬럼 검증에 사용
+### 7.3 YAML ↔ DB 양방향 ✅ (2026-05-16)
+- [x] `services/etlx-server/etlx_server/io/yaml_sync.py` — connections.yaml + pipelines/*.yaml ↔ DB 양방향 + idempotent upsert + 변경 시에만 PipelineVersion 증가
+- [x] CLI: `etlx-server import-yaml <yaml_dir> --workspace=<slug>` + `etlx-server export-yaml --workspace=<slug> --to=<dir>` (core `etlx` 와 분리 — ADR-0017 단방향 의존 유지)
+- [x] Pydantic 모델 재사용: `etl_plugins.config.models`의 `ConnectionsConfig`/`ConnectionConfig`/`PipelineConfig`을 그대로 검증에 사용 (SSOT)
+- [x] Secret 처리: `!secret <path>` → DB에 `${SECRET:<path>}` placeholder + `connections.secret_refs` 리스트만 저장 (평문 금지). 역방향 export에서 다시 `!secret` 태그로 복원
+- [x] 9 통합 테스트 추가 (round-trip + idempotent + 버전 증가 + 스케줄 추가/삭제 + 스트림 모드)
 
 ### 7.4 Secret backend UI 통합
 - [ ] 입력 즉시 metadata DB에는 평문 저장 금지 — 시크릿 백엔드(Vault / AWS SM / GCP SM)에 저장하고 ref만 보관
@@ -430,3 +432,4 @@
 - 2026-05-14: **Step 6 격상 — ADR-0024.** "강화" 일반 항목을 "Asset/Lineage/Cursor 1급 모델 코어 추가"로 재구성. 9 서브슬라이스(6.1~6.9)로 분할, v0.1.0(Cursor+릴리스)과 v0.2.0(Asset+Lineage+Catalog) 두 단계로 쪼갬. 코드 변경 없음.
 - 2026-05-15: **Step 7.1 (모노레포 스캐폴딩) 완료.** `services/etlx-server`(uv workspace member, FastAPI `/health`+`/version` placeholder, 2 unit tests) + `services/etlx-web`(pnpm workspace, Next.js 15 placeholder) + `pnpm-workspace.yaml` + 루트 `[tool.uv.workspace]` + CI 3분리(`ci-core.yml`/`ci-server.yml`/`ci-web.yml`) + `.importlinter` 2 contracts(CI 자동 검증, KEPT). 코어 코드 변경 0. 다음은 Step 7.2 메타DB 스키마.
 - 2026-05-16: **Step 7.2 (메타데이터 DB 스키마) 완료.** `etlx_server/db/` 모듈 (uuid7 PK, TimestampMixin, 5종 PG ENUM, 12 테이블 모델: workspace/user/membership/PAT/connection/pipeline/pipelineVersion/schedule/run/runLog/runMetric/auditLog). Alembic 초기 마이그레이션 0001 (hand-written, 5 enum 타입 + 12 테이블 + 인덱스/UNIQUE). testcontainers Postgres + per-test rollback isolation + `default_fixture_loop_scope=session` 으로 **18 통합 테스트** 통과 — 워커 큐 `FOR UPDATE SKIP LOCKED` 패턴, 좀비 회수 인덱스(`ix_runs_heartbeat`), cascade/SET NULL FK 동작, JSONB 라운드트립 모두 검증. ADR-0020/0021/0023 결정 구현체 (신규 ADR 없음). 다음은 Step 7.3 YAML↔DB 동기화.
+- 2026-05-16: **Step 7.3 (YAML ↔ DB 양방향) 완료.** `etlx_server/io/yaml_sync.py` + `etlx-server` 새 console script (`import-yaml`/`export-yaml`). 코어 `etl_plugins.config.models`를 SSOT로 재사용. `!secret <path>` 태그는 DB에 `${SECRET:<path>}` placeholder + `secret_refs` 리스트만 저장(평문 0); export 시 다시 `!secret` 로 복원되어 round-trip. `${VAR}` env-var placeholder는 import 시점에 절대 expand 하지 않고 그대로 보관. PipelineVersion은 config_json diff 시에만 증가(idempotent). 9 신규 통합 테스트 — 누적 27 server it + 변동 없는 core 321 unit + 2 server unit = **350 테스트** all green. ADR-0017 단방향 의존 유지(`etlx`는 core, `etlx-server`는 service). 다음은 Step 7.4 secret backend 구현.

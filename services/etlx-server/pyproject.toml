@@ -20,7 +20,13 @@ dependencies = [
     "passlib[bcrypt]>=1.7",   # ADR-0023 local auth fallback
     "pyjwt>=2.9",             # ADR-0023 JWT
     "croniter>=2.0",          # cron schedule evaluation
+    "typer>=0.12",            # etlx-server admin CLI (Step 7.3)
 ]
+
+[project.scripts]
+# Admin CLI for the metadata DB (Step 7.3). Stays on the service side so the
+# core ``etlx`` CLI in etl_plugins.cli remains DB-agnostic (ADR-0017).
+etlx-server = "etlx_server.cli:app"
 
 [build-system]
 requires = ["hatchling>=1.24"]

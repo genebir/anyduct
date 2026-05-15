@@ -1442,6 +1442,7 @@ dependencies = [
     { name = "passlib", extra = ["bcrypt"] },
     { name = "pyjwt" },
     { name = "sqlalchemy" },
+    { name = "typer" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -1456,6 +1457,7 @@ requires-dist = [
     { name = "passlib", extras = ["bcrypt"], specifier = ">=1.7" },
     { name = "pyjwt", specifier = ">=2.9" },
     { name = "sqlalchemy", specifier = ">=2.0" },
+    { name = "typer", specifier = ">=0.12" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
 ]
 

@@ -426,6 +426,37 @@
 ### Milestone
 - **Step 7.2 — 메타데이터 DB 스키마 완료 (2026-05-16)**: 12 테이블 + 5 enum 타입 + 초기 Alembic 마이그레이션 + 18 통합 테스트 (testcontainers Postgres 16). 코어 321 unit (regression 0) + 서버 18 it = **변경 없는 코어 + 18 신규 it green**. `mypy strict` 통과(13 source files), `lint-imports` 2 contracts KEPT. 다음 슬라이스는 **Step 7.3 (YAML ↔ DB 양방향)** — `etl_plugins.config.models` 재사용해 `configs/*.yaml` ↔ metadata DB upsert/export + CLI `etlx import|export`.
 
+- **YAML ↔ DB 양방향 동기화** [Step 7.3]
+  - `services/etlx-server/etlx_server/io/yaml_sync.py` — `connections.yaml` + `pipelines/*.yaml` ↔ metadata DB 양방향 sync.
+    * `import_connections_yaml(session, ws, path)` — 한 워크스페이스에 connections 일괄 upsert.
+    * `import_pipeline_yaml(session, ws, path)` — 한 파이프라인 upsert: Pipeline 존재 확인 후 PipelineVersion 비교 → diff면 새 버전 생성(`is_current=True`, 이전 demote), 동일하면 no-op. cfg.schedule 유무에 따라 `name="default"` Schedule 추가/삭제.
+    * `import_yaml_dir(session, ws, dir)` — 디렉토리 walk + `ImportResult` 요약(연결/파이프라인/새 버전/유지/스케줄 카운트).
+    * `export_workspace(session, ws, out_dir)` — 역방향: `connections.yaml` + `pipelines/<name>.yaml` 재생성.
+  - Secret 처리 (평문 0 약속 유지): `!secret <path>` YAML 태그 → DB `config_json`에 `${SECRET:<path>}` placeholder + `connections.secret_refs` 리스트. Export 시 `${SECRET:<path>}` → `!secret <path>` 태그로 복원. `${VAR}` env-var 형식은 import 시 절대 expand 하지 않고 그대로 보관 → DB는 항상 unresolved placeholder만 가짐.
+  - 코어 `etl_plugins.config.models`(SSOT)을 그대로 재사용 — `ConnectionsConfig`/`ConnectionConfig`/`PipelineConfig`이 spec 검증을 책임짐. `extra="forbid"`인 모델 덕분에 unknown 필드가 자동 차단됨.
+  - PipelineVersion 증가 규칙: 동일 `config_json` 재import = no-op (`pipeline_versions_unchanged++`). 변경된 import만 `version=v+1`로 새 행 + 이전 `is_current=False` (단일 트랜잭션).
+- **etlx-server CLI** [Step 7.3]
+  - `services/etlx-server/etlx_server/cli.py` — Typer 기반 admin CLI. 두 서브커맨드:
+    * `etlx-server import-yaml <yaml_dir> --workspace <slug>` — 슬러그로 워크스페이스 찾고 디렉토리 import → 요약 한 줄.
+    * `etlx-server export-yaml --workspace <slug> --to <dir>` — DB → YAML 트리.
+  - `DATABASE_URL` env var 필수(없으면 exit 2). 자체 engine + session 생성 → commit 한 후 dispose.
+  - `services/etlx-server/pyproject.toml`: `typer>=0.12` 의존성 + `[project.scripts] etlx-server = "etlx_server.cli:app"` 추가. **코어 `etlx`와 분리** — ADR-0017 단방향 의존 유지(`etlx` = `etl_plugins.cli`는 DB 무지, `etlx-server`는 services 안에서 DB를 다룸).
+- **통합 테스트 확장** [Step 7.3]
+  - `services/etlx-server/tests/db/test_yaml_sync.py` — 9 신규 it 테스트:
+    * `!secret`/`${VAR}` 처리(평문 미저장, env placeholder 보존)
+    * Pipeline+Schedule 생성, batch/stream 모드 모두
+    * 재import idempotent / diff 시 버전 증가 + demote
+    * `import_yaml_dir` summary 카운트
+    * 전체 round-trip (in → DB → out → re-import 시 변경 0)
+    * 파이프라인 내부 `!secret` 태그도 라운드트립
+    * `schedule:` 줄 제거 후 재import → Schedule 행 삭제
+
+### Decisions
+- (이번 슬라이스에서 신규 ADR 없음 — ADR-0017 단방향 의존 + ADR-0020 SSOT 재사용 원칙 그대로 구현)
+
+### Milestone
+- **Step 7.3 — YAML ↔ DB 양방향 완료 (2026-05-16)**: `etlx-server` 새 CLI + `yaml_sync.py` 양방향 + 9 신규 it 통합 테스트. 누적 코어 321 unit + 서버 2 unit + 서버 **27 it** (18 + 9) = **350 tests** all green. `mypy strict` 16 source files OK, `lint-imports` 2 contracts KEPT. 다음 슬라이스는 **Step 7.4 (Secret backend UI 통합)** — `EnvSecretBackend` 외 3종(Vault/AWS SM/GCP SM) 실제 구현 + 로컬 dev용 `FileSecretBackend`.
+
 ### Changed
 - (없음)
 

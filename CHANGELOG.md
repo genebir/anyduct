@@ -507,6 +507,32 @@
 ### Milestone
 - **Step 8.1 — API Server 부트스트랩 + OOP 재구성 완료 (2026-05-16)**: 모듈 글로벌 0 (factory 패턴 + `app.state` + `Depends`). 누적 코어 344 unit + 서버 **8 unit** (7.1 placeholder 2 + 8.1 6) + 서버 **29 it** (7.2~7.4 27 + 8.1 readiness 2) + 코어 119 it = **500 tests** all green. mypy strict 22 server src files OK, import-linter 2 contracts KEPT. 다음 슬라이스는 **Step 8.2 (인증)** — OIDC(authlib) + 로컬 fallback(bcrypt) + JWT(pyjwt RS256) + `/auth/login` `/auth/refresh` `/auth/logout` (ADR-0023 구현).
 
+- **로컬 인증 + JWT** [Step 8.2a]
+  - **분할 결정**: Step 8.2를 a(로컬 + JWT) / b(OIDC) 두 슬라이스로 분리 — 1 PR = 1 slice 원칙 유지.
+  - `services/etlx-server/etlx_server/auth/` 신규 패키지 (정규화된 OOP layering):
+    * `jwt_service.py` — `JwtService` (RS256, `issue_access`/`issue_refresh`/`verify(token, expected_type)`), `Claims` dataclass, `TokenType` StrEnum, `InvalidTokenError`. verify-only 인스턴스 지원(private_key=None) → 워커가 검증만 할 때 사용. `extra_claims`가 reserved claim(`sub`/`iss`/`exp`/...) 덮어쓰지 못함. `generate_rsa_keypair_pem()` 헬퍼(테스트/스크립트용).
+    * `password_service.py` — `PasswordService(rounds=12)`. **bcrypt 직접 사용**(passlib는 bcrypt 4.x와 비호환 — `__about__` 누락 + 72-byte 엄격 체크). 72-byte 초과 패스워드는 SHA-256 prehash + base64 후 bcrypt에 전달.
+    * `user_repository.py` — `UserRepository(session)` 에 `get_by_id` / `get_by_email`(email은 항상 lowercase). 라우터가 ORM 직접 접근하지 않게 분리.
+    * `schemas.py` — Pydantic `LoginRequest`(EmailStr) / `RefreshRequest` / `TokenPair`(`token_type: "bearer"` 고정) / `CurrentUser`.
+    * `current_user.py` — `get_jwt_service` / `get_password_service` (app.state DI) + `get_current_user`(HTTPBearer → JwtService.verify(ACCESS) → UserRepository.get_by_id → CurrentUser). 모든 실패 경로 401 + `WWW-Authenticate: Bearer` 일관 응답.
+  - `services/etlx-server/etlx_server/routers/auth.py` — `/auth/login`(local, disabled 시 503), `/auth/refresh`(refresh 토큰만 허용 — access는 401), `/auth/logout`(stateless 204), `/auth/me`(FE bootstrap). Login은 unknown email 시 dummy bcrypt verify로 timing leak 방지. OIDC 사용자가 local login 시도하면 401(detail 동일 — leak 방지).
+  - `app_factory.py` — lifespan에서 `PasswordService` + `JwtService` 인스턴스화 후 `app.state`에 attach. JwtService는 키 누락 시 None — 무관한 엔드포인트(`/health`/`/ready`/`/version`)는 키 없이도 동작.
+  - `settings.py` 확장: `auth_jwt_private_key_pem`/`auth_jwt_public_key_pem`(SecretStr) / `auth_jwt_issuer` / `auth_jwt_audience` / `auth_jwt_access_ttl_seconds` / `auth_jwt_refresh_ttl_seconds` / `auth_local_enabled`.
+- **의존성 변경** [Step 8.2a]
+  - 추가: `bcrypt>=4.2`(passlib 제거), `pyjwt[crypto]>=2.9`(crypto extras로 RS256), `email-validator>=2.2`(Pydantic EmailStr).
+  - 제거: `passlib[bcrypt]>=1.7` — bcrypt 4.x와 호환 안 됨.
+  - mypy override 추가: `passlib.*` → ignore_missing_imports (남아있는 transitive 참조 대비).
+- **테스트 정규화** [Step 8.2a]
+  - `services/etlx-server/tests/auth/test_password_service.py` — 4 unit (round-trip, wrong password, malformed hash → False(fail-closed), `$2`로 시작하는 bcrypt marker).
+  - `services/etlx-server/tests/auth/test_jwt_service.py` — 11 unit (access/refresh 발급+검증, 잘못된 type 거부, signature 검증, audience/issuer 검증, expired 거부, verify-only 인스턴스, public_key 자동 derive, extra_claims가 reserved 못 덮음 등).
+  - `services/etlx-server/tests/db/test_auth_router.py` — 13 it (real PG via testcontainers). conftest의 outer-trans rollback과 lifespan의 별도 connection이 충돌하므로 `app.dependency_overrides[get_session]`로 테스트 세션을 라우터에 주입 — rollback isolation 유지. 시나리오: login(성공 / wrong password / unknown email / OIDC user / disabled local) + me(missing token / garbage token / refresh token in auth header) + refresh(success / access token rejected) + logout(204 / 401).
+
+### Decisions
+- (이번 슬라이스에서 신규 ADR 없음 — ADR-0023 로컬 fallback + JWT 부분 구현체)
+
+### Milestone
+- **Step 8.2a — 로컬 인증 + JWT 완료 (2026-05-16)**: 정규화된 auth 패키지(JwtService/PasswordService/UserRepository/Schemas) + 4 엔드포인트(login/refresh/logout/me). 누적 코어 344 unit + 서버 **23 unit** + 서버 **47 it** + 코어 119 it = **533 tests** all green. mypy strict 29 server src files OK, import-linter 2 contracts KEPT. 다음 슬라이스는 **Step 8.2b (OIDC)** — authlib 기반 Google/Azure AD/Okta 공통화 + `/auth/oidc/login`+`/auth/oidc/callback` + ID token 검증 + 신규 OIDC 사용자 자동 프로비저닝.
+
 ### Changed
 - (없음)
 

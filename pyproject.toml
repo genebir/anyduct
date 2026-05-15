@@ -153,6 +153,11 @@ ignore_missing_imports = true
 module = ["pymysql", "pymysql.*"]
 ignore_missing_imports = true
 
+# passlib doesn't ship type stubs in a way our pinned mypy picks up.
+[[tool.mypy.overrides]]
+module = ["passlib", "passlib.*"]
+ignore_missing_imports = true
+
 # Secret backend optional extras (Step 7.4) — typed stubs aren't published or
 # are gRPC-generated and don't expose useful types for our usage.
 [[tool.mypy.overrides]]

@@ -117,7 +117,7 @@ uv run mypy etl_plugins
 
 ## 5. 현재 단계
 
-**Step 8.1 완료 → 8.2 인증 차례** (2026-05-16 기준). Steps 1–4 + Step 5.1(MySQL, SQLite) + Step 7.0~7.4 + **Step 8.1(FastAPI 부트스트랩 + OOP 재구성)** 완료. **344 코어 단위 + 8 etlx-server 단위 + 3 skip + 119 코어 통합(testcontainers PG/MinIO/Kafka/MySQL/Vault/LocalStack) + 29 서버 통합 = 500 테스트** all green, **24 ADR**. `mypy strict` 코어 39 + 서버 22 src files OK, `lint-imports` 2 contracts KEPT. **OOP 정규화 적용**: factory 패턴(`create_app`), `Settings(BaseSettings)`, routers 도메인 분리, `Depends`-기반 DI, lifespan-managed engine.
+**Step 8.2a 완료 → 8.2b OIDC 차례** (2026-05-16 기준). Steps 1–4 + Step 5.1 + Step 7.0~7.4 + Step 8.1 + **Step 8.2a(로컬 인증 + JWT RS256)** 완료. **344 코어 단위 + 23 etlx-server 단위 + 3 skip + 119 코어 통합(testcontainers PG/MinIO/Kafka/MySQL/Vault/LocalStack) + 47 서버 통합 = 533 테스트** all green, **24 ADR**. `mypy strict` 코어 39 + 서버 29 src files OK, `lint-imports` 2 contracts KEPT. **OOP 정규화 일관 적용**: services(`JwtService`/`PasswordService`) + repository(`UserRepository`) + 도메인 라우터 + `Depends`-기반 DI + lifespan-managed `app.state` 싱글톤.
 
 추가로 **서비스화 방향 확정**(ADR-0017): `services/etlx-server`(FastAPI) + `services/etlx-web`(Next.js)을 별도 패키지로 Step 7부터 진행. 코어와 서비스는 단방향 의존.
 
@@ -139,7 +139,10 @@ Step별 산출물 요약:
   - 7.2 ✅ 메타데이터 DB 스키마 완료 — 12 테이블 + 5 PG enum + Alembic 초기 마이그레이션 + uuid7 PK + 18 testcontainers 통합 테스트(ADR-0020/0021/0023 구현)
   - 7.3 ✅ YAML↔DB 양방향 완료 — `etlx_server/io/yaml_sync.py` + `etlx-server` CLI(`import-yaml`/`export-yaml`). `!secret` 평문 0 약속 유지, idempotent PipelineVersion, 9 신규 it 테스트
   - 7.4 ✅ Secret backend 구현 완료 — `SecretBackend`에 write API(set/delete) + 4 구현체(File/Vault/AWS SM/GCP SM). lazy import + 3 pyproject extras. 35 unit + 8 testcontainers it(Vault + LocalStack)
-- 📋 Step 8 (API Server / FastAPI) — 미착수
+- 🔄 Step 8 (API Server / FastAPI):
+  - 8.1 ✅ 부트스트랩 + OOP 재구성 — factory 패턴, Settings, routers 분리, lifespan engine, /ready DB ping
+  - 8.2a ✅ 로컬 인증 + JWT — JwtService(RS256) + PasswordService(bcrypt) + UserRepository + /auth/login/refresh/logout/me + Depends(get_current_user)
+  - 8.2b~8.7 미착수 — 다음은 OIDC(authlib)
 - 📋 Step 9 (Execution Engine 통합) — 미착수
 - 📋 Step 10 (Web UI / Next.js) — 미착수
 - 📋 Step 11 (운영 강화) — 미착수

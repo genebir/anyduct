@@ -16,7 +16,7 @@ from __future__ import annotations
 from enum import StrEnum
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -67,6 +67,36 @@ class Settings(BaseSettings):
     cors_origins: list[str] = Field(
         default_factory=list,
         description="Allowed CORS origins. Empty disables CORS middleware.",
+    )
+
+    # --- auth (ADR-0023 — JWT RS256 + bcrypt local fallback) ---------------
+    auth_jwt_private_key_pem: SecretStr | None = Field(
+        default=None,
+        description="RSA private key PEM (signing). Required to issue tokens.",
+    )
+    auth_jwt_public_key_pem: SecretStr | None = Field(
+        default=None,
+        description="RSA public key PEM (verification). Derived from private key if omitted.",
+    )
+    auth_jwt_issuer: str = Field(
+        default="etlx-server",
+        description="JWT 'iss' claim and validation expectation.",
+    )
+    auth_jwt_audience: str = Field(
+        default="etlx",
+        description="JWT 'aud' claim and validation expectation.",
+    )
+    auth_jwt_access_ttl_seconds: int = Field(
+        default=900,
+        description="Access token lifetime (default 15 min).",
+    )
+    auth_jwt_refresh_ttl_seconds: int = Field(
+        default=86400 * 7,
+        description="Refresh token lifetime (default 7 days).",
+    )
+    auth_local_enabled: bool = Field(
+        default=True,
+        description="If false, /auth/login (local email+password) returns 503.",
     )
 
     @property

@@ -285,10 +285,24 @@
 - [x] 14 신규 unit(`test_health.py` 6 + `test_settings.py` 6 + factory/CORS 2) + 2 신규 it(`test_health_ready.py`, testcontainers Postgres 16)
 
 ### 8.2 인증
+**원래 단일 슬라이스였으나 PR 크기 관리를 위해 a/b로 분리 (2026-05-16).**
+
+#### 8.2a 로컬 인증 + JWT ✅ (2026-05-16)
+- [x] `JwtService` 클래스 (RS256, `issue_access`/`issue_refresh`/`verify`, `Claims` dataclass, `TokenType` enum, verify-only 인스턴스 지원, extra_claims가 reserved claim 덮어쓰지 못함)
+- [x] `PasswordService` 클래스 — bcrypt 직접 사용(passlib 미사용 — bcrypt 4.x 비호환), 72-byte 초과는 SHA-256 prehash + base64 후 bcrypt
+- [x] `UserRepository`(get_by_email/id) — SQL 추상화, email은 lowercase로 정규화
+- [x] 로컬 계정 fallback — bcrypt password_hash 검증, OIDC 사용자는 로컬 로그인 거부(401), unknown email 시 dummy hash compare로 timing leak 방지
+- [x] `/auth/login`, `/auth/refresh`(access→refresh는 거부), `/auth/logout`(stateless 204), `/auth/me`(FE bootstrap)
+- [x] `Depends(get_current_user)` — `HTTPBearer` + JwtService.verify + UserRepository 조회, 모든 실패 경로 401 + `WWW-Authenticate: Bearer`
+- [x] Settings 확장: `auth_jwt_private_key_pem`/`auth_jwt_public_key_pem`(SecretStr) / `auth_jwt_issuer` / `auth_jwt_audience` / `auth_jwt_access_ttl_seconds`(900) / `auth_jwt_refresh_ttl_seconds`(7d) / `auth_local_enabled`(disable 시 503)
+- [x] 신규 의존성: `bcrypt>=4.2`(passlib 제거), `pyjwt[crypto]>=2.9`(RS256), `email-validator>=2.2`(Pydantic EmailStr)
+- [x] 15 신규 unit(`test_password_service.py` 4 + `test_jwt_service.py` 11) + 13 신규 it(`test_auth_router.py`, testcontainers PG, `app.dependency_overrides[get_session]`로 outer-trans rollback isolation 유지)
+
+#### 8.2b OIDC
 - [ ] OIDC (Google / Azure AD / Okta 일반화) — authlib
-- [ ] 로컬 계정 fallback (email + password, bcrypt)
-- [ ] JWT 발급/검증 (RS256)
-- [ ] `/auth/login`, `/auth/refresh`, `/auth/logout`
+- [ ] `/auth/oidc/login`, `/auth/oidc/callback`
+- [ ] ID token 검증 + 신규 OIDC 사용자 자동 프로비저닝
+- [ ] Settings 확장: `auth_oidc_*`
 
 ### 8.3 RBAC
 - [ ] 역할: Owner / Editor / Viewer / Runner
@@ -446,3 +460,5 @@
 - 2026-05-16: **Step 7.3 (YAML ↔ DB 양방향) 완료.** `etlx_server/io/yaml_sync.py` + `etlx-server` 새 console script (`import-yaml`/`export-yaml`). 코어 `etl_plugins.config.models`를 SSOT로 재사용. `!secret <path>` 태그는 DB에 `${SECRET:<path>}` placeholder + `secret_refs` 리스트만 저장(평문 0); export 시 다시 `!secret` 로 복원되어 round-trip. `${VAR}` env-var placeholder는 import 시점에 절대 expand 하지 않고 그대로 보관. PipelineVersion은 config_json diff 시에만 증가(idempotent). 9 신규 통합 테스트 — 누적 27 server it + 변동 없는 core 321 unit + 2 server unit = **350 테스트** all green. ADR-0017 단방향 의존 유지(`etlx`는 core, `etlx-server`는 service). 다음은 Step 7.4 secret backend 구현.
 - 2026-05-16: **Step 7.4 (Secret backend 구현) 완료.** `SecretBackend`에 write API 추가(`set`/`delete`, read-only면 NotImplementedError). 4종 실제 구현: `FileSecretBackend`(JSON, atomic write, 0600), `VaultSecretBackend`(hvac KV v2), `AwsSmSecretBackend`(boto3 SM, ResourceExists handling, ForceDelete), `GcpSmSecretBackend`(google-cloud-secret-manager, AlreadyExists handling). pyproject extras 3종(`vault`/`aws-sm`/`gcp-sm`) — 클라이언트 라이브러리는 lazy import. 35 신규 unit(File 9, GCP 풀-mock 6, Env/Static 확장, factory 4) + 4 Vault testcontainers it + 4 AWS SM LocalStack it. 누적 **코어 344 unit + 2 server unit + 코어 119 it + 27 server it = 492 테스트** all green. 신규 ADR 없음 — 기존 SecretBackend ABC를 확장한 것. 다음은 Step 8 (API Server / FastAPI) 또는 Step 5 코어 확장(MSSQL/Oracle/HTTP 등).
 - 2026-05-16: **Step 8.1 (API Server 부트스트랩 / OOP 재구성) 완료.** `services/etlx-server`를 정규화된 OOP 구조로 재배치 — **factory 패턴** `app_factory.create_app(settings)`, **Settings** 클래스(`pydantic-settings`), **routers** 도메인 분리(`health`/`meta`), **DI 헬퍼** `dependencies.py`(`get_engine`/`get_session_factory`/`get_session`), **lifespan-managed engine**(인스턴스마다 별도 엔진, shutdown dispose). `/ready`는 진짜 DB `SELECT 1` ping (실패 시 503 + degraded). 14 신규 server unit + 2 readiness it(testcontainers PG 16). 누적 **코어 344 unit + 서버 **8 unit** + 코어 119 it + 서버 **29 it** = 500 테스트** all green. 신규 dep `pydantic-settings>=2.5`. 신규 ADR 없음 — ADR-0019(FastAPI) 구현체. 다음은 Step 8.2 (인증 — OIDC + JWT + bcrypt fallback, ADR-0023 구현).
+- 2026-05-16: **Step 8.2 a/b 분리.** 단일 슬라이스가 너무 커져서 a(로컬 + JWT) / b(OIDC) 로 분할. 1 PR = 1 slice 원칙 유지.
+- 2026-05-16: **Step 8.2a (로컬 인증 + JWT) 완료.** `auth/` 하위 패키지 신설 — `JwtService`(RS256, access/refresh + verify-only 모드), `PasswordService`(bcrypt 직접 — passlib는 bcrypt 4.x와 비호환), `UserRepository`(email/id 조회), `current_user.py` DI 헬퍼 + `get_current_user` Depends, Pydantic schemas. `routers/auth.py` 4 엔드포인트(login/refresh/logout/me). app_factory가 JwtService + PasswordService를 lifespan에서 `app.state`에 attach. 15 신규 unit(JwtService 11 + PasswordService 4) + 13 신규 it(`test_auth_router.py`, `app.dependency_overrides[get_session]`로 outer-trans rollback isolation 유지). 누적 **코어 344 unit + 서버 23 unit + 코어 119 it + 서버 47 it = 533 테스트** all green. 신규 deps `bcrypt>=4.2` + `pyjwt[crypto]>=2.9` + `email-validator>=2.2`. ADR-0023 로컬 fallback + JWT 부분 구현체. 다음은 Step 8.2b (OIDC, authlib).

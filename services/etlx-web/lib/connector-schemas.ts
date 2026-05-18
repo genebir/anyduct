@@ -131,6 +131,35 @@ const S3: ConnectorSchema = {
   ],
 };
 
+const HTTP: ConnectorSchema = {
+  type: "http",
+  label: "HTTP / REST",
+  description: "httpx-backed batch source for JSON-returning REST endpoints.",
+  fields: [
+    {
+      key: "base_url",
+      label: "Base URL",
+      type: "string",
+      required: true,
+      placeholder: "https://api.example.com",
+      help: "Scheme + host (path is supplied per task via the operator's Path field).",
+    },
+    {
+      key: "auth_token",
+      label: "Bearer token",
+      type: "password",
+      isSecret: true,
+      help: "Sent as Authorization: Bearer <token>. Leave blank for unauthenticated APIs.",
+    },
+    {
+      key: "timeout_seconds",
+      label: "Timeout (seconds)",
+      type: "number",
+      defaultValue: 30,
+    },
+  ],
+};
+
 const KAFKA: ConnectorSchema = {
   type: "kafka",
   label: "Kafka",
@@ -183,6 +212,7 @@ export const CONNECTOR_SCHEMAS: ConnectorSchema[] = [
   SQLITE,
   S3,
   KAFKA,
+  HTTP,
 ];
 
 export function findSchema(type: string): ConnectorSchema | undefined {

@@ -45,6 +45,7 @@ repos:
           - tenacity>=8.2
           - jinja2>=3.1
           - python-dotenv>=1.0
+          - httpx>=0.27
         args: [--config-file=pyproject.toml]
         files: ^etl_plugins/
 

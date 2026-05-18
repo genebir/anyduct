@@ -10,6 +10,15 @@
 ## [Unreleased]
 
 ### Added
+- **HTTP source connector** [Step 5.7] — new `etl_plugins/connectors/http/` houses `HttpConnector(BatchSource)`, registered as `http` via `@ConnectorRegistry.register` and the `etl_plugins.connectors` entry-point.
+  - **httpx-backed** so timeout / retry / JSON decoding behavior is consistent with the rest of the stack, and tests can use `httpx.MockTransport` instead of a real server.
+  - **Response shapes**: top-level JSON array (`[{...}, {...}]`) or top-level object indexed by `records_field` (default `"items"`; pass `None` to require list-only responses).
+  - **Pagination**: when `page_param` is set, the connector loops appending `?<page_param>=N` starting from `start_page` (default 1) until the server returns an empty page or `max_pages` (default 1000 — sanity guard) is hit. No `page_param` → single GET.
+  - **Auth**: optional `auth_token` becomes `Authorization: Bearer <token>`; arbitrary `headers` (e.g. `X-Api-Key`) merge into every request. `params` is sent as static query parameters on every page.
+  - **Health check** returns `True` for any response with status `< 500` (so 401 / 403 mean "server up, auth is the issue, not reachability"); only 5xx and connection errors flip it to `False`.
+  - **`httpx>=0.27` promoted** from dev-only (FastAPI TestClient) to a top-level `dependencies` entry so the HTTP connector is zero-extras to install. New entry-point row `http = "etl_plugins.connectors.http.connector:HttpConnector"`.
+  - **UI catalog**: `services/etlx-web/lib/operators.ts` gains a `source:http` operator with fields for Path / Records field / Page parameter / Static params; `services/etlx-web/lib/connector-schemas.ts` adds the matching connection form (base_url + bearer token secret + timeout). Users can build an HTTP pipeline end-to-end from the web UI.
+  - **21 new unit tests** (`tests/unit/connectors/http/test_http.py`) cover construction guards (missing `base_url`, non-http scheme), array + object response shapes, custom `records_field`, Bearer auth header, custom headers, query params, pagination-until-empty + `max_pages` cap, non-2xx → `ReadError`, non-JSON → `ReadError`, missing field → `ReadError`, non-object record → `ReadError`, registry lookup, and `records_field=None` with object response. Cumulative core-side: **348 unit + 3 skipped**; full project **758 tests** all green.
 - **Stream worker manager** [Step 9.4] — new `etlx_server/worker/stream.py` + `etlx-server stream-worker run` CLI runs as a separate process and keeps stream pipelines alive.
   - **Lifecycle inversion**: batch pipelines are pull-driven (scheduler enqueues, worker claims); stream pipelines are push-driven (worker scans active stream Schedule rows on a tick, creates a `running` Run row, and spawns an `asyncio.Task` that calls `Pipeline.arun_stream()`). The task gets the same heartbeat + RunRecorder periodic-drain treatment as batch.
   - **Cancellation**: deactivating or deleting a schedule cancels its in-flight task; the Run row is stamped `cancelled` with `error_class='StreamCancelled'`. Worker shutdown cancels every in-flight stream so the UI never shows ghost `running` rows after a restart.

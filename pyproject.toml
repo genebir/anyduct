@@ -25,6 +25,10 @@ dependencies = [
     "tenacity>=8.2",
     "jinja2>=3.1",
     "python-dotenv>=1.0",
+    # httpx is small + pure Python; used by both the FastAPI TestClient (dev
+    # dep) and the http connector (production dep). Promoting it here keeps
+    # the http connector zero-extras to install.
+    "httpx>=0.27",
 ]
 
 # 커넥터별 드라이버는 extras로 분리. 사용자는 필요한 것만 설치.
@@ -54,6 +58,7 @@ mysql = "etl_plugins.connectors.rdbms.mysql:MySQLConnector"
 sqlite = "etl_plugins.connectors.rdbms.sqlite:SQLiteConnector"
 s3 = "etl_plugins.connectors.object_storage.s3:S3Connector"
 kafka = "etl_plugins.connectors.stream.kafka:KafkaConnector"
+http = "etl_plugins.connectors.http.connector:HttpConnector"
 
 [build-system]
 requires = ["hatchling"]

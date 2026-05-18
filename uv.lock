@@ -1333,6 +1333,7 @@ wheels = [
 name = "etl-plugins"
 source = { editable = "." }
 dependencies = [
+    { name = "httpx" },
     { name = "jinja2" },
     { name = "pydantic" },
     { name = "python-dotenv" },
@@ -1406,6 +1407,7 @@ requires-dist = [
     { name = "boto3", marker = "extra == 's3'", specifier = ">=1.34" },
     { name = "dagster", marker = "extra == 'dagster'", specifier = ">=1.9" },
     { name = "google-cloud-secret-manager", marker = "extra == 'gcp-sm'", specifier = ">=2.20" },
+    { name = "httpx", specifier = ">=0.27" },
     { name = "hvac", marker = "extra == 'vault'", specifier = ">=2.0" },
     { name = "jinja2", specifier = ">=3.1" },
     { name = "prefect", marker = "extra == 'prefect'", specifier = ">=3.0" },

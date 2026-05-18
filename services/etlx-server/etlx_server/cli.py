@@ -32,16 +32,18 @@ from etlx_server.db.models import Workspace
 from etlx_server.db.session import make_engine, make_session_factory
 from etlx_server.io.yaml_sync import export_workspace, import_yaml_dir
 from etlx_server.scheduler import Scheduler
-from etlx_server.worker import RunWorker, ZombieReaper
+from etlx_server.worker import RunWorker, StreamWorker, ZombieReaper
 from etlx_server.worker.recorder import log_processor
 
 app = typer.Typer(help="etlx-server administration CLI (metadata DB sync, ops).")
 worker_app = typer.Typer(help="Worker process commands.")
 reaper_app = typer.Typer(help="Zombie-run reaper process commands.")
 scheduler_app = typer.Typer(help="Cron scheduler process commands.")
+stream_worker_app = typer.Typer(help="Stream worker process commands.")
 app.add_typer(worker_app, name="worker")
 app.add_typer(reaper_app, name="reaper")
 app.add_typer(scheduler_app, name="scheduler")
+app.add_typer(stream_worker_app, name="stream-worker")
 
 
 def _database_url() -> str:
@@ -314,6 +316,91 @@ def scheduler_run_cmd(
 
         try:
             await scheduler.run()
+        finally:
+            await engine.dispose()
+
+    asyncio.run(_run())
+
+
+@stream_worker_app.command("run")
+def stream_worker_run_cmd(
+    tick_interval: float = typer.Option(
+        5.0,
+        "--tick-interval",
+        help="Seconds between scans of active stream schedules.",
+        min=1.0,
+        max=60.0,
+    ),
+    worker_id: str = typer.Option(
+        "",
+        "--worker-id",
+        help="Identifier stamped on Run rows (default: auto-generated UUID).",
+    ),
+    secret_backend: str = typer.Option(
+        "env",
+        "--secret-backend",
+        help="One of: env, static, file, vault, aws_sm, gcp_sm.",
+    ),
+    secret_file_path: str = typer.Option(
+        "",
+        "--secret-file-path",
+        help="Used only when --secret-backend=file.",
+    ),
+    log_flush_interval: float = typer.Option(
+        2.0,
+        "--log-flush-interval",
+        help="Seconds between RunRecorder flushes to run_logs / run_metrics.",
+        min=0.0,
+        max=60.0,
+    ),
+    log_level: str = typer.Option("INFO", "--log-level"),
+) -> None:
+    """Run stream pipelines for all active stream schedules.
+
+    Scans :class:`Schedule` rows where ``mode='stream'`` and
+    ``is_active=true`` and keeps an ``arun_stream`` task alive per
+    schedule. On SIGTERM/SIGINT, every in-flight stream is cancelled
+    and its Run row is stamped ``cancelled`` so the UI doesn't show
+    ghost ``running`` rows after the operator restarts the process.
+
+    **Single-replica today.** Running two instances would race —
+    they'd each try to spawn the same schedule. Multi-replica is
+    a Step 11 enhancement (``FOR UPDATE SKIP LOCKED`` on the
+    schedule row before spawn).
+    """
+    logging.basicConfig(
+        level=getattr(logging, log_level.upper(), logging.INFO),
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+    configure_logging(level=log_level, json=True, extra_processors=[log_processor])
+    wid = worker_id or f"stream-worker-{uuid.uuid4().hex[:12]}"
+
+    async def _run() -> None:
+        engine = make_engine(_database_url())
+        factory = make_session_factory(engine)
+        backend_opts: dict[str, str] = {}
+        if secret_file_path:
+            backend_opts["file_path"] = secret_file_path
+        backend = get_secret_backend(secret_backend, **backend_opts)
+        worker = StreamWorker(
+            factory,
+            backend,
+            worker_id=wid,
+            tick_interval_seconds=tick_interval,
+            log_flush_interval_seconds=(log_flush_interval if log_flush_interval > 0 else None),
+        )
+
+        loop = asyncio.get_running_loop()
+
+        def _shutdown(_signame: str) -> None:
+            typer.echo(f"received {_signame}, shutting down stream worker")
+            worker.stop()
+
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            loop.add_signal_handler(sig, _shutdown, sig.name)
+
+        try:
+            await worker.run()
         finally:
             await engine.dispose()
 

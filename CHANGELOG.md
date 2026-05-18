@@ -10,6 +10,13 @@
 ## [Unreleased]
 
 ### Added
+- **Stream worker manager** [Step 9.4] — new `etlx_server/worker/stream.py` + `etlx-server stream-worker run` CLI runs as a separate process and keeps stream pipelines alive.
+  - **Lifecycle inversion**: batch pipelines are pull-driven (scheduler enqueues, worker claims); stream pipelines are push-driven (worker scans active stream Schedule rows on a tick, creates a `running` Run row, and spawns an `asyncio.Task` that calls `Pipeline.arun_stream()`). The task gets the same heartbeat + RunRecorder periodic-drain treatment as batch.
+  - **Cancellation**: deactivating or deleting a schedule cancels its in-flight task; the Run row is stamped `cancelled` with `error_class='StreamCancelled'`. Worker shutdown cancels every in-flight stream so the UI never shows ghost `running` rows after a restart.
+  - **No re-spawn loop**: when a task finishes for any reason (build failure / mode mismatch / connector error / success), the worker records the schedule's `updated_at` at that moment. The next tick refuses to re-spawn unless `Schedule.updated_at` has changed — so a misconfigured pipeline doesn't generate a Run row per tick. The user has to edit the schedule (toggle off+on, change cron, etc.) to retry.
+  - **Mode enforcement**: a stream schedule pointing at a batch PipelineVersion stamps the Run row `failed` with `error_class='ModeMismatch'` immediately rather than calling `arun_stream` on an incompatible pipeline.
+  - **Single-replica today**: documented in CLI help + module docstring. Multi-replica needs a `FOR UPDATE SKIP LOCKED` claim on the schedule row before spawning (tracked as Step 11 operator strengthening).
+  - **6 new integration tests** (`tests/db/test_stream_worker.py`) using a monkey-patched `build_pipeline` + `_FakeStreamPipeline` (whose `arun_stream` is an `asyncio.sleep` respecting cancellation) so the slice doesn't need a Kafka testcontainer. Covers: stream schedule spawn / inactive + batch ignored / mode mismatch / deactivation cancels / pre-set stop / pipeline-without-current-version skip. Cumulative server-side: **300 tests in suite, all green**.
 - **Workspace dashboard / home page** [Step 10.6] — new `/w/[slug]` route is the workspace entry point.
   - **Stat cards** (4-up grid): pipelines, active schedules (with "N paused" subtext), connections, runs today (with "N in last batch" subtext). Each card links to its respective detail page; values render `—` while loading so the cards don't pop in.
   - **Recent runs** (left card, 2/3 width): newest 10 runs with `StatusBadge`, run id, pipeline id, "scheduled vs manual" hint, duration, and chevron — links into the existing Run detail page.

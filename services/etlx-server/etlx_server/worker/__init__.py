@@ -26,12 +26,14 @@ from etlx_server.worker.recorder import (
     log_processor,
 )
 from etlx_server.worker.runner import RunWorker
+from etlx_server.worker.stream import StreamWorker
 
 __all__ = [
     "RecordingMetrics",
     "RunExecutor",
     "RunRecorder",
     "RunWorker",
+    "StreamWorker",
     "ZombieReaper",
     "claim_pending_run",
     "current_run_id",

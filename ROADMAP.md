@@ -403,10 +403,15 @@
 - [x] **9.3c (log/metric 수집, 2026-05-18) 완료** — 새 `etlx_server/worker/recorder.py` 패키지. `RunRecorder` 비동기 컨텍스트 매니저가 활성 run 별로 등록되고, `RecordingMetrics`(코어 `Metrics` ABC 구현)로 글로벌 metrics 백엔드 교체 + structlog `log_processor` 필터(event_dict의 `run_id`가 활성 recorder와 일치하면 enqueue). 두 producer 모두 `queue.SimpleQueue`(스레드 안전) — `asyncio.to_thread`에서 emit해도 안전. `__aexit__`에서 최종 한 번 flush (활성 맵에서 제거 → metrics 백엔드 복원 → run_logs/run_metrics 일괄 commit). 단일-flush 디자인 결정 사유: 주기적 drain은 executor의 메인 코루틴과 같은 `AsyncSession`을 동시에 commit 해야 하는데, 공유 세션을 쓰는 테스트 픽스처에서 동시 사용 충돌이 발생. live-tail SSE는 `/runs/{id}/logs/stream` 폴링으로 대체. **Executor 통합**: `RunExecutor.execute`가 4 lifecycle 이벤트(`run.build_started`/`build_failed`/`pipeline_started`/`pipeline_succeeded`/`pipeline_failed`)를 emit해 조용한 connector도 최소한의 trail 보장. **CLI 통합**: `etlx-server worker run` 시작 시 `configure_logging(extra_processors=[log_processor])`. **테스트**: 5 it (`test_worker_recorder.py`) — 매칭 run_id 이벤트 capture / metric capture / exit 후 stale 이벤트 drop / e2e 성공 시 lifecycle + RECORDS_READ/WRITTEN/DURATION 메트릭 / build 실패 시 `run.build_failed` 로그 + error_class.
 - [ ] **메트릭 수집: 코어가 emit하는 OTel 메트릭을 Prometheus로** — Step 6 OTel 백엔드와 묶일 가능성.
 
-### 9.4 Stream worker manager
-- [ ] long-running stream pipeline은 별도 process/Pod로 관리
-- [ ] K8s 모드: `Deployment` per pipeline, healthcheck, graceful shutdown
-- [ ] Docker Compose 모드 (로컬 dev): supervisor
+### 9.4 Stream worker manager ✅ (2026-05-18, 단일 replica)
+- [x] **`etlx_server/worker/stream.py` `StreamWorker`** + `etlx-server stream-worker run` CLI. tick loop이 active stream schedule을 스캔, 누락된 schedule마다 Run row(`running` status, started_at/heartbeat_at stamped)를 생성하고 `asyncio.Task`로 `Pipeline.arun_stream()` 실행. heartbeat + RunRecorder(periodic drain)도 동일하게 부착.
+- [x] **종료 정책**: schedule이 비활성화/삭제되면 task cancel → Run row `status=cancelled` + `error_class='StreamCancelled'`. worker shutdown 시 in-flight 전체 cancel. CancelledError는 다시 raise해서 호출 컨텍스트가 cleanup 가능.
+- [x] **No re-spawn loop**: build 실패(모드 mismatch, 누락 connection 등)로 task가 즉시 종료된 경우, 동일 schedule을 다음 tick에서 재시도하지 않음. user가 schedule을 수정(`updated_at` 변경)해야만 retry — poison schedule이 매 tick마다 Run row 양산하는 thundering herd 방지.
+- [x] **Single-replica** — 다중 replica는 schedule row에 `FOR UPDATE SKIP LOCKED` claim 필요(Step 11 운영 강화로 미룸). 현재는 deployment에서 replica=1로 강제.
+- [x] **Stream 모드 enforcement**: pipeline version의 `mode`가 `stream`이 아니면 `error_class='ModeMismatch'`로 즉시 stamp + skip.
+- [x] 6 신규 it(스트림 spawn / inactive·batch ignored / mode mismatch / deactivation cancels / pre-set stop / pipeline without current version). 코어 Kafka 없이 monkeypatched `build_pipeline` + `_FakeStreamPipeline`(arun_stream = `asyncio.sleep` respecting cancellation)으로 worker lifecycle만 검증.
+- [ ] K8s 모드: `Deployment` per pipeline, healthcheck — Step 11.
+- [ ] Docker Compose 모드 supervisor — Step 11.
 
 ### 9.5 정책 UI 노출
 - [ ] retry / DLQ / 타임아웃 / 동시성 정책을 메타데이터 DB → UI에서 편집 가능

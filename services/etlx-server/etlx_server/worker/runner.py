@@ -48,11 +48,13 @@ class RunWorker:
         *,
         worker_id: str,
         poll_interval: float = 1.0,
+        log_flush_interval_seconds: float | None = None,
     ) -> None:
         self._factory = factory
         self._backend = backend
         self._worker_id = worker_id
         self._poll_interval = poll_interval
+        self._log_flush_interval = log_flush_interval_seconds
         self._stop_event = asyncio.Event()
 
     async def run(self) -> None:
@@ -78,7 +80,10 @@ class RunWorker:
             if run_id is not None:
                 try:
                     await RunExecutor(
-                        self._factory, self._backend, worker_id=self._worker_id
+                        self._factory,
+                        self._backend,
+                        worker_id=self._worker_id,
+                        log_flush_interval_seconds=self._log_flush_interval,
                     ).execute(run_id)
                 except Exception:
                     # Executor swallows pipeline errors and writes them

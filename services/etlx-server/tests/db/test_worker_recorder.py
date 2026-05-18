@@ -15,6 +15,7 @@ Covers:
 
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -39,8 +40,8 @@ from etlx_server.worker.recorder import (
     current_run_id,
     log_processor,
 )
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import delete, select
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from etl_plugins.config.secrets import StaticSecretBackend
 from etl_plugins.observability.logging import configure_logging
@@ -367,3 +368,91 @@ async def test_executor_logs_failure_when_build_fails(
     assert "run.build_failed" in messages
     failed = next(r for r in log_rows if r.message == "run.build_failed")
     assert failed.context_json.get("error_class") == "_PipelineBuildError"
+
+
+# --- periodic drain (live tail) -------------------------------------------
+
+
+async def test_recorder_flushes_periodically_when_interval_set(
+    metadata_engine: AsyncEngine,
+) -> None:
+    """With ``flush_interval_seconds`` set, run_logs lands mid-run instead of
+    only at __aexit__.
+
+    Skips the conftest ``session`` fixture entirely — that fixture wraps an
+    outer transaction, and the recorder's separate-connection writes can't
+    see uncommitted parent rows through that wrapper. We open our own
+    sessionmaker against the same testcontainer engine, seed + assert +
+    clean up explicitly. The rows live outside any wrapper, so we delete
+    them in a ``finally`` block so later tests in the session don't see
+    leftover state.
+    """
+    factory: async_sessionmaker[AsyncSession] = async_sessionmaker(
+        bind=metadata_engine, expire_on_commit=False
+    )
+    ws_id: UUID | None = None
+    pipeline_id: UUID | None = None
+    pv_id: UUID | None = None
+    run_id: UUID | None = None
+    try:
+        # Seed via the real factory — these are committed rows visible from
+        # any session/connection in the engine pool.
+        async with factory() as setup:
+            ws = Workspace(name="Rec Live", slug="rec-live-drain", color_hex="#FF3D8B")
+            setup.add(ws)
+            await setup.flush()
+            ws_id = ws.id
+            p = Pipeline(workspace_id=ws.id, name="p")
+            setup.add(p)
+            await setup.flush()
+            pipeline_id = p.id
+            pv = PipelineVersion(
+                pipeline_id=p.id,
+                version=1,
+                config_json={"name": "p"},
+                is_current=True,
+            )
+            setup.add(pv)
+            await setup.flush()
+            pv_id = pv.id
+            run = Run(
+                workspace_id=ws.id,
+                pipeline_id=p.id,
+                pipeline_version_id=pv.id,
+                status=RunStatus.RUNNING,
+            )
+            setup.add(run)
+            await setup.flush()
+            run_id = run.id
+            await setup.commit()
+
+        async with RunRecorder(factory, run_id, flush_interval_seconds=0.05):
+            structlog.get_logger().bind(run_id=str(run_id)).info("mid-run", phase="warm")
+            # Wait a hair longer than the drain interval so the timer fires
+            # at least once before we check the DB.
+            await asyncio.sleep(0.2)
+
+            async with factory() as check:
+                mid_logs = (
+                    (await check.execute(select(RunLog).where(RunLog.run_id == run_id)))
+                    .scalars()
+                    .all()
+                )
+            assert any(
+                log.message == "mid-run" for log in mid_logs
+            ), "periodic drain should land logs before __aexit__"
+    finally:
+        # Strip everything we committed so later tests in the session
+        # don't see leftover state.
+        async with factory() as cleanup:
+            if run_id is not None:
+                await cleanup.execute(delete(RunLog).where(RunLog.run_id == run_id))
+                await cleanup.execute(delete(RunMetric).where(RunMetric.run_id == run_id))
+                await cleanup.execute(delete(Run).where(Run.id == run_id))
+            if pv_id is not None:
+                await cleanup.execute(delete(PipelineVersion).where(PipelineVersion.id == pv_id))
+            if pipeline_id is not None:
+                await cleanup.execute(delete(Pipeline).where(Pipeline.id == pipeline_id))
+            if ws_id is not None:
+                await cleanup.execute(delete(Workspace).where(Workspace.id == ws_id))
+            await cleanup.commit()

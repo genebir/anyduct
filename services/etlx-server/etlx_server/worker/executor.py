@@ -87,10 +87,31 @@ class RunExecutor:
         backend: SecretBackend,
         *,
         worker_id: str,
+        log_flush_interval_seconds: float | None = None,
     ) -> None:
+        """
+        Parameters
+        ----------
+        factory
+            Session factory used both for the executor's own row updates and
+            for the recorder's periodic flushes. In production this is
+            ``make_session_factory(engine)``, which yields a fresh session
+            per call — so the recorder's flush task and the executor's
+            commit don't share an ``AsyncSession``.
+        backend
+            Secret backend used to resolve ``${SECRET:...}`` placeholders.
+        worker_id
+            Identifier stamped on the Run row + recorder lifecycle logs.
+        log_flush_interval_seconds
+            When set, the :class:`RunRecorder` flushes pending log + metric
+            entries every N seconds. Leave ``None`` to flush only on
+            executor exit (the default in tests so the shared-session
+            fixture doesn't deadlock on concurrent commits).
+        """
         self._factory = factory
         self._backend = backend
         self._worker_id = worker_id
+        self._log_flush_interval = log_flush_interval_seconds
 
     async def execute(self, run_id: UUID) -> Run:
         """Execute the run identified by ``run_id``; persist the result.
@@ -115,7 +136,11 @@ class RunExecutor:
             # ``run_logs`` via the recorder's structlog processor (Step 9.3c).
             log = structlog.get_logger().bind(run_id=str(run.id))
 
-            async with RunRecorder(self._factory, run.id):
+            async with RunRecorder(
+                self._factory,
+                run.id,
+                flush_interval_seconds=self._log_flush_interval,
+            ):
                 ctx_token = current_run_id.set(run.id)
                 try:
                     log.info(

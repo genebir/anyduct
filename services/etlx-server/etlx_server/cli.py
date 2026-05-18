@@ -149,6 +149,17 @@ def worker_run_cmd(
         "--secret-file-path",
         help="Used only when --secret-backend=file.",
     ),
+    log_flush_interval: float = typer.Option(
+        2.0,
+        "--log-flush-interval",
+        help=(
+            "Seconds between RunRecorder flushes to run_logs / run_metrics. "
+            "Lower = more live UI but more transactions; 0 disables periodic "
+            "flush (recorder writes once at run end)."
+        ),
+        min=0.0,
+        max=60.0,
+    ),
     log_level: str = typer.Option("INFO", "--log-level"),
 ) -> None:
     """Run the worker poll loop until SIGTERM/SIGINT.
@@ -179,6 +190,7 @@ def worker_run_cmd(
             backend,
             worker_id=wid,
             poll_interval=poll_interval,
+            log_flush_interval_seconds=(log_flush_interval if log_flush_interval > 0 else None),
         )
 
         loop = asyncio.get_running_loop()

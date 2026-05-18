@@ -10,6 +10,11 @@
 ## [Unreleased]
 
 ### Added
+- **Recorder periodic drain (live log tail)** [Step 9.3c / 10.5] — opt-in mid-run flushing for `RunRecorder`.
+  - `RunRecorder` gains a `flush_interval_seconds: float | None = None` parameter. When set, an `asyncio` background task wakes up every N seconds and commits the snapshot of pending log + metric entries through a fresh session from the factory. Producers (structlog processor, `RecordingMetrics`) stay zero-lock; the timer task is the only writer, and it serializes against the `__aexit__` final flush via the existing stop event.
+  - Default stays at `None` so unit tests using the shared `_SessionFactoryAdapter` (where the executor + recorder share one `AsyncSession`) keep working — concurrent `session.commit()` calls aren't safe on one async session, and the periodic path would deadlock.
+  - **Wiring**: `RunExecutor` accepts `log_flush_interval_seconds`, `RunWorker` forwards it, and `etlx-server worker run` exposes a `--log-flush-interval` CLI flag (default 2.0s, 0 disables). Production worker process now writes logs to `run_logs` live; the Run-detail page's existing 2-second poll picks them up without further changes.
+  - **New test**: `test_recorder_flushes_periodically_when_interval_set` builds a separate `async_sessionmaker` against the testcontainer engine (skipping the conftest outer-transaction wrapper because the recorder's separate connection can't see uncommitted parent rows through it). Verifies `run_logs` contains the mid-run event *before* the recorder's `__aexit__`. Explicit cleanup in `finally` keeps later tests in the session unaffected. Cumulative server-side: **294 tests in suite, all green**.
 - **Pipeline-level retry + DLQ config in the builder** [Step 10.4 / 9.5] — `PipelineConfig.retry` and `PipelineConfig.dlq` are no longer invisible in the UI.
   - New `PipelineSettingsPanel` (`components/builder/pipeline-settings-panel.tsx`) shows in the right pane when no node is selected. Two collapsible sections per DESIGN.md card grammar:
     - **Retry policy**: `max_attempts` (1-20), `backoff` (`fixed` / `exponential`), `initial_delay_seconds`. Maps directly to core `RetryConfig`.

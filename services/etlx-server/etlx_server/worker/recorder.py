@@ -35,6 +35,8 @@ the queues are scoped per ``run_id``.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 import queue
 import threading
@@ -228,13 +230,39 @@ class RunRecorder:
         run_id: UUID,
         *,
         max_batch: int = _MAX_BATCH,
+        flush_interval_seconds: float | None = None,
     ) -> None:
+        """
+        Parameters
+        ----------
+        factory
+            ``async_sessionmaker`` used for every flush. Each ``factory()``
+            call must yield an *independent* session — concurrent commits
+            from the periodic drain and the executor's own session updates
+            would otherwise step on each other (Python's ``AsyncSession``
+            isn't safe for concurrent use).
+        run_id
+            Run this recorder belongs to. Determines which structlog events
+            and metric calls get captured.
+        max_batch
+            Cap on items pulled from each queue per flush.
+        flush_interval_seconds
+            When set, runs a background asyncio task that flushes pending
+            logs / metrics every N seconds so the Run-detail page can show
+            them live instead of after the worker finishes. ``None`` (the
+            default) flushes only once at ``__aexit__`` — fine for unit
+            tests where a shared session would conflict with concurrent
+            commits, and the live-tail SSE catches up via polling.
+        """
         self._factory = factory
         self._run_id = run_id
         self._max_batch = max_batch
+        self._flush_interval = flush_interval_seconds
         self._log_q: queue.SimpleQueue[_LogEntry] = queue.SimpleQueue()
         self._metric_q: queue.SimpleQueue[_MetricEntry] = queue.SimpleQueue()
         self._prev_metrics: Metrics | None = None
+        self._stop = asyncio.Event()
+        self._drain_task: asyncio.Task[None] | None = None
 
     # ---- producer side (thread-safe) -------------------------------------
 
@@ -251,6 +279,8 @@ class RunRecorder:
             _ACTIVE[self._run_id] = self
         self._prev_metrics = get_metrics()
         set_metrics(RecordingMetrics())
+        if self._flush_interval is not None:
+            self._drain_task = asyncio.create_task(self._drain_loop())
         return self
 
     async def __aexit__(
@@ -268,9 +298,32 @@ class RunRecorder:
             set_metrics(self._prev_metrics)
         else:
             set_metrics(NoOpMetrics())
-        # Final (and only) flush. Producers stop here; no concurrent
-        # session use to worry about.
+        # Stop the periodic drain (if any) before the final flush. The drain
+        # task may be mid-flush — await it so we don't issue two commits
+        # against the same session in production-shaped factories that
+        # happen to share state (e.g. test adapters).
+        self._stop.set()
+        if self._drain_task is not None:
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._drain_task
+            self._drain_task = None
         await self._flush()
+
+    async def _drain_loop(self) -> None:
+        """Background task: flush queues on a timer until ``stop`` is set.
+
+        Skipped entirely when ``flush_interval_seconds`` is ``None``.
+        """
+        interval = self._flush_interval
+        assert interval is not None  # mypy
+        while not self._stop.is_set():
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(self._stop.wait(), timeout=interval)
+            if self._stop.is_set():
+                # __aexit__ will do the final flush itself; bail without
+                # racing it.
+                return
+            await self._flush()
 
     async def _flush(self) -> None:
         logs = _drain_queue(self._log_q, cap=self._max_batch)

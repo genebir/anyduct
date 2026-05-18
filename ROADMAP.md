@@ -460,7 +460,7 @@
 - [x] **Run 상세** (2026-05-18) — `/w/[slug]/runs/[id]`. 2-col 레이아웃: 좌측은 mono 로그 viewer(레벨별 색, context_json inline), 우측은 Summary(상태/시간/duration/records/worker/heartbeat) + Metrics(name별 누적 + point 개수) + Error(error_class + error_message pre). 비-terminal status면 2초 polling, terminal이 되면 1회 더 fetch 후 정지. failed/cancelled에 Retry 버튼 → `POST /runs/{id}/retry`.
 - [x] **Schedule CRUD + cron builder** (2026-05-18) — 새 `components/schedules/{cron-input,schedule-form}.tsx`. Create form: 이름/mode picker(batch/stream)/CronInput(6 preset chips + cronstrue 자연어 해설 inline + 5-field validation)/active checkbox. Edit form: 이름 + cron만(mode immutable). Per-row 액션: toggle(active ↔ paused via `POST /toggle`) / edit / delete(ConfirmDialog). 의존성 추가: `cronstrue ^3.4.x`(human-readable cron).
 - [x] **다음 N회 실행 예상 시각 미리보기** (2026-05-18) — CronInput에 `cron-parser` 통합. 유효한 cron이면 다음 3 firing을 사용자 로컬 타임존 + 상대 시간(`in 5h 23m`)으로 표시. 미드-편집 invalid 상태에서는 조용히 비활성화. 의존성 `cron-parser ^5.x`(Luxon 포함, schedules 라우트 12.7→42.6 kB).
-- [ ] Live-tail via SSE (현재는 polling — Step 9.3c 단일-flush 디자인이라 logs는 run 종료 시점에만 보임. 진정한 live-tail은 recorder의 periodic drain 재설계 또는 SSE 쪽에서 worker process의 in-memory queue 직접 노출 필요).
+- [x] **Live mid-run logs via recorder periodic drain** (2026-05-18) — `RunRecorder`에 opt-in `flush_interval_seconds` 추가, 백그라운드 task가 N초마다 fresh session으로 commit. Default `None`(테스트 호환), `etlx-server worker run --log-flush-interval`(default 2.0s)로 production 활성화. Run 상세 페이지의 2s polling이 별도 변경 없이 live tail로 동작. 새 it 1개(periodic drain check + 명시적 cleanup). 진정한 SSE live-tail(EventSource via 토큰)은 별도 슬라이스(헤더-기반 인증을 query param으로 옮기거나 미들웨어로 sniff 필요).
 - [ ] DLQ 조회 + 재처리.
 
 ### 10.6 관리자 화면 (← 작업 중, 2026-05-18 멤버 + 감사 로그까지 완료)

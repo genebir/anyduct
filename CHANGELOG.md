@@ -757,6 +757,28 @@
 ### Milestone
 - **Step 8.7 — 시나리오 테스트 완료 (2026-05-18)**: 3 신규 e2e it (happy / retry-after-failure / cross-ws boundary). 누적 코어 344 unit + 서버 **65 unit** + 서버 **193 it** (190 → 193, +3) + 코어 119 it = **721 tests** all green. mypy strict 코어 39 + 서버 60 src files OK, import-linter 2 contracts KEPT. **Step 8 (API Server) 완전 종료** — auth(local + OIDC) / RBAC(workspace-scoped + SuperAdmin bypass) / audit(middleware + 이중 ACL) / CRUD(workspaces/memberships/connections/pipelines/schedules) / runs read-mostly / actions(dry-run+trigger+retry+SSE) / e2e 시나리오 검증 모두 ship. 다음은 **Step 9 (Execution Engine)** — 워커가 ADR-0021 runs 큐를 SKIP LOCKED로 claim → 코어 `run_pipeline_yaml` 호출 + heartbeat per ~30s + zombie 회수. Step 8.6에서 enqueue까지 끝났으니 9는 큐 consumer + status writer만 추가하면 된다.
 
+- **Worker — claim + batch execution lifecycle** [Step 9.3a]
+  - 새 `services/etlx-server/etlx_server/worker/` 패키지:
+    * `claim.py` — `claim_pending_run(session, *, worker_id)`: `SELECT ... WHERE status='pending' AND scheduled_at <= now() ORDER BY scheduled_at, created_at LIMIT 1 FOR UPDATE SKIP LOCKED` + 같은 트랜잭션에서 `status=running` + `worker_id` + `started_at` + `heartbeat_at` 전이. ADR-0021 SKIP LOCKED로 다중 워커 안전 동시 claim.
+    * `executor.py` — `RunExecutor(factory, backend, *, worker_id).execute(run_id)`: fresh session per run, `_build`로 `PipelineConfig.model_validate` + connection 이름 resolve + `${SECRET:<path>}` 풀이 + 코어 `build_connector`/`build_pipeline`. **build 실패는 status=failed로 기록한 뒤 commit 후 종료** (worker crash 아님). 빌드 성공 시 단일 `asyncio.to_thread(_run_pipeline_in_thread, ...)`로 connect+run+close 일관 thread — sqlite3 같은 thread-bound driver 호환. 성공: `records_read`/`records_written`/`duration_seconds`/`result_json.core_run_id` 기록. 실패: `error_class`/`error_message[2000자 trim]`/`finished_at`/`heartbeat_at`. `result_json.retry_of` 같은 pre-existing key는 성공 write에서 보존.
+    * `runner.py` — `RunWorker(factory, backend, *, worker_id, poll_interval=1.0)`: `asyncio.Event` stop, claim → execute → 즉시 다음 iteration; queue 비면 `contextlib.suppress(TimeoutError) + asyncio.wait_for(stop_event.wait, timeout=poll_interval)`. claim 단계의 row lock은 status 전이까지만 hold(긴 실행 시간 동안 lock 보유 X).
+  - `etlx-server worker run` CLI 신규: `--poll-interval / --worker-id / --secret-backend / --secret-file-path / --log-level`. SIGTERM/SIGINT 그레이스풀 종료(handler → `worker.stop()`).
+  - 신규 공유 모듈 `etlx_server/pipelines/runtime.py` (`resolve_placeholders` / `referenced_connection_names` / `load_connections_by_name`) — DryRunService와 worker가 빌드 경로 공유해 "dry-run ok면 worker run도 build는 통과" 보장. DryRunService에서 동일 코드 중복 제거.
+- **코어 버그 수정** [Step 9.3a 부수 작업, 별도 변경 아님]
+  - `etl_plugins/core/pipeline.py::Pipeline._run_task`가 `task.sink_table`을 `sink.write`에 forwarding 안 하던 잠재 버그 — 코어 unit 테스트는 `InMemoryBatchSink`(`**options` 흡수)라 가려져 있었다. RDBMS sink(sqlite/postgres/mysql)의 batch 경로가 worker에서 처음 동작하면서 발견. 1-line 수정. S3 sink(`**options`)와 Kafka(stream path는 별도) 비영향. 코어 unit 327개 무회귀.
+- **Audit 정렬 안정화** [Step 9.3a 부수 작업]
+  - `AuditLogRepository.query`가 `created_at desc` 단독 정렬이라 같은 microsecond 내 audit row 순서가 비결정적이었음. 시나리오 e2e 테스트가 다른 테스트와 함께 실행될 때 ~40% 실패. UUIDv7(ADR-0020 시간 순서) 기반 `id.desc()` secondary sort 추가.
+- **OIDC state test 비결정성 수정** [Step 9.3a 부수 작업]
+  - `test_verify_rejects_tampered_token`이 base64 마지막 char 1bit flip만으로는 underlying signature bytes 동일할 수 있어 ~40% 통과. signature 전체를 명백히 wrong한 `"AAA...A"`로 치환해 결정적으로 만들었다.
+- **테스트 정규화** [Step 9.3a]
+  - `services/etlx-server/tests/db/test_worker_lifecycle.py` — 11 신규 it. claim 4(oldest pending pick + None on empty + skip running + skip future scheduled_at) + executor 5(sqlite tmp file fixture로 실제 read→write 3 row 검증 + unknown connector type failed + missing connection failed + stream mode 거부 failed + retry_of preserve in result_json) + worker 2(loop processes pending then stops + empty queue exits on stop). `_SessionFactoryAdapter`로 conftest의 outer-trans fixture 안에서 executor가 reuse하도록 wrap.
+
+### Decisions
+- (이번 슬라이스에서 신규 ADR 없음 — ADR-0021 worker queue 첫 구현)
+
+### Milestone
+- **Step 9.3a — Worker batch lifecycle 완료 (2026-05-18)**: 3 신규 패키지 모듈 + 1 신규 공유 helper + 1 신규 CLI 서브커맨드 + 1 코어 버그 수정 + 2 비결정성 테스트 수정. 누적 코어 344 unit + 서버 **65 unit** + 서버 **204 it** (193 → 204, +11) + 코어 119 it = **732 tests** all green. mypy strict 코어 39 + 서버 65 src files OK, import-linter 2 contracts KEPT. ADR-0021 in-DB queue 첫 구현 — 신규 ADR 없음. 다음은 **Step 9.2 (스케줄러)** — schedules 테이블 tick으로 pending Run 생성 — 또는 **Step 9.3b (heartbeat + zombie reaper)** — stuck running row 회수.
+
 ### Changed
 - (없음)
 

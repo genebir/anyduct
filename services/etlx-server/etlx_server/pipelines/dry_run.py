@@ -24,22 +24,22 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import re
 from dataclasses import dataclass, field
 from typing import Any
-from uuid import UUID
 
 from pydantic import ValidationError
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from etl_plugins.config.models import ConnectionConfig, PipelineConfig
 from etl_plugins.config.secrets import SecretBackend
 from etl_plugins.core.exceptions import ConfigError, RegistryError, SecretError
 from etl_plugins.runtime.builder import build_connector, build_pipeline
-from etlx_server.db.models import Connection, Pipeline, PipelineVersion
-
-_PLACEHOLDER_RE = re.compile(r"^\$\{SECRET:(?P<path>[^}]+)\}$")
+from etlx_server.db.models import Pipeline, PipelineVersion
+from etlx_server.pipelines.runtime import (
+    load_connections_by_name,
+    referenced_connection_names,
+    resolve_placeholders,
+)
 
 
 @dataclass(frozen=True)
@@ -59,34 +59,6 @@ class DryRunResult:
     ok: bool
     errors: list[str] = field(default_factory=list)
     connectors: list[ConnectorCheck] = field(default_factory=list)
-
-
-def _referenced_connection_names(cfg: PipelineConfig) -> list[str]:
-    """Source + sink + (optional) DLQ, deduped while preserving first occurrence."""
-    seen: set[str] = set()
-    names: list[str] = []
-    for n in (cfg.source.connection, cfg.sink.connection):
-        if n not in seen:
-            seen.add(n)
-            names.append(n)
-    if cfg.dlq is not None and cfg.dlq.connection not in seen:
-        seen.add(cfg.dlq.connection)
-        names.append(cfg.dlq.connection)
-    return names
-
-
-def _resolve_placeholders(obj: Any, backend: SecretBackend) -> Any:
-    """Recursively replace ``${SECRET:<path>}`` strings with backend values."""
-    if isinstance(obj, str):
-        m = _PLACEHOLDER_RE.match(obj)
-        if m is None:
-            return obj
-        return backend.get(m.group("path"))
-    if isinstance(obj, dict):
-        return {k: _resolve_placeholders(v, backend) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [_resolve_placeholders(x, backend) for x in obj]
-    return obj
 
 
 def _blocking_health_check(connector: Any) -> tuple[bool, str | None]:
@@ -131,8 +103,10 @@ class DryRunService:
             return DryRunResult(ok=False, errors=[f"invalid pipeline config: {e.errors()}"])
 
         # 2) Resolve every referenced connection name from this workspace.
-        names = _referenced_connection_names(pipeline_cfg)
-        rows = await self._load_connections_by_name(workspace_id=pipeline.workspace_id, names=names)
+        names = referenced_connection_names(pipeline_cfg)
+        rows = await load_connections_by_name(
+            self._session, workspace_id=pipeline.workspace_id, names=names
+        )
         missing = [n for n in names if n not in rows]
         if missing:
             return DryRunResult(
@@ -147,7 +121,7 @@ class DryRunService:
         for name in names:
             row = rows[name]
             try:
-                resolved = _resolve_placeholders(row.config_json, self._backend)
+                resolved = resolve_placeholders(row.config_json, self._backend)
             except SecretError as e:
                 checks.append(
                     ConnectorCheck(name=name, type=row.type, ok=False, error=f"SecretError: {e}")
@@ -229,20 +203,6 @@ class DryRunService:
             self._close_all(connectors)
 
         return DryRunResult(ok=True, errors=[], connectors=checks)
-
-    async def _load_connections_by_name(
-        self, *, workspace_id: UUID, names: list[str]
-    ) -> dict[str, Connection]:
-        if not names:
-            return {}
-        result = await self._session.execute(
-            select(Connection).where(
-                Connection.workspace_id == workspace_id,
-                Connection.name.in_(names),
-            )
-        )
-        rows = result.scalars().all()
-        return {r.name: r for r in rows}
 
     @staticmethod
     def _close_all(connectors: dict[str, Any]) -> None:

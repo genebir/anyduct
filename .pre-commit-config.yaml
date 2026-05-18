@@ -32,7 +32,19 @@ repos:
     hooks:
       - id: mypy
         additional_dependencies:
+          # Mirror the project's core dependencies so mypy can resolve
+          # imports inside the hook's isolated venv. Keep in sync with
+          # [project.dependencies] in pyproject.toml — extras (boto3,
+          # hvac, google-cloud-secret-manager, etc.) are already
+          # silenced via [[tool.mypy.overrides]].
           - pydantic>=2.7
+          - pyyaml>=6.0
+          - types-PyYAML>=6.0
+          - structlog>=24.1
+          - typer>=0.12
+          - tenacity>=8.2
+          - jinja2>=3.1
+          - python-dotenv>=1.0
         args: [--config-file=pyproject.toml]
         files: ^etl_plugins/
 

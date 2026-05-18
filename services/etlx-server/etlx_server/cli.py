@@ -7,6 +7,7 @@ Subcommands:
 
 * ``etlx-server import-yaml <yaml_dir> --workspace <slug>``
 * ``etlx-server export-yaml --workspace <slug> --to <dir>``
+* ``etlx-server worker run`` — long-running worker process
 
 The slug is resolved via the ``workspaces.slug`` UNIQUE column, so callers can
 script the CLI without juggling UUIDs.
@@ -15,18 +16,25 @@ script the CLI without juggling UUIDs.
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
+import signal
 import sys
+import uuid
 from pathlib import Path
 
 import typer
 from sqlalchemy import select
 
+from etl_plugins.config.secrets import get_secret_backend
 from etlx_server.db.models import Workspace
 from etlx_server.db.session import make_engine, make_session_factory
 from etlx_server.io.yaml_sync import export_workspace, import_yaml_dir
+from etlx_server.worker import RunWorker
 
 app = typer.Typer(help="etlx-server administration CLI (metadata DB sync, ops).")
+worker_app = typer.Typer(help="Worker process commands.")
+app.add_typer(worker_app, name="worker")
 
 
 def _database_url() -> str:
@@ -104,6 +112,75 @@ def export_yaml_cmd(
                 f"exported: connections={result.connections_written} "
                 f"pipelines={result.pipelines_written} -> {to}"
             )
+        finally:
+            await engine.dispose()
+
+    asyncio.run(_run())
+
+
+@worker_app.command("run")
+def worker_run_cmd(
+    poll_interval: float = typer.Option(
+        1.0,
+        "--poll-interval",
+        help="Seconds to wait between empty-queue polls.",
+        min=0.1,
+        max=60.0,
+    ),
+    worker_id: str = typer.Option(
+        "",
+        "--worker-id",
+        help="Identifier stamped on claimed rows (default: auto-generated UUID).",
+    ),
+    secret_backend: str = typer.Option(
+        "env",
+        "--secret-backend",
+        help="One of: env, static, file, vault, aws_sm, gcp_sm.",
+    ),
+    secret_file_path: str = typer.Option(
+        "",
+        "--secret-file-path",
+        help="Used only when --secret-backend=file.",
+    ),
+    log_level: str = typer.Option("INFO", "--log-level"),
+) -> None:
+    """Run the worker poll loop until SIGTERM/SIGINT.
+
+    The worker claims pending Run rows via ``FOR UPDATE SKIP LOCKED``,
+    materializes the stored pipeline, and writes back terminal status.
+    Multiple instances can run in parallel — the queue is the table.
+    """
+    logging.basicConfig(
+        level=getattr(logging, log_level.upper(), logging.INFO),
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+    wid = worker_id or f"worker-{uuid.uuid4().hex[:12]}"
+
+    async def _run() -> None:
+        engine = make_engine(_database_url())
+        factory = make_session_factory(engine)
+        backend_opts: dict[str, str] = {}
+        if secret_file_path:
+            backend_opts["file_path"] = secret_file_path
+        backend = get_secret_backend(secret_backend, **backend_opts)
+        worker = RunWorker(
+            factory,
+            backend,
+            worker_id=wid,
+            poll_interval=poll_interval,
+        )
+
+        loop = asyncio.get_running_loop()
+
+        def _shutdown(_signame: str) -> None:
+            typer.echo(f"received {_signame}, shutting down worker")
+            worker.stop()
+
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            loop.add_signal_handler(sig, _shutdown, sig.name)
+
+        try:
+            await worker.run()
         finally:
             await engine.dispose()
 

@@ -50,9 +50,13 @@ def test_verify_rejects_garbage(signer: OidcStateSigner) -> None:
 
 def test_verify_rejects_tampered_token(signer: OidcStateSigner) -> None:
     token = signer.sign(provider="google", nonce="x", return_to=None)
-    # Flip a character in the signature segment to invalidate it.
-    head, payload, sig = token.split(".")
-    bad = ".".join([head, payload, sig[:-1] + ("A" if sig[-1] != "A" else "B")])
+    # Replace the signature segment entirely with a clearly-bogus one.
+    # Flipping a single trailing base64 char is unreliable — JWT
+    # signatures are URL-safe base64 with no padding, and changing the
+    # final character can leave the underlying signature bytes unchanged
+    # if the flipped bits fall in the unused trailing region.
+    head, payload, _ = token.split(".")
+    bad = ".".join([head, payload, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"])
     with pytest.raises(InvalidStateError):
         signer.verify(bad)
 

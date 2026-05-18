@@ -216,10 +216,17 @@ class Pipeline:
                 if record is not None:
                     yield record
 
+        # RDBMS sinks (sqlite/postgres/mysql) require ``table`` as a
+        # keyword; without it ``write`` raises ``WriteError``. The YAML
+        # builder strips ``table`` from ``sink_options`` and stores it
+        # on ``task.sink_table``, so we re-thread it here. (Stream sinks
+        # like Kafka pull it from ``sink_options['topic']`` directly —
+        # see ``_run_task_stream`` below.)
         written = sink.write(
             _read_and_transform(),
             mode=task.sink_mode,
             key_columns=task.sink_key_columns,
+            table=task.sink_table,
             **task.sink_options,
         )
         return records_read, written

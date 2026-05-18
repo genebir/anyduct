@@ -41,7 +41,15 @@ class AuditLogRepository:
             stmt = stmt.where(AuditLog.resource_type == resource_type)
         if resource_id is not None:
             stmt = stmt.where(AuditLog.resource_id == resource_id)
-        stmt = stmt.order_by(AuditLog.created_at.desc()).limit(limit).offset(offset)
+        # Secondary sort on ``id`` (UUIDv7 — temporally ordered, see
+        # ADR-0020) breaks ties when two audit rows happen to land in
+        # the same microsecond. Without it the ``/audit`` response
+        # order is non-deterministic on bursty test traffic.
+        stmt = (
+            stmt.order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
+            .limit(limit)
+            .offset(offset)
+        )
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
 

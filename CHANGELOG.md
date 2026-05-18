@@ -664,6 +664,30 @@
 ### Milestone
 - **Step 8.5c — Connections CRUD + test 완료 (2026-05-18)**: 6 신규 endpoint + Secret backend 완전 통합 + 평문 0 + `POST /test`로 핵심 connector smoke 검증. 누적 코어 344 unit + 서버 **65 unit** + 서버 **131 it** (113 → 131, +18) + 코어 119 it = **659 tests** all green. mypy strict 코어 39 + 서버 50 src files OK, import-linter 2 contracts KEPT. 다음 슬라이스는 **Step 8.5d (Pipelines CRUD + 버전 관리)** — `/workspaces/{ws}/pipelines` + `GET /{pid}/versions`. Step 7.3 yaml_sync의 PipelineVersion idempotency 패턴(config_json diff 시에만 새 version 생성) 재사용.
 
+- **Pipelines CRUD + immutable version history** [Step 8.5d]
+  - 새 `services/etlx-server/etlx_server/pipelines/` 패키지:
+    * `repository.py` — `PipelineRepository` with `list_for_workspace`/`get`/`get_current_version`/`list_versions`/`add`(Pipeline + PipelineVersion v1 원자적 insert, UNIQUE → `PipelineNameTakenError`)/`update_metadata`(name/description 화이트리스트, IntegrityError → 같은 예외)/`ensure_version`(Step 7.3 yaml_sync와 동일한 **idempotency** — `current.config_json == new` 면 no-op, 다르면 `current.is_current=False` + 신규 `version=current.version+1` insert)/`delete`(FK cascade로 versions + schedules 제거) + `snapshot(pipeline, current)` 헬퍼.
+    * `__init__.py` — public re-export + 사용 패턴 docstring.
+  - `routers/pipelines.py` 6 신규 엔드포인트:
+    * `GET ""` Viewer+ — 각 Pipeline에 대해 current_version + config_json flatten.
+    * `POST ""` Editor+ (201) — `_validate_config(config, name)`가 `body.name`을 `config["name"]`로 주입 후 core의 `PipelineConfig.model_validate` 통과 → canonical JSON dump → repo.add → audit.create.
+    * `GET "/{pid}"` Viewer+ — 단건 + current version flatten.
+    * `PATCH "/{pid}"` Editor+ — `name`/`description`/`config` 모두 optional. metadata만 보내면 버전 안 올라감. config 보내면 ensure_version에서 비교 → `version_created` 플래그가 audit.after_json에 들어가 forensics에서 metadata-only vs config-edit 구분 가능. 빈 body 400. name 충돌 409.
+    * `DELETE "/{pid}"` Editor+ (204) — FK cascade로 versions + schedules 제거 + audit.delete.
+    * `GET "/{pid}/versions"` Viewer+ — 오름차순 version + is_current 플래그.
+  - 각 mutation은 audit.record(pipeline.{create,update,delete}) + session.commit. PATCH의 audit `after_json`에 `version_created: bool` 포함 — Step 7.3 idempotency 패턴을 audit 레이어로 노출.
+  - **PipelineConfig 검증**: core의 `PipelineConfig.model_validate`로 source/sink/transforms 등 구조 검증. Pydantic `ValidationError` → 422 + `e.errors()` 체인. config에 name 안 써도 됨 — 서버가 body.name 주입(canonical dump는 YAML re-export 가능한 완전한 형태).
+  - `auth/schemas.py` 확장: `PipelineSummary`(id/ws_id/name/description/current_version/current_config_json), `PipelineCreateRequest`(name/description?/config), `PipelineUpdateRequest`(전부 optional — PATCH), `PipelineVersionEntry`(id/version/is_current/config_json/created_at, `from_attributes=True`).
+  - `app_factory.py`: `app.include_router(pipelines_router.router)`.
+- **테스트 정규화** [Step 8.5d]
+  - `services/etlx-server/tests/db/test_pipelines_router.py` — 14 신규 it. 핵심: **버전 idempotency 양 분기 직접 검증** — `test_patch_config_diff_creates_new_version`은 prior `is_current=False` + 신규 v2 `is_current=True` 검증 + `audit.after_json.version_created=True` 확인 / `test_patch_config_identical_is_no_op`은 같은 config 재제출 시 v1 그대로 + audit.after_json.version_created=False 확인. POST happy + v1 + audit + 서버가 `config["name"]` 주입 / invalid config 422 / dup 409 / Viewer 403 / list with current_version / 단건 404 / PATCH metadata only no bump / 빈 400 / name collision 409 / DELETE cascade + audit / GET /versions multi-version + is_current / versions 404.
+
+### Decisions
+- (이번 슬라이스에서 신규 ADR 없음 — Step 7.3 idempotency 패턴 재사용)
+
+### Milestone
+- **Step 8.5d — Pipelines CRUD + 버전 관리 완료 (2026-05-18)**: 6 신규 endpoint + immutable version history + ensure_version idempotency + version_created audit 플래그 + core PipelineConfig 구조 검증 + 서버측 name 주입. 누적 코어 344 unit + 서버 **65 unit** + 서버 **145 it** (131 → 145, +14) + 코어 119 it = **673 tests** all green. mypy strict 코어 39 + 서버 53 src files OK, import-linter 2 contracts KEPT. 다음 슬라이스는 **Step 8.5e (Schedules CRUD + 활성화 토글 + Runs 읽기 전용)** — 8.5의 마지막 슬라이스. 실제 실행 트리거링은 Step 9의 worker queue.
+
 ### Changed
 - (없음)
 

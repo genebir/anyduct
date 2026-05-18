@@ -164,6 +164,48 @@ class ConnectionTestResult(BaseModel):
     error: str | None = None
 
 
+class PipelineVersionEntry(BaseModel):
+    """One row of ``GET /workspaces/{ws}/pipelines/{pid}/versions``."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    version: int
+    is_current: bool
+    config_json: dict[str, Any]
+    created_at: datetime
+
+
+class PipelineSummary(BaseModel):
+    """Pipeline + a flattened view of the current version's config."""
+
+    id: UUID
+    workspace_id: UUID
+    name: str
+    description: str | None = None
+    current_version: int | None = None
+    current_config_json: dict[str, Any] | None = None
+
+
+class PipelineCreateRequest(BaseModel):
+    """Body of ``POST /workspaces/{id}/pipelines``."""
+
+    name: str = Field(min_length=1, max_length=255)
+    description: str | None = Field(default=None, max_length=2000)
+    # Full ``PipelineConfig`` dump *minus* ``name`` — server injects ``name``
+    # from the body so the two stay in sync without forcing the client to
+    # repeat themselves.
+    config: dict[str, Any] = Field(default_factory=dict)
+
+
+class PipelineUpdateRequest(BaseModel):
+    """PATCH body — every field optional."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    description: str | None = Field(default=None, max_length=2000)
+    config: dict[str, Any] | None = None
+
+
 class AuditLogEntry(BaseModel):
     """One row of the ``audit_log`` table, shaped for the ``/audit`` response."""
 
@@ -196,6 +238,10 @@ __all__ = [
     "OidcAuthorizeResponse",
     "OidcCallbackResponse",
     "OidcProviderSummary",
+    "PipelineCreateRequest",
+    "PipelineSummary",
+    "PipelineUpdateRequest",
+    "PipelineVersionEntry",
     "RefreshRequest",
     "TokenPair",
     "WorkspaceCreateRequest",

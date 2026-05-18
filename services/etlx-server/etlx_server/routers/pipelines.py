@@ -1,0 +1,246 @@
+"""Pipeline CRUD + versions (Step 8.5d).
+
+| Method | Path                                              | Auth     |
+|--------|---------------------------------------------------|----------|
+| GET    | ``/workspaces/{ws}/pipelines``                    | Viewer+  |
+| POST   | ``/workspaces/{ws}/pipelines``                    | Editor+  |
+| GET    | ``/workspaces/{ws}/pipelines/{pid}``              | Viewer+  |
+| PATCH  | ``/workspaces/{ws}/pipelines/{pid}``              | Editor+  |
+| DELETE | ``/workspaces/{ws}/pipelines/{pid}``              | Editor+  |
+| GET    | ``/workspaces/{ws}/pipelines/{pid}/versions``     | Viewer+  |
+
+The version model is **immutable history**: every successful POST/PATCH
+that changes ``config_json`` produces a fresh
+:class:`PipelineVersion` (``version`` increments, ``is_current`` flips on
+the prior row); identical ``config_json`` re-submitted is a no-op
+(:meth:`PipelineRepository.ensure_version`). Audit ``pipeline.update``
+includes a ``version_created`` flag so the audit log distinguishes
+real edits from no-op PATCHes.
+
+``PipelineConfig`` (core) provides structural validation — bad shapes
+produce 422 with the Pydantic error chain. The server injects
+``config["name"]`` from the body so users don't have to repeat it.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import ValidationError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from etl_plugins.config.models import PipelineConfig
+from etlx_server.audit.dependencies import get_audit_service
+from etlx_server.audit.service import AuditService
+from etlx_server.auth.schemas import (
+    PipelineCreateRequest,
+    PipelineSummary,
+    PipelineUpdateRequest,
+    PipelineVersionEntry,
+)
+from etlx_server.auth.workspace_context import (
+    WorkspaceContext,
+    require_workspace_role,
+)
+from etlx_server.db.enums import WorkspaceRole
+from etlx_server.db.models import Pipeline, PipelineVersion
+from etlx_server.dependencies import get_session
+from etlx_server.pipelines.repository import (
+    PipelineNameTakenError,
+    PipelineRepository,
+)
+
+router = APIRouter(prefix="/workspaces/{workspace_id}/pipelines", tags=["pipelines"])
+
+_require_viewer = Depends(require_workspace_role(WorkspaceRole.VIEWER))
+_require_editor = Depends(require_workspace_role(WorkspaceRole.EDITOR))
+
+
+def _validate_config(config: dict[str, Any], *, name: str) -> dict[str, Any]:
+    """Inject ``name`` and run it through the core ``PipelineConfig`` validator.
+
+    Returns the canonical JSON dump (post-validation) — that's what
+    lands in ``pipeline_versions.config_json`` and is what the version
+    idempotency check compares against.
+    """
+    payload = dict(config)
+    payload["name"] = name
+    try:
+        cfg = PipelineConfig.model_validate(payload)
+    except ValidationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"invalid pipeline config: {e.errors()}",
+        ) from e
+    return cfg.model_dump(mode="json")
+
+
+def _to_summary(pipeline: Pipeline, current: PipelineVersion | None) -> PipelineSummary:
+    return PipelineSummary(
+        id=pipeline.id,
+        workspace_id=pipeline.workspace_id,
+        name=pipeline.name,
+        description=pipeline.description,
+        current_version=current.version if current is not None else None,
+        current_config_json=current.config_json if current is not None else None,
+    )
+
+
+@router.get("", response_model=list[PipelineSummary])
+async def list_pipelines(
+    ctx: WorkspaceContext = _require_viewer,
+    session: AsyncSession = Depends(get_session),  # noqa: B008
+) -> list[PipelineSummary]:
+    repo = PipelineRepository(session)
+    pipelines = await repo.list_for_workspace(workspace_id=ctx.workspace.id)
+    out: list[PipelineSummary] = []
+    for p in pipelines:
+        current = await repo.get_current_version(pipeline_id=p.id)
+        out.append(_to_summary(p, current))
+    return out
+
+
+@router.post("", response_model=PipelineSummary, status_code=status.HTTP_201_CREATED)
+async def create_pipeline(
+    body: PipelineCreateRequest,
+    ctx: WorkspaceContext = _require_editor,
+    session: AsyncSession = Depends(get_session),  # noqa: B008
+    audit: AuditService = Depends(get_audit_service),  # noqa: B008
+) -> PipelineSummary:
+    canonical = _validate_config(body.config, name=body.name)
+    repo = PipelineRepository(session)
+    try:
+        pipeline, version = await repo.add(
+            workspace_id=ctx.workspace.id,
+            name=body.name,
+            description=body.description,
+            config_json=canonical,
+            created_by_user_id=ctx.user.id,
+        )
+    except PipelineNameTakenError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
+
+    await audit.record(
+        actor_user_id=ctx.user.id,
+        workspace_id=ctx.workspace.id,
+        action="pipeline.create",
+        resource_type="pipeline",
+        resource_id=str(pipeline.id),
+        before=None,
+        after=PipelineRepository.snapshot(pipeline, version),
+    )
+    await session.commit()
+    return _to_summary(pipeline, version)
+
+
+@router.get("/{pipeline_id}", response_model=PipelineSummary)
+async def get_pipeline(
+    pipeline_id: UUID,
+    ctx: WorkspaceContext = _require_viewer,
+    session: AsyncSession = Depends(get_session),  # noqa: B008
+) -> PipelineSummary:
+    repo = PipelineRepository(session)
+    pipeline = await repo.get(workspace_id=ctx.workspace.id, pipeline_id=pipeline_id)
+    if pipeline is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="pipeline not found")
+    current = await repo.get_current_version(pipeline_id=pipeline.id)
+    return _to_summary(pipeline, current)
+
+
+@router.patch("/{pipeline_id}", response_model=PipelineSummary)
+async def update_pipeline(
+    pipeline_id: UUID,
+    body: PipelineUpdateRequest,
+    ctx: WorkspaceContext = _require_editor,
+    session: AsyncSession = Depends(get_session),  # noqa: B008
+    audit: AuditService = Depends(get_audit_service),  # noqa: B008
+) -> PipelineSummary:
+    repo = PipelineRepository(session)
+    pipeline = await repo.get(workspace_id=ctx.workspace.id, pipeline_id=pipeline_id)
+    if pipeline is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="pipeline not found")
+    if body.name is None and body.description is None and body.config is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="at least one field is required",
+        )
+
+    current_before = await repo.get_current_version(pipeline_id=pipeline.id)
+    before = PipelineRepository.snapshot(pipeline, current_before)
+
+    metadata_fields: dict[str, Any] = {}
+    if body.name is not None:
+        metadata_fields["name"] = body.name
+    if body.description is not None:
+        metadata_fields["description"] = body.description
+    if metadata_fields:
+        try:
+            await repo.update_metadata(pipeline, **metadata_fields)
+        except PipelineNameTakenError as e:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
+
+    version_created = False
+    if body.config is not None:
+        canonical = _validate_config(body.config, name=pipeline.name)
+        _, version_created = await repo.ensure_version(
+            pipeline, canonical, created_by_user_id=ctx.user.id
+        )
+
+    current_after = await repo.get_current_version(pipeline_id=pipeline.id)
+    after = PipelineRepository.snapshot(pipeline, current_after)
+
+    await audit.record(
+        actor_user_id=ctx.user.id,
+        workspace_id=ctx.workspace.id,
+        action="pipeline.update",
+        resource_type="pipeline",
+        resource_id=str(pipeline.id),
+        before=before,
+        after={**after, "version_created": version_created},
+    )
+    await session.commit()
+    return _to_summary(pipeline, current_after)
+
+
+@router.delete("/{pipeline_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_pipeline(
+    pipeline_id: UUID,
+    ctx: WorkspaceContext = _require_editor,
+    session: AsyncSession = Depends(get_session),  # noqa: B008
+    audit: AuditService = Depends(get_audit_service),  # noqa: B008
+) -> None:
+    repo = PipelineRepository(session)
+    pipeline = await repo.get(workspace_id=ctx.workspace.id, pipeline_id=pipeline_id)
+    if pipeline is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="pipeline not found")
+    current = await repo.get_current_version(pipeline_id=pipeline.id)
+    before = PipelineRepository.snapshot(pipeline, current)
+    pipeline_uuid = pipeline.id
+
+    await repo.delete(pipeline)
+    await audit.record(
+        actor_user_id=ctx.user.id,
+        workspace_id=ctx.workspace.id,
+        action="pipeline.delete",
+        resource_type="pipeline",
+        resource_id=str(pipeline_uuid),
+        before=before,
+        after=None,
+    )
+    await session.commit()
+
+
+@router.get("/{pipeline_id}/versions", response_model=list[PipelineVersionEntry])
+async def list_pipeline_versions(
+    pipeline_id: UUID,
+    ctx: WorkspaceContext = _require_viewer,
+    session: AsyncSession = Depends(get_session),  # noqa: B008
+) -> list[PipelineVersionEntry]:
+    repo = PipelineRepository(session)
+    pipeline = await repo.get(workspace_id=ctx.workspace.id, pipeline_id=pipeline_id)
+    if pipeline is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="pipeline not found")
+    versions = await repo.list_versions(pipeline_id=pipeline.id)
+    return [PipelineVersionEntry.model_validate(v) for v in versions]

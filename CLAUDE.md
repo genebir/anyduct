@@ -117,7 +117,7 @@ uv run mypy etl_plugins
 
 ## 5. 현재 단계
 
-**Step 8.3 완료 → 8.4 Audit log 차례** (2026-05-18 기준). Steps 1–4 + Step 5.1 + Step 7.0~7.4 + Step 8.1 + Step 8.2a(로컬 인증 + JWT RS256) + Step 8.2b(OIDC SSO — Google/Azure/Okta/GitHub/generic 공통화, RS256 JWKS 검증, 무상태 state JWT, provision_oidc_user) + **Step 8.3(RBAC — 4역할 strict hierarchy + `Depends(require_workspace_role(...))` + WorkspaceContext + 첫 RBAC-protected 라우터 `GET /workspaces/{id}`)** 완료. **344 코어 단위 + 63 etlx-server 단위 + 3 skip + 119 코어 통합(testcontainers PG/MinIO/Kafka/MySQL/Vault/LocalStack) + 70 서버 통합 = 596 테스트** all green, **24 ADR**. `mypy strict` 코어 39 + 서버 38 src files OK, `lint-imports` 2 contracts KEPT. **OOP 정규화 일관 적용**: services(`JwtService`/`PasswordService`/`OidcService`/`OidcStateSigner`) + repository(`UserRepository`/`MembershipRepository`/`WorkspaceRepository`) + 도메인 라우터(`auth.py`/`oidc.py`/`workspaces.py`) + `Depends`-기반 DI(`get_current_workspace`/`require_workspace_role`) + lifespan-managed `app.state` 싱글톤 + 테스트 시 `http_client_factory` 주입으로 `httpx.MockTransport` IdP 모킹.
+**Step 8.4 완료 → 8.5 CRUD 차례** (2026-05-18 기준). Steps 1–4 + Step 5.1 + Step 7.0~7.4 + Step 8.1 + Step 8.2a/b(로컬 + OIDC JWT) + Step 8.3(RBAC) + **Step 8.4(Audit log infra — `AuditService` 세션 바운드, `AuditLogRepository`, `AuditRequestMetaMiddleware`, `GET /audit` 이중 ACL)** 완료. **344 코어 단위 + 65 etlx-server 단위 + 3 skip + 119 코어 통합(testcontainers PG/MinIO/Kafka/MySQL/Vault/LocalStack) + 87 서버 통합 = 615 테스트** all green, **24 ADR**. `mypy strict` 코어 39 + 서버 44 src files OK, `lint-imports` 2 contracts KEPT. **OOP 정규화 일관 적용**: services(`JwtService`/`PasswordService`/`OidcService`/`OidcStateSigner`/`AuditService`) + repository(`UserRepository`/`MembershipRepository`/`WorkspaceRepository`/`AuditLogRepository`) + 도메인 라우터(`auth.py`/`oidc.py`/`workspaces.py`/`audit.py`) + `Depends`-기반 DI(`get_current_workspace`/`require_workspace_role`/`get_audit_service`) + lifespan-managed `app.state` 싱글톤 + ASGI `BaseHTTPMiddleware` subclass(`AuditRequestMetaMiddleware`) + 테스트 시 `http_client_factory` 주입으로 `httpx.MockTransport` IdP 모킹.
 
 추가로 **서비스화 방향 확정**(ADR-0017): `services/etlx-server`(FastAPI) + `services/etlx-web`(Next.js)을 별도 패키지로 Step 7부터 진행. 코어와 서비스는 단방향 의존.
 
@@ -144,7 +144,8 @@ Step별 산출물 요약:
   - 8.2a ✅ 로컬 인증 + JWT — JwtService(RS256) + PasswordService(bcrypt) + UserRepository + /auth/login/refresh/logout/me + Depends(get_current_user)
   - 8.2b ✅ OIDC — OidcService(provider 레지스트리, RS256 JWKS 검증, nonce/email_verified 강제) + OidcStateSigner(무상태 state JWT) + UserRepository.provision_oidc_user(LOCAL/다른 provider 충돌 거부) + /auth/oidc/{providers,login,callback}
   - 8.3 ✅ RBAC — `rbac.py`(strict hierarchy Owner>Editor>Runner>Viewer, `has_at_least`) + MembershipRepository + WorkspaceRepository + WorkspaceContext + `Depends(get_current_workspace)` + `require_workspace_role(...)` factory(SuperAdmin bypass) + 첫 보호 라우터 `GET /workspaces/{id}` (Viewer+)
-  - 8.4~8.7 미착수 — 다음은 Audit log(mutating 미들웨어 + `/audit` 조회)
+  - 8.4 ✅ Audit log — `AuditService`(세션 바운드, 호출자 트랜잭션 따라 자동 rollback) + `AuditLogRepository.query` + `AuditRequestMetaMiddleware`(ASGI BaseHTTPMiddleware → request.state.audit_meta) + `get_audit_service` Depends + `GET /audit` 이중 ACL(no workspace_id → SuperAdmin only / with workspace_id → Viewer+ or SuperAdmin)
+  - 8.5~8.7 미착수 — 다음은 CRUD 엔드포인트(/connections /pipelines /schedules /runs + 각 mutation에서 audit.record + workspace_id 자동 필터)
 - 📋 Step 9 (Execution Engine 통합) — 미착수
 - 📋 Step 10 (Web UI / Next.js) — 미착수
 - 📋 Step 11 (운영 강화) — 미착수

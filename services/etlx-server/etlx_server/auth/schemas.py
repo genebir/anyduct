@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from datetime import datetime
+from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
 class LoginRequest(BaseModel):
@@ -69,7 +70,26 @@ class WorkspaceSummary(BaseModel):
     """Caller's role in this workspace; ``None`` means SuperAdmin bypass."""
 
 
+class AuditLogEntry(BaseModel):
+    """One row of the ``audit_log`` table, shaped for the ``/audit`` response."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    actor_user_id: UUID | None
+    workspace_id: UUID | None
+    action: str
+    resource_type: str
+    resource_id: str | None
+    before_json: dict[str, Any] | None
+    after_json: dict[str, Any] | None
+    ip: str | None
+    user_agent: str | None
+    created_at: datetime
+
+
 __all__ = [
+    "AuditLogEntry",
     "CurrentUser",
     "LoginRequest",
     "OidcAuthorizeResponse",

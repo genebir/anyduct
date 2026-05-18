@@ -19,11 +19,13 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from etlx_server import __version__ as server_version
+from etlx_server.audit.middleware import AuditRequestMetaMiddleware
 from etlx_server.auth.jwt_service import JwtService
 from etlx_server.auth.oidc_service import OidcService
 from etlx_server.auth.oidc_state import OidcStateSigner
 from etlx_server.auth.password_service import PasswordService
 from etlx_server.db.session import make_engine, make_session_factory
+from etlx_server.routers import audit as audit_router
 from etlx_server.routers import auth as auth_router
 from etlx_server.routers import health as health_router
 from etlx_server.routers import meta as meta_router
@@ -128,6 +130,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # for the OpenAPI schema generation that some test clients trigger).
     app.state.settings = resolved
 
+    # Audit metadata capture sits in front of every handler so any Depends-
+    # built AuditService picks up the request's IP + User-Agent.
+    app.add_middleware(AuditRequestMetaMiddleware)
+
     if resolved.cors_origins:
         app.add_middleware(
             CORSMiddleware,
@@ -142,6 +148,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(auth_router.router)
     app.include_router(oidc_router.router)
     app.include_router(workspaces_router.router)
+    app.include_router(audit_router.router)
     return app
 
 

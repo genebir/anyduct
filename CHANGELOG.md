@@ -575,6 +575,28 @@
 ### Milestone
 - **Step 8.3 — RBAC 완료 (2026-05-18)**: 4역할 strict hierarchy + WorkspaceContext + `Depends(require_workspace_role(...))` + 첫 RBAC-protected 라우터(`GET /workspaces/{id}`). 누적 코어 344 unit + 서버 **63 unit** (48 → 63, +15) + 서버 **70 it** (59 → 70, +11) + 코어 119 it = **596 tests** all green. mypy strict 코어 39 + 서버 38 src files OK, import-linter 2 contracts KEPT. 워크스페이스 단위 격리(쿼리 자동 필터)는 Step 8.5의 도메인 CRUD가 들어올 때 함께 구현 — 8.3 단독으로는 적용 대상이 없어 자연 이관. 다음 슬라이스는 **Step 8.4 (Audit log)** — mutating 요청 미들웨어 + actor/before/after JSON 기록 + `/audit?resource=&actor=` 조회.
 
+- **Audit log infra + `/audit` query** [Step 8.4]
+  - `services/etlx-server/etlx_server/audit/` 신규 패키지 (모든 모듈이 단일 책임 + OOP-normalized):
+    * `service.py` — `AuditService(session, *, request_meta=None)` 와 `RequestMeta(ip, user_agent)` frozen dataclass. `record(*, action, resource_type, actor_user_id, workspace_id=None, resource_id=None, before=None, after=None)` 가 `AuditLog` row를 add+flush 후 반환. **commit 안 함** — 호출자(보통 라우터)가 트랜잭션 boundary 소유. 비즈니스 mutation이 rollback되면 audit row도 함께 rollback되어 false-positive 0 보장 (테스트로 검증).
+    * `repository.py` — `AuditLogRepository.query(workspace_id, actor_user_id, resource_type, resource_id, limit=50, offset=0)`. `created_at desc` 정렬, offset 페이지네이션 (Step 11에서 cursor pagination으로 격상 가능).
+    * `middleware.py` — `AuditRequestMetaMiddleware(BaseHTTPMiddleware)`. `request.client.host` + `request.headers["user-agent"]`를 `request.state.audit_meta`(RequestMeta)에 부착. `X-Forwarded-For` reverse-proxy 처리는 Step 11(Operability)로 위임 — 배포 토폴로지 의존.
+    * `dependencies.py` — `get_audit_service` Depends. `request.state.audit_meta`가 없거나 잘못된 타입이면 빈 `RequestMeta()` fallback (middleware 없이 직접 호출되는 경로 안전).
+    * `__init__.py` — public re-export + 사용 패턴 docstring.
+  - `services/etlx-server/etlx_server/routers/audit.py` 신규: `GET /audit` 이중 ACL. `workspace_id` 미지정 시 SuperAdmin 필수 (그 외 403 with detail "cross-workspace audit query requires SuperAdmin"). 지정 시 SuperAdmin이거나 `MembershipRepository.get_role`이 None이 아니어야 함(비멤버는 미존재 workspace UUID에도 403 — workspace 존재 여부 leak 방지). 필터: `actor_user_id` / `resource_type`(≤64) / `resource_id`(≤64). `limit` 1~200 강제(422), `offset` ≥0. 응답은 `list[AuditLogEntry]` (Pydantic, `from_attributes=True` ORM mapping).
+  - `auth/schemas.py` 확장: `AuditLogEntry` (id/actor/workspace/action/resource_type/resource_id/before_json/after_json/ip/user_agent/created_at).
+  - `app_factory.py` 확장: `app.add_middleware(AuditRequestMetaMiddleware)` (CORS보다 앞 — 모든 핸들러 진입 전에 부착) + `app.include_router(audit_router.router)`.
+- **테스트 정규화** [Step 8.4]
+  - `services/etlx-server/tests/audit/test_middleware.py` — 2 unit. 진짜 Starlette 앱에 `TestClient` 부착해서 production 경로 그대로 실행 — `request.state.audit_meta`가 `RequestMeta` 인스턴스로 들어오고 UA 헤더가 전달되는지 확인.
+  - `services/etlx-server/tests/db/test_audit_service.py` — 4 it. record + roundtrip / RequestMeta 없이 NULL fields / actor·workspace 모두 NULL(시스템 이벤트) / rollback 시 audit row 함께 사라지는지 검증.
+  - `services/etlx-server/tests/db/test_audit_repository.py` — 5 it. workspace/actor/resource_type+id 필터 + `created_at desc` 정렬(record 사이 5ms sleep으로 microsecond 분리) + limit/offset 페이지네이션.
+  - `services/etlx-server/tests/db/test_audit_router.py` — 8 it. 401 unauthenticated / 403 비admin global / 200 admin global / 403 비멤버 workspace / 200 Viewer 멤버 workspace(자신 workspace 행만) / 200 multi-filter(workspace + resource_type) / 422 limit=0 / 403 미존재 workspace UUID에 비admin(enumeration leak 방지).
+
+### Decisions
+- (이번 슬라이스에서 신규 ADR 없음 — ADR-0023 §9 audit 부분 구현체)
+
+### Milestone
+- **Step 8.4 — Audit infra + `/audit` query 완료 (2026-05-18)**: AuditService + AuditLogRepository + RequestMeta + AuditRequestMetaMiddleware + `GET /audit` 이중 ACL. 누적 코어 344 unit + 서버 **65 unit** (63 → 65, +2) + 서버 **87 it** (70 → 87, +17) + 코어 119 it = **615 tests** all green. mypy strict 코어 39 + 서버 44 src files OK, import-linter 2 contracts KEPT. Mutating endpoint의 `audit.record(...)` 호출은 도메인 CRUD가 들어오는 Step 8.5에서 일괄 wire — 8.4 단독 적용 대상이 없어 infra + query API만 ship한 것이 의도. 다음 슬라이스는 **Step 8.5 (CRUD 엔드포인트)** — `/connections`/`/pipelines`/`/schedules`/`/runs` 도메인 라우터 + 각 mutation에 audit.record + workspace_id 자동 필터.
+
 ### Changed
 - (없음)
 

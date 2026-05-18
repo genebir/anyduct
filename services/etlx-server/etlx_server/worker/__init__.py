@@ -19,12 +19,22 @@ from etlx_server.worker.claim import claim_pending_run
 from etlx_server.worker.executor import RunExecutor
 from etlx_server.worker.heartbeat import heartbeat_loop
 from etlx_server.worker.reaper import ZombieReaper
+from etlx_server.worker.recorder import (
+    RecordingMetrics,
+    RunRecorder,
+    current_run_id,
+    log_processor,
+)
 from etlx_server.worker.runner import RunWorker
 
 __all__ = [
+    "RecordingMetrics",
     "RunExecutor",
+    "RunRecorder",
     "RunWorker",
     "ZombieReaper",
     "claim_pending_run",
+    "current_run_id",
     "heartbeat_loop",
+    "log_processor",
 ]

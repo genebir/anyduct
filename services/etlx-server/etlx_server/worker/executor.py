@@ -30,6 +30,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
+import structlog
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -50,6 +51,7 @@ from etlx_server.pipelines.runtime import (
     resolve_placeholders,
 )
 from etlx_server.worker.heartbeat import heartbeat_loop
+from etlx_server.worker.recorder import RunRecorder, current_run_id
 
 logger = logging.getLogger(__name__)
 
@@ -109,47 +111,78 @@ class RunExecutor:
                 )
             ).scalar_one()
 
-            try:
-                pipeline_obj, connectors = await self._build(pipeline, version, session)
-            except _PipelineBuildError as e:
-                _record_failure(run, type(e).__name__, str(e))
-                await session.commit()
-                return run
+            # Bound logger — events emitted from the executor itself land in
+            # ``run_logs`` via the recorder's structlog processor (Step 9.3c).
+            log = structlog.get_logger().bind(run_id=str(run.id))
 
-            # Connect + run + close must happen in a *single* worker
-            # thread so connector drivers (notably sqlite3) that bind
-            # to a specific thread don't trip on cross-thread reuse.
-            ctx = Context(pipeline_name=pipeline_obj.name, run_id=str(run.id))
-            # Heartbeat task runs on the asyncio main loop with its own
-            # session; while pipeline.run blocks the thread-pool worker,
-            # this keeps ``heartbeat_at`` fresh so the reaper doesn't
-            # mistake an honest long-running run for a zombie.
-            heartbeat_stop = asyncio.Event()
-            heartbeat_task = asyncio.create_task(
-                heartbeat_loop(
-                    self._factory,
-                    run.id,
-                    stop_event=heartbeat_stop,
-                    interval_seconds=_HEARTBEAT_INTERVAL_SECONDS,
-                )
-            )
-            try:
-                result = await asyncio.to_thread(
-                    _run_pipeline_in_thread, pipeline_obj, ctx, connectors
-                )
-                _record_success(run, result)
-            except Exception as e:
-                # Any exception coming out of ``pipeline.run`` lands here. The
-                # core re-raises after recording metrics, so the duration_seconds
-                # on ``RunResult`` isn't accessible — we leave it null and just
-                # log the error.
-                _record_failure(run, type(e).__name__, str(e))
-            finally:
-                heartbeat_stop.set()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await heartbeat_task
-            await session.commit()
-            return run
+            async with RunRecorder(self._factory, run.id):
+                ctx_token = current_run_id.set(run.id)
+                try:
+                    log.info(
+                        "run.build_started",
+                        pipeline_id=str(pipeline.id),
+                        version=version.version,
+                    )
+                    try:
+                        pipeline_obj, connectors = await self._build(pipeline, version, session)
+                    except _PipelineBuildError as e:
+                        log.error(
+                            "run.build_failed",
+                            error_class=type(e).__name__,
+                            error=str(e),
+                        )
+                        _record_failure(run, type(e).__name__, str(e))
+                        await session.commit()
+                        return run
+
+                    # Connect + run + close must happen in a *single* worker
+                    # thread so connector drivers (notably sqlite3) that bind
+                    # to a specific thread don't trip on cross-thread reuse.
+                    ctx = Context(pipeline_name=pipeline_obj.name, run_id=str(run.id))
+                    # Heartbeat task runs on the asyncio main loop with its own
+                    # session; while pipeline.run blocks the thread-pool worker,
+                    # this keeps ``heartbeat_at`` fresh so the reaper doesn't
+                    # mistake an honest long-running run for a zombie.
+                    heartbeat_stop = asyncio.Event()
+                    heartbeat_task = asyncio.create_task(
+                        heartbeat_loop(
+                            self._factory,
+                            run.id,
+                            stop_event=heartbeat_stop,
+                            interval_seconds=_HEARTBEAT_INTERVAL_SECONDS,
+                        )
+                    )
+                    try:
+                        log.info("run.pipeline_started", pipeline=pipeline_obj.name)
+                        result = await asyncio.to_thread(
+                            _run_pipeline_in_thread, pipeline_obj, ctx, connectors
+                        )
+                        _record_success(run, result)
+                        log.info(
+                            "run.pipeline_succeeded",
+                            records_read=result.records_read,
+                            records_written=result.records_written,
+                            duration_seconds=result.duration_seconds,
+                        )
+                    except Exception as e:
+                        # Any exception coming out of ``pipeline.run`` lands here.
+                        # The core re-raises after recording metrics, so the
+                        # duration_seconds on ``RunResult`` isn't accessible — we
+                        # leave it null and log the error.
+                        log.error(
+                            "run.pipeline_failed",
+                            error_class=type(e).__name__,
+                            error=str(e),
+                        )
+                        _record_failure(run, type(e).__name__, str(e))
+                    finally:
+                        heartbeat_stop.set()
+                        with contextlib.suppress(asyncio.CancelledError):
+                            await heartbeat_task
+                    await session.commit()
+                    return run
+                finally:
+                    current_run_id.reset(ctx_token)
 
     async def _build(
         self,

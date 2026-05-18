@@ -27,11 +27,13 @@ import typer
 from sqlalchemy import select
 
 from etl_plugins.config.secrets import get_secret_backend
+from etl_plugins.observability.logging import configure_logging
 from etlx_server.db.models import Workspace
 from etlx_server.db.session import make_engine, make_session_factory
 from etlx_server.io.yaml_sync import export_workspace, import_yaml_dir
 from etlx_server.scheduler import Scheduler
 from etlx_server.worker import RunWorker, ZombieReaper
+from etlx_server.worker.recorder import log_processor
 
 app = typer.Typer(help="etlx-server administration CLI (metadata DB sync, ops).")
 worker_app = typer.Typer(help="Worker process commands.")
@@ -159,6 +161,10 @@ def worker_run_cmd(
         level=getattr(logging, log_level.upper(), logging.INFO),
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    # Install the recorder's structlog processor so anything the pipeline
+    # logs via ctx.logger / structlog.get_logger() lands in ``run_logs``
+    # whenever a recorder is active for that run_id (Step 9.3c).
+    configure_logging(level=log_level, json=True, extra_processors=[log_processor])
     wid = worker_id or f"worker-{uuid.uuid4().hex[:12]}"
 
     async def _run() -> None:

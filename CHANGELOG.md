@@ -618,6 +618,26 @@
 ### Milestone
 - **Step 8.5a — Workspaces CRUD 완료 (2026-05-18)**: 4 신규 endpoint + Owner 자동 멤버십 + audit 페어링 + Step 8.4 audit infra 첫 production 호출처. 누적 코어 344 unit + 서버 **65 unit** + 서버 **98 it** (87 → 98, +11) + 코어 119 it = **626 tests** all green. mypy strict 코어 39 + 서버 44 src files OK, import-linter 2 contracts KEPT. 다음 슬라이스는 **Step 8.5b (Membership management)** — `/workspaces/{id}/memberships` list/add/change-role/remove. 마지막 Owner 제거 보호(워크스페이스 orphan 방지) 포함.
 
+- **Membership management** [Step 8.5b]
+  - `auth/membership_repository.py` 확장: 기존 `get_role` 외에 `get`(full row), `list_for_workspace`(User join → 이메일 정렬, FE 표시용), `count_owners`(워크스페이스 단위), `add`(UNIQUE 위반 → `MembershipExistsError`), `update_role`(마지막 Owner 데모트 시 `LastOwnerError`), `remove`(마지막 Owner 제거 시 `LastOwnerError`). 모든 mutation은 호출자 트랜잭션 안에서 동작 — repo는 commit 하지 않음.
+  - 신규 도메인 예외 2종: `MembershipExistsError`(라우터 → 409), `LastOwnerError`(라우터 → 409). DB 무결성 + 비즈니스 invariant를 라우터가 안전하게 다룰 수 있게 추상화.
+  - `auth/schemas.py` 확장: `MembershipSummary`(id/user_id/email/name/role), `MembershipCreateRequest`(email + role — UUID 대신 이메일로 초대, role은 `Literal["owner","editor","runner","viewer"]`로 422 강제), `MembershipUpdateRequest`(role only).
+  - `services/etlx-server/etlx_server/routers/memberships.py` 신규: 4 엔드포인트 (`/workspaces/{ws}/memberships` GET Viewer+ / POST Owner; `/{user_id}` PATCH Owner / DELETE Owner). 모듈 레벨 `_require_viewer`/`_require_owner` Depends 싱글톤. POST는 `UserRepository.get_by_email`로 사용자 조회(unknown → 404), `MembershipRepository.add`로 insert. PATCH는 `update_role`로 LastOwnerError 처리. DELETE는 row 삭제 *전*에 `membership.id`를 Python 변수에 캡처하여 삭제 후 audit row의 `resource_id`로 사용. 각 mutation이 `audit.record(action=membership.{create,update,delete}, resource_type='membership', resource_id=str(membership.id))` + `session.commit`.
+  - **마지막 Owner 보호 의도**: 자기 자신 mutation에도 적용 — 다른 Owner가 없는 상태에서 자기 데모트/제거하면 409. 워크스페이스가 orphan 되어 아무도 관리할 수 없는 상태를 원천 차단.
+  - `app_factory.py`: `app.include_router(memberships_router.router)` 추가.
+- **테스트 정규화** [Step 8.5b]
+  - `services/etlx-server/tests/db/test_memberships_router.py` — 15 신규 it. 시나리오:
+    * list: 멤버는 모든 멤버 목록 조회 / 비멤버 403
+    * POST: owner adds editor + audit.create / non-owner 403 / unknown email 404 / dup 409 / invalid role 422
+    * PATCH: role 변경 + audit before·after / last-owner demote 409 / 다른 Owner 존재 시 자기 demote 허용 / unknown membership 404
+    * DELETE: happy path + audit row in NULL workspace_id (FK SET NULL) / last-owner remove 409 + 행 그대로 유지 / 다른 Owner 시 자기 제거 허용 / unknown 404
+
+### Decisions
+- (이번 슬라이스에서 신규 ADR 없음 — ADR-0023 §5 RBAC + §9 audit 적용)
+
+### Milestone
+- **Step 8.5b — Membership management 완료 (2026-05-18)**: 4 신규 endpoint + 마지막 Owner 보호 + audit 페어링. 누적 코어 344 unit + 서버 **65 unit** + 서버 **113 it** (98 → 113, +15) + 코어 119 it = **641 tests** all green. mypy strict 코어 39 + 서버 45 src files OK, import-linter 2 contracts KEPT. 다음 슬라이스는 **Step 8.5c (Connections CRUD)** — workspace-scoped `/connections` + 시크릿은 Secret backend(Vault/AWS SM/GCP SM/File)에 즉시 위임, DB에는 ref만 + `POST /{conn_id}/test`.
+
 ### Changed
 - (없음)
 

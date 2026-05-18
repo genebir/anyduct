@@ -117,7 +117,7 @@ uv run mypy etl_plugins
 
 ## 5. 현재 단계
 
-**Step 8.5a 완료 → 8.5b Membership 차례** (2026-05-18 기준). Steps 1–4 + Step 5.1 + Step 7.0~7.4 + Step 8.1 + Step 8.2a/b(로컬 + OIDC JWT) + Step 8.3(RBAC) + Step 8.4(Audit log infra) + **Step 8.5a(Workspaces CRUD — POST 201 auto-Owner / GET list with SuperAdmin bypass / PATCH Editor+ / DELETE Owner-only, 모든 mutation이 audit.record + session.commit, audit row가 SET NULL FK로 forensics 보존)** 완료. **344 코어 단위 + 65 etlx-server 단위 + 3 skip + 119 코어 통합(testcontainers PG/MinIO/Kafka/MySQL/Vault/LocalStack) + 98 서버 통합 = 626 테스트** all green, **24 ADR**. `mypy strict` 코어 39 + 서버 44 src files OK, `lint-imports` 2 contracts KEPT. **OOP 정규화 일관 적용**: services(`JwtService`/`PasswordService`/`OidcService`/`OidcStateSigner`/`AuditService`) + repository(`UserRepository`/`MembershipRepository`/`WorkspaceRepository`/`AuditLogRepository`) + 도메인 라우터(`auth.py`/`oidc.py`/`workspaces.py`/`audit.py`) + `Depends`-기반 DI(`get_current_workspace`/`require_workspace_role`/`get_audit_service`) + 모듈 레벨 `_require_*` Depends 싱글톤(ruff B008 회피) + lifespan-managed `app.state` 싱글톤 + ASGI `BaseHTTPMiddleware` subclass(`AuditRequestMetaMiddleware`).
+**Step 8.5b 완료 → 8.5c Connections 차례** (2026-05-18 기준). Steps 1–4 + Step 5.1 + Step 7.0~7.4 + Step 8.1 + Step 8.2a/b(로컬 + OIDC JWT) + Step 8.3(RBAC) + Step 8.4(Audit log infra) + Step 8.5a(Workspaces CRUD) + **Step 8.5b(Membership management — list/add-by-email/change-role/remove + 마지막 Owner 보호로 workspace orphan 방지)** 완료. **344 코어 단위 + 65 etlx-server 단위 + 3 skip + 119 코어 통합(testcontainers PG/MinIO/Kafka/MySQL/Vault/LocalStack) + 113 서버 통합 = 641 테스트** all green, **24 ADR**. `mypy strict` 코어 39 + 서버 45 src files OK, `lint-imports` 2 contracts KEPT. **OOP 정규화 일관 적용**: services(`JwtService`/`PasswordService`/`OidcService`/`OidcStateSigner`/`AuditService`) + repository(`UserRepository`/`MembershipRepository`/`WorkspaceRepository`/`AuditLogRepository`) + 도메인 라우터(`auth.py`/`oidc.py`/`workspaces.py`/`memberships.py`/`audit.py`) + `Depends`-기반 DI(`get_current_workspace`/`require_workspace_role`/`get_audit_service`) + 모듈 레벨 `_require_*` Depends 싱글톤(ruff B008 회피) + 도메인 예외(`WorkspaceSlugTakenError`/`MembershipExistsError`/`LastOwnerError`)로 라우터에서 깨끗한 4xx 매핑.
 
 추가로 **서비스화 방향 확정**(ADR-0017): `services/etlx-server`(FastAPI) + `services/etlx-web`(Next.js)을 별도 패키지로 Step 7부터 진행. 코어와 서비스는 단방향 의존.
 
@@ -146,8 +146,9 @@ Step별 산출물 요약:
   - 8.3 ✅ RBAC — `rbac.py`(strict hierarchy Owner>Editor>Runner>Viewer, `has_at_least`) + MembershipRepository + WorkspaceRepository + WorkspaceContext + `Depends(get_current_workspace)` + `require_workspace_role(...)` factory(SuperAdmin bypass) + 첫 보호 라우터 `GET /workspaces/{id}` (Viewer+)
   - 8.4 ✅ Audit log — `AuditService`(세션 바운드, 호출자 트랜잭션 따라 자동 rollback) + `AuditLogRepository.query` + `AuditRequestMetaMiddleware`(ASGI BaseHTTPMiddleware → request.state.audit_meta) + `get_audit_service` Depends + `GET /audit` 이중 ACL(no workspace_id → SuperAdmin only / with workspace_id → Viewer+ or SuperAdmin)
   - 8.5 a~e 분리 (도메인이 넓어 1 PR = 1 slice 유지)
-    - 8.5a ✅ Workspaces CRUD — POST(auto-Owner) / GET list(SuperAdmin bypass) / PATCH(Editor+) / DELETE(Owner) + audit pairing + 모듈 레벨 `_require_*` Depends 싱글톤
-    - 8.5b~e 미착수 — 다음은 Membership management(list/add/change-role/remove + 마지막 Owner 제거 보호)
+    - 8.5a ✅ Workspaces CRUD — POST(auto-Owner) / GET list(SuperAdmin bypass) / PATCH(Editor+) / DELETE(Owner) + audit pairing
+    - 8.5b ✅ Membership management — list(Viewer+) / POST add-by-email(Owner) / PATCH role(Owner) / DELETE(Owner) + 마지막 Owner 보호(`LastOwnerError` → 409) + audit pairing
+    - 8.5c~e 미착수 — 다음은 Connections CRUD(workspace-scoped + Secret backend 위임 + `POST /{id}/test`)
   - 8.6~8.7 미착수
 - 📋 Step 9 (Execution Engine 통합) — 미착수
 - 📋 Step 10 (Web UI / Next.js) — 미착수

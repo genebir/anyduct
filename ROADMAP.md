@@ -8,7 +8,7 @@
 
 ## 현재 상태 (2026-05-18)
 
-**Steps 1–4 + Step 5.1(MySQL/SQLite) + Step 7.0~7.4 + Step 8.1~8.4 + Step 8.5a 완료. 코어 344 unit + 서버 65 unit + 3 skip + 코어 119 it + 서버 98 it = 629 테스트, 24 ADR.**
+**Steps 1–4 + Step 5.1(MySQL/SQLite) + Step 7.0~7.4 + Step 8.1~8.4 + Step 8.5a/b 완료. 코어 344 unit + 서버 65 unit + 3 skip + 코어 119 it + 서버 113 it = 644 테스트, 24 ADR.**
 **서비스화 방향 확정**: Step 7 이후로 `services/etlx-server` (FastAPI) + `services/etlx-web` (Next.js) 별도 패키지로 진행. 코어와 서비스는 단방향 의존 (서비스 → 코어). 자세한 결정은 ADR-0017.
 
 ---
@@ -335,11 +335,14 @@
 - [x] `WorkspaceSlugTakenError`(`IntegrityError` 변환)로 409 응답
 - [x] 11 신규 it(POST happy + 409 + 422 invalid slug / list user memberships / list superadmin sees all / PATCH editor + audit before·after / runner 403 / empty body 400 / slug collision 409 / DELETE owner + audit + cascade / editor 403)
 
-#### 8.5b Membership management (다음)
-- [ ] `GET /workspaces/{id}/memberships` (Viewer+)
-- [ ] `POST /workspaces/{id}/memberships` (Owner — user_id + role)
-- [ ] `PATCH /workspaces/{id}/memberships/{user_id}` (Owner — role 변경)
-- [ ] `DELETE /workspaces/{id}/memberships/{user_id}` (Owner — 자기 자신 제거 시 마지막 Owner 보호 필요)
+#### 8.5b Membership management ✅ (2026-05-18)
+- [x] `GET /workspaces/{id}/memberships` (Viewer+) — User row와 join해서 email + name 포함, email 정렬
+- [x] `POST /workspaces/{id}/memberships` (Owner — email + role 입력, unknown email 404, 중복 409, invalid role 422)
+- [x] `PATCH /workspaces/{id}/memberships/{user_id}` (Owner — role 변경)
+- [x] `DELETE /workspaces/{id}/memberships/{user_id}` (Owner)
+- [x] **마지막 Owner 보호**: `MembershipRepository.update_role`/`remove`가 `count_owners(...) <= 1`이고 Owner를 demote/remove하면 `LastOwnerError` → 409. 자기 자신 mutation에도 동일 적용 — 자기 자신을 데모트/제거하더라도 다른 Owner가 남아있어야만 허용. 워크스페이스 orphan 방지.
+- [x] 각 mutation이 `audit.record(membership.create / update / delete, resource_id=str(membership.id))` 호출 — DELETE는 row 삭제 전 `membership.id` 캡처 (Python 객체는 후에도 살아있음).
+- [x] 15 신규 it (list 멤버/비멤버 403, POST owner-add + audit / non-owner 403 / unknown email 404 / dup 409 / invalid role 422, PATCH role 변경 + audit before·after / last-owner demote 409 / 다른 Owner 존재 시 자기 demote 허용 / unknown 404, DELETE owner-remove + audit + cascade / last-owner remove 409 + 행 그대로 유지 / 자기 제거 다른 Owner 존재 시 허용 / unknown 404).
 
 #### 8.5c Connections CRUD
 - [ ] `/workspaces/{id}/connections` (workspace-scoped CRUD)
@@ -501,3 +504,4 @@
 - 2026-05-18: **Step 8.4 (Audit log) 완료.** 새 `etlx_server/audit/` 패키지 — `AuditService`(세션 바운드 recorder, 호출자 트랜잭션 따라 자동 rollback으로 false-positive 방지) + `AuditLogRepository.query`(workspace/actor/resource_type/resource_id 필터 + limit/offset + created_at desc) + `RequestMeta`(ip/user_agent dataclass) + `AuditRequestMetaMiddleware`(starlette `BaseHTTPMiddleware` subclass, request.state.audit_meta 부착) + `get_audit_service` Depends(meta 없으면 기본 RequestMeta() fallback). `routers/audit.py` `GET /audit` 이중 ACL — `workspace_id` 미지정 시 SuperAdmin 필수, 지정 시 Viewer+ 멤버 또는 SuperAdmin (비멤버는 미존재 workspace UUID로도 403 — enumeration leak 방지). limit 1~200 강제. `AuditLogEntry` Pydantic 응답(`from_attributes=True`로 ORM row → API mapping). app_factory에 middleware + router 추가. mutating 라우터의 `audit.record(...)` 호출은 도메인 mutation 라우터가 들어오는 Step 8.5에서 일괄 wire — 8.4 단독 적용 대상이 없어 infra + query API만 ship. 2 신규 unit(middleware) + 17 신규 it(audit_service 4 + repository 5 + router 8). 누적 **코어 344 unit + 서버 65 unit + 코어 119 it + 서버 87 it = 615 테스트** all green, mypy strict 코어 39 + 서버 44 src files OK, lint-imports 2 KEPT. ADR-0023 §9 audit 부분 구현체 — 신규 ADR 없음. 다음은 Step 8.5 (CRUD 엔드포인트 — `/connections`/`/pipelines`/`/schedules`/`/runs`, 각 mutation에서 `audit.record` 호출 + workspace_id 쿼리 자동 필터).
 - 2026-05-18: **Step 8.5 a/b/c/d/e 분리.** Step 8.5의 도메인이 너무 넓어(workspaces+members+connections+pipelines+schedules+runs) 1 PR = 1 slice 원칙 유지를 위해 5개 슬라이스로 분할. 8.5a부터 진행.
 - 2026-05-18: **Step 8.5a (Workspaces CRUD) 완료.** `WorkspaceRepository`에 `create`(워크스페이스 + Owner 멤버십 원자적 insert) / `list_for_user`(SuperAdmin은 include_all=True로 전체) / `update`(허용된 필드 외 거부 ValueError) / `delete`(FK cascade로 memberships 제거) + `snapshot()` 헬퍼(audit before/after용 dict) 추가. `WorkspaceSlugTakenError`로 `IntegrityError` 추상화. `WorkspaceCreateRequest`/`WorkspaceUpdateRequest` Pydantic 스키마 — slug regex + color_hex regex 검증. `routers/workspaces.py` 4 신규 엔드포인트 (POST 201 + Owner 자동 / GET list / PATCH Editor+ / DELETE Owner only) + 기존 GET/{id} 유지. 각 mutation이 audit.record + session.commit (`workspace.create` / `workspace.update` / `workspace.delete`) — 모듈 레벨 `_require_viewer`/`_require_editor`/`_require_owner` Depends 싱글톤으로 ruff B008 회피. **테스트 패턴 확립**: 호출자 commit이 conftest의 outer-trans rollback 안에서 savepoint release로 동작 (`expire_on_commit=False`), 테스트가 `session.commit()` 호출로 router 쓴 데이터를 자체 식별맵 갱신해서 audit row 조회. 11 신규 it (POST happy + audit + 멤버십 확인 / 409 slug 중복 / 422 invalid slug / list user 멤버십만 / list superadmin 전체 / PATCH editor + audit before·after / runner 403 / empty body 400 / slug 충돌 409 / DELETE owner + audit + cascade + workspace_id SET NULL / editor 403). 누적 **코어 344 unit + 서버 65 unit + 코어 119 it + 서버 98 it = 626 테스트** all green, mypy strict 코어 39 + 서버 44 src files OK, lint-imports 2 KEPT. ADR-0023 §5 RBAC + §9 audit 구현 적용 — 신규 ADR 없음. 다음은 Step 8.5b (Membership management — list/add/change-role/remove, 마지막 Owner 제거 보호).
+- 2026-05-18: **Step 8.5b (Membership management) 완료.** `MembershipRepository`에 `get`(full row), `list_for_workspace`(User join + email 정렬), `count_owners`(워크스페이스 단위), `add`(UNIQUE 위반 → `MembershipExistsError`), `update_role`(마지막 Owner demote 시 `LastOwnerError`), `remove`(마지막 Owner remove 시 `LastOwnerError`) 추가. 새 `routers/memberships.py` 4 엔드포인트 (`/workspaces/{ws}/memberships` GET Viewer+/POST Owner, `/{user_id}` PATCH Owner/DELETE Owner). `MembershipSummary`/`MembershipCreateRequest`(email 입력)/`MembershipUpdateRequest` Pydantic — role은 `Literal["owner","editor","runner","viewer"]`로 422 강제. **마지막 Owner 보호**가 핵심: `update_role`/`remove`가 `OWNER` + `count_owners <= 1`이면 LastOwnerError로 409 — 자기 자신 mutation에도 동일 적용. DELETE는 row 삭제 전 `membership.id`를 Python 변수에 캡처하여 삭제 후 audit row에서 `resource_id`로 참조. 각 mutation은 `audit.record(membership.{create,update,delete})` + commit. 15 신규 it (list 멤버 + email 정렬 / 비멤버 403 / POST owner-add + audit + non-owner 403 + unknown email 404 + dup 409 + invalid role 422 / PATCH role 변경 + before·after audit + last-owner demote 409 + 다른 Owner 존재 시 자기 demote 허용 + unknown 404 / DELETE happy + audit + cascade + last-owner 409 + 다른 Owner 시 자기 제거 허용 + unknown 404). 누적 **코어 344 unit + 서버 65 unit + 코어 119 it + 서버 113 it = 641 테스트** all green, mypy strict 코어 39 + 서버 45 src files OK, lint-imports 2 KEPT. ADR-0023 §5 RBAC + §9 audit 구현 적용 — 신규 ADR 없음. 다음은 Step 8.5c (Connections CRUD — workspace-scoped + Secret backend 위임 + `POST /{id}/test`).

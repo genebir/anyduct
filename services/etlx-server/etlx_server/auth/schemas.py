@@ -94,6 +94,29 @@ class WorkspaceUpdateRequest(BaseModel):
         return self.model_dump(exclude_unset=True)
 
 
+class MembershipSummary(BaseModel):
+    """One row of ``/workspaces/{id}/memberships`` — joined user identity + role."""
+
+    id: UUID
+    user_id: UUID
+    email: EmailStr
+    name: str
+    role: str
+
+
+class MembershipCreateRequest(BaseModel):
+    """Body of ``POST /workspaces/{id}/memberships`` — add by email."""
+
+    email: EmailStr
+    role: Literal["owner", "editor", "runner", "viewer"]
+
+
+class MembershipUpdateRequest(BaseModel):
+    """Body of ``PATCH /workspaces/{id}/memberships/{user_id}`` — role only."""
+
+    role: Literal["owner", "editor", "runner", "viewer"]
+
+
 class AuditLogEntry(BaseModel):
     """One row of the ``audit_log`` table, shaped for the ``/audit`` response."""
 
@@ -116,6 +139,9 @@ __all__ = [
     "AuditLogEntry",
     "CurrentUser",
     "LoginRequest",
+    "MembershipCreateRequest",
+    "MembershipSummary",
+    "MembershipUpdateRequest",
     "OidcAuthorizeResponse",
     "OidcCallbackResponse",
     "OidcProviderSummary",

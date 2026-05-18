@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import cronstrue from "cronstrue";
+import { CronExpressionParser } from "cron-parser";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/cn";
 
@@ -34,6 +35,10 @@ export function CronInput({
   allowEmpty?: boolean;
 }) {
   const description = useMemo(() => describe(value, allowEmpty), [value, allowEmpty]);
+  const upcoming = useMemo(
+    () => (description.kind === "ok" ? nextFirings(value, 3) : []),
+    [value, description.kind],
+  );
 
   return (
     <div className="flex flex-col gap-2">
@@ -74,8 +79,49 @@ export function CronInput({
       >
         {description.text}
       </p>
+      {upcoming.length > 0 ? (
+        <div className="rounded-md border border-border-subtle bg-elevated/40 p-2">
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">
+            Next firings (your timezone)
+          </div>
+          <ul className="mt-1 space-y-0.5 font-mono text-[11px] text-text-secondary">
+            {upcoming.map((d, i) => (
+              <li key={i} className="flex justify-between gap-3">
+                <span>{d.toLocaleString()}</span>
+                <span className="text-text-muted">{relative(d)}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
     </div>
   );
+}
+
+function nextFirings(expr: string, n: number): Date[] {
+  const out: Date[] = [];
+  try {
+    const it = CronExpressionParser.parse(expr.trim(), { currentDate: new Date() });
+    for (let i = 0; i < n; i++) out.push(it.next().toDate());
+  } catch {
+    // Mid-edit invalid input — silently return what we have.
+  }
+  return out;
+}
+
+function relative(d: Date): string {
+  const delta = d.getTime() - Date.now();
+  if (delta < 0) return "past";
+  const seconds = Math.floor(delta / 1000);
+  if (seconds < 60) return `in ${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `in ${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `in ${hours}h ${minutes % 60}m`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `in ${days}d ${hours % 24}h`;
+  const months = Math.floor(days / 30);
+  return `in ~${months}mo`;
 }
 
 function describe(

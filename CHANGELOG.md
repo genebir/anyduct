@@ -10,6 +10,7 @@
 ## [Unreleased]
 
 ### Added
+- **Next-firing preview in CronInput** [Step 10.5] — when the cron expression parses, the input shows the next 3 firings in the user's local timezone plus a relative offset (`in 5h 23m`). Invalid mid-edit input silently disables the preview (no red error spam). Uses `cron-parser ^5.x` (timezone-aware via Luxon, ~30 kB to the schedules route).
 - **Pipeline Dry Run UI** [Step 10.4] — third header button in `/w/[slug]/pipelines/[id]/edit`.
   - Calls `POST /pipelines/{id}/dry-run` (which builds the pipeline server-side + parallel `connector.health_check()` per resolved connection — no I/O on the actual source/sink data).
   - Results render in a collapsible panel between the canvas and properties panel: top "passed / failed" banner with a success or error icon, top-level config errors in a red-bordered block, then per-connector rows (success-tinted bg with check icon when ok, error-tinted bg with full error trace `<pre>` when not). Dismiss button clears the panel.

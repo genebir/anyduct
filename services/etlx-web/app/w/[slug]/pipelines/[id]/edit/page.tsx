@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Palette } from "@/components/builder/palette";
 import { PropertiesPanel } from "@/components/builder/properties-panel";
 import { BuilderCanvas } from "@/components/builder/builder-canvas";
+import { PipelineSettingsPanel } from "@/components/builder/pipeline-settings-panel";
 import {
   ApiError,
   connectionsApi,
@@ -33,7 +34,9 @@ import {
   serialize,
   type BuilderNode,
   type BuilderState,
+  type DlqSettings,
   type PipelineConfigJson,
+  type RetrySettings,
 } from "@/lib/pipeline-config";
 
 export default function PipelineEditorPage() {
@@ -92,13 +95,14 @@ export default function PipelineEditorPage() {
         return true;
       });
       const ordered = reorderNodes([...filtered, next]);
-      return { nodes: ordered };
+      return { ...prev, nodes: ordered };
     });
     setSelectedId(null);
   }, []);
 
   const removeOperator = useCallback((nodeId: string) => {
     setState((prev) => ({
+      ...prev,
       nodes: prev.nodes.filter((n) => n.id !== nodeId),
     }));
     setSelectedId((cur) => (cur === nodeId ? null : cur));
@@ -111,6 +115,7 @@ export default function PipelineEditorPage() {
   const updateNode = useCallback(
     (nodeId: string, values: Record<string, unknown>) => {
       setState((prev) => ({
+        ...prev,
         nodes: prev.nodes.map((n) =>
           n.id === nodeId ? { ...n, data: values } : n,
         ),
@@ -118,6 +123,14 @@ export default function PipelineEditorPage() {
     },
     [],
   );
+
+  const updateRetry = useCallback((next: RetrySettings) => {
+    setState((prev) => ({ ...prev, retry: next }));
+  }, []);
+
+  const updateDlq = useCallback((next: DlqSettings) => {
+    setState((prev) => ({ ...prev, dlq: next }));
+  }, []);
 
   const selectedNode = useMemo(
     () => state.nodes.find((n) => n.id === selectedId) ?? null,
@@ -225,6 +238,7 @@ export default function PipelineEditorPage() {
               selectedId={selectedId}
               onSelect={selectNode}
               onRemove={removeOperator}
+              onDeselect={() => setSelectedId(null)}
             />
           </div>
           {dryRunResult ? (
@@ -234,11 +248,21 @@ export default function PipelineEditorPage() {
             />
           ) : null}
         </div>
-        <PropertiesPanel
-          node={selectedNode}
-          connections={connections}
-          onChange={updateNode}
-        />
+        {selectedNode ? (
+          <PropertiesPanel
+            node={selectedNode}
+            connections={connections}
+            onChange={updateNode}
+          />
+        ) : (
+          <PipelineSettingsPanel
+            retry={state.retry}
+            dlq={state.dlq}
+            connections={connections}
+            onChangeRetry={updateRetry}
+            onChangeDlq={updateDlq}
+          />
+        )}
       </div>
     </>
   );

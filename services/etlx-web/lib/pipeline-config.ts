@@ -15,9 +15,41 @@ export interface BuilderNode {
   data: Record<string, unknown>;
 }
 
+export interface RetrySettings {
+  enabled: boolean;
+  max_attempts: number;
+  backoff: "fixed" | "exponential";
+  initial_delay_seconds: number;
+}
+
+export interface DlqSettings {
+  enabled: boolean;
+  connection: string;
+  table: string;
+  topic: string;
+  mode: "append" | "overwrite" | "upsert";
+}
+
 export interface BuilderState {
   nodes: BuilderNode[];
+  retry: RetrySettings;
+  dlq: DlqSettings;
 }
+
+export const DEFAULT_RETRY: RetrySettings = {
+  enabled: false,
+  max_attempts: 3,
+  backoff: "exponential",
+  initial_delay_seconds: 5,
+};
+
+export const DEFAULT_DLQ: DlqSettings = {
+  enabled: false,
+  connection: "",
+  table: "",
+  topic: "",
+  mode: "append",
+};
 
 export interface PipelineConfigJson {
   name: string;
@@ -25,6 +57,17 @@ export interface PipelineConfigJson {
   source: { connection: string; [k: string]: unknown };
   transforms: { type: string; [k: string]: unknown }[];
   sink: { connection: string; [k: string]: unknown };
+  retry?: {
+    max_attempts: number;
+    backoff: string;
+    initial_delay_seconds: number;
+  } | null;
+  dlq?: {
+    connection: string;
+    table?: string | null;
+    topic?: string | null;
+    mode: string;
+  } | null;
   [k: string]: unknown;
 }
 
@@ -36,10 +79,9 @@ const KIND_ORDER: Record<OperatorSpec["kind"], number> = {
 
 export function blankBuilder(): BuilderState {
   return {
-    nodes: [
-      makeNode("source:postgres"),
-      makeNode("sink:postgres"),
-    ],
+    nodes: [makeNode("source:postgres"), makeNode("sink:postgres")],
+    retry: { ...DEFAULT_RETRY },
+    dlq: { ...DEFAULT_DLQ },
   };
 }
 
@@ -99,6 +141,27 @@ export function serialize(
       ...sink.data,
     } as PipelineConfigJson["sink"],
   };
+
+  if (state.retry.enabled) {
+    config.retry = {
+      max_attempts: state.retry.max_attempts,
+      backoff: state.retry.backoff,
+      initial_delay_seconds: state.retry.initial_delay_seconds,
+    };
+  }
+  if (state.dlq.enabled && state.dlq.connection) {
+    const dlq: PipelineConfigJson["dlq"] = {
+      connection: state.dlq.connection,
+      mode: state.dlq.mode,
+    };
+    // Core DlqConfig stores either `table` (batch sink) or `topic` (stream
+    // sink). Send whichever the user filled; both populated is unusual but
+    // harmless — the core's runtime picks the relevant one per sink kind.
+    if (state.dlq.table) dlq.table = state.dlq.table;
+    if (state.dlq.topic) dlq.topic = state.dlq.topic;
+    config.dlq = dlq;
+  }
+
   return config;
 }
 
@@ -141,7 +204,31 @@ export function deserialize(config: PipelineConfigJson | null): BuilderState {
     operatorId: sink?.id ?? "sink:postgres",
     data: stripType({ ...config.sink }),
   });
-  return { nodes };
+
+  const retry: RetrySettings = config.retry
+    ? {
+        enabled: true,
+        max_attempts: config.retry.max_attempts,
+        backoff:
+          config.retry.backoff === "fixed" ? "fixed" : "exponential",
+        initial_delay_seconds: config.retry.initial_delay_seconds,
+      }
+    : { ...DEFAULT_RETRY };
+
+  const dlq: DlqSettings = config.dlq
+    ? {
+        enabled: true,
+        connection: config.dlq.connection,
+        table: config.dlq.table ?? "",
+        topic: config.dlq.topic ?? "",
+        mode:
+          config.dlq.mode === "overwrite" || config.dlq.mode === "upsert"
+            ? config.dlq.mode
+            : "append",
+      }
+    : { ...DEFAULT_DLQ };
+
+  return { nodes, retry, dlq };
 }
 
 /**

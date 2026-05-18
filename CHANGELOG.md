@@ -10,6 +10,14 @@
 ## [Unreleased]
 
 ### Added
+- **Pipeline-level retry + DLQ config in the builder** [Step 10.4 / 9.5] — `PipelineConfig.retry` and `PipelineConfig.dlq` are no longer invisible in the UI.
+  - New `PipelineSettingsPanel` (`components/builder/pipeline-settings-panel.tsx`) shows in the right pane when no node is selected. Two collapsible sections per DESIGN.md card grammar:
+    - **Retry policy**: `max_attempts` (1-20), `backoff` (`fixed` / `exponential`), `initial_delay_seconds`. Maps directly to core `RetryConfig`.
+    - **Dead-letter queue**: connection picker filtered to all workspace connections, table (batch sink) + topic (stream sink) inputs, mode (`append` / `overwrite` / `upsert`). Maps to core `DlqConfig`.
+  - Both sections gate their fields behind an "Enable" checkbox so the saved `PipelineConfig` only carries `retry` / `dlq` keys when the user actually opted in — no empty objects polluting saved YAML/JSON.
+  - **Deselect support**: `BuilderCanvas` now forwards `onPaneClick` as an `onDeselect` callback. Clicking the canvas background returns the right pane to `PipelineSettingsPanel`; clicking any node re-binds to `PropertiesPanel`.
+  - `BuilderState` gains `retry` + `dlq` plus `DEFAULT_RETRY` / `DEFAULT_DLQ`; `serialize` / `deserialize` round-trip through the new fields. `blankBuilder()` keeps both disabled so new pipelines stay minimal.
+  - Builder route 62.8 → 63.8 kB.
 - **Next-firing preview in CronInput** [Step 10.5] — when the cron expression parses, the input shows the next 3 firings in the user's local timezone plus a relative offset (`in 5h 23m`). Invalid mid-edit input silently disables the preview (no red error spam). Uses `cron-parser ^5.x` (timezone-aware via Luxon, ~30 kB to the schedules route).
 - **Pipeline Dry Run UI** [Step 10.4] — third header button in `/w/[slug]/pipelines/[id]/edit`.
   - Calls `POST /pipelines/{id}/dry-run` (which builds the pipeline server-side + parallel `connector.health_check()` per resolved connection — no I/O on the actual source/sink data).

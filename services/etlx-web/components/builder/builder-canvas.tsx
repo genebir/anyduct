@@ -26,11 +26,13 @@ export function BuilderCanvas({
   selectedId,
   onSelect,
   onRemove,
+  onDeselect,
 }: {
   nodes: BuilderNode[];
   selectedId: string | null;
   onSelect: (id: string) => void;
   onRemove: (id: string) => void;
+  onDeselect?: () => void;
 }) {
   const { rfNodes, rfEdges } = useMemo(() => {
     const ordered = reorderNodes(nodes);
@@ -76,6 +78,7 @@ export function BuilderCanvas({
           nodesConnectable={false}
           edgesFocusable={false}
           proOptions={{ hideAttribution: true }}
+          onPaneClick={() => onDeselect?.()}
         >
           <Background
             variant={BackgroundVariant.Dots}

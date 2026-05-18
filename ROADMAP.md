@@ -438,10 +438,10 @@
 - [x] Auth 흐름 — `AuthProvider`가 `/auth/me` ping으로 현재 사용자 판정, 401 시 `etlx:unauthorized` 이벤트 + `/login` 리다이렉트, `next` 쿼리 보존.
 - [ ] 페이지 전환 motion preset — 작업 안 함, 후속.
 
-### 10.3 Connection 관리 (← 작업 중, 2026-05-18 read-only 목록만 완료, 생성/편집 UI 미완)
+### 10.3 Connection 관리 ✅ (2026-05-18, edit는 rename만 — config 변경은 delete+recreate)
 - [x] 목록 (`/w/[slug]/connections`) — `DataTable` + `Test` 버튼이 `POST /connections/{id}/test` 호출.
-- [ ] 생성 / 편집 / 삭제 UI (현재는 비활성화된 `New connection` 버튼만, API/YAML import로 추가 필요).
-- [ ] 시크릿 입력 폼 (값은 즉시 backend, DB에 평문 저장 금지).
+- [x] **생성 / 편집 / 삭제 UI** (2026-05-18) — Per-row Edit + Delete 버튼 + `ConfirmDialog` 모달. 생성 폼은 connector type pill picker(5종) + `lib/connector-schemas.ts`로 type별 필드 자동 렌더. Edit은 **이름 변경만** — config 변경은 secret 재입력이 필요하므로 "delete + recreate" 권장 메시지로 안내.
+- [x] **시크릿 입력 폼** — `isSecret` 필드(postgres/mysql password, s3 access_key/secret_key, kafka sasl_password)는 type=password input으로 표시. 제출 시 `config`에는 `{"$secret": "<field_key>"}` 마커, `secrets`에는 plaintext를 담아 POST → 서버가 SecretBackend에 즉시 위임. 평문은 metadata DB에 절대 들어가지 않음(`SecretWalker` 검증). <!-- pragma: allowlist secret -->
 
 ### 10.4 Pipeline Builder ✅ (2026-05-18, UI 2 slice — initial)
 - [x] React Flow(`@xyflow/react`) + 커스텀 `PipelineNode` (DESIGN.md §7.6 사양 충실 — bg-elevated/border-subtle/14 radius/accent handle, selected는 ring-accent).

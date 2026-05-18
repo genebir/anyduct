@@ -261,9 +261,38 @@ export const workspacesApi = {
     api<WorkspaceSummary>("/workspaces", { method: "POST", json: body }),
 };
 
+export interface ConnectionCreateBody {
+  name: string;
+  type: string;
+  config: Record<string, unknown>;
+  secrets: Record<string, string>;
+}
+
+export interface ConnectionUpdateBody {
+  name?: string;
+  config?: Record<string, unknown>;
+  secrets?: Record<string, string>;
+}
+
 export const connectionsApi = {
   list: (workspaceId: string) =>
     api<ConnectionSummary[]>(`/workspaces/${workspaceId}/connections`),
+  get: (workspaceId: string, id: string) =>
+    api<ConnectionSummary>(`/workspaces/${workspaceId}/connections/${id}`),
+  create: (workspaceId: string, body: ConnectionCreateBody) =>
+    api<ConnectionSummary>(`/workspaces/${workspaceId}/connections`, {
+      method: "POST",
+      json: body,
+    }),
+  update: (workspaceId: string, id: string, body: ConnectionUpdateBody) =>
+    api<ConnectionSummary>(`/workspaces/${workspaceId}/connections/${id}`, {
+      method: "PATCH",
+      json: body,
+    }),
+  delete: (workspaceId: string, id: string) =>
+    api<void>(`/workspaces/${workspaceId}/connections/${id}`, {
+      method: "DELETE",
+    }),
   test: (workspaceId: string, id: string) =>
     api<{ ok: boolean; error: string | null }>(
       `/workspaces/${workspaceId}/connections/${id}/test`,

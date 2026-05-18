@@ -2,19 +2,22 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { CableIcon, PlusIcon } from "lucide-react";
+import { CableIcon, PencilIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { toast } from "sonner";
 import { Header } from "@/components/shell/header";
 import { Card } from "@/components/ui/card";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
-import {
-  ApiError,
-  connectionsApi,
-  type ConnectionSummary,
-} from "@/lib/api";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { ConnectionForm } from "@/components/connections/connection-form";
+import { ApiError, connectionsApi, type ConnectionSummary } from "@/lib/api";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
+
+type FormState =
+  | { kind: "closed" }
+  | { kind: "create" }
+  | { kind: "edit"; row: ConnectionSummary };
 
 const COLUMNS: Column<ConnectionSummary>[] = [
   { key: "name", header: "Name", cell: (r) => r.name },
@@ -47,26 +50,27 @@ export default function ConnectionsPage() {
   const ws = useWorkspaceFromSlug(slug);
   const [rows, setRows] = useState<ConnectionSummary[] | null>(null);
   const [testing, setTesting] = useState<string | null>(null);
+  const [form, setForm] = useState<FormState>({ kind: "closed" });
+  const [pendingDelete, setPendingDelete] = useState<ConnectionSummary | null>(
+    null,
+  );
+  const [deleting, setDeleting] = useState(false);
+
+  async function refresh(workspaceId: string) {
+    try {
+      const list = await connectionsApi.list(workspaceId);
+      setRows(list);
+    } catch (err) {
+      toast.error(
+        err instanceof ApiError ? err.message : "Couldn't load connections.",
+      );
+      setRows([]);
+    }
+  }
 
   useEffect(() => {
     if (!ws) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const list = await connectionsApi.list(ws.id);
-        if (!cancelled) setRows(list);
-      } catch (err) {
-        if (!cancelled) {
-          toast.error(
-            err instanceof ApiError ? err.message : "Couldn't load connections.",
-          );
-          setRows([]);
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+    void refresh(ws.id);
   }, [ws]);
 
   async function onTest(row: ConnectionSummary) {
@@ -88,19 +92,68 @@ export default function ConnectionsPage() {
     }
   }
 
+  async function onConfirmDelete() {
+    if (!ws || !pendingDelete) return;
+    setDeleting(true);
+    try {
+      await connectionsApi.delete(ws.id, pendingDelete.id);
+      toast.success(`Deleted ${pendingDelete.name}`);
+      setPendingDelete(null);
+      await refresh(ws.id);
+    } catch (err) {
+      toast.error(
+        err instanceof ApiError ? err.message : "Couldn't delete connection.",
+      );
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   return (
     <>
       <Header
         title="Connections"
         subtitle={ws ? `Workspace ${ws.name}` : "Loading workspace…"}
         actions={
-          <Button variant="primary" size="md" disabled>
+          <Button
+            variant="primary"
+            size="md"
+            onClick={() =>
+              setForm((f) =>
+                f.kind === "create" ? { kind: "closed" } : { kind: "create" },
+              )
+            }
+          >
             <PlusIcon size={16} />
             New connection
           </Button>
         }
       />
       <main className="mx-auto w-full max-w-6xl flex-1 space-y-6 overflow-y-auto px-6 py-8">
+        {form.kind === "create" && ws ? (
+          <ConnectionForm
+            workspaceId={ws.id}
+            mode="create"
+            onSaved={async () => {
+              setForm({ kind: "closed" });
+              await refresh(ws.id);
+            }}
+            onCancel={() => setForm({ kind: "closed" })}
+          />
+        ) : null}
+        {form.kind === "edit" && ws ? (
+          <ConnectionForm
+            workspaceId={ws.id}
+            mode="edit"
+            existing={form.row}
+            onSaved={async () => {
+              setForm({ kind: "closed" });
+              await refresh(ws.id);
+            }}
+            onCancel={() => setForm({ kind: "closed" })}
+          />
+        ) : null}
+
         <Card>
           {rows === null ? (
             <div className="py-12 text-center text-sm text-text-muted">
@@ -113,19 +166,44 @@ export default function ConnectionsPage() {
                 {
                   key: "actions",
                   header: "",
-                  className: "w-32 text-right",
+                  className: "w-64 text-right",
                   cell: (row) => (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      loading={testing === row.id}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        void onTest(row);
-                      }}
-                    >
-                      Test
-                    </Button>
+                    <div className="flex justify-end gap-1">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        loading={testing === row.id}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void onTest(row);
+                        }}
+                      >
+                        Test
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setForm({ kind: "edit", row });
+                        }}
+                        aria-label={`Edit ${row.name}`}
+                      >
+                        <PencilIcon size={14} />
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setPendingDelete(row);
+                        }}
+                        aria-label={`Delete ${row.name}`}
+                        className="hover:text-error"
+                      >
+                        <Trash2Icon size={14} />
+                      </Button>
+                    </div>
                   ),
                 },
               ]}
@@ -134,13 +212,38 @@ export default function ConnectionsPage() {
                 <EmptyState
                   icon={<CableIcon size={36} strokeWidth={1.5} />}
                   title="No connections yet"
-                  description="Connections store the credentials and host metadata for sources and sinks. Add one through the API or YAML import to get started."
+                  description="Connections store the credentials and host metadata for sources and sinks."
+                  action={
+                    <Button onClick={() => setForm({ kind: "create" })}>
+                      <PlusIcon size={16} />
+                      New connection
+                    </Button>
+                  }
                 />
               }
             />
           )}
         </Card>
       </main>
+
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        title={
+          pendingDelete ? `Delete ${pendingDelete.name}?` : "Delete connection?"
+        }
+        description={
+          pendingDelete
+            ? `${pendingDelete.secret_refs.length === 0 ? "No" : pendingDelete.secret_refs.length} secret${
+                pendingDelete.secret_refs.length === 1 ? "" : "s"
+              } will be removed from the backend. Pipelines that reference this connection by name will fail until you create a replacement.`
+            : undefined
+        }
+        confirmLabel="Delete"
+        destructive
+        loading={deleting}
+        onConfirm={onConfirmDelete}
+        onCancel={() => (deleting ? undefined : setPendingDelete(null))}
+      />
     </>
   );
 }

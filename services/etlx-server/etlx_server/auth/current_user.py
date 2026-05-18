@@ -14,6 +14,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from etlx_server.auth.jwt_service import InvalidTokenError, JwtService, TokenType
+from etlx_server.auth.oidc_service import OidcService
 from etlx_server.auth.password_service import PasswordService
 from etlx_server.auth.schemas import CurrentUser
 from etlx_server.auth.user_repository import UserRepository
@@ -28,6 +29,18 @@ def get_jwt_service(request: Request) -> JwtService:
 
 def get_password_service(request: Request) -> PasswordService:
     return request.app.state.password_service  # type: ignore[no-any-return]
+
+
+def get_oidc_service(request: Request) -> OidcService:
+    """Return the singleton OidcService attached at startup. Raises 503 if
+    OIDC was not configured."""
+    oidc = getattr(request.app.state, "oidc_service", None)
+    if oidc is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="OIDC is not configured",
+        )
+    return oidc  # type: ignore[no-any-return]
 
 
 async def get_current_user(
@@ -65,4 +78,9 @@ async def get_current_user(
     )
 
 
-__all__ = ["get_current_user", "get_jwt_service", "get_password_service"]
+__all__ = [
+    "get_current_user",
+    "get_jwt_service",
+    "get_oidc_service",
+    "get_password_service",
+]

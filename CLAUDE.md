@@ -117,7 +117,7 @@ uv run mypy etl_plugins
 
 ## 5. 현재 단계
 
-**Step 8.2a 완료 → 8.2b OIDC 차례** (2026-05-16 기준). Steps 1–4 + Step 5.1 + Step 7.0~7.4 + Step 8.1 + **Step 8.2a(로컬 인증 + JWT RS256)** 완료. **344 코어 단위 + 23 etlx-server 단위 + 3 skip + 119 코어 통합(testcontainers PG/MinIO/Kafka/MySQL/Vault/LocalStack) + 47 서버 통합 = 533 테스트** all green, **24 ADR**. `mypy strict` 코어 39 + 서버 29 src files OK, `lint-imports` 2 contracts KEPT. **OOP 정규화 일관 적용**: services(`JwtService`/`PasswordService`) + repository(`UserRepository`) + 도메인 라우터 + `Depends`-기반 DI + lifespan-managed `app.state` 싱글톤.
+**Step 8.2b 완료 → 8.3 RBAC 차례** (2026-05-18 기준). Steps 1–4 + Step 5.1 + Step 7.0~7.4 + Step 8.1 + Step 8.2a(로컬 인증 + JWT RS256) + **Step 8.2b(OIDC SSO — Google/Azure/Okta/GitHub/generic 공통화, RS256 JWKS 검증, 무상태 state JWT, provision_oidc_user)** 완료. **344 코어 단위 + 48 etlx-server 단위 + 3 skip + 119 코어 통합(testcontainers PG/MinIO/Kafka/MySQL/Vault/LocalStack) + 59 서버 통합 = 570 테스트** all green, **24 ADR**. `mypy strict` 코어 39 + 서버 33 src files OK, `lint-imports` 2 contracts KEPT. **OOP 정규화 일관 적용**: services(`JwtService`/`PasswordService`/`OidcService`/`OidcStateSigner`) + repository(`UserRepository.provision_oidc_user`) + 도메인 라우터(`auth.py`/`oidc.py`) + `Depends`-기반 DI(`get_oidc_service`) + lifespan-managed `app.state` 싱글톤 + 테스트 시 `http_client_factory` 주입으로 `httpx.MockTransport` IdP 모킹.
 
 추가로 **서비스화 방향 확정**(ADR-0017): `services/etlx-server`(FastAPI) + `services/etlx-web`(Next.js)을 별도 패키지로 Step 7부터 진행. 코어와 서비스는 단방향 의존.
 
@@ -142,7 +142,8 @@ Step별 산출물 요약:
 - 🔄 Step 8 (API Server / FastAPI):
   - 8.1 ✅ 부트스트랩 + OOP 재구성 — factory 패턴, Settings, routers 분리, lifespan engine, /ready DB ping
   - 8.2a ✅ 로컬 인증 + JWT — JwtService(RS256) + PasswordService(bcrypt) + UserRepository + /auth/login/refresh/logout/me + Depends(get_current_user)
-  - 8.2b~8.7 미착수 — 다음은 OIDC(authlib)
+  - 8.2b ✅ OIDC — OidcService(provider 레지스트리, RS256 JWKS 검증, nonce/email_verified 강제) + OidcStateSigner(무상태 state JWT) + UserRepository.provision_oidc_user(LOCAL/다른 provider 충돌 거부) + /auth/oidc/{providers,login,callback}
+  - 8.3~8.7 미착수 — 다음은 RBAC(workspace 단위 4역할 + Depends 게이트)
 - 📋 Step 9 (Execution Engine 통합) — 미착수
 - 📋 Step 10 (Web UI / Next.js) — 미착수
 - 📋 Step 11 (운영 강화) — 미착수

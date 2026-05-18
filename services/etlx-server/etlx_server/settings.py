@@ -19,6 +19,8 @@ from functools import lru_cache
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from etlx_server.auth.oidc_config import OidcProviderConfig
+
 
 class Environment(StrEnum):
     """Deployment environment — drives a couple of safety defaults."""
@@ -97,6 +99,29 @@ class Settings(BaseSettings):
     auth_local_enabled: bool = Field(
         default=True,
         description="If false, /auth/login (local email+password) returns 503.",
+    )
+
+    # --- OIDC (Step 8.2b, ADR-0023) ----------------------------------------
+    auth_oidc_enabled: bool = Field(
+        default=False,
+        description="Master switch — when false, /auth/oidc/* returns 503 and "
+        "the provider list is empty.",
+    )
+    auth_oidc_providers: list[OidcProviderConfig] = Field(
+        default_factory=list,
+        description="OIDC providers (Google / Azure AD / Okta / GitHub / "
+        "custom). Provide via env as JSON (e.g. "
+        '``AUTH_OIDC_PROVIDERS=\'[{"name":"google",...}]\'``).',
+    )
+    auth_oidc_state_ttl_seconds: int = Field(
+        default=600,
+        description="Lifetime of the signed state token that carries CSRF + "
+        "nonce + return_to between /login and /callback (default 10 min).",
+    )
+    auth_oidc_http_timeout_seconds: float = Field(
+        default=10.0,
+        description="Timeout for outbound HTTP calls to the IdP (discovery, "
+        "JWKS, token endpoint, userinfo).",
     )
 
     @property

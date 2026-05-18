@@ -6,9 +6,9 @@
 
 ---
 
-## 현재 상태 (2026-05-14)
+## 현재 상태 (2026-05-18)
 
-**Steps 1–4 완료 + Step 5.1 RDBMS 일부(MySQL, SQLite). 321 단위 + 3 skip + 111 통합 = 435 테스트, 16 ADR.**
+**Steps 1–4 + Step 5.1(MySQL/SQLite) + Step 7.0~7.4 + Step 8.1 + Step 8.2 a/b 완료. 코어 344 unit + 서버 48 unit + 3 skip + 코어 119 it + 서버 59 it = 573 테스트, 24 ADR.**
 **서비스화 방향 확정**: Step 7 이후로 `services/etlx-server` (FastAPI) + `services/etlx-web` (Next.js) 별도 패키지로 진행. 코어와 서비스는 단방향 의존 (서비스 → 코어). 자세한 결정은 ADR-0017.
 
 ---
@@ -298,11 +298,14 @@
 - [x] 신규 의존성: `bcrypt>=4.2`(passlib 제거), `pyjwt[crypto]>=2.9`(RS256), `email-validator>=2.2`(Pydantic EmailStr)
 - [x] 15 신규 unit(`test_password_service.py` 4 + `test_jwt_service.py` 11) + 13 신규 it(`test_auth_router.py`, testcontainers PG, `app.dependency_overrides[get_session]`로 outer-trans rollback isolation 유지)
 
-#### 8.2b OIDC
-- [ ] OIDC (Google / Azure AD / Okta 일반화) — authlib
-- [ ] `/auth/oidc/login`, `/auth/oidc/callback`
-- [ ] ID token 검증 + 신규 OIDC 사용자 자동 프로비저닝
-- [ ] Settings 확장: `auth_oidc_*`
+#### 8.2b OIDC ✅ (2026-05-18)
+- [x] OIDC (Google / Azure AD / Okta / GitHub / generic 일반화) — `OidcService` + `OidcProviderConfig` 레지스트리. authlib는 deprecation(`authlib.jose`) 회피 위해 PyJWT + httpx 직접 사용. ADR-0023 implementation footnote에 명시.
+- [x] `/auth/oidc/providers` (메타 — 시크릿 노출 0), `/auth/oidc/login`, `/auth/oidc/callback`
+- [x] ID token RS256 + JWKS 검증 (kid 매칭, audience/issuer 강제, `email_verified=false` 거부, nonce 매칭). 신규 사용자 `UserRepository.provision_oidc_user`로 자동 프로비저닝 — provider명 → `AuthMethod` 매핑.
+- [x] Settings 확장: `auth_oidc_enabled` / `auth_oidc_providers` (list[OidcProviderConfig] — 환경변수 JSON) / `auth_oidc_state_ttl_seconds` / `auth_oidc_http_timeout_seconds`
+- [x] State CSRF + nonce: `OidcStateSigner`가 같은 RS256 키쌍으로 단명 state JWT(`token_type=oidc_state`) 서명/검증, 서버측 세션·쿠키 0
+- [x] 이메일 충돌 안전성: LOCAL 계정과 동일 email 거부(409, 계정 탈취 방지), 다른 OIDC provider와 동일 email 거부(409). 동일 provider 재로그인 시 name만 갱신.
+- [x] 6 신규 unit(OidcStateSigner) + 14 신규 unit(OidcService, IdP를 `httpx.MockTransport`로 모킹 — 진짜 ID token JWT 서명/검증) + 6 신규 it(provision_oidc_user) + 11 신규 it(OIDC router 전체 플로우)
 
 ### 8.3 RBAC
 - [ ] 역할: Owner / Editor / Viewer / Runner
@@ -462,3 +465,4 @@
 - 2026-05-16: **Step 8.1 (API Server 부트스트랩 / OOP 재구성) 완료.** `services/etlx-server`를 정규화된 OOP 구조로 재배치 — **factory 패턴** `app_factory.create_app(settings)`, **Settings** 클래스(`pydantic-settings`), **routers** 도메인 분리(`health`/`meta`), **DI 헬퍼** `dependencies.py`(`get_engine`/`get_session_factory`/`get_session`), **lifespan-managed engine**(인스턴스마다 별도 엔진, shutdown dispose). `/ready`는 진짜 DB `SELECT 1` ping (실패 시 503 + degraded). 14 신규 server unit + 2 readiness it(testcontainers PG 16). 누적 **코어 344 unit + 서버 **8 unit** + 코어 119 it + 서버 **29 it** = 500 테스트** all green. 신규 dep `pydantic-settings>=2.5`. 신규 ADR 없음 — ADR-0019(FastAPI) 구현체. 다음은 Step 8.2 (인증 — OIDC + JWT + bcrypt fallback, ADR-0023 구현).
 - 2026-05-16: **Step 8.2 a/b 분리.** 단일 슬라이스가 너무 커져서 a(로컬 + JWT) / b(OIDC) 로 분할. 1 PR = 1 slice 원칙 유지.
 - 2026-05-16: **Step 8.2a (로컬 인증 + JWT) 완료.** `auth/` 하위 패키지 신설 — `JwtService`(RS256, access/refresh + verify-only 모드), `PasswordService`(bcrypt 직접 — passlib는 bcrypt 4.x와 비호환), `UserRepository`(email/id 조회), `current_user.py` DI 헬퍼 + `get_current_user` Depends, Pydantic schemas. `routers/auth.py` 4 엔드포인트(login/refresh/logout/me). app_factory가 JwtService + PasswordService를 lifespan에서 `app.state`에 attach. 15 신규 unit(JwtService 11 + PasswordService 4) + 13 신규 it(`test_auth_router.py`, `app.dependency_overrides[get_session]`로 outer-trans rollback isolation 유지). 누적 **코어 344 unit + 서버 23 unit + 코어 119 it + 서버 47 it = 533 테스트** all green. 신규 deps `bcrypt>=4.2` + `pyjwt[crypto]>=2.9` + `email-validator>=2.2`. ADR-0023 로컬 fallback + JWT 부분 구현체. 다음은 Step 8.2b (OIDC, authlib).
+- 2026-05-18: **Step 8.2b (OIDC) 완료.** `auth/` 확장 — `OidcProviderConfig`(Pydantic, provider명→`AuthMethod` 매핑), `OidcStateSigner`(RS256 키쌍 재사용, `token_type=oidc_state` 단명 JWT로 CSRF+nonce+return_to 무상태 운반), `OidcService`(provider 레지스트리, 디스커버리/JWKS 캐시, `build_authorize_url`+`handle_callback`, `httpx.AsyncClient` factory 주입 가능, PyJWT로 ID 토큰 RS256+JWKS 검증 — `authlib.jose` deprecated 회피), `UserRepository.provision_oidc_user`(LOCAL 계정/다른 OIDC provider와 email 충돌 시 `OidcEmailCollisionError`로 거부, 동일 provider 재로그인 시 name만 갱신). `routers/oidc.py` 3 엔드포인트(`/auth/oidc/providers`+`/login`+`/callback`) — 시크릿 노출 0, OIDC 미설정 시 503. app_factory가 `_build_oidc_service` 헬퍼로 lifespan에서 attach. 20 신규 unit(OidcStateSigner 6 + OidcService 14, IdP를 `httpx.MockTransport`로 모킹 + 진짜 ID token JWT 서명/검증으로 nonce/aud/iss/email_verified 경로 전부 커버) + 17 신규 it(provision_oidc_user 6 + OIDC 라우터 end-to-end 11). 누적 **코어 344 unit + 서버 48 unit + 코어 119 it + 서버 59 it = 570 테스트** all green, mypy strict 코어 39 + 서버 33 src files OK, lint-imports 2 KEPT. ADR-0023 OIDC 부분 구현체 — 신규 ADR 없음. 다음은 Step 8.3 (RBAC — workspace 단위 역할 + `Depends(require_role(...))`).

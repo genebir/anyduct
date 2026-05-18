@@ -20,11 +20,14 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from etlx_server import __version__ as server_version
 from etlx_server.auth.jwt_service import JwtService
+from etlx_server.auth.oidc_service import OidcService
+from etlx_server.auth.oidc_state import OidcStateSigner
 from etlx_server.auth.password_service import PasswordService
 from etlx_server.db.session import make_engine, make_session_factory
 from etlx_server.routers import auth as auth_router
 from etlx_server.routers import health as health_router
 from etlx_server.routers import meta as meta_router
+from etlx_server.routers import oidc as oidc_router
 from etlx_server.settings import Settings, get_settings
 
 Lifespan = Callable[[FastAPI], AbstractAsyncContextManager[None]]
@@ -51,6 +54,32 @@ def _build_jwt_service(settings: Settings) -> JwtService | None:
     )
 
 
+def _build_oidc_service(settings: Settings) -> OidcService | None:
+    """Construct an :class:`OidcService` when OIDC is configured.
+
+    Returns ``None`` when no providers were declared *or* when the JWT keypair
+    is missing — without those keys, state tokens can't be signed and the
+    callback flow would never succeed.
+    """
+    if not settings.auth_oidc_providers:
+        return None
+    private = settings.auth_jwt_private_key_pem
+    public = settings.auth_jwt_public_key_pem
+    if private is None or public is None:
+        return None
+    state_signer = OidcStateSigner(
+        private_key_pem=private.get_secret_value().encode("utf-8"),
+        public_key_pem=public.get_secret_value().encode("utf-8"),
+        issuer=settings.auth_jwt_issuer,
+        ttl_seconds=settings.auth_oidc_state_ttl_seconds,
+    )
+    return OidcService(
+        providers=settings.auth_oidc_providers,
+        state_signer=state_signer,
+        http_timeout_seconds=settings.auth_oidc_http_timeout_seconds,
+    )
+
+
 def _build_lifespan(settings: Settings) -> Lifespan:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -67,6 +96,9 @@ def _build_lifespan(settings: Settings) -> Lifespan:
         jwt = _build_jwt_service(settings)
         if jwt is not None:
             app.state.jwt_service = jwt
+        oidc = _build_oidc_service(settings)
+        if oidc is not None:
+            app.state.oidc_service = oidc
         try:
             yield
         finally:
@@ -107,6 +139,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(health_router.router)
     app.include_router(meta_router.router)
     app.include_router(auth_router.router)
+    app.include_router(oidc_router.router)
     return app
 
 

@@ -533,6 +533,28 @@
 ### Milestone
 - **Step 8.2a — 로컬 인증 + JWT 완료 (2026-05-16)**: 정규화된 auth 패키지(JwtService/PasswordService/UserRepository/Schemas) + 4 엔드포인트(login/refresh/logout/me). 누적 코어 344 unit + 서버 **23 unit** + 서버 **47 it** + 코어 119 it = **533 tests** all green. mypy strict 29 server src files OK, import-linter 2 contracts KEPT. 다음 슬라이스는 **Step 8.2b (OIDC)** — authlib 기반 Google/Azure AD/Okta 공통화 + `/auth/oidc/login`+`/auth/oidc/callback` + ID token 검증 + 신규 OIDC 사용자 자동 프로비저닝.
 
+- **OIDC SSO** [Step 8.2b]
+  - `services/etlx-server/etlx_server/auth/oidc_config.py` 신규: `OidcProviderConfig`(Pydantic frozen — `name`/`display_name`/`client_id`/`client_secret: SecretStr`/`discovery_url`/`redirect_uri`/`scopes`). `auth_method` property가 provider명 → `AuthMethod` enum 매핑(google/azure/okta/github → 전용 enum, 그 외 → `OIDC_GENERIC`).
+  - `services/etlx-server/etlx_server/auth/oidc_state.py` 신규: `OidcStateSigner` — `JwtService`와 동일 RSA 키쌍 재사용. `token_type=oidc_state` 단명 JWT(기본 10분)에 `provider`+`nonce`+`return_to`를 담아 callback에 전달. 서버측 세션/쿠키 0, 무상태 CSRF. `verify`는 access/refresh 토큰을 거부(token_type 검사).
+  - `services/etlx-server/etlx_server/auth/oidc_service.py` 신규: `OidcService` — provider 레지스트리 + Authorization Code 플로우 드라이버. `build_authorize_url(provider, return_to=)`은 IdP authorize URL + state 토큰 반환. `handle_callback(provider, code, state)`은 state 검증 → discovery → token exchange → JWKS 페치 → ID 토큰 RS256 검증(kid 매칭, audience/issuer/email_verified/nonce 강제) → `OidcCallbackResult` 반환. 메타데이터/JWKS 메모리 캐시(프로세스 lifetime). `http_client_factory` + `nonce_factory` DI로 테스트 시 `httpx.MockTransport` 주입. 예외 분리: `UnknownProviderError`/`OidcDiscoveryError`/`OidcExchangeError`/`IdTokenError`. authlib.jose deprecation 회피를 위해 PyJWT + httpx 직접 사용.
+  - `auth/user_repository.py` 확장: `provision_oidc_user(email, name, auth_method)` 신규 — 동일 provider 재로그인 시 name만 갱신(idempotent), LOCAL/다른 OIDC provider와 email 충돌 시 `OidcEmailCollisionError`(409) 발생. `auth_method=LOCAL`을 받으면 `ValueError`.
+  - `auth/schemas.py` 확장: `OidcProviderSummary`(시크릿 0) / `OidcAuthorizeResponse`(`authorize_url`+`state`) / `OidcCallbackResponse`(TokenPair + `return_to`).
+  - `auth/current_user.py` 확장: `get_oidc_service` Depends — `app.state.oidc_service`가 없으면 503.
+  - `services/etlx-server/etlx_server/routers/oidc.py` 신규: `/auth/oidc/providers`(시크릿 0 메타) / `/auth/oidc/login?provider=&return_to=` / `/auth/oidc/callback?provider=&code=&state=`. provider명 → `AuthMethod` 매핑, 이메일 충돌 → 409, 알 수 없는 provider → 404, ID 토큰 검증 실패 → 401, IdP 통신 실패 → 502, OIDC 미설정 → 503.
+  - `app_factory.py` 확장: `_build_oidc_service(settings)` 헬퍼 — provider 0개거나 키 누락 시 None 반환. lifespan에서 `app.state.oidc_service` 부착. `app.include_router(oidc_router.router)` 추가.
+  - `settings.py` 확장: `auth_oidc_enabled`(default False) / `auth_oidc_providers: list[OidcProviderConfig]`(env JSON, 기본 `[]`) / `auth_oidc_state_ttl_seconds`(default 600) / `auth_oidc_http_timeout_seconds`(default 10).
+- **테스트 정규화** [Step 8.2b]
+  - `services/etlx-server/tests/auth/test_oidc_state.py` — 6 unit (sign/verify round-trip ± return_to, garbage 거부, signature tamper 거부, expired 거부, access 토큰 거부).
+  - `services/etlx-server/tests/auth/test_oidc_service.py` — 14 unit (provider 레지스트리, 중복 provider 거부, name→AuthMethod 매핑, build_authorize_url 파라미터/state 디코드, unknown provider, discovery 실패, callback happy path + form 검증, state/provider mismatch, token endpoint 에러, nonce mismatch, email_verified=false 거부, audience mismatch 거부, id_token 누락, name 누락 시 email-local fallback). `httpx.MockTransport`로 IdP 모킹, 진짜 RSA 키로 ID 토큰 RS256 서명 → JWKS 검증 경로 전체 실행.
+  - `services/etlx-server/tests/db/test_user_repository_oidc.py` — 6 it (신규 OIDC 사용자 생성/email 정규화/password_hash=None, 재로그인 시 name 갱신, idempotent, LOCAL 충돌 거부, 다른 OIDC provider 충돌 거부, `auth_method=LOCAL` ValueError).
+  - `services/etlx-server/tests/db/test_auth_oidc_router.py` — 11 it (providers 리스트, 비활성 시 빈 리스트, 비활성 시 login 503, unknown provider 404, login authorize URL 형태, callback 신규 사용자 프로비저닝 + 토큰 발급 + `/auth/me` 작동, 재로그인 name 갱신, LOCAL 충돌 409, tampered state 401, state/provider mismatch 404, 미설정 OIDC callback 503).
+
+### Decisions
+- (이번 슬라이스에서 신규 ADR 없음 — ADR-0023 OIDC 부분 구현체)
+
+### Milestone
+- **Step 8.2b — OIDC 완료 (2026-05-18)**: OidcService/OidcStateSigner/OidcProviderConfig + provision_oidc_user + 3 라우트(`/auth/oidc/providers`+`/login`+`/callback`). 누적 코어 344 unit + 서버 **48 unit** (23 → 48, +25) + 서버 **59 it** (47 → 59, +12, user_repository 분리 포함) + 코어 119 it = **570 tests** all green. mypy strict 코어 39 + 서버 33 src files OK, import-linter 2 contracts KEPT. 다음 슬라이스는 **Step 8.3 (RBAC)** — workspace 단위 4역할(Owner/Editor/Runner/Viewer) + `Depends(require_workspace_role(...))` + 리소스 쿼리 자동 필터.
+
 ### Changed
 - (없음)
 

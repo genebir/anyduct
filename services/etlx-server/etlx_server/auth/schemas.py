@@ -36,4 +36,34 @@ class CurrentUser(BaseModel):
     is_superadmin: bool
 
 
-__all__ = ["CurrentUser", "LoginRequest", "RefreshRequest", "TokenPair"]
+class OidcProviderSummary(BaseModel):
+    """Public-safe provider info — never leaks ``client_secret``."""
+
+    name: str
+    display_name: str | None = None
+
+
+class OidcAuthorizeResponse(BaseModel):
+    """Returned from ``GET /auth/oidc/login`` — the FE redirects the browser
+    to ``authorize_url`` and stores nothing (state is embedded in the URL)."""
+
+    authorize_url: str
+    state: str
+
+
+class OidcCallbackResponse(TokenPair):
+    """Same shape as ``TokenPair`` plus the original ``return_to`` so the FE
+    can redirect to the page the user clicked from."""
+
+    return_to: str | None = None
+
+
+__all__ = [
+    "CurrentUser",
+    "LoginRequest",
+    "OidcAuthorizeResponse",
+    "OidcCallbackResponse",
+    "OidcProviderSummary",
+    "RefreshRequest",
+    "TokenPair",
+]

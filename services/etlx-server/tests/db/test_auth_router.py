@@ -153,9 +153,7 @@ async def test_login_unknown_email_returns_401(session: AsyncSession) -> None:
 
 
 async def test_oidc_user_cannot_use_local_login(session: AsyncSession) -> None:
-    await _seed_local_user(
-        session, email="bob@example.com", auth_method=AuthMethod.OIDC_GOOGLE
-    )
+    await _seed_local_user(session, email="bob@example.com", auth_method=AuthMethod.OIDC_GOOGLE)
     app = _build_app(session)
     async with _client(app) as client:
         resp = await client.post(

@@ -10,6 +10,16 @@
 ## [Unreleased]
 
 ### Added
+- **Cron 스케줄러** [Step 9.2] — `services/etlx-server/etlx_server/scheduler/` 패키지.
+  - `Scheduler(factory, *, tick_interval_seconds=10.0)` — `tick_once()`이 활성 batch 스케줄 1회 스캔, cron의 다음 firing이 도래한 행에 대해 `RunStatus.PENDING` Run을 enqueue. worker(Step 9.3a)가 그 후 SKIP-LOCKED claim.
+  - "last fire" 기준은 `MAX(runs.scheduled_at) WHERE schedule_id=…` — 별도 컬럼/마이그레이션 없음. 첫 firing은 `schedule.created_at`을 base로 사용해 epoch backfill 방지.
+  - **No-catchup 의미론** (한 tick당 미스 firing 하나씩 enqueue). 진정한 no-catchup은 `base = max(last_or_created, now)` 변경으로 가능하나 새 스케줄이 첫 tick에 firing 안 함 — 정책 결정 보류, 현 상태가 합리적 trade-off.
+  - **방어적 skip + log** (loop crash 안 함): `is_active=False` / `mode=STREAM` / `cron_expr IS NULL` / `is_current` 버전 부재 / 잘못된 cron 식 (router 검증 우회 시).
+  - `croniter` 라이브러리(이미 의존성)로 firing 계산. invalid cron은 `ValueError`/`KeyError` 잡아 skip.
+  - `asyncio.Event` 기반 graceful stop — `Scheduler.stop()` 호출 시 다음 tick wait가 즉시 깨어남.
+  - 새 CLI 서브커맨드 `etlx-server scheduler run --tick-interval … --log-level …` — `worker run` / `reaper run`과 동일한 패턴으로 별도 process 배포 (SIGTERM/SIGINT graceful).
+  - 8 신규 통합 테스트(`tests/db/test_scheduler.py`): due batch → 1 Run 생성 + version/workspace 핀 / inactive skipped / stream skipped / no current version skipped + log / 두 번째 tick은 no-op(yearly cron으로 결정성 보장) / 잘못된 cron skip / loop pre-set stop / loop fires + stop.
+  - **HA 노트**: 현 단일-replica 배포 안전. multi-replica는 `FOR UPDATE SKIP LOCKED`로 schedule row를 lock 필요 — 운영 도입 시 추가.
 - **Harness 문서** [Step 1.0]
   - `SPEC.md` — 기존 설계 명세서 분리 (마스터 설계 문서)
   - `CLAUDE.md` — 세션 컨텍스트 문서 (§8.2 형식)

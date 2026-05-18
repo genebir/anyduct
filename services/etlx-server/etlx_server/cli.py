@@ -30,13 +30,16 @@ from etl_plugins.config.secrets import get_secret_backend
 from etlx_server.db.models import Workspace
 from etlx_server.db.session import make_engine, make_session_factory
 from etlx_server.io.yaml_sync import export_workspace, import_yaml_dir
+from etlx_server.scheduler import Scheduler
 from etlx_server.worker import RunWorker, ZombieReaper
 
 app = typer.Typer(help="etlx-server administration CLI (metadata DB sync, ops).")
 worker_app = typer.Typer(help="Worker process commands.")
 reaper_app = typer.Typer(help="Zombie-run reaper process commands.")
+scheduler_app = typer.Typer(help="Cron scheduler process commands.")
 app.add_typer(worker_app, name="worker")
 app.add_typer(reaper_app, name="reaper")
+app.add_typer(scheduler_app, name="scheduler")
 
 
 def _database_url() -> str:
@@ -248,6 +251,51 @@ def reaper_run_cmd(
 
         try:
             await reaper.run()
+        finally:
+            await engine.dispose()
+
+    asyncio.run(_run())
+
+
+@scheduler_app.command("run")
+def scheduler_run_cmd(
+    tick_interval: float = typer.Option(
+        10.0,
+        "--tick-interval",
+        help="Seconds between scans of active schedules.",
+        min=1.0,
+        max=600.0,
+    ),
+    log_level: str = typer.Option("INFO", "--log-level"),
+) -> None:
+    """Run the cron scheduler until SIGTERM/SIGINT.
+
+    Inspects active batch ``schedules`` periodically and creates pending
+    Run rows whose ``scheduled_at`` is the cron's next firing time. No
+    catchup: if a firing was missed (process down), only the next future
+    firing is enqueued — not the missed ones.
+    """
+    logging.basicConfig(
+        level=getattr(logging, log_level.upper(), logging.INFO),
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+
+    async def _run() -> None:
+        engine = make_engine(_database_url())
+        factory = make_session_factory(engine)
+        scheduler = Scheduler(factory, tick_interval_seconds=tick_interval)
+
+        loop = asyncio.get_running_loop()
+
+        def _shutdown(_signame: str) -> None:
+            typer.echo(f"received {_signame}, shutting down scheduler")
+            scheduler.stop()
+
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            loop.add_signal_handler(sig, _shutdown, sig.name)
+
+        try:
+            await scheduler.run()
         finally:
             await engine.dispose()
 

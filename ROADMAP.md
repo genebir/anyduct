@@ -8,7 +8,7 @@
 
 ## 현재 상태 (2026-05-18)
 
-**Steps 1–4 + Step 5.1(MySQL/SQLite) + Step 7.0~7.4 + Step 8 전체 + Step 9.3a + Step 9.3b(heartbeat + zombie reaper) 완료. 코어 344 unit + 서버 65 unit + 3 skip + 코어 119 it + 서버 215 it = 746 테스트, 24 ADR.**
+**Steps 1–4 + Step 5.1(MySQL/SQLite) + Step 7.0~7.4 + Step 8 전체 + Step 9.2(scheduler) + Step 9.3a + Step 9.3b(heartbeat + zombie reaper) 완료. 코어 344 unit + 서버 65 unit + 3 skip + 코어 119 it + 서버 223 it = 754 테스트, 24 ADR.**
 **서비스화 방향 확정**: Step 7 이후로 `services/etlx-server` (FastAPI) + `services/etlx-web` (Next.js) 별도 패키지로 진행. 코어와 서비스는 단방향 의존 (서비스 → 코어). 자세한 결정은 ADR-0017.
 
 ---
@@ -390,10 +390,12 @@
 ### 9.1 엔진 선택 확정 ✅ (ADR-0021)
 - [x] **결정**: Dagster/Prefect 임베드 대신 **자체 PG worker queue** — `runs` 테이블 자체가 큐, `FOR UPDATE SKIP LOCKED`로 다중 워커 안전 claim. 코어 어댑터 재활용은 Step 10 후 검토.
 
-### 9.2 스케줄러 (미착수)
-- [ ] DB `schedules` 테이블 → tick 마다 활성 schedule 평가, 다음 firing time에 pending Run row 생성 (worker가 그 후 claim).
+### 9.2 스케줄러 ✅ (2026-05-18)
+- [x] DB `schedules` 테이블 → tick 마다 활성 schedule 평가, 다음 firing time에 pending Run row 생성 (worker가 그 후 claim). 새 `etlx_server/scheduler/` 패키지 — `Scheduler(factory, *, tick_interval_seconds=10.0)`, `tick_once()` 단일 패스 + `run()` poll 루프(`asyncio.Event` 기반 graceful stop). 새 `etlx-server scheduler run` CLI(SIGTERM/SIGINT graceful).
 - [x] cron 표현식 검증 (`croniter`) — Step 8.5e에서 `validate_cron_for_mode` 구현 완료.
-- [ ] 일시정지 / 재개 — Step 8.5e의 `POST /schedules/{sid}/toggle` 엔드포인트는 이미 있음, 스케줄러 측에서 `is_active=False` 무시하면 끝.
+- [x] 일시정지 / 재개 — `is_active=False`는 `_load_due_schedules`에서 자동 필터. Step 8.5e `POST /schedules/{sid}/toggle`과 자연스럽게 연동.
+- [x] no-migration 디자인 — "last firing"을 schedules row에 저장 않고 `MAX(runs.scheduled_at) WHERE runs.schedule_id=...`로 derive. `schedule.created_at`을 fallback base로 사용해 epoch backfill 방지.
+- [x] safety: 인액티브 / stream(`cron_expr IS NULL`) / no-current-version / invalid cron 전부 skip-and-log (loop crash 안 함). 8 신규 it 테스트.
 
 ### 9.3 Run 라이프사이클
 - [x] **9.3a (worker batch lifecycle, 2026-05-18) 완료** — 신규 `etlx_server/worker/` 패키지 + `etlx-server worker run` CLI. `claim_pending_run`(SQLAlchemy `with_for_update(skip_locked=True)` + ORDER BY scheduled_at, created_at + LIMIT 1, 같은 트랜잭션에서 status=running + worker_id + started_at + heartbeat_at 전이) + `RunExecutor`(fresh session per run, `_build`로 PipelineConfig 재검증 + connection 이름 resolve + `${SECRET:...}` 풀이 + 코어 `build_connector`/`build_pipeline`, 단일 `asyncio.to_thread`로 connect+run+close 일관 thread — sqlite3 같은 thread-bound driver 호환, 성공 시 records_read/written/duration_seconds/`core_run_id` 기록, 실패 시 error_class/message[2000자 trim]) + `RunWorker` 폴 루프(`asyncio.Event` stop, exception은 log + 계속, empty queue는 `contextlib.suppress(TimeoutError)` + `asyncio.wait_for`로 stop 또는 poll_interval 중 먼저). CLI: `etlx-server worker run --poll-interval / --worker-id / --secret-backend / --secret-file-path / --log-level`, SIGTERM/SIGINT 그레이스풀 종료. **현재 batch only** — `Pipeline.run` 호출이라 stream pipeline은 즉시 `_PipelineBuildError`로 failed. **헬퍼 공유 모듈** `etlx_server/pipelines/runtime.py`(`resolve_placeholders`/`referenced_connection_names`/`load_connections_by_name`) — DryRunService와 worker가 같은 빌드 경로를 공유해 "dry-run ok면 worker run도 build 단계는 통과" 보장. **코어 버그 수정**: `Pipeline._run_task`가 `task.sink_table`을 sink.write에 forwarding 안 하던 문제 발견 + 수정 — RDBMS sink(sqlite/postgres/mysql)의 batch 경로가 처음으로 동작. InMemorySink/S3 sink는 `**options`로 흡수해서 비영향. **Audit 정렬 안정화**: `AuditLogRepository.query`에 secondary sort `id.desc()` 추가(UUIDv7 시간 순서) — 같은 microsecond 내 audit row 정렬 안정. 11 신규 worker it (claim 4 + executor 5 + worker loop 2) + sqlite tmp_path fixture 활용한 실제 read→write 검증 (`records_read=records_written=3`).

@@ -77,7 +77,7 @@ export default function WorkspacesPage() {
           </Button>
         }
       />
-      <main className="mx-auto w-full max-w-5xl space-y-6 px-6 py-8">
+      <main className="mx-auto w-full max-w-5xl flex-1 space-y-6 overflow-y-auto px-6 py-8">
         {creating ? (
           <Card>
             <CardHeader

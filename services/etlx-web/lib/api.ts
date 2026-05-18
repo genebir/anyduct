@@ -251,6 +251,18 @@ export const pipelinesApi = {
     api<PipelineSummary[]>(`/workspaces/${workspaceId}/pipelines`),
   get: (workspaceId: string, id: string) =>
     api<PipelineSummary>(`/workspaces/${workspaceId}/pipelines/${id}`),
+  create: (
+    workspaceId: string,
+    body: {
+      name: string;
+      description?: string;
+      config: Record<string, unknown>;
+    },
+  ) =>
+    api<PipelineSummary>(`/workspaces/${workspaceId}/pipelines`, {
+      method: "POST",
+      json: body,
+    }),
   update: (
     workspaceId: string,
     id: string,

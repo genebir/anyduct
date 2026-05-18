@@ -122,7 +122,7 @@ export default function RunsPage() {
         title="Runs"
         subtitle={ws ? `Workspace ${ws.name}` : "Loading workspace…"}
       />
-      <main className="mx-auto w-full max-w-6xl space-y-6 px-6 py-8">
+      <main className="mx-auto w-full max-w-6xl flex-1 space-y-6 overflow-y-auto px-6 py-8">
         <Card>
           {rows === null ? (
             <div className="py-12 text-center text-sm text-text-muted">

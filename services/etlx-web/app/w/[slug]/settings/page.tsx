@@ -15,7 +15,7 @@ export default function SettingsPage() {
         title="Settings"
         subtitle={ws ? `Workspace ${ws.name}` : "Loading workspace…"}
       />
-      <main className="mx-auto w-full max-w-3xl space-y-6 px-6 py-8">
+      <main className="mx-auto w-full max-w-3xl flex-1 space-y-6 overflow-y-auto px-6 py-8">
         <Card>
           <CardHeader
             title="Workspace"

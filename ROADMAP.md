@@ -443,11 +443,14 @@
 - [ ] 생성 / 편집 / 삭제 UI (현재는 비활성화된 `New connection` 버튼만, API/YAML import로 추가 필요).
 - [ ] 시크릿 입력 폼 (값은 즉시 backend, DB에 평문 저장 금지).
 
-### 10.4 Pipeline Builder
-- [ ] React Flow + 커스텀 노드 테마 (DESIGN.md §7.6, §11.4)
-- [ ] 노드 타입: source / transform / sink / dlq
-- [ ] Properties 패널 (Pydantic schema → 자동 폼)
-- [ ] 저장 = metadata DB의 PipelineConfig JSON
+### 10.4 Pipeline Builder ✅ (2026-05-18, UI 2 slice — initial)
+- [x] React Flow(`@xyflow/react`) + 커스텀 `PipelineNode` (DESIGN.md §7.6 사양 충실 — bg-elevated/border-subtle/14 radius/accent handle, selected는 ring-accent).
+- [x] 노드 타입: source(`postgres`/`mysql`/`sqlite`/`s3`/`kafka`) / transform(`rename`/`cast`/`filter`/`python`) / sink(같은 connector 5종). DESIGN.md §3.5 컬러 톤별로 accent 다르게.
+- [x] 좌측 Palette — 그룹별 operator 카탈로그(클릭 add). 우측 Properties 패널 — 선택된 노드의 필드 자동 폼(connection은 workspace의 같은 type connection만 select, JSON 필드는 inline validation).
+- [x] 저장 = `PATCH /pipelines/{id}` body.config → 코어 `PipelineConfig.model_validate` 통과 시 새 PipelineVersion(idempotent).
+- [x] 신규 파이프라인 생성 — list page의 "New pipeline" 버튼이 blank `PipelineConfig`(default postgres source+sink, empty connection)로 POST 후 즉시 editor로 이동.
+- [ ] DLQ 노드 — 아직 (core PipelineConfig는 단일 dlq optional, builder UI에서 노출 안 함).
+- [ ] Multi-branch / fan-out — core가 linear pipeline이라 의도적으로 미지원. 향후 graph 지원은 core 확장 필요.
 
 ### 10.5 Schedule + Run 모니터링 (← 작업 중, 2026-05-18 read-only만 완료)
 - [x] Run 목록 (Data Table, StatusBadge, 5s polling) — `/w/[slug]/runs`.

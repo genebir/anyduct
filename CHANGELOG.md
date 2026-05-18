@@ -744,6 +744,19 @@
 ### Milestone
 - **Step 8.6 — Action 엔드포인트 완료 (2026-05-18)**: 4 신규 endpoint (dry-run / trigger / retry / SSE logs stream) + worker 단일 writer 원칙 유지(retry는 새 row 생성, 원본 unchanged). 누적 코어 344 unit + 서버 **65 unit** + 서버 **190 it** (171 → 190, +19) + 코어 119 it = **718 tests** all green. mypy strict 코어 39 + 서버 60 src files OK, import-linter 2 contracts KEPT. **Step 8 (API Server)의 코어 surface 사실상 종료** — auth / RBAC / audit / CRUD / actions / SSE 모두 ship, 남은 8.7은 end-to-end 시나리오 테스트 추가. 다음은 **Step 8.7 (시나리오 테스트)** 또는 **Step 9 (Execution Engine)** — 워커가 runs 큐 claim → 코어 `run_pipeline_yaml` 호출 + heartbeat + zombie 회수.
 
+- **End-to-end scenario tests** [Step 8.7]
+  - 새 `services/etlx-server/tests/db/test_scenario_e2e.py` — 3 e2e 시나리오, 모두 testcontainers PG 위에서 outer-trans rollback 격리 유지:
+    * **full happy path**: login → POST workspace(Owner 자동 멤버십) → POST 2 connections(src/dst, sqlite :memory:로 dry-run health_check이 실제로 connect/close 검증) → POST pipeline + POST schedule(batch + cron) → POST dry-run(ok=True + connector 둘 다 ok) → POST trigger(202, status=pending, worker_id/heartbeat_at NULL — 워커 미존재 확인) → GET runs list(triggered run 포함) + single → **GET audit?workspace_id={ws}로 정확한 순서 검증** `workspace.create → connection.create → connection.create → pipeline.create → schedule.create → run.trigger` (dry-run·GET는 audit 없음 확인). 6 mutation 모두가 같은 트랜잭션 흐름으로 audit row 작성된다는 composition 보장.
+    * **retry-after-simulated-worker-failure**: trigger 후 ORM으로 Run.status=FAILED + error_message 직접 set (워커가 없으니 실패 simulate) → HTTP `POST /runs/{rid}/retry` → 새 row의 `result_json={"retry_of": <original_id>}` + pipeline_version_id 상속 + 원본 row.status=FAILED + error_message 그대로 보존 검증. 워커가 status 전이의 단일 writer라는 원칙이 HTTP 측에서 깨지지 않음을 e2e로 확인.
+    * **non-member cross-workspace boundary**: Alice 워크스페이스에 Bob이 GET single / GET pipelines list / POST dry-run / POST trigger 모두 403. RBAC가 모든 엔드포인트에 일관 적용되는지 확인.
+  - **회원가입 엔드포인트 미존재** — `auth.py`는 login/refresh/logout/me 만, User 시드는 ORM 직접 insert + `await session.commit()` 후 login(HTTP 측에서 보이도록). 시나리오는 가입 이후 워크플로우만 검증; 가입 자체는 후속 슬라이스 또는 OIDC 경로.
+
+### Decisions
+- (이번 슬라이스에서 신규 ADR 없음 — 기존 Step 7.2 conftest 패턴 + Step 8 ADR-0023 RBAC + ADR-0021 worker queue 재사용)
+
+### Milestone
+- **Step 8.7 — 시나리오 테스트 완료 (2026-05-18)**: 3 신규 e2e it (happy / retry-after-failure / cross-ws boundary). 누적 코어 344 unit + 서버 **65 unit** + 서버 **193 it** (190 → 193, +3) + 코어 119 it = **721 tests** all green. mypy strict 코어 39 + 서버 60 src files OK, import-linter 2 contracts KEPT. **Step 8 (API Server) 완전 종료** — auth(local + OIDC) / RBAC(workspace-scoped + SuperAdmin bypass) / audit(middleware + 이중 ACL) / CRUD(workspaces/memberships/connections/pipelines/schedules) / runs read-mostly / actions(dry-run+trigger+retry+SSE) / e2e 시나리오 검증 모두 ship. 다음은 **Step 9 (Execution Engine)** — 워커가 ADR-0021 runs 큐를 SKIP LOCKED로 claim → 코어 `run_pipeline_yaml` 호출 + heartbeat per ~30s + zombie 회수. Step 8.6에서 enqueue까지 끝났으니 9는 큐 consumer + status writer만 추가하면 된다.
+
 ### Changed
 - (없음)
 

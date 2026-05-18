@@ -10,6 +10,11 @@
 ## [Unreleased]
 
 ### Added
+- **Pipeline delete + Workspace edit/delete UI** [Step 10.3 / 10.6]
+  - **Pipeline delete**: third action button on each row in `/w/[slug]/pipelines`, gated by `ConfirmDialog` with copy that calls out "All versions and schedules are removed; past runs stay for audit; pending/in-flight runs are left to complete (the worker can't re-fetch them after deletion)". Hits `DELETE /pipelines/{id}` and refreshes the list.
+  - **Workspace edit**: `/w/[slug]/settings` is no longer read-only. Owners (and SuperAdmin) get name / slug / accent-color forms; slug changes hot-redirect to the new URL via `router.replace`. Non-Owners get a read-only display + the role line. Server's `WorkspaceSlugTakenError` 409 surfaces in the error toast unmodified.
+  - **Workspace delete (Danger zone)**: red-bordered card at the bottom of settings with a destructive button + `ConfirmDialog`. On success the workspace list is refreshed and the page redirects to `/workspaces`.
+  - **API surface**: `workspacesApi.update` / `delete`, `pipelinesApi.delete` added to `lib/api.ts`. Build still produces 11 routes (settings grew from 2.21 kB → 4.45 kB, pipelines from 3.86 kB → 4.65 kB).
 - **Audit log viewer** [Step 10.6] — `/w/[slug]/audit` with sidebar nav entry.
   - **Filters**: resource type `<select>` (workspace / membership / connection / pipeline / schedule / run + "All"), resource ID exact match. Both are pushed straight into the `?resource_type` / `?resource_id` query params of `GET /audit?workspace_id=…` — the server already enforces "must be a member or SuperAdmin" so no UI-side ACL.
   - **Row expansion**: each row is a single line (timestamp · action chip · resource_type+id · actor truncated UUID). Clicking expands into a two-column `before_json` / `after_json` pre block so the diff is immediately visible without a separate detail page. Rows that had `before == null` AND `after == {}` collapse the chevron and disable expansion since there's nothing to show.

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { PlusIcon, WorkflowIcon } from "lucide-react";
+import { PlusIcon, Trash2Icon, WorkflowIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Header } from "@/components/shell/header";
 import { Card } from "@/components/ui/card";
@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { EmptyState } from "@/components/ui/empty-state";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ApiError, pipelinesApi, type PipelineSummary } from "@/lib/api";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import { blankBuilder, serialize } from "@/lib/pipeline-config";
@@ -51,6 +52,10 @@ export default function PipelinesPage() {
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<PipelineSummary | null>(
+    null,
+  );
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     if (!ws) return;
@@ -93,6 +98,24 @@ export default function PipelinesPage() {
       );
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function onConfirmDelete() {
+    if (!ws || !pendingDelete) return;
+    setDeleting(true);
+    try {
+      await pipelinesApi.delete(ws.id, pendingDelete.id);
+      toast.success(`Deleted ${pendingDelete.name}`);
+      setPendingDelete(null);
+      const list = await pipelinesApi.list(ws.id);
+      setRows(list);
+    } catch (err) {
+      toast.error(
+        err instanceof ApiError ? err.message : "Couldn't delete pipeline.",
+      );
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -170,9 +193,9 @@ export default function PipelinesPage() {
                 {
                   key: "actions",
                   header: "",
-                  className: "w-48 text-right",
+                  className: "w-64 text-right",
                   cell: (row) => (
-                    <div className="flex justify-end gap-2">
+                    <div className="flex justify-end gap-1">
                       <Link
                         href={
                           ws ? `/w/${ws.slug}/pipelines/${row.id}/edit` : "#"
@@ -193,6 +216,18 @@ export default function PipelinesPage() {
                         disabled={!row.current_version}
                       >
                         Trigger
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setPendingDelete(row);
+                        }}
+                        aria-label={`Delete ${row.name}`}
+                        className="hover:text-error"
+                      >
+                        <Trash2Icon size={14} />
                       </Button>
                     </div>
                   ),
@@ -216,6 +251,17 @@ export default function PipelinesPage() {
           )}
         </Card>
       </main>
+
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        title={pendingDelete ? `Delete ${pendingDelete.name}?` : "Delete pipeline?"}
+        description="All versions and schedules of this pipeline are removed. Past runs stay in the runs table for audit. Pending and in-flight runs are left to complete on their own — the worker won't be able to re-fetch them after deletion."
+        confirmLabel="Delete"
+        destructive
+        loading={deleting}
+        onConfirm={onConfirmDelete}
+        onCancel={() => (deleting ? undefined : setPendingDelete(null))}
+      />
     </>
   );
 }

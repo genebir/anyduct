@@ -259,6 +259,16 @@ export const workspacesApi = {
   get: (id: string) => api<WorkspaceSummary>(`/workspaces/${id}`),
   create: (body: { name: string; slug: string; color_hex?: string }) =>
     api<WorkspaceSummary>("/workspaces", { method: "POST", json: body }),
+  update: (
+    id: string,
+    body: { name?: string; slug?: string; color_hex?: string },
+  ) =>
+    api<WorkspaceSummary>(`/workspaces/${id}`, {
+      method: "PATCH",
+      json: body,
+    }),
+  delete: (id: string) =>
+    api<void>(`/workspaces/${id}`, { method: "DELETE" }),
 };
 
 export interface AuditLogEntry {
@@ -379,6 +389,10 @@ export const pipelinesApi = {
     api<RunSummary>(`/workspaces/${workspaceId}/pipelines/${id}/trigger`, {
       method: "POST",
       json: {},
+    }),
+  delete: (workspaceId: string, id: string) =>
+    api<void>(`/workspaces/${workspaceId}/pipelines/${id}`, {
+      method: "DELETE",
     }),
 };
 

@@ -463,7 +463,8 @@
 
 ### 10.6 관리자 화면 (← 작업 중, 2026-05-18 멤버 + 감사 로그까지 완료)
 - [x] Workspace 목록 + 생성 — `/workspaces` (auto-Owner). 8 preset color picker.
-- [x] Workspace 상세 메타 — `/w/[slug]/settings` (read-only — name/slug/color/role).
+- [x] Workspace 상세 메타 — `/w/[slug]/settings`. Owner는 name/slug/color rename 가능(slug 변경 시 자동 hot-redirect), SuperAdmin bypass도 동일 권한. Danger Zone에서 workspace 삭제(`ConfirmDialog`). Non-Owner는 read-only.
+- [x] **Pipeline 삭제** UI — `/w/[slug]/pipelines` 각 row에 Delete 버튼(`ConfirmDialog`로 "all versions/schedules removed; runs stay for audit" 경고). `DELETE /pipelines/{id}`.
 - [x] **멤버 + 역할 관리 UI** (2026-05-18) — `/w/[slug]/members`. 이메일로 추가(`POST /memberships`), 역할 인라인 변경(`PATCH /memberships/{user_id}` — owner/editor/runner/viewer select), 제거(`DELETE`). RBAC role별 색 칠한 badge + 역할 설명 legend. Owner 아닌 사용자는 read-only view. 자기 자신의 행은 변경/제거 비활성화 (서버는 LastOwnerError 409로도 보호). Sidebar에 Members nav 추가.
 - [x] **Audit log 뷰어** (2026-05-18) — `/w/[slug]/audit`. `GET /audit?workspace_id=…` 호출(서버는 멤버이면 자동 ACL, SuperAdmin bypass). 필터: resource_type select(workspace/membership/connection/pipeline/schedule/run/all) + resource_id 정확 매치 input. row expand → before_json / after_json side-by-side pre 패널. Pagination via offset(100/page).
 

@@ -452,12 +452,13 @@
 - [ ] DLQ 노드 — 아직 (core PipelineConfig는 단일 dlq optional, builder UI에서 노출 안 함).
 - [ ] Multi-branch / fan-out — core가 linear pipeline이라 의도적으로 미지원. 향후 graph 지원은 core 확장 필요.
 
-### 10.5 Schedule + Run 모니터링 (← 작업 중, 2026-05-18 read-only만 완료)
-- [x] Run 목록 (Data Table, StatusBadge, 5s polling) — `/w/[slug]/runs`.
+### 10.5 Schedule + Run 모니터링 (← 작업 중, 2026-05-18 Run 상세까지 완료)
+- [x] Run 목록 (Data Table, StatusBadge, 5s polling) — `/w/[slug]/runs`. Row 클릭 시 상세 페이지로 이동.
 - [x] Schedule 목록 — `/w/[slug]/schedules` (across pipelines flattened, cron/mode 표시).
+- [x] **Run 상세** (2026-05-18) — `/w/[slug]/runs/[id]`. 2-col 레이아웃: 좌측은 mono 로그 viewer(레벨별 색, context_json inline), 우측은 Summary(상태/시간/duration/records/worker/heartbeat) + Metrics(name별 누적 + point 개수) + Error(error_class + error_message pre). 비-terminal status면 2초 polling, terminal이 되면 1회 더 fetch 후 정지. failed/cancelled에 Retry 버튼 → `POST /runs/{id}/retry`.
 - [ ] cron 표현식 빌더 + cronstrue 자연어 해설.
 - [ ] 다음 N회 실행 예상 시각 미리보기.
-- [ ] Run 상세 (timeline + 로그 + 메트릭 차트).
+- [ ] Live-tail via SSE (현재는 polling — Step 9.3c 단일-flush 디자인이라 logs는 run 종료 시점에만 보임. 진정한 live-tail은 recorder의 periodic drain 재설계 또는 SSE 쪽에서 worker process의 in-memory queue 직접 노출 필요).
 - [ ] DLQ 조회 + 재처리.
 
 ### 10.6 관리자 화면 (← 작업 중, 2026-05-18 부분 완료)

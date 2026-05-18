@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { ActivityIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Header } from "@/components/shell/header";
@@ -83,6 +83,7 @@ const COLUMNS: Column<RunSummary>[] = [
 ];
 
 export default function RunsPage() {
+  const router = useRouter();
   const { slug } = useParams<{ slug: string }>();
   const ws = useWorkspaceFromSlug(slug);
   const [rows, setRows] = useState<RunSummary[] | null>(null);
@@ -132,6 +133,9 @@ export default function RunsPage() {
             <DataTable
               columns={COLUMNS}
               rows={rows}
+              onRowClick={(row) => {
+                if (ws) router.push(`/w/${ws.slug}/runs/${row.id}`);
+              }}
               emptyState={
                 <EmptyState
                   icon={<ActivityIcon size={36} strokeWidth={1.5} />}

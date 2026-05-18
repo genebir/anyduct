@@ -188,6 +188,31 @@ export interface RunSummary {
   created_at: string;
 }
 
+export interface RunDetail extends RunSummary {
+  heartbeat_at: string | null;
+  worker_id: string | null;
+  error_message: string | null;
+  result_json: Record<string, unknown>;
+}
+
+export type LogLevel = "debug" | "info" | "warning" | "error";
+
+export interface RunLogEntry {
+  id: string;
+  ts: string;
+  level: LogLevel;
+  message: string;
+  context_json: Record<string, unknown>;
+}
+
+export interface RunMetricEntry {
+  id: string;
+  name: string;
+  value: number;
+  attrs_json: Record<string, unknown>;
+  recorded_at: string;
+}
+
 /* ─────────────────────────────────────────────────────────────────────────
    Auth helpers
    ─────────────────────────────────────────────────────────────────────── */
@@ -289,4 +314,23 @@ export const schedulesApi = {
 export const runsApi = {
   list: (workspaceId: string, query: { limit?: number; status?: RunStatus } = {}) =>
     api<RunSummary[]>(`/workspaces/${workspaceId}/runs`, { query }),
+  get: (workspaceId: string, runId: string) =>
+    api<RunDetail>(`/workspaces/${workspaceId}/runs/${runId}`),
+  logs: (
+    workspaceId: string,
+    runId: string,
+    query: { limit?: number; offset?: number } = {},
+  ) =>
+    api<RunLogEntry[]>(`/workspaces/${workspaceId}/runs/${runId}/logs`, {
+      query,
+    }),
+  metrics: (workspaceId: string, runId: string) =>
+    api<RunMetricEntry[]>(`/workspaces/${workspaceId}/runs/${runId}/metrics`),
+  retry: (workspaceId: string, runId: string) =>
+    api<RunSummary>(`/workspaces/${workspaceId}/runs/${runId}/retry`, {
+      method: "POST",
+      json: {},
+    }),
+  logsStreamUrl: (workspaceId: string, runId: string) =>
+    `${apiBaseUrl()}/workspaces/${workspaceId}/runs/${runId}/logs/stream`,
 };

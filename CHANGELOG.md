@@ -688,6 +688,40 @@
 ### Milestone
 - **Step 8.5d — Pipelines CRUD + 버전 관리 완료 (2026-05-18)**: 6 신규 endpoint + immutable version history + ensure_version idempotency + version_created audit 플래그 + core PipelineConfig 구조 검증 + 서버측 name 주입. 누적 코어 344 unit + 서버 **65 unit** + 서버 **145 it** (131 → 145, +14) + 코어 119 it = **673 tests** all green. mypy strict 코어 39 + 서버 53 src files OK, import-linter 2 contracts KEPT. 다음 슬라이스는 **Step 8.5e (Schedules CRUD + 활성화 토글 + Runs 읽기 전용)** — 8.5의 마지막 슬라이스. 실제 실행 트리거링은 Step 9의 worker queue.
 
+- **Schedules CRUD + Runs read-only** [Step 8.5e]
+  - 새 두 패키지:
+    * `services/etlx-server/etlx_server/schedules/repository.py` — `ScheduleRepository` (list_for_pipeline/get/add/update/delete + snapshot 헬퍼) + `InvalidCronError` + `validate_cron_for_mode(mode, cron_expr)`. **mode-aware cron 검증**: batch는 `cron_expr` 필수, stream은 NULL 허용(연속 활성); 둘 다 supplied 시 `croniter.is_valid`로 검증. 워커(Step 9)가 다음 firing time 계산에 같은 라이브러리 사용 — "저장된 schedule = 워커가 실행할 schedule" 보장. update는 화이트리스트(`name`/`cron_expr`/`is_active`/`config_overrides`) — unknown 필드 즉시 ValueError로 거부. **mode immutable** — UpdateRequest에 mode 필드 없음, batch↔stream 전환은 삭제+재생성.
+    * `services/etlx-server/etlx_server/runs/repository.py` — `RunRepository` (list_for_workspace/get/list_logs/list_metrics). **read-only** — write 메서드 없음. 워커(Step 9) 전용. 필터는 status/pipeline_id/schedule_id + limit(1~500, default 50)/offset; 정렬은 created_at desc.
+  - `routers/schedules.py` 6 신규 엔드포인트 (`/workspaces/{ws}/pipelines/{pid}/schedules` 하위에 nest — schema가 1-pipeline-many-schedules + worker가 PipelineVersion에 policy attach):
+    * `GET ""` Viewer+ — name 정렬.
+    * `POST ""` Editor+ (201) — cron 검증, 422 on InvalidCronError.
+    * `GET "/{sid}"` Viewer+.
+    * `PATCH "/{sid}"` Editor+ — 부분 갱신, cron 재검증, 빈 body 400, mode 변경 시 ValueError → 500 (Pydantic이 이미 거부).
+    * `DELETE "/{sid}"` Editor+ (204) — 행 삭제 후 audit (resource_id에 cached UUID 사용).
+    * `POST "/{sid}/toggle"` Editor+ — `is_active` flip 후 audit.
+    * 매 mutation `audit.record(schedule.{create,update,delete,toggle})` + commit.
+    * **Pipeline-workspace 경계**: `_resolve_pipeline_or_404`가 `pipeline.workspace_id == ctx.workspace.id`를 매 호출 검증. 다른 워크스페이스 pipeline id 또는 다른 pipeline 하위 schedule id 모두 404로 collapse (enumeration leak 방지).
+  - `routers/runs.py` 4 read-only 엔드포인트 (`/workspaces/{ws}/runs` 하위):
+    * `GET ""` Viewer+ — status/pipeline_id/schedule_id 필터 + limit/offset 페이지네이션.
+    * `GET "/{rid}"` Viewer+ — `RunDetail` = base + worker_id + heartbeat_at + error_message + result_json.
+    * `GET "/{rid}/logs"` Viewer+ — RunLog 시계열 ts 정렬, limit 1~1000 (default 200).
+    * `GET "/{rid}/metrics"` Viewer+ — RunMetric recorded_at 정렬.
+    * **No mutation 엔드포인트** — runs는 워커(Step 9) 전용 쓰기 도메인. POST 시도는 404 (route 없음), PATCH/DELETE 시도는 405.
+    * **No audit on runs** — read-only이므로 audit 없음. runs 자체 + run_logs 시계열이 워커의 audit trail.
+    * **워크스페이스 boundary** — 단일 run 조회 시 항상 `workspace_id` 함께 매칭; logs/metrics 조회도 먼저 run 조회를 통해 boundary 보장. 다른 ws run UUID 추측해도 404.
+  - `auth/schemas.py` 확장: `ScheduleSummary`/`ScheduleCreateRequest`(mode literal `"batch"|"stream"`, cron_expr optional, is_active default True, config_overrides JSONB)/`ScheduleUpdateRequest`(전부 optional, mode 없음 — immutable)/`RunSummary`(ORM `from_attributes=True`)/`RunDetail`(extends RunSummary + worker bookkeeping)/`RunLogEntry`/`RunMetricEntry`.
+  - `app_factory.py`: schedules + runs router 두 개 추가.
+  - **Schedule name 비유일** — Pipelines/Connections/Workspaces는 YAML(Step 7.3 yaml_sync)에서 name으로 addressing이라 unique이지만 schedule은 id로만 — 이번 슬라이스에서 unique constraint를 schema에 추가하지 않고 가벼운 자유로 유지. 필요해지면 후속 ADR + migration.
+- **테스트 정규화** [Step 8.5e]
+  - `services/etlx-server/tests/db/test_schedules_router.py` — 15 신규 it. cron 검증 매트릭스 (batch+valid / stream+null / batch missing 422 / 잘못된 cron 422) + Viewer 403 + cross-ws pipeline 404 + list 정렬 + single 404 + PATCH cron + audit before·after / PATCH invalid cron 422 / 빈 PATCH 400 + DELETE + audit + toggle ON↔OFF (2번) + audit 행 3개 검증 + repository.update unknown 필드 ValueError + 다른 pipeline 하위 schedule 404.
+  - `services/etlx-server/tests/db/test_runs_router.py` — 11 신규 it. list happy + status 필터 + pipeline_id 필터 + 워크스페이스 boundary (list + GET 둘 다) + limit/offset 페이지네이션 + RunDetail 단건 + 404 + logs 시계열 정렬 + metrics + 다른 ws run logs 404 + **mutation 메서드 거부** (POST 404 / PATCH 405 / DELETE 405).
+
+### Decisions
+- (이번 슬라이스에서 신규 ADR 없음 — ADR-0023 §5/§9 + ADR-0021 worker queue 의존성 분리 적용)
+
+### Milestone
+- **Step 8.5e — Schedules CRUD + Runs read-only 완료 (2026-05-18)**: 6 schedule endpoint + 4 run read-only endpoint + croniter mode-aware 검증 + workspace/pipeline boundary 검증 + worker write 도메인 격리. 누적 코어 344 unit + 서버 **65 unit** + 서버 **171 it** (145 → 171, +26) + 코어 119 it = **699 tests** all green. mypy strict 코어 39 + 서버 55 src files OK, import-linter 2 contracts KEPT. **Step 8.5 (CRUD 도메인) 완전 종료** — workspaces / memberships / connections / pipelines / schedules / runs read 모두 ship. 다음은 **Step 8.6 (Action 엔드포인트)** — `POST /pipelines/{id}/dry-run` / `POST /pipelines/{id}/trigger` (run 큐잉) / `POST /runs/{id}/retry` / `GET /runs/{id}/logs` streaming. Step 9 worker queue와 짝지어 동작 — 8.6은 큐 enqueue만, 실제 execute는 Step 9.
+
 ### Changed
 - (없음)
 

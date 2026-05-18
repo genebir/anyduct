@@ -206,6 +206,101 @@ class PipelineUpdateRequest(BaseModel):
     config: dict[str, Any] | None = None
 
 
+class ScheduleSummary(BaseModel):
+    """One row of ``GET /workspaces/{ws}/pipelines/{pid}/schedules``."""
+
+    id: UUID
+    pipeline_id: UUID
+    name: str
+    mode: Literal["batch", "stream"]
+    cron_expr: str | None
+    is_active: bool
+    config_overrides: dict[str, Any]
+
+
+class ScheduleCreateRequest(BaseModel):
+    """Body of ``POST /workspaces/{ws}/pipelines/{pid}/schedules``.
+
+    ``mode='batch'`` requires ``cron_expr``; ``mode='stream'`` allows
+    ``cron_expr=None`` (the worker keeps the stream pipeline alive
+    indefinitely) or an optional re-arm cron.
+    """
+
+    name: str = Field(min_length=1, max_length=255)
+    mode: Literal["batch", "stream"]
+    cron_expr: str | None = Field(default=None, max_length=64)
+    is_active: bool = True
+    config_overrides: dict[str, Any] = Field(default_factory=dict)
+
+
+class ScheduleUpdateRequest(BaseModel):
+    """PATCH body — every field optional. Mode is immutable (delete + recreate
+    if you actually want to change the underlying execution model)."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    cron_expr: str | None = Field(default=None, max_length=64)
+    is_active: bool | None = None
+    config_overrides: dict[str, Any] | None = None
+
+    def as_field_dict(self) -> dict[str, Any]:
+        return self.model_dump(exclude_unset=True)
+
+
+class RunSummary(BaseModel):
+    """Compact row for the runs table (workspace dashboard)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    workspace_id: UUID
+    pipeline_id: UUID
+    pipeline_version_id: UUID
+    schedule_id: UUID | None
+    triggered_by_user_id: UUID | None
+    status: Literal["pending", "running", "succeeded", "failed", "cancelled"]
+    scheduled_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
+    records_read: int
+    records_written: int
+    duration_seconds: float | None
+    error_class: str | None
+    created_at: datetime
+
+
+class RunDetail(RunSummary):
+    """Drill-down view — adds the worker bookkeeping + raw error message + result_json."""
+
+    heartbeat_at: datetime | None
+    worker_id: str | None
+    error_message: str | None
+    result_json: dict[str, Any]
+
+
+class RunLogEntry(BaseModel):
+    """One row of ``GET /workspaces/{ws}/runs/{id}/logs``."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    ts: datetime
+    level: Literal["debug", "info", "warning", "error"]
+    message: str
+    context_json: dict[str, Any]
+
+
+class RunMetricEntry(BaseModel):
+    """One row of ``GET /workspaces/{ws}/runs/{id}/metrics``."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    name: str
+    value: float
+    attrs_json: dict[str, Any]
+    recorded_at: datetime
+
+
 class AuditLogEntry(BaseModel):
     """One row of the ``audit_log`` table, shaped for the ``/audit`` response."""
 
@@ -243,6 +338,13 @@ __all__ = [
     "PipelineUpdateRequest",
     "PipelineVersionEntry",
     "RefreshRequest",
+    "RunDetail",
+    "RunLogEntry",
+    "RunMetricEntry",
+    "RunSummary",
+    "ScheduleCreateRequest",
+    "ScheduleSummary",
+    "ScheduleUpdateRequest",
     "TokenPair",
     "WorkspaceCreateRequest",
     "WorkspaceSummary",

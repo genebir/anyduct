@@ -34,6 +34,8 @@ from etlx_server.routers import memberships as memberships_router
 from etlx_server.routers import meta as meta_router
 from etlx_server.routers import oidc as oidc_router
 from etlx_server.routers import pipelines as pipelines_router
+from etlx_server.routers import runs as runs_router
+from etlx_server.routers import schedules as schedules_router
 from etlx_server.routers import workspaces as workspaces_router
 from etlx_server.settings import Settings, get_settings
 
@@ -164,6 +166,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(memberships_router.router)
     app.include_router(connections_router.router)
     app.include_router(pipelines_router.router)
+    app.include_router(schedules_router.router)
+    app.include_router(runs_router.router)
     app.include_router(audit_router.router)
     return app
 

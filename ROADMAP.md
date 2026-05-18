@@ -8,7 +8,7 @@
 
 ## 현재 상태 (2026-05-18)
 
-**Steps 1–4 + Step 5.1(MySQL/SQLite) + Step 7.0~7.4 + Step 8.1~8.4 완료. 코어 344 unit + 서버 65 unit + 3 skip + 코어 119 it + 서버 87 it = 618 테스트, 24 ADR.**
+**Steps 1–4 + Step 5.1(MySQL/SQLite) + Step 7.0~7.4 + Step 8.1~8.4 + Step 8.5a 완료. 코어 344 unit + 서버 65 unit + 3 skip + 코어 119 it + 서버 98 it = 629 테스트, 24 ADR.**
 **서비스화 방향 확정**: Step 7 이후로 `services/etlx-server` (FastAPI) + `services/etlx-web` (Next.js) 별도 패키지로 진행. 코어와 서비스는 단방향 의존 (서비스 → 코어). 자세한 결정은 ADR-0017.
 
 ---
@@ -322,11 +322,37 @@
 - [x] 2 신규 unit(middleware — `TestClient`로 실 Starlette 앱에 부착) + 17 신규 it(audit_service 4 + audit_repository 5 + audit_router 8 — 미인증/비admin global 403/admin global/비멤버 403/Viewer/필터 조합/limit 0 422/미존재 workspace 403 안전 path).
 
 ### 8.5 CRUD 엔드포인트
-- [ ] `/workspaces` `/users` `/roles`
-- [ ] `/connections` (CRUD + `POST /{id}/test`)
-- [ ] `/pipelines` (CRUD + 버전 관리, `GET /{id}/versions`)
-- [ ] `/schedules` (CRUD + 활성화 토글)
-- [ ] `/runs` (목록/상세/로그/메트릭 조회)
+**1 PR = 1 slice 원칙 유지를 위해 a~e로 분할 (2026-05-18).**
+
+#### 8.5a Workspaces CRUD ✅ (2026-05-18)
+- [x] `POST /workspaces` (인증된 사용자면 누구나, 호출자 자동 Owner 멤버십 동시 insert)
+- [x] `GET /workspaces` (caller가 멤버인 워크스페이스 목록 + SuperAdmin은 전체)
+- [x] `GET /workspaces/{id}` (Step 8.3에서 이미 ship)
+- [x] `PATCH /workspaces/{id}` (Editor+, name/slug/color_hex 부분 갱신)
+- [x] `DELETE /workspaces/{id}` (Owner only, FK cascade로 memberships 제거, audit row는 `workspace_id FK ON DELETE SET NULL`로 보존)
+- [x] 각 mutation이 `audit_service.record(workspace.create / update / delete)` 호출 — 같은 트랜잭션에서 commit, 실패 시 audit row도 함께 rollback
+- [x] `WorkspaceCreateRequest`/`UpdateRequest` Pydantic 검증(slug regex `^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$`, color_hex `#RRGGBB(AA)?`)
+- [x] `WorkspaceSlugTakenError`(`IntegrityError` 변환)로 409 응답
+- [x] 11 신규 it(POST happy + 409 + 422 invalid slug / list user memberships / list superadmin sees all / PATCH editor + audit before·after / runner 403 / empty body 400 / slug collision 409 / DELETE owner + audit + cascade / editor 403)
+
+#### 8.5b Membership management (다음)
+- [ ] `GET /workspaces/{id}/memberships` (Viewer+)
+- [ ] `POST /workspaces/{id}/memberships` (Owner — user_id + role)
+- [ ] `PATCH /workspaces/{id}/memberships/{user_id}` (Owner — role 변경)
+- [ ] `DELETE /workspaces/{id}/memberships/{user_id}` (Owner — 자기 자신 제거 시 마지막 Owner 보호 필요)
+
+#### 8.5c Connections CRUD
+- [ ] `/workspaces/{id}/connections` (workspace-scoped CRUD)
+- [ ] 시크릿 처리: 입력 받은 즉시 Secret backend(Vault/AWS SM/GCP SM/File)에 위임, DB에는 ref만
+- [ ] `POST /workspaces/{id}/connections/{conn_id}/test` (Test connection)
+
+#### 8.5d Pipelines CRUD + 버전 관리
+- [ ] `/workspaces/{id}/pipelines` (CRUD)
+- [ ] `GET /workspaces/{id}/pipelines/{pid}/versions` (config_json diff 시에만 새 PipelineVersion 생성 — Step 7.3 yaml_sync 패턴 재사용)
+
+#### 8.5e Schedules + Runs (read-only)
+- [ ] `/workspaces/{id}/schedules` (CRUD + 활성화 토글)
+- [ ] `/workspaces/{id}/runs` (목록/상세/로그/메트릭 조회)
 
 ### 8.6 Action 엔드포인트
 - [ ] `POST /pipelines/{id}/dry-run` — 파이프라인 빌드 검증 + 첫 100 record 샘플
@@ -473,3 +499,5 @@
 - 2026-05-18: **Step 8.2b (OIDC) 완료.** `auth/` 확장 — `OidcProviderConfig`(Pydantic, provider명→`AuthMethod` 매핑), `OidcStateSigner`(RS256 키쌍 재사용, `token_type=oidc_state` 단명 JWT로 CSRF+nonce+return_to 무상태 운반), `OidcService`(provider 레지스트리, 디스커버리/JWKS 캐시, `build_authorize_url`+`handle_callback`, `httpx.AsyncClient` factory 주입 가능, PyJWT로 ID 토큰 RS256+JWKS 검증 — `authlib.jose` deprecated 회피), `UserRepository.provision_oidc_user`(LOCAL 계정/다른 OIDC provider와 email 충돌 시 `OidcEmailCollisionError`로 거부, 동일 provider 재로그인 시 name만 갱신). `routers/oidc.py` 3 엔드포인트(`/auth/oidc/providers`+`/login`+`/callback`) — 시크릿 노출 0, OIDC 미설정 시 503. app_factory가 `_build_oidc_service` 헬퍼로 lifespan에서 attach. 20 신규 unit(OidcStateSigner 6 + OidcService 14, IdP를 `httpx.MockTransport`로 모킹 + 진짜 ID token JWT 서명/검증으로 nonce/aud/iss/email_verified 경로 전부 커버) + 17 신규 it(provision_oidc_user 6 + OIDC 라우터 end-to-end 11). 누적 **코어 344 unit + 서버 48 unit + 코어 119 it + 서버 59 it = 570 테스트** all green, mypy strict 코어 39 + 서버 33 src files OK, lint-imports 2 KEPT. ADR-0023 OIDC 부분 구현체 — 신규 ADR 없음. 다음은 Step 8.3 (RBAC — workspace 단위 역할 + `Depends(require_role(...))`).
 - 2026-05-18: **Step 8.3 (RBAC) 완료.** `auth/` 확장 — `rbac.py`(strict hierarchy Owner>Editor>Runner>Viewer, `role_rank`/`has_at_least`), `MembershipRepository.get_role`, `WorkspaceRepository.get_by_id`, `workspace_context.py`(`WorkspaceContext` frozen dataclass + `get_current_workspace` Depends [path param `workspace_id` 자동 추출, 404/403 일관 처리, SuperAdmin bypass 시 `role=None`] + `require_workspace_role(min_role)` factory). 첫 RBAC-protected 라우터 `routers/workspaces.py` (`GET /workspaces/{workspace_id}` Viewer+) — 모듈 레벨 `_require_viewer = Depends(...)`로 ruff B008 회피. app_factory에 router 추가. `WorkspaceSummary` Pydantic 스키마(`role: str | None`로 SuperAdmin 표현). 워크스페이스 단위 격리(쿼리 자동 필터)는 도메인 리소스 라우터가 추가되는 Step 8.5로 자연 이관. 15 신규 unit(rbac 9 + workspace_context 6) + 11 신규 it(membership repo 4 + workspaces router 7 — 미인증/미존재/비멤버/Viewer/Owner/SuperAdmin/malformed UUID). 누적 **코어 344 unit + 서버 63 unit + 코어 119 it + 서버 70 it = 596 테스트** all green, mypy strict 코어 39 + 서버 38 src files OK, lint-imports 2 KEPT. ADR-0023 RBAC 부분 구현체 — 신규 ADR 없음. 다음은 Step 8.4 (Audit log — 미들웨어 + `/audit` 조회).
 - 2026-05-18: **Step 8.4 (Audit log) 완료.** 새 `etlx_server/audit/` 패키지 — `AuditService`(세션 바운드 recorder, 호출자 트랜잭션 따라 자동 rollback으로 false-positive 방지) + `AuditLogRepository.query`(workspace/actor/resource_type/resource_id 필터 + limit/offset + created_at desc) + `RequestMeta`(ip/user_agent dataclass) + `AuditRequestMetaMiddleware`(starlette `BaseHTTPMiddleware` subclass, request.state.audit_meta 부착) + `get_audit_service` Depends(meta 없으면 기본 RequestMeta() fallback). `routers/audit.py` `GET /audit` 이중 ACL — `workspace_id` 미지정 시 SuperAdmin 필수, 지정 시 Viewer+ 멤버 또는 SuperAdmin (비멤버는 미존재 workspace UUID로도 403 — enumeration leak 방지). limit 1~200 강제. `AuditLogEntry` Pydantic 응답(`from_attributes=True`로 ORM row → API mapping). app_factory에 middleware + router 추가. mutating 라우터의 `audit.record(...)` 호출은 도메인 mutation 라우터가 들어오는 Step 8.5에서 일괄 wire — 8.4 단독 적용 대상이 없어 infra + query API만 ship. 2 신규 unit(middleware) + 17 신규 it(audit_service 4 + repository 5 + router 8). 누적 **코어 344 unit + 서버 65 unit + 코어 119 it + 서버 87 it = 615 테스트** all green, mypy strict 코어 39 + 서버 44 src files OK, lint-imports 2 KEPT. ADR-0023 §9 audit 부분 구현체 — 신규 ADR 없음. 다음은 Step 8.5 (CRUD 엔드포인트 — `/connections`/`/pipelines`/`/schedules`/`/runs`, 각 mutation에서 `audit.record` 호출 + workspace_id 쿼리 자동 필터).
+- 2026-05-18: **Step 8.5 a/b/c/d/e 분리.** Step 8.5의 도메인이 너무 넓어(workspaces+members+connections+pipelines+schedules+runs) 1 PR = 1 slice 원칙 유지를 위해 5개 슬라이스로 분할. 8.5a부터 진행.
+- 2026-05-18: **Step 8.5a (Workspaces CRUD) 완료.** `WorkspaceRepository`에 `create`(워크스페이스 + Owner 멤버십 원자적 insert) / `list_for_user`(SuperAdmin은 include_all=True로 전체) / `update`(허용된 필드 외 거부 ValueError) / `delete`(FK cascade로 memberships 제거) + `snapshot()` 헬퍼(audit before/after용 dict) 추가. `WorkspaceSlugTakenError`로 `IntegrityError` 추상화. `WorkspaceCreateRequest`/`WorkspaceUpdateRequest` Pydantic 스키마 — slug regex + color_hex regex 검증. `routers/workspaces.py` 4 신규 엔드포인트 (POST 201 + Owner 자동 / GET list / PATCH Editor+ / DELETE Owner only) + 기존 GET/{id} 유지. 각 mutation이 audit.record + session.commit (`workspace.create` / `workspace.update` / `workspace.delete`) — 모듈 레벨 `_require_viewer`/`_require_editor`/`_require_owner` Depends 싱글톤으로 ruff B008 회피. **테스트 패턴 확립**: 호출자 commit이 conftest의 outer-trans rollback 안에서 savepoint release로 동작 (`expire_on_commit=False`), 테스트가 `session.commit()` 호출로 router 쓴 데이터를 자체 식별맵 갱신해서 audit row 조회. 11 신규 it (POST happy + audit + 멤버십 확인 / 409 slug 중복 / 422 invalid slug / list user 멤버십만 / list superadmin 전체 / PATCH editor + audit before·after / runner 403 / empty body 400 / slug 충돌 409 / DELETE owner + audit + cascade + workspace_id SET NULL / editor 403). 누적 **코어 344 unit + 서버 65 unit + 코어 119 it + 서버 98 it = 626 테스트** all green, mypy strict 코어 39 + 서버 44 src files OK, lint-imports 2 KEPT. ADR-0023 §5 RBAC + §9 audit 구현 적용 — 신규 ADR 없음. 다음은 Step 8.5b (Membership management — list/add/change-role/remove, 마지막 Owner 제거 보호).

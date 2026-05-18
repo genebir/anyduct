@@ -597,6 +597,27 @@
 ### Milestone
 - **Step 8.4 — Audit infra + `/audit` query 완료 (2026-05-18)**: AuditService + AuditLogRepository + RequestMeta + AuditRequestMetaMiddleware + `GET /audit` 이중 ACL. 누적 코어 344 unit + 서버 **65 unit** (63 → 65, +2) + 서버 **87 it** (70 → 87, +17) + 코어 119 it = **615 tests** all green. mypy strict 코어 39 + 서버 44 src files OK, import-linter 2 contracts KEPT. Mutating endpoint의 `audit.record(...)` 호출은 도메인 CRUD가 들어오는 Step 8.5에서 일괄 wire — 8.4 단독 적용 대상이 없어 infra + query API만 ship한 것이 의도. 다음 슬라이스는 **Step 8.5 (CRUD 엔드포인트)** — `/connections`/`/pipelines`/`/schedules`/`/runs` 도메인 라우터 + 각 mutation에 audit.record + workspace_id 자동 필터.
 
+- **Workspaces CRUD + audit integration** [Step 8.5a]
+  - **분할 결정**: Step 8.5 도메인이 너무 넓어(workspaces+members+connections+pipelines+schedules+runs) 1 PR = 1 slice 원칙 유지를 위해 a~e 5개 슬라이스로 분할.
+  - `auth/workspace_repository.py` 확장: 기존 `get_by_id` + `list_for_user`(include_all 옵션) 추가, mutating 메서드 `create`(워크스페이스 + Owner 멤버십 원자적 insert) / `update`(`_ALLOWED_UPDATE_FIELDS` 화이트리스트 + IntegrityError → WorkspaceSlugTakenError) / `delete`(FK cascade로 memberships 자동 제거). `snapshot(workspace, fields=...)` static helper로 audit before/after JSON 생성. 모든 mutation은 호출자 트랜잭션 안에서만 동작 — repo는 commit 안 함.
+  - `WorkspaceSlugTakenError` 신규 예외 — `sqlalchemy.exc.IntegrityError`를 라우터 입장에서 안정적으로 다룰 수 있는 도메인 예외로 변환.
+  - `auth/schemas.py` 확장: `WorkspaceCreateRequest` (name 1-255 / slug regex `^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$` / color_hex `^#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$`) + `WorkspaceUpdateRequest`(PATCH 스타일 — 모든 필드 optional, `as_field_dict()`로 `exclude_unset=True` dump).
+  - `routers/workspaces.py` 4 신규 엔드포인트:
+    * `POST /workspaces` (201, 인증된 모든 사용자 — 호출자가 자동 Owner). 409 slug 중복.
+    * `GET /workspaces` (caller가 멤버인 워크스페이스 목록 + SuperAdmin은 전체). N+1 회피 위해 role은 응답에 포함 안 함 — 자세한 role은 `/{id}` 호출.
+    * `PATCH /workspaces/{id}` (Editor+ via `_require_editor` Depends 싱글톤). 빈 body는 400. slug 중복 409.
+    * `DELETE /workspaces/{id}` (Owner only via `_require_owner` 싱글톤). 204. **audit row를 delete 전에 먼저 record** — `audit_log.workspace_id` FK가 `ON DELETE SET NULL`이라 row는 살아남고 workspace_id만 NULL로 떨어져 forensics에 사용 가능.
+  - 모든 mutation이 `audit.record(action=workspace.create/update/delete, resource_type='workspace', resource_id=str(ws.id), before=..., after=...)` 호출 후 `await session.commit()`. 비즈니스 mutation 실패 시 audit row 함께 rollback — Step 8.4 설계 의도가 production 코드로 처음 검증됨.
+- **테스트 정규화** [Step 8.5a]
+  - `services/etlx-server/tests/db/test_workspaces_crud.py` — 11 신규 it. 패턴: `_audit_rows_for(session, ws_id)`가 `await session.commit()` 후 audit 테이블을 직접 select — conftest의 outer-trans rollback이 router의 `commit()`을 savepoint release로 처리하기 때문에 동일 session identity map만으로는 router 쓴 데이터가 안 보임, 명시적 commit + 재조회로 봐야 함.
+  - 시나리오: POST happy path(201 + Owner 멤버십 insert + audit.create row with after JSON) / POST duplicate slug 409 / POST invalid slug 422 / GET list returns only caller's memberships / GET list SuperAdmin sees all / PATCH editor allowed + audit.update with before·after / PATCH runner 403 / PATCH empty body 400 / PATCH slug collision 409 / DELETE owner + audit.delete + cascade memberships 제거 + workspace_id SET NULL 검증 / DELETE editor 403.
+
+### Decisions
+- (이번 슬라이스에서 신규 ADR 없음 — ADR-0023 §5 RBAC + §9 audit 적용)
+
+### Milestone
+- **Step 8.5a — Workspaces CRUD 완료 (2026-05-18)**: 4 신규 endpoint + Owner 자동 멤버십 + audit 페어링 + Step 8.4 audit infra 첫 production 호출처. 누적 코어 344 unit + 서버 **65 unit** + 서버 **98 it** (87 → 98, +11) + 코어 119 it = **626 tests** all green. mypy strict 코어 39 + 서버 44 src files OK, import-linter 2 contracts KEPT. 다음 슬라이스는 **Step 8.5b (Membership management)** — `/workspaces/{id}/memberships` list/add/change-role/remove. 마지막 Owner 제거 보호(워크스페이스 orphan 방지) 포함.
+
 ### Changed
 - (없음)
 

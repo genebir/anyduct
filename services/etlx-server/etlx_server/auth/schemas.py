@@ -59,6 +59,10 @@ class OidcCallbackResponse(TokenPair):
     return_to: str | None = None
 
 
+_SLUG_PATTERN = r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$"
+_COLOR_PATTERN = r"^#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+
+
 class WorkspaceSummary(BaseModel):
     """Compact workspace identity used by RBAC-aware endpoints."""
 
@@ -68,6 +72,26 @@ class WorkspaceSummary(BaseModel):
     color_hex: str
     role: str | None = None
     """Caller's role in this workspace; ``None`` means SuperAdmin bypass."""
+
+
+class WorkspaceCreateRequest(BaseModel):
+    """Body of ``POST /workspaces``."""
+
+    name: str = Field(min_length=1, max_length=255)
+    slug: str = Field(min_length=1, max_length=64, pattern=_SLUG_PATTERN)
+    color_hex: str = Field(default="#FF3D8B", pattern=_COLOR_PATTERN)
+
+
+class WorkspaceUpdateRequest(BaseModel):
+    """PATCH-style body of ``PATCH /workspaces/{id}`` — all fields optional."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    slug: str | None = Field(default=None, min_length=1, max_length=64, pattern=_SLUG_PATTERN)
+    color_hex: str | None = Field(default=None, pattern=_COLOR_PATTERN)
+
+    def as_field_dict(self) -> dict[str, Any]:
+        """Return only the fields the caller actually set (``model_dump(exclude_unset=True)``)."""
+        return self.model_dump(exclude_unset=True)
 
 
 class AuditLogEntry(BaseModel):
@@ -97,5 +121,7 @@ __all__ = [
     "OidcProviderSummary",
     "RefreshRequest",
     "TokenPair",
+    "WorkspaceCreateRequest",
     "WorkspaceSummary",
+    "WorkspaceUpdateRequest",
 ]

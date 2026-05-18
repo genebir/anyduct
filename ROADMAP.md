@@ -417,31 +417,31 @@
 
 > 디자인 단일 진실은 `DESIGN.md`. 토큰 외 임의 값 금지. 진행 순서는 `DESIGN.md` §13.
 
-### 10.0 디자인 토큰 구현
-- [ ] `services/etlx-web/styles/globals.css` (CSS variables, DESIGN.md §11.1)
-- [ ] `services/etlx-web/tailwind.config.ts` (DESIGN.md §11.2)
-- [ ] 폰트 self-host (Inter Variable + Pretendard Variable + JetBrains Mono)
-- [ ] Storybook 초기화 + 토큰 sanity stories (Colors / Typography / Spacing / Radius / Motion)
-- [ ] Chromatic 또는 Playwright visual baseline
+### 10.0 디자인 토큰 구현 ✅ (2026-05-18, UI 1 slice)
+- [x] `services/etlx-web/app/globals.css` — DESIGN.md §11.1 토큰 전부 (`@theme` 블록을 통한 Tailwind v4 inline 매핑). dark default + `[data-theme="light"]` 분기. focus-visible / scrollbar / pulse keyframe 포함.
+- [x] PostCSS 설정 (`postcss.config.mjs` → `@tailwindcss/postcss`). 별도 `tailwind.config.ts` 없음 — Tailwind v4 CSS-first 구성.
+- [ ] 폰트 self-host (Inter Variable + Pretendard Variable + JetBrains Mono) — 시스템 폴백 fallback chain만 적용. self-host는 10.8 품질 게이트로 미루기.
+- [ ] Storybook + Chromatic — 10.8 품질 게이트로 묶음.
 
-### 10.1 기초 컴포넌트 (shadcn/ui → 토큰 치환)
-- [ ] Button / Input / Card / Badge / Tooltip / Tabs / Select / Dropdown / Separator
-- [ ] Toast (Sonner)
-- [ ] Sidebar (Arc-style, workspace 4px 컬러 bar)
-- [ ] Header (검색 진입 + 액션 + theme toggle)
-- [ ] Command Palette (cmdk, Cmd+K — DESIGN.md §7.5)
-- [ ] 모든 컴포넌트 Storybook story 작성
+### 10.1 기초 컴포넌트 ✅ (2026-05-18, UI 1 slice — partial)
+- [x] Button / Input / Card / DataTable / StatusBadge / EmptyState — 모두 토큰 기반, shadcn 없이 직접 작성 (Tailwind v4 + 디자인 토큰 안전성). variant 5/size 3 Button(primary gradient/secondary/ghost/destructive/outline).
+- [x] Sidebar (Arc-style, workspace 4px 컬러 인디케이터 via `box-shadow inset 4px 0`, 워크스페이스 picker dropdown, 활성 nav 핑크 강조).
+- [x] Header (페이지 title/subtitle + theme toggle + user avatar + sign-out).
+- [x] Toast (Sonner, top-right, 토큰 적용 className).
+- [ ] Badge (general-purpose) / Tooltip / Tabs / Select / Dropdown / Separator / Command Palette — 10.6 관리자 화면 또는 후속 슬라이스에서 필요할 때 추가.
+- [ ] Storybook story — 10.8.
 
-### 10.2 레이아웃 셸
-- [ ] Sidebar + Header + Content slot
-- [ ] 워크스페이스 전환 (컬러 인디케이터 슬라이드)
-- [ ] 다크/라이트 토글 + system preference + 로컬 저장
-- [ ] 페이지 전환 motion preset 적용
+### 10.2 레이아웃 셸 ✅ (2026-05-18, UI 1 slice)
+- [x] `AppShell` — signed-in이면 Sidebar + 메인 area, signed-out / `/login`은 중앙 정렬 카드.
+- [x] 워크스페이스 전환 — Sidebar dropdown + 4px 컬러 bar가 현재 선택을 반영. URL 변경 시 `useWorkspaceFromSlug` 훅이 자동 동기화.
+- [x] 다크/라이트 토글 — `ThemeProvider` + `localStorage["etlx.theme"]` (dark default).
+- [x] Auth 흐름 — `AuthProvider`가 `/auth/me` ping으로 현재 사용자 판정, 401 시 `etlx:unauthorized` 이벤트 + `/login` 리다이렉트, `next` 쿼리 보존.
+- [ ] 페이지 전환 motion preset — 작업 안 함, 후속.
 
-### 10.3 Connection 관리
-- [ ] 목록 / 생성 / 편집 / 삭제
-- [ ] 시크릿 입력 폼 (값은 즉시 backend, DB에 평문 저장 금지)
-- [ ] Test connection 버튼 + 결과 인디케이터
+### 10.3 Connection 관리 (← 작업 중, 2026-05-18 read-only 목록만 완료, 생성/편집 UI 미완)
+- [x] 목록 (`/w/[slug]/connections`) — `DataTable` + `Test` 버튼이 `POST /connections/{id}/test` 호출.
+- [ ] 생성 / 편집 / 삭제 UI (현재는 비활성화된 `New connection` 버튼만, API/YAML import로 추가 필요).
+- [ ] 시크릿 입력 폼 (값은 즉시 backend, DB에 평문 저장 금지).
 
 ### 10.4 Pipeline Builder
 - [ ] React Flow + 커스텀 노드 테마 (DESIGN.md §7.6, §11.4)
@@ -449,17 +449,19 @@
 - [ ] Properties 패널 (Pydantic schema → 자동 폼)
 - [ ] 저장 = metadata DB의 PipelineConfig JSON
 
-### 10.5 Schedule + Run 모니터링
-- [ ] cron 표현식 빌더 + cronstrue 자연어 해설
-- [ ] 다음 N회 실행 예상 시각 미리보기
-- [ ] Run 목록 (Data Table, status badge)
-- [ ] Run 상세 (timeline + 로그 + 메트릭 차트)
-- [ ] DLQ 조회 + 재처리
+### 10.5 Schedule + Run 모니터링 (← 작업 중, 2026-05-18 read-only만 완료)
+- [x] Run 목록 (Data Table, StatusBadge, 5s polling) — `/w/[slug]/runs`.
+- [x] Schedule 목록 — `/w/[slug]/schedules` (across pipelines flattened, cron/mode 표시).
+- [ ] cron 표현식 빌더 + cronstrue 자연어 해설.
+- [ ] 다음 N회 실행 예상 시각 미리보기.
+- [ ] Run 상세 (timeline + 로그 + 메트릭 차트).
+- [ ] DLQ 조회 + 재처리.
 
-### 10.6 관리자 화면
-- [ ] Workspace 관리 (생성/멤버/색)
-- [ ] 멤버 + 역할 (Owner / Editor / Viewer / Runner)
-- [ ] Audit log 뷰어 (필터, 시간 범위)
+### 10.6 관리자 화면 (← 작업 중, 2026-05-18 부분 완료)
+- [x] Workspace 목록 + 생성 — `/workspaces` (auto-Owner). 8 preset color picker.
+- [x] Workspace 상세 메타 — `/w/[slug]/settings` (read-only — name/slug/color/role).
+- [ ] 멤버 + 역할 관리 UI.
+- [ ] Audit log 뷰어 (필터, 시간 범위).
 
 ### 10.7 빈 상태 / 에러 / 로딩 패스 점검
 - [ ] 전 페이지 empty state (DESIGN.md §7.11)

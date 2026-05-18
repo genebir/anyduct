@@ -1,0 +1,183 @@
+@import "tailwindcss";
+
+/* ─────────────────────────────────────────────────────────────────────────
+   DESIGN.md §11.1 — semantic token CSS variables.
+   Defined twice: dark (default) and light (data-theme="light" on <html>).
+   Tailwind reads them through the @theme block below using `rgb(var(--…) / <a>)`.
+   ─────────────────────────────────────────────────────────────────────── */
+@layer base {
+  :root,
+  :root[data-theme="dark"] {
+    --bg-base: 10 18 40;
+    --bg-surface: 15 23 48;
+    --bg-elevated: 21 32 63;
+    --bg-overlay: 26 42 79;
+
+    --border-subtle: 31 45 84;
+    --border-default: 42 58 107;
+    --border-strong: 59 79 138;
+
+    --text-primary: 244 246 251;
+    --text-secondary: 168 179 209;
+    --text-muted: 110 122 160;
+    --text-disabled: 74 85 122;
+
+    --accent: 255 61 139;
+    --accent-hover: 255 85 153;
+    --accent-active: 255 45 124;
+
+    --success: 74 222 128;
+    --warning: 251 191 36;
+    --error: 248 113 113;
+    --info: 96 165 250;
+  }
+
+  :root[data-theme="light"] {
+    --bg-base: 248 249 253;
+    --bg-surface: 255 255 255;
+    --bg-elevated: 244 246 251;
+    --bg-overlay: 232 236 245;
+
+    --border-subtle: 226 232 240;
+    --border-default: 203 213 225;
+    --border-strong: 148 163 184;
+
+    --text-primary: 10 18 40;
+    --text-secondary: 71 85 105;
+    --text-muted: 148 163 184;
+    --text-disabled: 203 213 225;
+  }
+
+  html,
+  body {
+    height: 100%;
+  }
+
+  body {
+    background-color: rgb(var(--bg-base));
+    color: rgb(var(--text-primary));
+    font-family:
+      "Inter", "Inter Variable", "Pretendard Variable", -apple-system,
+      BlinkMacSystemFont, system-ui, sans-serif;
+    font-feature-settings: "cv11", "ss01", "ss03";
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  *:focus-visible {
+    outline: 2px solid rgb(var(--accent) / 0.7);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+
+  /* Scrollbar — keep subtle in both themes */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgb(var(--border-default) / 0.6);
+    border-radius: 8px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgb(var(--border-strong) / 0.8);
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Tailwind v4 inline theme — every utility we use maps to a token above.
+   No `bg-[#…]` arbitrary values allowed; ban enforced by code review.
+   ─────────────────────────────────────────────────────────────────────── */
+@theme {
+  --color-bg: rgb(var(--bg-base) / <alpha-value>);
+  --color-surface: rgb(var(--bg-surface) / <alpha-value>);
+  --color-elevated: rgb(var(--bg-elevated) / <alpha-value>);
+  --color-overlay: rgb(var(--bg-overlay) / <alpha-value>);
+
+  --color-border-subtle: rgb(var(--border-subtle) / <alpha-value>);
+  --color-border: rgb(var(--border-default) / <alpha-value>);
+  --color-border-strong: rgb(var(--border-strong) / <alpha-value>);
+
+  --color-text: rgb(var(--text-primary) / <alpha-value>);
+  --color-text-secondary: rgb(var(--text-secondary) / <alpha-value>);
+  --color-text-muted: rgb(var(--text-muted) / <alpha-value>);
+  --color-text-disabled: rgb(var(--text-disabled) / <alpha-value>);
+
+  --color-accent: rgb(var(--accent) / <alpha-value>);
+  --color-accent-hover: rgb(var(--accent-hover) / <alpha-value>);
+  --color-accent-active: rgb(var(--accent-active) / <alpha-value>);
+
+  --color-success: rgb(var(--success) / <alpha-value>);
+  --color-warning: rgb(var(--warning) / <alpha-value>);
+  --color-error: rgb(var(--error) / <alpha-value>);
+  --color-info: rgb(var(--info) / <alpha-value>);
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --radius-2xl: 28px;
+
+  --font-sans:
+    "Inter", "Pretendard Variable", -apple-system, BlinkMacSystemFont,
+    system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.6);
+  --shadow-accent: 0 0 0 4px rgba(255, 61, 139, 0.4);
+
+  --background-image-accent-gradient: linear-gradient(
+    135deg,
+    rgb(var(--accent)) 0%,
+    #ff7ab3 100%
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Utility classes that compose tokens — keep these tiny and semantic.
+   ─────────────────────────────────────────────────────────────────────── */
+@layer components {
+  .bg-accent-gradient {
+    background-image: linear-gradient(
+      135deg,
+      rgb(var(--accent)) 0%,
+      #ff7ab3 100%
+    );
+  }
+
+  .ring-accent {
+    box-shadow: 0 0 0 4px rgb(var(--accent) / 0.4);
+  }
+
+  .pulse-dot {
+    position: relative;
+  }
+  .pulse-dot::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: currentColor;
+    opacity: 0.4;
+    animation: pulse 1.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  }
+  @keyframes pulse {
+    0% {
+      transform: scale(1);
+      opacity: 0.4;
+    }
+    70% {
+      transform: scale(2.1);
+      opacity: 0;
+    }
+    100% {
+      transform: scale(2.1);
+      opacity: 0;
+    }
+  }
+}

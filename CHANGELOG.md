@@ -10,6 +10,22 @@
 ## [Unreleased]
 
 ### Added
+- **Web UI foundation** [Step 10 UI 1] — `services/etlx-web` Next.js 15 / React 19 / Tailwind v4 app.
+  - **Design tokens (Step 10.0)**: `app/globals.css` carries every token from DESIGN.md §11.1 inside a `@theme` block; dark default + `[data-theme="light"]` branch + Tailwind v4 CSS-first config (no `tailwind.config.ts`). Focus-visible ring uses the accent token; scrollbars and a `pulse-dot` keyframe round out shared visual chrome. PostCSS bridge via `postcss.config.mjs` → `@tailwindcss/postcss`.
+  - **Primitives (Step 10.1)**: `components/ui/{button,input,card,data-table,status-badge,empty-state}.tsx`. Button has 5 variants × 3 sizes (primary = accent gradient + `shadow-md`, secondary/ghost/destructive/outline). `StatusBadge` covers every `RunStatus` + queued/skipped with status-tinted bg/text and a pulsing dot in `running`.
+  - **Shell (Step 10.2)**: `components/shell/{app-shell,sidebar,header}.tsx`. Sidebar is Arc-style — 4px inset color bar drives off the current workspace's `color_hex`, an inline dropdown switches workspaces with hex preview, and nav items go pink when active. Header sticks at top with theme toggle + user avatar + sign-out.
+  - **Providers** (all `"use client"`): `AuthProvider` reads JWT from `localStorage["etlx.token"]`, calls `/auth/me` on mount, listens for the `etlx:unauthorized` window event (dispatched by the API client on 401) and routes to `/login?next=...`. `ThemeProvider` persists `etlx.theme` and writes `[data-theme]` to `<html>`. `WorkspaceProvider` lists `/workspaces` and pins the current selection via `etlx.workspace` localStorage.
+  - **API client** (`lib/api.ts`): typed `fetch` wrapper, DTOs mirror `etlx_server.auth.schemas` exactly so the FE never translates names. Endpoint groups: `workspacesApi`, `connectionsApi`, `pipelinesApi`, `schedulesApi`, `runsApi`. Tokens are read per-call (no in-memory cache) so multi-tab sign-in/out doesn't desync; the base URL falls back to `http://localhost:8000` if `NEXT_PUBLIC_ETLX_API_URL` is unset.
+  - **Pages**:
+    - `/login` — email/password form → `POST /auth/login`, stores access + refresh, toasts on failure, honors `?next=`.
+    - `/workspaces` — list + create flow (auto-owner via `POST /workspaces`), 8 preset color picker matching DESIGN.md §3.5.
+    - `/w/[slug]/connections` — list + per-row `Test` button hitting `POST /connections/{id}/test`, results toasted.
+    - `/w/[slug]/pipelines` — list with `Open builder` link (placeholder for UI 2) + `Trigger` button calling `POST /pipelines/{id}/trigger`.
+    - `/w/[slug]/schedules` — flattened across pipelines (cron + mode + active state).
+    - `/w/[slug]/runs` — Run table with `StatusBadge`, 5s polling so live runs visibly progress, formatted duration / records-read-written / error class.
+    - `/w/[slug]/settings` — workspace metadata read-out.
+  - **Guardrails**: every color/spacing/radius comes from a token; no `bg-[#…]` arbitrary classes; PostCSS pipeline + Next 15 production build succeed (`pnpm --filter @etlx/web build`).
+  - **Deferred to a later slice**: Storybook + Chromatic baseline, axe-core scan, font self-host, Command Palette, member-management UI, audit log viewer, schedule cron editor, DLQ tools. Tracked under ROADMAP §10.0/10.1/10.5/10.6/10.8.
 - **Cron 스케줄러** [Step 9.2] — `services/etlx-server/etlx_server/scheduler/` 패키지.
   - `Scheduler(factory, *, tick_interval_seconds=10.0)` — `tick_once()`이 활성 batch 스케줄 1회 스캔, cron의 다음 firing이 도래한 행에 대해 `RunStatus.PENDING` Run을 enqueue. worker(Step 9.3a)가 그 후 SKIP-LOCKED claim.
   - "last fire" 기준은 `MAX(runs.scheduled_at) WHERE schedule_id=…` — 별도 컬럼/마이그레이션 없음. 첫 firing은 `schedule.created_at`을 base로 사용해 epoch backfill 방지.

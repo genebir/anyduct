@@ -10,6 +10,12 @@
 ## [Unreleased]
 
 ### Added
+- **Schedule CRUD + cron builder UI** [Step 10.5] — `/w/[slug]/schedules` is no longer read-only.
+  - **CronInput** (`components/schedules/cron-input.tsx`): 5-field cron text input wrapped with six preset chips (every minute / every 5 min / hourly / daily 03:00 / weekdays 09:00 / monthly), an inline human-readable description from `cronstrue` (verbose mode), and red-border invalidation on parse failure. Stream mode allows blank — the description text explains the semantics.
+  - **Schedule form** (`components/schedules/schedule-form.tsx`): create flow with mode pill picker (batch / stream — pickable only at create time per the server's immutable-mode rule), CronInput, active checkbox. Edit flow renames + cron only (mode read-only). Both validate the batch-mode-requires-cron rule client-side before submitting so a 422 from the server is the rare case rather than the common one.
+  - **Schedules page**: pipelines fetched once for the create-form pipeline picker (each schedule belongs to one pipeline). Each row gets toggle (pause/resume via `POST /toggle`), edit, and delete actions. `ConfirmDialog` carries forward from Step 10.3 for delete confirmation.
+  - **API surface**: `schedulesApi.create` / `update` / `delete` / `toggle` added to `lib/api.ts`, plus `ScheduleCreateBody` / `ScheduleUpdateBody` typed bodies matching the server's request schemas.
+  - **New dep**: `cronstrue ^3.4.x`. Verified by `pnpm --filter @etlx/web build` — schedules route is 12.6 kB / 136 kB first-load JS (was 2.62 kB read-only); cronstrue weighs ~10 kB gzipped.
 - **Connection create/edit/delete UI** [Step 10.3] — `/w/[slug]/connections` is no longer read-only.
   - **Connector schema catalog** (`lib/connector-schemas.ts`): per-connector list of fields with type / required / default / placeholder / `isSecret`. Mirrors the `__init__` signatures of `postgres` / `mysql` / `sqlite` / `s3` / `kafka` exactly so the form never emits a knob the runtime wouldn't accept.
   - **Create form** (`components/connections/connection-form.tsx`): name + connector-type pill picker + schema-driven field grid. Secret fields render as `type=password` inputs; the wire-format builder turns each filled secret into a `{"$secret": "<field_key>"}` marker in `config` plus a matching entry in `secrets`, so plaintext only travels over TLS and never reaches the metadata DB (`SecretWalker` server-side enforces this).

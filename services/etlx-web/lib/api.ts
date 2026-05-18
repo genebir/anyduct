@@ -333,10 +333,50 @@ export const pipelinesApi = {
     }),
 };
 
+export interface ScheduleCreateBody {
+  name: string;
+  mode: PipelineMode;
+  cron_expr: string | null;
+  is_active?: boolean;
+  config_overrides?: Record<string, unknown>;
+}
+
+export interface ScheduleUpdateBody {
+  name?: string;
+  cron_expr?: string | null;
+  is_active?: boolean;
+  config_overrides?: Record<string, unknown>;
+}
+
 export const schedulesApi = {
   list: (workspaceId: string, pipelineId: string) =>
     api<ScheduleSummary[]>(
       `/workspaces/${workspaceId}/pipelines/${pipelineId}/schedules`,
+    ),
+  create: (workspaceId: string, pipelineId: string, body: ScheduleCreateBody) =>
+    api<ScheduleSummary>(
+      `/workspaces/${workspaceId}/pipelines/${pipelineId}/schedules`,
+      { method: "POST", json: body },
+    ),
+  update: (
+    workspaceId: string,
+    pipelineId: string,
+    id: string,
+    body: ScheduleUpdateBody,
+  ) =>
+    api<ScheduleSummary>(
+      `/workspaces/${workspaceId}/pipelines/${pipelineId}/schedules/${id}`,
+      { method: "PATCH", json: body },
+    ),
+  delete: (workspaceId: string, pipelineId: string, id: string) =>
+    api<void>(
+      `/workspaces/${workspaceId}/pipelines/${pipelineId}/schedules/${id}`,
+      { method: "DELETE" },
+    ),
+  toggle: (workspaceId: string, pipelineId: string, id: string) =>
+    api<ScheduleSummary>(
+      `/workspaces/${workspaceId}/pipelines/${pipelineId}/schedules/${id}/toggle`,
+      { method: "POST" },
     ),
 };
 

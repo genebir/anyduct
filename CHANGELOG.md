@@ -10,6 +10,13 @@
 ## [Unreleased]
 
 ### Added
+- **Workspace dashboard / home page** [Step 10.6] — new `/w/[slug]` route is the workspace entry point.
+  - **Stat cards** (4-up grid): pipelines, active schedules (with "N paused" subtext), connections, runs today (with "N in last batch" subtext). Each card links to its respective detail page; values render `—` while loading so the cards don't pop in.
+  - **Recent runs** (left card, 2/3 width): newest 10 runs with `StatusBadge`, run id, pipeline id, "scheduled vs manual" hint, duration, and chevron — links into the existing Run detail page.
+  - **Recent failures** (right card, 1/3 width): up to 5 failed runs from the latest batch, each in a red-tinted card with `error_class` headline and "Xm ago" relative timestamp. Renders a green "Nothing failing right now" badge when there are no failures, so the empty state feels reassuring rather than empty.
+  - **Polling**: page refreshes every 10 s (longer than the run-detail page since this is a glance view, not an active-monitor view).
+  - **Routing changes**: sidebar gets an "Overview" nav entry pointing to `/w/[slug]`, listed first. The workspaces list cards now land users on `/w/[slug]` instead of `/w/[slug]/connections`. Sidebar active-state detection now matches the overview entry by exact equality so nested routes don't keep it highlighted.
+  - Builder route `/w/[slug]` weighs 3.98 kB / 131 kB; 12 total routes now.
 - **Recorder periodic drain (live log tail)** [Step 9.3c / 10.5] — opt-in mid-run flushing for `RunRecorder`.
   - `RunRecorder` gains a `flush_interval_seconds: float | None = None` parameter. When set, an `asyncio` background task wakes up every N seconds and commits the snapshot of pending log + metric entries through a fresh session from the factory. Producers (structlog processor, `RecordingMetrics`) stay zero-lock; the timer task is the only writer, and it serializes against the `__aexit__` final flush via the existing stop event.
   - Default stays at `None` so unit tests using the shared `_SessionFactoryAdapter` (where the executor + recorder share one `AsyncSession`) keep working — concurrent `session.commit()` calls aren't safe on one async session, and the periodic path would deadlock.

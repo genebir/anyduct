@@ -9,6 +9,7 @@ import {
   CalendarClockIcon,
   ChevronsUpDownIcon,
   GitBranchIcon,
+  HomeIcon,
   ScrollTextIcon,
   SettingsIcon,
   UsersIcon,
@@ -25,6 +26,11 @@ interface NavLink {
 }
 
 const NAV: NavLink[] = [
+  {
+    href: (s) => `/w/${s}`,
+    label: "Overview",
+    icon: <HomeIcon size={18} />,
+  },
   {
     href: (s) => `/w/${s}/connections`,
     label: "Connections",
@@ -153,7 +159,14 @@ export function Sidebar() {
         </div>
         {NAV.map((link) => {
           const href = slug ? link.href(slug) : "/workspaces";
-          const active = pathname.startsWith(`/w/${slug}/${link.label.toLowerCase()}`);
+          // Overview href is exactly /w/<slug> — every other workspace route
+          // is /w/<slug>/<segment>, so "starts with overview's href" would
+          // also match every nested page. Match exactly for the overview
+          // entry, prefix-match for the rest.
+          const active =
+            link.label === "Overview"
+              ? pathname === href
+              : pathname.startsWith(href);
           return (
             <Link
               key={link.label}

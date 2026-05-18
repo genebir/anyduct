@@ -179,7 +179,7 @@ function WorkspaceCard({
 }) {
   return (
     <Link
-      href={`/w/${workspace.slug}/connections`}
+      href={`/w/${workspace.slug}`}
       onClick={() => onSelect(workspace.id)}
       className="group block"
     >

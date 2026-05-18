@@ -638,6 +638,32 @@
 ### Milestone
 - **Step 8.5b — Membership management 완료 (2026-05-18)**: 4 신규 endpoint + 마지막 Owner 보호 + audit 페어링. 누적 코어 344 unit + 서버 **65 unit** + 서버 **113 it** (98 → 113, +15) + 코어 119 it = **641 tests** all green. mypy strict 코어 39 + 서버 45 src files OK, import-linter 2 contracts KEPT. 다음 슬라이스는 **Step 8.5c (Connections CRUD)** — workspace-scoped `/connections` + 시크릿은 Secret backend(Vault/AWS SM/GCP SM/File)에 즉시 위임, DB에는 ref만 + `POST /{conn_id}/test`.
 
+- **Connections CRUD + secret backend integration + test endpoint** [Step 8.5c]
+  - 새 `services/etlx-server/etlx_server/connections/` 패키지 (단일 책임, OOP-normalized):
+    * `repository.py` — `ConnectionRepository.list_for_workspace`/`get`/`add`(pre-minted UUID, UNIQUE → `ConnectionNameTakenError`)/`update`(필드 화이트리스트 + IntegrityError → `ConnectionNameTakenError`)/`delete` + `snapshot()` 헬퍼.
+    * `secrets.py` — `SecretWalker.sanitize(config, secrets, ws_id, conn_id)`가 `{"$secret": "key"}` sentinel을 `${SECRET:etlx/{ws}/{conn}/{key}}` placeholder로 치환 + `(sanitized, refs)` 반환. orphan 마커(`config`에 있으나 `secrets`에 없음) → `SecretMarkerError`, orphan 값(반대) → 같은 예외. `write_secrets`는 backend.set 호출 — read-only backend(`EnvSecretBackend`) NotImplementedError → `SecretBackendReadOnlyError`. `delete_paths`는 best-effort.
+    * `tester.py` — `ConnectionTester(backend).run(connection)`가 `${SECRET:...}` placeholder를 backend.get으로 resolve → `ConnectorRegistry.get(type)` (RegistryError/ConfigError catch → 친절한 에러) → `asyncio.to_thread(_run_blocking_health_check, klass, options)`로 sync connect/health_check/close 실행. 결과는 `ConnectionTestOutcome(ok, error)`.
+  - `routers/connections.py` 6 신규 엔드포인트 (`/workspaces/{ws}/connections` 접두):
+    * `GET ""` Viewer+, `GET "/{id}"` Viewer+
+    * `POST ""` Editor+ (201) — UUID 사전 mint → walker sanitize → backend.set → repo.add → audit.create. DB 실패 시 방금 쓴 backend secret을 best-effort 정리.
+    * `PATCH "/{id}"` Editor+ — name only 또는 config+secrets 동기화. 빈 body 400. `secrets` without `config` 400. 새 config에 없어진 path는 backend.delete, 새 path는 backend.set. 실패 시 새로 쓴 path만 정리.
+    * `DELETE "/{id}"` Editor+ (204) — row 삭제 후 backend.delete_paths(old refs). audit row 보존.
+    * `POST "/{id}/test"` Runner+ — 위 `ConnectionTester` 호출, `{ok, error}` 반환.
+  - **ADR-0017 §6 완전 준수**: 평문은 절대 DB에 안 저장, 응답에도 안 노출(placeholder만). connection UUID를 backend write 전에 mint해서 경로가 row 평생 안정 — rename에도 secret 안 옮겨감.
+  - `auth/schemas.py`: `ConnectionSummary`(workspace_id/name/type/config_json/secret_refs), `ConnectionCreateRequest`(name + type + config + secrets), `ConnectionUpdateRequest`(모든 필드 optional — PATCH semantics), `ConnectionTestResult(ok, error)`.
+  - `settings.py` 확장: `secret_backend`(default `env`), `secret_backend_file_path`(file backend용).
+  - `app_factory._build_secret_backend(settings)`가 lifespan에서 `get_secret_backend(name, **opts)` 호출, `app.state.secret_backend` attach. `dependencies.get_secret_backend_dep` Depends.
+  - `app.include_router(connections_router.router)`.
+- **테스트 정규화** [Step 8.5c]
+  - `services/etlx-server/tests/db/test_connections_router.py` — 18 신규 it. `_build_app(session, backend=...)`가 `StaticSecretBackend()`(write 가능) 또는 `EnvSecretBackend()`(read-only 403 검증) 주입. SQLite `:memory:`로 `POST /test` happy path 검증 — 외부 인프라 0.
+  - 시나리오: POST happy(secret + placeholder 형식 + backend path 검증 + audit.after_json에 secret_refs) / orphan marker 422 / orphan value 422 / EnvSecretBackend 503 / dup 409 / Viewer 403 / list workspace 단위 / cross-ws 404 / PATCH name only / PATCH secret rotation(old path backend.delete + new path backend.set) / 빈 PATCH 400 / secrets-without-config 400 / DELETE row + backend + audit / DELETE 404 / test endpoint sqlite ok=True / unknown connector type ok=False + RegistryError 메시지 / secret resolve 후 test ok=True / Viewer test 403.
+
+### Decisions
+- (이번 슬라이스에서 신규 ADR 없음 — ADR-0017 §6 + ADR-0023 §5/§9 적용)
+
+### Milestone
+- **Step 8.5c — Connections CRUD + test 완료 (2026-05-18)**: 6 신규 endpoint + Secret backend 완전 통합 + 평문 0 + `POST /test`로 핵심 connector smoke 검증. 누적 코어 344 unit + 서버 **65 unit** + 서버 **131 it** (113 → 131, +18) + 코어 119 it = **659 tests** all green. mypy strict 코어 39 + 서버 50 src files OK, import-linter 2 contracts KEPT. 다음 슬라이스는 **Step 8.5d (Pipelines CRUD + 버전 관리)** — `/workspaces/{ws}/pipelines` + `GET /{pid}/versions`. Step 7.3 yaml_sync의 PipelineVersion idempotency 패턴(config_json diff 시에만 새 version 생성) 재사용.
+
 ### Changed
 - (없음)
 

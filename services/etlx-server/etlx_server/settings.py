@@ -124,6 +124,20 @@ class Settings(BaseSettings):
         "JWKS, token endpoint, userinfo).",
     )
 
+    # --- secrets (Step 8.5c, ADR-0017 §6) ----------------------------------
+    secret_backend: str = Field(
+        default="env",
+        description="Secret backend identifier passed to "
+        "``etl_plugins.config.secrets.get_secret_backend``: one of env / "
+        "static / file / vault / aws_sm / gcp_sm. Connection mutations that "
+        "carry secret values require a backend with write support (i.e. not "
+        "``env``).",
+    )
+    secret_backend_file_path: str | None = Field(
+        default=None,
+        description="Path argument forwarded when ``secret_backend=file``.",
+    )
+
     @property
     def docs_enabled(self) -> bool:
         """Hide /docs and /redoc in production by default."""

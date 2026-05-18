@@ -117,6 +117,53 @@ class MembershipUpdateRequest(BaseModel):
     role: Literal["owner", "editor", "runner", "viewer"]
 
 
+class ConnectionSummary(BaseModel):
+    """One row of the connections response. ``config_json`` carries the
+    ``${SECRET:...}`` placeholders — never the resolved values."""
+
+    id: UUID
+    workspace_id: UUID
+    name: str
+    type: str
+    config_json: dict[str, Any]
+    secret_refs: list[str]
+
+
+class ConnectionCreateRequest(BaseModel):
+    """Body of ``POST /workspaces/{id}/connections``.
+
+    ``config`` may contain ``{"$secret": "<key>"}`` markers wherever a string
+    would go; each referenced key must appear in ``secrets``. Extra keys in
+    ``secrets`` (not referenced from config) → 422.
+    """
+
+    name: str = Field(min_length=1, max_length=255)
+    type: str = Field(min_length=1, max_length=64)
+    config: dict[str, Any] = Field(default_factory=dict)
+    secrets: dict[str, str] = Field(default_factory=dict)
+
+
+class ConnectionUpdateRequest(BaseModel):
+    """PATCH body — every field optional.
+
+    Touching ``config`` always re-syncs secrets: pre-existing backend
+    entries that are no longer referenced get deleted, and new secret keys
+    must be supplied via ``secrets``. Updating only ``name`` is allowed
+    without re-sending config/secrets.
+    """
+
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    config: dict[str, Any] | None = None
+    secrets: dict[str, str] | None = None
+
+
+class ConnectionTestResult(BaseModel):
+    """Response from ``POST /connections/{id}/test``."""
+
+    ok: bool
+    error: str | None = None
+
+
 class AuditLogEntry(BaseModel):
     """One row of the ``audit_log`` table, shaped for the ``/audit`` response."""
 
@@ -137,6 +184,10 @@ class AuditLogEntry(BaseModel):
 
 __all__ = [
     "AuditLogEntry",
+    "ConnectionCreateRequest",
+    "ConnectionSummary",
+    "ConnectionTestResult",
+    "ConnectionUpdateRequest",
     "CurrentUser",
     "LoginRequest",
     "MembershipCreateRequest",

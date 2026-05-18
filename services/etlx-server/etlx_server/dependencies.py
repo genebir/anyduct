@@ -12,6 +12,7 @@ from collections.abc import AsyncIterator
 from fastapi import Request
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
+from etl_plugins.config.secrets import SecretBackend
 from etlx_server.settings import Settings
 
 
@@ -39,4 +40,15 @@ async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
             raise
 
 
-__all__ = ["get_engine", "get_session", "get_session_factory", "get_settings"]
+def get_secret_backend_dep(request: Request) -> SecretBackend:
+    """Return the process-wide :class:`SecretBackend` attached at startup."""
+    return request.app.state.secret_backend  # type: ignore[no-any-return]
+
+
+__all__ = [
+    "get_engine",
+    "get_secret_backend_dep",
+    "get_session",
+    "get_session_factory",
+    "get_settings",
+]

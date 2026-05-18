@@ -18,6 +18,7 @@ from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from etl_plugins.config.secrets import SecretBackend, get_secret_backend
 from etlx_server import __version__ as server_version
 from etlx_server.audit.middleware import AuditRequestMetaMiddleware
 from etlx_server.auth.jwt_service import JwtService
@@ -27,6 +28,7 @@ from etlx_server.auth.password_service import PasswordService
 from etlx_server.db.session import make_engine, make_session_factory
 from etlx_server.routers import audit as audit_router
 from etlx_server.routers import auth as auth_router
+from etlx_server.routers import connections as connections_router
 from etlx_server.routers import health as health_router
 from etlx_server.routers import memberships as memberships_router
 from etlx_server.routers import meta as meta_router
@@ -84,6 +86,14 @@ def _build_oidc_service(settings: Settings) -> OidcService | None:
     )
 
 
+def _build_secret_backend(settings: Settings) -> SecretBackend:
+    """Construct the configured :class:`SecretBackend`. Honors Settings.secret_backend."""
+    opts: dict[str, str] = {}
+    if settings.secret_backend_file_path:
+        opts["file_path"] = settings.secret_backend_file_path
+    return get_secret_backend(settings.secret_backend, **opts)
+
+
 def _build_lifespan(settings: Settings) -> Lifespan:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -103,6 +113,7 @@ def _build_lifespan(settings: Settings) -> Lifespan:
         oidc = _build_oidc_service(settings)
         if oidc is not None:
             app.state.oidc_service = oidc
+        app.state.secret_backend = _build_secret_backend(settings)
         try:
             yield
         finally:
@@ -150,6 +161,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(oidc_router.router)
     app.include_router(workspaces_router.router)
     app.include_router(memberships_router.router)
+    app.include_router(connections_router.router)
     app.include_router(audit_router.router)
     return app
 

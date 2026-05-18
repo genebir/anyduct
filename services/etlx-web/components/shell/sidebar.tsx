@@ -9,6 +9,7 @@ import {
   CalendarClockIcon,
   ChevronsUpDownIcon,
   GitBranchIcon,
+  ScrollTextIcon,
   SettingsIcon,
   UsersIcon,
   WorkflowIcon,
@@ -48,6 +49,11 @@ const NAV: NavLink[] = [
     href: (s) => `/w/${s}/members`,
     label: "Members",
     icon: <UsersIcon size={18} />,
+  },
+  {
+    href: (s) => `/w/${s}/audit`,
+    label: "Audit",
+    icon: <ScrollTextIcon size={18} />,
   },
   {
     href: (s) => `/w/${s}/settings`,

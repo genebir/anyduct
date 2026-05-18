@@ -261,6 +261,36 @@ export const workspacesApi = {
     api<WorkspaceSummary>("/workspaces", { method: "POST", json: body }),
 };
 
+export interface AuditLogEntry {
+  id: string;
+  actor_user_id: string | null;
+  workspace_id: string | null;
+  action: string;
+  resource_type: string;
+  resource_id: string | null;
+  before_json: Record<string, unknown> | null;
+  after_json: Record<string, unknown> | null;
+  ip: string | null;
+  user_agent: string | null;
+  created_at: string;
+}
+
+export const auditApi = {
+  query: (
+    workspaceId: string,
+    query: {
+      actor_user_id?: string;
+      resource_type?: string;
+      resource_id?: string;
+      limit?: number;
+      offset?: number;
+    } = {},
+  ) =>
+    api<AuditLogEntry[]>("/audit", {
+      query: { workspace_id: workspaceId, ...query },
+    }),
+};
+
 export const membershipsApi = {
   list: (workspaceId: string) =>
     api<MembershipSummary[]>(`/workspaces/${workspaceId}/memberships`),

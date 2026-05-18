@@ -10,6 +10,11 @@
 ## [Unreleased]
 
 ### Added
+- **Audit log viewer** [Step 10.6] — `/w/[slug]/audit` with sidebar nav entry.
+  - **Filters**: resource type `<select>` (workspace / membership / connection / pipeline / schedule / run + "All"), resource ID exact match. Both are pushed straight into the `?resource_type` / `?resource_id` query params of `GET /audit?workspace_id=…` — the server already enforces "must be a member or SuperAdmin" so no UI-side ACL.
+  - **Row expansion**: each row is a single line (timestamp · action chip · resource_type+id · actor truncated UUID). Clicking expands into a two-column `before_json` / `after_json` pre block so the diff is immediately visible without a separate detail page. Rows that had `before == null` AND `after == {}` collapse the chevron and disable expansion since there's nothing to show.
+  - **Pagination**: 100/page offset stepper at the bottom; Next is disabled when fewer rows came back than the page size.
+  - **API surface**: `auditApi.query` + `AuditLogEntry` type added to `lib/api.ts`. Verified by `pnpm --filter @etlx/web build` — audit route is 4.33 kB / 127 kB first-load JS, 11 total routes.
 - **Member management UI** [Step 10.6] — `/w/[slug]/members` with sidebar nav entry.
   - **List**: shows joined user identity (name / email) + role chip (color-coded per role — pink Owner / blue Editor / amber Runner / muted Viewer).
   - **Add by email** (Owner only): inline form with email + role select; matches the server contract that the email must already exist in the metadata DB (no signup flow yet — local-auth users are seeded via OIDC first-sign-in or `etlx-server` CLI).

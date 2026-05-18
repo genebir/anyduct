@@ -35,6 +35,7 @@ dependencies = [
 [project.optional-dependencies]
 postgres = ["psycopg[binary]>=3.1"]
 mysql = ["pymysql>=1.1"]
+mongodb = ["pymongo>=4.6"]
 s3 = ["boto3>=1.34", "pyarrow>=16.0"]
 kafka = ["aiokafka>=0.11"]
 airflow = ["apache-airflow>=2.10"]
@@ -56,6 +57,7 @@ etlx = "etl_plugins.cli:app"
 postgres = "etl_plugins.connectors.rdbms.postgres:PostgresConnector"
 mysql = "etl_plugins.connectors.rdbms.mysql:MySQLConnector"
 sqlite = "etl_plugins.connectors.rdbms.sqlite:SQLiteConnector"
+mongodb = "etl_plugins.connectors.nosql.mongodb:MongoDBConnector"
 s3 = "etl_plugins.connectors.object_storage.s3:S3Connector"
 kafka = "etl_plugins.connectors.stream.kafka:KafkaConnector"
 http = "etl_plugins.connectors.http.connector:HttpConnector"
@@ -87,12 +89,13 @@ dev = [
     "pre-commit>=3.8",
     "detect-secrets>=1.5",
     "yamllint>=1.35",
-    "testcontainers[postgres,minio,kafka,mysql,vault,localstack]>=4.7",
+    "testcontainers[postgres,minio,kafka,mysql,mongodb,vault,localstack]>=4.7",
     "types-PyYAML>=6.0",
     "import-linter>=2.0",       # ADR-0022 단방향 의존 자동 검증
     # 통합 테스트에서 사용 (CI 통합 테스트 잡이 자동 실행)
     "psycopg[binary]>=3.1",
     "pymysql>=1.1",
+    "pymongo>=4.6",
     "boto3>=1.34",
     "pyarrow>=16.0",
     "aiokafka>=0.11",
@@ -156,6 +159,14 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = ["pymysql", "pymysql.*"]
+ignore_missing_imports = true
+
+# pymongo ships type stubs as of 4.6, but the lazy-imported path in our
+# optional-extra connector module means mypy can still flag it when the
+# extra isn't installed in the hook's venv. We rely on pyproject's
+# [project.optional-dependencies] mongodb = ["pymongo>=4.6"] for users.
+[[tool.mypy.overrides]]
+module = ["pymongo", "pymongo.*", "bson", "bson.*"]
 ignore_missing_imports = true
 
 # passlib doesn't ship type stubs in a way our pinned mypy picks up.

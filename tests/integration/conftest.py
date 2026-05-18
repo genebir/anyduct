@@ -13,13 +13,16 @@ from uuid import uuid4
 
 import boto3
 import psycopg
+import pymongo
 import pymysql
 import pytest
 from testcontainers.kafka import KafkaContainer
 from testcontainers.minio import MinioContainer
+from testcontainers.mongodb import MongoDbContainer
 from testcontainers.mysql import MySqlContainer
 from testcontainers.postgres import PostgresContainer
 
+from etl_plugins.connectors.nosql.mongodb import MongoDBConnector
 from etl_plugins.connectors.object_storage.s3 import S3Connector
 from etl_plugins.connectors.rdbms.mysql import MySQLConnector
 from etl_plugins.connectors.rdbms.postgres import PostgresConnector
@@ -303,3 +306,50 @@ async def kafka_seeded_topic(
     finally:
         await producer.stop()
     return kafka_topic
+
+
+# =============================================================================
+# MongoDB — Step 5.3
+# =============================================================================
+
+
+@pytest.fixture(scope="session")
+def mongo_container() -> Iterator[MongoDbContainer]:
+    """A long-lived mongo:7 container shared across the test session."""
+    with MongoDbContainer("mongo:7") as container:
+        yield container
+
+
+@pytest.fixture(scope="session")
+def mongo_uri(mongo_container: MongoDbContainer) -> str:
+    """Connection URI for ``MongoDBConnector(uri=..., database=...)``."""
+    return mongo_container.get_connection_url()
+
+
+@pytest.fixture
+def mongo_collection(mongo_uri: str) -> Iterator[str]:
+    """Create a fresh collection name. Dropped on teardown.
+
+    Mongo collections are created lazily on first write, so the fixture only
+    needs to return a unique name + drop on teardown.
+    """
+    name = f"etl_test_{uuid4().hex[:8]}"
+    yield name
+    with pymongo.MongoClient(mongo_uri) as client:
+        client["test"].drop_collection(name)
+
+
+@pytest.fixture
+def mongo_seeded(mongo_uri: str, mongo_collection: str, sample_records: list[Record]) -> str:
+    """Seed ``mongo_collection`` with ``sample_records`` and return the name."""
+    with pymongo.MongoClient(mongo_uri) as client:
+        client["test"][mongo_collection].insert_many([dict(r.data) for r in sample_records])
+    return mongo_collection
+
+
+@pytest.fixture
+def mongo_connector(mongo_uri: str) -> Iterator[MongoDBConnector]:
+    """A fresh, unconnected MongoDBConnector. Closed on teardown."""
+    conn = MongoDBConnector(uri=mongo_uri, database="test")
+    yield conn
+    conn.close()

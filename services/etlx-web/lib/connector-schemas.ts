@@ -95,6 +95,48 @@ const SQLITE: ConnectorSchema = {
   ],
 };
 
+const MONGODB: ConnectorSchema = {
+  type: "mongodb",
+  label: "MongoDB",
+  description: "pymongo-backed batch source + sink for MongoDB document stores.",
+  fields: [
+    {
+      key: "uri",
+      label: "URI",
+      type: "string",
+      required: true,
+      placeholder: "mongodb://localhost:27017",
+      help: "Standard mongodb:// or mongodb+srv:// connection string.",
+    },
+    { key: "database", label: "Database", type: "string", required: true },
+    {
+      key: "username",
+      label: "Username",
+      type: "string",
+      help: "Optional — overrides any credentials embedded in the URI.",
+    },
+    {
+      key: "password",
+      label: "Password",
+      type: "password",
+      isSecret: true,
+    },
+    {
+      key: "auth_source",
+      label: "Auth source",
+      type: "string",
+      placeholder: "admin",
+      help: "Database to authenticate against, when different from the working database.",
+    },
+    {
+      key: "timeout_ms",
+      label: "Timeout (ms)",
+      type: "number",
+      defaultValue: 30000,
+    },
+  ],
+};
+
 const S3: ConnectorSchema = {
   type: "s3",
   label: "S3 / MinIO",
@@ -210,6 +252,7 @@ export const CONNECTOR_SCHEMAS: ConnectorSchema[] = [
   POSTGRES,
   MYSQL,
   SQLITE,
+  MONGODB,
   S3,
   KAFKA,
   HTTP,

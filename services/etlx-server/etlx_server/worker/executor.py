@@ -49,6 +49,7 @@ from etlx_server.pipelines.runtime import (
     referenced_connection_names,
     resolve_placeholders,
 )
+from etlx_server.worker.heartbeat import heartbeat_loop
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +57,11 @@ logger = logging.getLogger(__name__)
 # error_class is a short class name; error_message can be arbitrarily long
 # in Python, but we don't want to bloat the runs table.
 _MAX_ERROR_MESSAGE_LEN = 2000
+
+# How often to refresh ``runs.heartbeat_at`` during execution. The reaper
+# (Step 9.3b) uses this stamp to spot stuck workers; the interval just
+# needs to be comfortably below the reaper's idle threshold (default 60s).
+_HEARTBEAT_INTERVAL_SECONDS = 10.0
 
 
 class _PipelineBuildError(Exception):
@@ -114,6 +120,19 @@ class RunExecutor:
             # thread so connector drivers (notably sqlite3) that bind
             # to a specific thread don't trip on cross-thread reuse.
             ctx = Context(pipeline_name=pipeline_obj.name, run_id=str(run.id))
+            # Heartbeat task runs on the asyncio main loop with its own
+            # session; while pipeline.run blocks the thread-pool worker,
+            # this keeps ``heartbeat_at`` fresh so the reaper doesn't
+            # mistake an honest long-running run for a zombie.
+            heartbeat_stop = asyncio.Event()
+            heartbeat_task = asyncio.create_task(
+                heartbeat_loop(
+                    self._factory,
+                    run.id,
+                    stop_event=heartbeat_stop,
+                    interval_seconds=_HEARTBEAT_INTERVAL_SECONDS,
+                )
+            )
             try:
                 result = await asyncio.to_thread(
                     _run_pipeline_in_thread, pipeline_obj, ctx, connectors
@@ -125,6 +144,10 @@ class RunExecutor:
                 # on ``RunResult`` isn't accessible — we leave it null and just
                 # log the error.
                 _record_failure(run, type(e).__name__, str(e))
+            finally:
+                heartbeat_stop.set()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await heartbeat_task
             await session.commit()
             return run
 

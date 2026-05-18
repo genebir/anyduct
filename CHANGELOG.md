@@ -779,6 +779,29 @@
 ### Milestone
 - **Step 9.3a — Worker batch lifecycle 완료 (2026-05-18)**: 3 신규 패키지 모듈 + 1 신규 공유 helper + 1 신규 CLI 서브커맨드 + 1 코어 버그 수정 + 2 비결정성 테스트 수정. 누적 코어 344 unit + 서버 **65 unit** + 서버 **204 it** (193 → 204, +11) + 코어 119 it = **732 tests** all green. mypy strict 코어 39 + 서버 65 src files OK, import-linter 2 contracts KEPT. ADR-0021 in-DB queue 첫 구현 — 신규 ADR 없음. 다음은 **Step 9.2 (스케줄러)** — schedules 테이블 tick으로 pending Run 생성 — 또는 **Step 9.3b (heartbeat + zombie reaper)** — stuck running row 회수.
 
+- **Heartbeat-during-execution + ZombieReaper** [Step 9.3b]
+  - 새 `services/etlx-server/etlx_server/worker/heartbeat.py`:
+    * `heartbeat_loop(factory, run_id, *, stop_event, interval_seconds)` async fn — asyncio main loop에서 별도 fresh session으로 주기적 `UPDATE runs SET heartbeat_at=now()`. `stop_event` 우선 wait → timeout이면 stamp. exception은 log + 계속 (transient DB hiccup이 in-flight pipeline 죽이지 않게).
+  - `RunExecutor.execute` 갱신: `asyncio.to_thread(pipeline.run, ...)` *호출 전에* `heartbeat_loop` task spawn → finally에서 `stop_event.set()` + `await heartbeat_task` (CancelledError suppress). 기본 interval `_HEARTBEAT_INTERVAL_SECONDS=10.0` — reaper의 기본 idle threshold(60s)보다 6배 작게 유지.
+  - 새 `services/etlx-server/etlx_server/worker/reaper.py`:
+    * `ZombieReaper(factory, *, heartbeat_timeout_seconds=60, scan_interval_seconds=30, batch_limit=100)` — async `run()` 폴 루프 + `reap_once()` 한 번 스캔.
+    * `reap_once()`: `SELECT ... WHERE status='running' AND heartbeat_at IS NOT NULL AND heartbeat_at < cutoff ORDER BY heartbeat_at LIMIT N FOR UPDATE SKIP LOCKED` → 각 행을 `status=failed` + `error_class='ZombieReaped'` + `error_message='worker {id} stopped heartbeating {s}s ago (threshold {t}s)'` + `finished_at=now`로 전이. SKIP LOCKED라 worker가 막 heartbeat 갱신 중인 row는 자동 건너뜀.
+    * **Auto-resubmit 의도적 안 함** — poison row가 worker 전체를 죽이는 thundering herd 방지. UI(Step 10)에서 ZombieReaped failure는 명시적이며, 사용자가 Step 8.6 `POST /runs/{id}/retry`로 retry 가능.
+    * `heartbeat_at IS NOT NULL` 가드 — claim된 직후 heartbeat stamp 전 microsecond 구간 보호.
+  - `etlx-server reaper run` CLI 신규 (별도 process):
+    * `--heartbeat-timeout` / `--scan-interval` / `--batch-limit` / `--log-level`. SIGTERM/SIGINT 핸들러 → `reaper.stop()`.
+    * 별도 process 이유: ① reaper crash가 worker 죽이지 않게 격리, ② 운영 스케일링이 다름(N worker마다 reaper 1대면 충분), ③ kubernetes에서 별도 Deployment.
+  - `etlx_server/worker/__init__.py` re-export 확장: `ZombieReaper` + `heartbeat_loop` 추가.
+- **테스트 정규화** [Step 9.3b]
+  - `services/etlx-server/tests/db/test_zombie_reaper.py` — 8 신규 it. `reap_once` 6: stale → failed + error_message 검증(worker_id 포함) / fresh untouched / NULL heartbeat untouched / terminal 3종(succeeded/failed/cancelled) untouched / 두 번째 reap_once는 0(idempotent) / 3 stale + batch_limit=2 → 2 + 1 + 0. `run()` loop 2: pre-set stop은 즉시 exit / 짧은 sleep 후 stop은 1 zombie reap 후 종료.
+  - `services/etlx-server/tests/db/test_worker_heartbeat.py` — 3 신규 it. heartbeat_loop가 0.5s 동안 0.1s 간격으로 stamp → heartbeat_at이 stale value(1h ago)에서 최근으로 진행 / pre-set stop은 stamp 안 함(no-op execute 보호) / 첫 iteration이 `RuntimeError` 던지는 flaky factory에서도 loop 계속 → 후속 iteration이 stamp 성공.
+
+### Decisions
+- (이번 슬라이스에서 신규 ADR 없음 — ADR-0021 worker queue 운영성 보강)
+
+### Milestone
+- **Step 9.3b — Heartbeat + ZombieReaper 완료 (2026-05-18)**: 2 신규 worker 모듈 + 1 신규 CLI 서브커맨드. 누적 코어 344 unit + 서버 **65 unit** + 서버 **215 it** (204 → 215, +11) + 코어 119 it = **743 tests** all green. mypy strict 코어 39 + 서버 67 src files OK, import-linter 2 contracts KEPT. **워커 운영성 단계 완료** — crash → zombie → 영구 stuck 시나리오가 자동 해소되며 명시적 retry로 깔끔하게 회복. 다음은 **Step 9.2 (스케줄러)** — `schedules` 테이블 tick으로 pending Run 자동 생성 — 또는 **Step 9.3c (log/metric forwarding)** — 코어 structlog → run_logs, metrics ABC → run_metrics.
+
 ### Changed
 - (없음)
 

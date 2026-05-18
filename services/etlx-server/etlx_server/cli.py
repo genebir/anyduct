@@ -30,11 +30,13 @@ from etl_plugins.config.secrets import get_secret_backend
 from etlx_server.db.models import Workspace
 from etlx_server.db.session import make_engine, make_session_factory
 from etlx_server.io.yaml_sync import export_workspace, import_yaml_dir
-from etlx_server.worker import RunWorker
+from etlx_server.worker import RunWorker, ZombieReaper
 
 app = typer.Typer(help="etlx-server administration CLI (metadata DB sync, ops).")
 worker_app = typer.Typer(help="Worker process commands.")
+reaper_app = typer.Typer(help="Zombie-run reaper process commands.")
 app.add_typer(worker_app, name="worker")
+app.add_typer(reaper_app, name="reaper")
 
 
 def _database_url() -> str:
@@ -181,6 +183,71 @@ def worker_run_cmd(
 
         try:
             await worker.run()
+        finally:
+            await engine.dispose()
+
+    asyncio.run(_run())
+
+
+@reaper_app.command("run")
+def reaper_run_cmd(
+    heartbeat_timeout: float = typer.Option(
+        60.0,
+        "--heartbeat-timeout",
+        help="Seconds since last heartbeat after which a running row is considered dead.",
+        min=5.0,
+        max=3600.0,
+    ),
+    scan_interval: float = typer.Option(
+        30.0,
+        "--scan-interval",
+        help="Seconds to wait between scans.",
+        min=1.0,
+        max=600.0,
+    ),
+    batch_limit: int = typer.Option(
+        100,
+        "--batch-limit",
+        help="Maximum rows to reap per scan.",
+        min=1,
+        max=10000,
+    ),
+    log_level: str = typer.Option("INFO", "--log-level"),
+) -> None:
+    """Run the zombie reaper poll loop until SIGTERM/SIGINT.
+
+    Scans ``runs`` for rows in ``running`` whose ``heartbeat_at`` is
+    older than ``--heartbeat-timeout`` and transitions them to
+    ``failed`` with ``error_class='ZombieReaped'``. Auto-resubmit is
+    intentionally NOT done — a poison row would otherwise take down
+    every worker that touches it.
+    """
+    logging.basicConfig(
+        level=getattr(logging, log_level.upper(), logging.INFO),
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+
+    async def _run() -> None:
+        engine = make_engine(_database_url())
+        factory = make_session_factory(engine)
+        reaper = ZombieReaper(
+            factory,
+            heartbeat_timeout_seconds=heartbeat_timeout,
+            scan_interval_seconds=scan_interval,
+            batch_limit=batch_limit,
+        )
+
+        loop = asyncio.get_running_loop()
+
+        def _shutdown(_signame: str) -> None:
+            typer.echo(f"received {_signame}, shutting down reaper")
+            reaper.stop()
+
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            loop.add_signal_handler(sig, _shutdown, sig.name)
+
+        try:
+            await reaper.run()
         finally:
             await engine.dispose()
 

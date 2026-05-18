@@ -28,6 +28,7 @@ from etlx_server.routers import auth as auth_router
 from etlx_server.routers import health as health_router
 from etlx_server.routers import meta as meta_router
 from etlx_server.routers import oidc as oidc_router
+from etlx_server.routers import workspaces as workspaces_router
 from etlx_server.settings import Settings, get_settings
 
 Lifespan = Callable[[FastAPI], AbstractAsyncContextManager[None]]
@@ -140,6 +141,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(meta_router.router)
     app.include_router(auth_router.router)
     app.include_router(oidc_router.router)
+    app.include_router(workspaces_router.router)
     return app
 
 

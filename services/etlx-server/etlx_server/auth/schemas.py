@@ -58,6 +58,17 @@ class OidcCallbackResponse(TokenPair):
     return_to: str | None = None
 
 
+class WorkspaceSummary(BaseModel):
+    """Compact workspace identity used by RBAC-aware endpoints."""
+
+    id: UUID
+    name: str
+    slug: str
+    color_hex: str
+    role: str | None = None
+    """Caller's role in this workspace; ``None`` means SuperAdmin bypass."""
+
+
 __all__ = [
     "CurrentUser",
     "LoginRequest",
@@ -66,4 +77,5 @@ __all__ = [
     "OidcProviderSummary",
     "RefreshRequest",
     "TokenPair",
+    "WorkspaceSummary",
 ]

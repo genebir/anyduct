@@ -8,7 +8,7 @@
 
 ## 현재 상태 (2026-05-18)
 
-**Steps 1–4 + Step 5.1(MySQL/SQLite) + Step 7.0~7.4 + Step 8.1 + Step 8.2 a/b 완료. 코어 344 unit + 서버 48 unit + 3 skip + 코어 119 it + 서버 59 it = 573 테스트, 24 ADR.**
+**Steps 1–4 + Step 5.1(MySQL/SQLite) + Step 7.0~7.4 + Step 8.1~8.3 완료. 코어 344 unit + 서버 63 unit + 3 skip + 코어 119 it + 서버 70 it = 599 테스트, 24 ADR.**
 **서비스화 방향 확정**: Step 7 이후로 `services/etlx-server` (FastAPI) + `services/etlx-web` (Next.js) 별도 패키지로 진행. 코어와 서비스는 단방향 의존 (서비스 → 코어). 자세한 결정은 ADR-0017.
 
 ---
@@ -307,10 +307,13 @@
 - [x] 이메일 충돌 안전성: LOCAL 계정과 동일 email 거부(409, 계정 탈취 방지), 다른 OIDC provider와 동일 email 거부(409). 동일 provider 재로그인 시 name만 갱신.
 - [x] 6 신규 unit(OidcStateSigner) + 14 신규 unit(OidcService, IdP를 `httpx.MockTransport`로 모킹 — 진짜 ID token JWT 서명/검증) + 6 신규 it(provision_oidc_user) + 11 신규 it(OIDC router 전체 플로우)
 
-### 8.3 RBAC
-- [ ] 역할: Owner / Editor / Viewer / Runner
-- [ ] 워크스페이스 단위 격리: 모든 리소스에 workspace_id, 쿼리 자동 필터
-- [ ] 의존성 주입: `Depends(require_role("editor"))`
+### 8.3 RBAC ✅ (2026-05-18)
+- [x] 역할: Owner / Editor / Runner / Viewer — `etlx_server/auth/rbac.py`가 strict hierarchy(Owner 4 > Editor 3 > Runner 2 > Viewer 1)로 모델링. `role_rank(role)` + `has_at_least(actual, required)`. Editor가 "all CRUD"이므로 trigger 포함 — Runner는 그 subset.
+- [x] 의존성 주입: `Depends(get_current_workspace)`(workspace_id path param 로딩 + 404/403) → `Depends(require_workspace_role(WorkspaceRole.X))` (role 비교 + 403). SuperAdmin(`users.is_superadmin`) 무조건 bypass — 멤버십 없어도 통과(`WorkspaceContext.role = None`).
+- [x] `WorkspaceContext` dataclass(user + workspace + role) + 도메인 분리(`MembershipRepository.get_role`, `WorkspaceRepository.get_by_id`).
+- [x] 첫 RBAC-protected 엔드포인트 `GET /workspaces/{workspace_id}` (Viewer+ 필요) — Step 8.5에서 같은 dependency stack 위에 CRUD/list/멤버 관리 확장.
+- [x] **워크스페이스 단위 격리(쿼리 자동 필터)는 Step 8.5로 이관** — 도메인 리소스 라우터가 추가되는 시점에 함께 구현해야 의미가 있음.
+- [x] 15 신규 unit(rbac 9 + workspace_context 6) + 11 신규 it(membership repo 4 + workspaces router 7) — 각 역할(미인증/미존재 워크스페이스/비멤버/Viewer/Owner/SuperAdmin/malformed UUID) 경로 전부 커버.
 
 ### 8.4 Audit log
 - [ ] 미들웨어: 모든 mutating 요청에 actor + path + before/after JSON 저장
@@ -466,3 +469,4 @@
 - 2026-05-16: **Step 8.2 a/b 분리.** 단일 슬라이스가 너무 커져서 a(로컬 + JWT) / b(OIDC) 로 분할. 1 PR = 1 slice 원칙 유지.
 - 2026-05-16: **Step 8.2a (로컬 인증 + JWT) 완료.** `auth/` 하위 패키지 신설 — `JwtService`(RS256, access/refresh + verify-only 모드), `PasswordService`(bcrypt 직접 — passlib는 bcrypt 4.x와 비호환), `UserRepository`(email/id 조회), `current_user.py` DI 헬퍼 + `get_current_user` Depends, Pydantic schemas. `routers/auth.py` 4 엔드포인트(login/refresh/logout/me). app_factory가 JwtService + PasswordService를 lifespan에서 `app.state`에 attach. 15 신규 unit(JwtService 11 + PasswordService 4) + 13 신규 it(`test_auth_router.py`, `app.dependency_overrides[get_session]`로 outer-trans rollback isolation 유지). 누적 **코어 344 unit + 서버 23 unit + 코어 119 it + 서버 47 it = 533 테스트** all green. 신규 deps `bcrypt>=4.2` + `pyjwt[crypto]>=2.9` + `email-validator>=2.2`. ADR-0023 로컬 fallback + JWT 부분 구현체. 다음은 Step 8.2b (OIDC, authlib).
 - 2026-05-18: **Step 8.2b (OIDC) 완료.** `auth/` 확장 — `OidcProviderConfig`(Pydantic, provider명→`AuthMethod` 매핑), `OidcStateSigner`(RS256 키쌍 재사용, `token_type=oidc_state` 단명 JWT로 CSRF+nonce+return_to 무상태 운반), `OidcService`(provider 레지스트리, 디스커버리/JWKS 캐시, `build_authorize_url`+`handle_callback`, `httpx.AsyncClient` factory 주입 가능, PyJWT로 ID 토큰 RS256+JWKS 검증 — `authlib.jose` deprecated 회피), `UserRepository.provision_oidc_user`(LOCAL 계정/다른 OIDC provider와 email 충돌 시 `OidcEmailCollisionError`로 거부, 동일 provider 재로그인 시 name만 갱신). `routers/oidc.py` 3 엔드포인트(`/auth/oidc/providers`+`/login`+`/callback`) — 시크릿 노출 0, OIDC 미설정 시 503. app_factory가 `_build_oidc_service` 헬퍼로 lifespan에서 attach. 20 신규 unit(OidcStateSigner 6 + OidcService 14, IdP를 `httpx.MockTransport`로 모킹 + 진짜 ID token JWT 서명/검증으로 nonce/aud/iss/email_verified 경로 전부 커버) + 17 신규 it(provision_oidc_user 6 + OIDC 라우터 end-to-end 11). 누적 **코어 344 unit + 서버 48 unit + 코어 119 it + 서버 59 it = 570 테스트** all green, mypy strict 코어 39 + 서버 33 src files OK, lint-imports 2 KEPT. ADR-0023 OIDC 부분 구현체 — 신규 ADR 없음. 다음은 Step 8.3 (RBAC — workspace 단위 역할 + `Depends(require_role(...))`).
+- 2026-05-18: **Step 8.3 (RBAC) 완료.** `auth/` 확장 — `rbac.py`(strict hierarchy Owner>Editor>Runner>Viewer, `role_rank`/`has_at_least`), `MembershipRepository.get_role`, `WorkspaceRepository.get_by_id`, `workspace_context.py`(`WorkspaceContext` frozen dataclass + `get_current_workspace` Depends [path param `workspace_id` 자동 추출, 404/403 일관 처리, SuperAdmin bypass 시 `role=None`] + `require_workspace_role(min_role)` factory). 첫 RBAC-protected 라우터 `routers/workspaces.py` (`GET /workspaces/{workspace_id}` Viewer+) — 모듈 레벨 `_require_viewer = Depends(...)`로 ruff B008 회피. app_factory에 router 추가. `WorkspaceSummary` Pydantic 스키마(`role: str | None`로 SuperAdmin 표현). 워크스페이스 단위 격리(쿼리 자동 필터)는 도메인 리소스 라우터가 추가되는 Step 8.5로 자연 이관. 15 신규 unit(rbac 9 + workspace_context 6) + 11 신규 it(membership repo 4 + workspaces router 7 — 미인증/미존재/비멤버/Viewer/Owner/SuperAdmin/malformed UUID). 누적 **코어 344 unit + 서버 63 unit + 코어 119 it + 서버 70 it = 596 테스트** all green, mypy strict 코어 39 + 서버 38 src files OK, lint-imports 2 KEPT. ADR-0023 RBAC 부분 구현체 — 신규 ADR 없음. 다음은 Step 8.4 (Audit log — 미들웨어 + `/audit` 조회).

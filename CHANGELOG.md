@@ -555,6 +555,26 @@
 ### Milestone
 - **Step 8.2b — OIDC 완료 (2026-05-18)**: OidcService/OidcStateSigner/OidcProviderConfig + provision_oidc_user + 3 라우트(`/auth/oidc/providers`+`/login`+`/callback`). 누적 코어 344 unit + 서버 **48 unit** (23 → 48, +25) + 서버 **59 it** (47 → 59, +12, user_repository 분리 포함) + 코어 119 it = **570 tests** all green. mypy strict 코어 39 + 서버 33 src files OK, import-linter 2 contracts KEPT. 다음 슬라이스는 **Step 8.3 (RBAC)** — workspace 단위 4역할(Owner/Editor/Runner/Viewer) + `Depends(require_workspace_role(...))` + 리소스 쿼리 자동 필터.
 
+- **RBAC (workspace 단위 4역할 + 의존성 게이트)** [Step 8.3]
+  - `services/etlx-server/etlx_server/auth/rbac.py` 신규: `WorkspaceRole`을 strict hierarchy로 모델링(Owner=4>Editor=3>Runner=2>Viewer=1). `role_rank(role)` + `has_at_least(actual, required)`. Editor가 ADR-0023상 "all CRUD"이므로 trigger를 포함 — Runner는 trigger+inspect+DLQ만 가능한 Editor의 subset. 따라서 hierarchical 비교가 충분.
+  - `auth/membership_repository.py` 신규: `MembershipRepository.get_role(workspace_id, user_id) -> WorkspaceRole | None`. read-only — 멤버십 CRUD는 Step 8.5.
+  - `auth/workspace_repository.py` 신규: `WorkspaceRepository.get_by_id(workspace_id) -> Workspace | None`. read-only — 워크스페이스 CRUD는 Step 8.5.
+  - `auth/workspace_context.py` 신규: `WorkspaceContext` frozen dataclass(user + workspace + role | None) + `get_current_workspace` Depends(path param `workspace_id`를 FastAPI가 자동 추출 → WorkspaceRepository로 404 처리 → MembershipRepository로 role 조회, 비멤버 + 비SuperAdmin 시 403) + `require_workspace_role(min_role)` factory가 closure-based checker 반환(SuperAdmin 무조건 통과, 그 외엔 `has_at_least(ctx.role, min_role)` 강제, 실패 시 403 + role 정보 leak 없이 "requires X or higher" 메시지).
+  - `auth/schemas.py` 확장: `WorkspaceSummary`(id/name/slug/color_hex/`role: str | None` — SuperAdmin bypass 표현).
+  - `services/etlx-server/etlx_server/routers/workspaces.py` 신규: `GET /workspaces/{workspace_id}` — `require_workspace_role(WorkspaceRole.VIEWER)` 게이트. ruff B008 회피 위해 모듈 레벨 `_require_viewer = Depends(...)` 싱글톤. Step 8.5가 같은 dependency stack에 CRUD/list/멤버 관리 확장 예정.
+  - `app_factory.py`에 `app.include_router(workspaces_router.router)` 추가.
+- **테스트 정규화** [Step 8.3]
+  - `services/etlx-server/tests/auth/test_rbac.py` — 9 unit (rank monotonicity, 각 role의 self-satisfy, Owner는 모든 요구 만족, Viewer는 Viewer만, Runner/Editor의 정확한 경계).
+  - `services/etlx-server/tests/auth/test_workspace_context.py` — 6 unit (`require_workspace_role` checker를 직접 호출: SuperAdmin without membership / SuperAdmin as Viewer requesting Owner / exact role / higher role / lower role 403 / Viewer-on-Viewer passthrough).
+  - `services/etlx-server/tests/db/test_membership_repository.py` — 4 it (member role 조회, 비멤버 None, 미존재 workspace None, 동일 사용자의 다중 워크스페이스 role 격리).
+  - `services/etlx-server/tests/db/test_workspaces_router.py` — 7 it (실제 `/auth/login`으로 JWT 발급 후 `GET /workspaces/{id}`: 401 unauthenticated / 404 unknown / 403 non-member / 200 Viewer with role echo / 200 Owner / 200 SuperAdmin with role=None / 422 malformed UUID).
+
+### Decisions
+- (이번 슬라이스에서 신규 ADR 없음 — ADR-0023 RBAC 부분 구현체)
+
+### Milestone
+- **Step 8.3 — RBAC 완료 (2026-05-18)**: 4역할 strict hierarchy + WorkspaceContext + `Depends(require_workspace_role(...))` + 첫 RBAC-protected 라우터(`GET /workspaces/{id}`). 누적 코어 344 unit + 서버 **63 unit** (48 → 63, +15) + 서버 **70 it** (59 → 70, +11) + 코어 119 it = **596 tests** all green. mypy strict 코어 39 + 서버 38 src files OK, import-linter 2 contracts KEPT. 워크스페이스 단위 격리(쿼리 자동 필터)는 Step 8.5의 도메인 CRUD가 들어올 때 함께 구현 — 8.3 단독으로는 적용 대상이 없어 자연 이관. 다음 슬라이스는 **Step 8.4 (Audit log)** — mutating 요청 미들웨어 + actor/before/after JSON 기록 + `/audit?resource=&actor=` 조회.
+
 ### Changed
 - (없음)
 

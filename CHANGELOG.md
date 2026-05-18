@@ -10,6 +10,14 @@
 ## [Unreleased]
 
 ### Added
+- **Member management UI** [Step 10.6] — `/w/[slug]/members` with sidebar nav entry.
+  - **List**: shows joined user identity (name / email) + role chip (color-coded per role — pink Owner / blue Editor / amber Runner / muted Viewer).
+  - **Add by email** (Owner only): inline form with email + role select; matches the server contract that the email must already exist in the metadata DB (no signup flow yet — local-auth users are seeded via OIDC first-sign-in or `etlx-server` CLI).
+  - **Role change** (Owner only): inline `<select>` on each row hits `PATCH /memberships/{user_id}`; toasts the new role. The server's `LastOwnerError` 409 is surfaced unmodified in the error toast so the message is clear ("cannot remove the last Owner of workspace X").
+  - **Remove** (Owner only): trash button → `ConfirmDialog`. The current user's own row shows "You" instead of a remove button so a self-eject can't lock the user out by accident.
+  - **Non-owner view**: read-only — the page renders a "Read-only" card explaining that only Owners can manage members. Detection uses `WorkspaceSummary.role`; SuperAdmin bypass (`role === null`) is treated as Owner.
+  - **API surface**: `membershipsApi.list` / `add` / `updateRole` / `remove` added to `lib/api.ts`.
+  - Verified by `pnpm --filter @etlx/web build` — members route is 5.19 kB / 128 kB first-load JS, 10 total routes.
 - **Schedule CRUD + cron builder UI** [Step 10.5] — `/w/[slug]/schedules` is no longer read-only.
   - **CronInput** (`components/schedules/cron-input.tsx`): 5-field cron text input wrapped with six preset chips (every minute / every 5 min / hourly / daily 03:00 / weekdays 09:00 / monthly), an inline human-readable description from `cronstrue` (verbose mode), and red-border invalidation on parse failure. Stream mode allows blank — the description text explains the semantics.
   - **Schedule form** (`components/schedules/schedule-form.tsx`): create flow with mode pill picker (batch / stream — pickable only at create time per the server's immutable-mode rule), CronInput, active checkbox. Edit flow renames + cron only (mode read-only). Both validate the batch-mode-requires-cron rule client-side before submitting so a 422 from the server is the rare case rather than the common one.

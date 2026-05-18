@@ -10,6 +10,7 @@ import {
   ChevronsUpDownIcon,
   GitBranchIcon,
   SettingsIcon,
+  UsersIcon,
   WorkflowIcon,
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
@@ -42,6 +43,11 @@ const NAV: NavLink[] = [
     href: (s) => `/w/${s}/runs`,
     label: "Runs",
     icon: <ActivityIcon size={18} />,
+  },
+  {
+    href: (s) => `/w/${s}/members`,
+    label: "Members",
+    icon: <UsersIcon size={18} />,
   },
   {
     href: (s) => `/w/${s}/settings`,

@@ -461,11 +461,10 @@
 - [ ] Live-tail via SSE (현재는 polling — Step 9.3c 단일-flush 디자인이라 logs는 run 종료 시점에만 보임. 진정한 live-tail은 recorder의 periodic drain 재설계 또는 SSE 쪽에서 worker process의 in-memory queue 직접 노출 필요).
 - [ ] DLQ 조회 + 재처리.
 
-### 10.6 관리자 화면 (← 작업 중, 2026-05-18 부분 완료)
+### 10.6 관리자 화면 (← 작업 중, 2026-05-18 멤버 관리까지 완료)
 - [x] Workspace 목록 + 생성 — `/workspaces` (auto-Owner). 8 preset color picker.
 - [x] Workspace 상세 메타 — `/w/[slug]/settings` (read-only — name/slug/color/role).
-- [ ] 멤버 + 역할 관리 UI.
-- [ ] Audit log 뷰어 (필터, 시간 범위).
+- [x] **멤버 + 역할 관리 UI** (2026-05-18) — `/w/[slug]/members`. 이메일로 추가(`POST /memberships`), 역할 인라인 변경(`PATCH /memberships/{user_id}` — owner/editor/runner/viewer select), 제거(`DELETE`). RBAC role별 색 칠한 badge + 역할 설명 legend. Owner 아닌 사용자는 read-only view. 자기 자신의 행은 변경/제거 비활성화 (서버는 LastOwnerError 409로도 보호). Sidebar에 Members nav 추가.
 
 ### 10.7 빈 상태 / 에러 / 로딩 패스 점검
 - [ ] 전 페이지 empty state (DESIGN.md §7.11)

@@ -261,6 +261,25 @@ export const workspacesApi = {
     api<WorkspaceSummary>("/workspaces", { method: "POST", json: body }),
 };
 
+export const membershipsApi = {
+  list: (workspaceId: string) =>
+    api<MembershipSummary[]>(`/workspaces/${workspaceId}/memberships`),
+  add: (workspaceId: string, body: { email: string; role: Role }) =>
+    api<MembershipSummary>(`/workspaces/${workspaceId}/memberships`, {
+      method: "POST",
+      json: body,
+    }),
+  updateRole: (workspaceId: string, userId: string, role: Role) =>
+    api<MembershipSummary>(
+      `/workspaces/${workspaceId}/memberships/${userId}`,
+      { method: "PATCH", json: { role } },
+    ),
+  remove: (workspaceId: string, userId: string) =>
+    api<void>(`/workspaces/${workspaceId}/memberships/${userId}`, {
+      method: "DELETE",
+    }),
+};
+
 export interface ConnectionCreateBody {
   name: string;
   type: string;

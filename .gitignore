@@ -7,6 +7,10 @@
 *.p8
 secrets/
 
+# --- Local runtime state (install.sh / start.sh / stop.sh) ---
+# PID files, log tails, dev JWT keypair. Always local; never committed.
+.run/
+
 # --- Python ---
 __pycache__/
 *.py[cod]

@@ -1,31 +1,43 @@
-"""RunRepository — read-only query over runs / run_logs / run_metrics.
+"""RunRepository — runs / run_logs / run_metrics access.
 
 The metadata DB is the source of truth for what happened on a
-pipeline; the worker engine (Step 9) is the only writer for these
-tables, so the API surface here intentionally exposes **no** mutations.
-The shape is:
+pipeline; the worker engine (Step 9) updates ``status`` /
+``started_at`` / ``records_*`` / etc., so the API surface here is
+**read-mostly**. The only writes are the two "queue a row" helpers
+used by Step 8.6 action endpoints:
 
-* ``list_for_workspace`` — filtered + paginated history view for the
-  workspace runs table in the UI.
-* ``get`` — drill-down to a single run.
-* ``list_logs`` / ``list_metrics`` — child collections for the run
-  detail page.
+* :meth:`add_manual` — UI button "run now" creates a pending row.
+* :meth:`add_retry` — UI button "retry this run" clones a failed/
+  cancelled row as a new pending one.
 
-Filters are kept narrow on purpose: ``status``, ``pipeline_id``,
-``schedule_id``. Anything more sophisticated (date ranges, full-text
-search across error messages, etc.) is a follow-up — adding it now
-without a UI driving the shape would just freeze guesses.
+Neither helper modifies an existing run row — the worker is still the
+only writer for state transitions. Filters on the listing endpoint are
+kept narrow on purpose: ``status``, ``pipeline_id``, ``schedule_id``.
+Anything more sophisticated (date ranges, full-text search across
+error messages, etc.) is a follow-up — adding it now without a UI
+driving the shape would just freeze guesses.
 """
 
 from __future__ import annotations
 
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from etlx_server.db.enums import RunStatus
-from etlx_server.db.models import Run, RunLog, RunMetric
+from etlx_server.db.models import Pipeline, PipelineVersion, Run, RunLog, RunMetric
+
+# Statuses a run must be in for ``add_retry`` to accept it. ``pending`` /
+# ``running`` would be a "run it twice" mistake; ``succeeded`` already did
+# its job and rerunning is a fresh ``trigger``, not a retry.
+_RETRYABLE_STATUSES: frozenset[RunStatus] = frozenset({RunStatus.FAILED, RunStatus.CANCELLED})
+
+
+class RunNotRetryableError(Exception):
+    """Raised by :meth:`RunRepository.add_retry` when the source run isn't terminal-failed."""
+
 
 _DEFAULT_LIMIT = 50
 _MAX_LIMIT = 500
@@ -99,5 +111,69 @@ class RunRepository:
         )
         return list(result.scalars().all())
 
+    # --- mutations (Step 8.6 action endpoints) ----------------------------
 
-__all__ = ["RunRepository"]
+    async def add_manual(
+        self,
+        *,
+        pipeline: Pipeline,
+        version: PipelineVersion,
+        triggered_by_user_id: UUID,
+        result_json: dict[str, Any] | None = None,
+    ) -> Run:
+        """Enqueue a pending Run row from a manual trigger.
+
+        ``schedule_id`` is left ``NULL`` to mark this as user-driven (the
+        worker's claim loop uses the same query regardless). The Run row
+        is the message queue itself per ADR-0021.
+        """
+        run = Run(
+            workspace_id=pipeline.workspace_id,
+            pipeline_id=pipeline.id,
+            pipeline_version_id=version.id,
+            schedule_id=None,
+            triggered_by_user_id=triggered_by_user_id,
+            status=RunStatus.PENDING,
+            result_json=result_json or {},
+        )
+        self._session.add(run)
+        await self._session.flush()
+        return run
+
+    async def add_retry(
+        self,
+        original: Run,
+        *,
+        triggered_by_user_id: UUID,
+    ) -> Run:
+        """Clone a failed/cancelled run as a fresh pending one.
+
+        Same ``pipeline_version_id`` and ``schedule_id`` as the original
+        — the retry is "do the same thing again", not "do the latest
+        version". ``result_json.retry_of`` carries the link back so
+        forensics can trace the lineage; if the original was itself a
+        retry the chain stays explicit (we don't transitively unwrap).
+
+        Raises :class:`RunNotRetryableError` if ``original.status`` isn't
+        in {failed, cancelled}.
+        """
+        if original.status not in _RETRYABLE_STATUSES:
+            raise RunNotRetryableError(
+                f"run status {original.status.value!r} is not retryable; "
+                f"only failed/cancelled runs may be retried"
+            )
+        run = Run(
+            workspace_id=original.workspace_id,
+            pipeline_id=original.pipeline_id,
+            pipeline_version_id=original.pipeline_version_id,
+            schedule_id=original.schedule_id,
+            triggered_by_user_id=triggered_by_user_id,
+            status=RunStatus.PENDING,
+            result_json={"retry_of": str(original.id)},
+        )
+        self._session.add(run)
+        await self._session.flush()
+        return run
+
+
+__all__ = ["RunNotRetryableError", "RunRepository"]

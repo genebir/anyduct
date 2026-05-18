@@ -32,13 +32,18 @@ from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from etl_plugins.config.models import PipelineConfig
+from etl_plugins.config.secrets import SecretBackend
 from etlx_server.audit.dependencies import get_audit_service
 from etlx_server.audit.service import AuditService
 from etlx_server.auth.schemas import (
+    DryRunConnectorCheck,
+    DryRunResponse,
     PipelineCreateRequest,
     PipelineSummary,
     PipelineUpdateRequest,
     PipelineVersionEntry,
+    RunSummary,
+    RunTriggerRequest,
 )
 from etlx_server.auth.workspace_context import (
     WorkspaceContext,
@@ -46,15 +51,18 @@ from etlx_server.auth.workspace_context import (
 )
 from etlx_server.db.enums import WorkspaceRole
 from etlx_server.db.models import Pipeline, PipelineVersion
-from etlx_server.dependencies import get_session
+from etlx_server.dependencies import get_secret_backend_dep, get_session
+from etlx_server.pipelines.dry_run import DryRunService
 from etlx_server.pipelines.repository import (
     PipelineNameTakenError,
     PipelineRepository,
 )
+from etlx_server.runs.repository import RunRepository
 
 router = APIRouter(prefix="/workspaces/{workspace_id}/pipelines", tags=["pipelines"])
 
 _require_viewer = Depends(require_workspace_role(WorkspaceRole.VIEWER))
+_require_runner = Depends(require_workspace_role(WorkspaceRole.RUNNER))
 _require_editor = Depends(require_workspace_role(WorkspaceRole.EDITOR))
 
 
@@ -244,3 +252,103 @@ async def list_pipeline_versions(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="pipeline not found")
     versions = await repo.list_versions(pipeline_id=pipeline.id)
     return [PipelineVersionEntry.model_validate(v) for v in versions]
+
+
+# --- Action endpoints (Step 8.6) -------------------------------------------
+
+
+async def _load_pipeline_and_current(
+    session: AsyncSession,
+    *,
+    workspace_id: UUID,
+    pipeline_id: UUID,
+) -> tuple[Pipeline, PipelineVersion]:
+    """Resolve pipeline + current version, raising 404/409 as needed.
+
+    Used by both ``dry-run`` and ``trigger``. A pipeline with no
+    ``is_current`` version is technically impossible via the public API
+    (``add`` inserts v1 atomically), but ``409 Conflict`` is the right
+    answer if the row got there some other way.
+    """
+    repo = PipelineRepository(session)
+    pipeline = await repo.get(workspace_id=workspace_id, pipeline_id=pipeline_id)
+    if pipeline is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="pipeline not found")
+    current = await repo.get_current_version(pipeline_id=pipeline.id)
+    if current is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="pipeline has no current version — nothing to run",
+        )
+    return pipeline, current
+
+
+@router.post("/{pipeline_id}/dry-run", response_model=DryRunResponse)
+async def dry_run_pipeline(
+    pipeline_id: UUID,
+    ctx: WorkspaceContext = _require_runner,
+    session: AsyncSession = Depends(get_session),  # noqa: B008
+    backend: SecretBackend = Depends(get_secret_backend_dep),  # noqa: B008
+) -> DryRunResponse:
+    """Build + health-check the pipeline without queuing a run.
+
+    Read-only: the only DB writes are connector health probes (network
+    I/O on the connectors themselves). No audit row — dry-run is a
+    "would this work?" question, not an action.
+    """
+    pipeline, current = await _load_pipeline_and_current(
+        session, workspace_id=ctx.workspace.id, pipeline_id=pipeline_id
+    )
+    outcome = await DryRunService(session, backend).run(pipeline, current)
+    return DryRunResponse(
+        ok=outcome.ok,
+        errors=list(outcome.errors),
+        connectors=[
+            DryRunConnectorCheck(name=c.name, type=c.type, ok=c.ok, error=c.error)
+            for c in outcome.connectors
+        ],
+    )
+
+
+@router.post(
+    "/{pipeline_id}/trigger",
+    response_model=RunSummary,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def trigger_pipeline(
+    pipeline_id: UUID,
+    body: RunTriggerRequest,
+    ctx: WorkspaceContext = _require_runner,
+    session: AsyncSession = Depends(get_session),  # noqa: B008
+    audit: AuditService = Depends(get_audit_service),  # noqa: B008
+) -> RunSummary:
+    """Enqueue a pending Run for the pipeline's current version.
+
+    Returns ``202 Accepted`` — the worker (Step 9) is what actually
+    moves the row through ``running`` / ``succeeded`` / ``failed``.
+    Until the worker exists, the row simply sits in ``pending``.
+    """
+    pipeline, current = await _load_pipeline_and_current(
+        session, workspace_id=ctx.workspace.id, pipeline_id=pipeline_id
+    )
+    run = await RunRepository(session).add_manual(
+        pipeline=pipeline,
+        version=current,
+        triggered_by_user_id=ctx.user.id,
+    )
+    await audit.record(
+        actor_user_id=ctx.user.id,
+        workspace_id=ctx.workspace.id,
+        action="run.trigger",
+        resource_type="run",
+        resource_id=str(run.id),
+        before=None,
+        after={
+            "pipeline_id": str(pipeline.id),
+            "pipeline_version_id": str(current.id),
+            "version": current.version,
+            "source": "manual",
+        },
+    )
+    await session.commit()
+    return RunSummary.model_validate(run)

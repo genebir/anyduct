@@ -301,6 +301,40 @@ class RunMetricEntry(BaseModel):
     recorded_at: datetime
 
 
+class DryRunConnectorCheck(BaseModel):
+    """One row of ``DryRunResult.connectors`` — per-connection outcome."""
+
+    name: str
+    type: str
+    ok: bool
+    error: str | None = None
+
+
+class DryRunResponse(BaseModel):
+    """Response of ``POST /workspaces/{ws}/pipelines/{pid}/dry-run``.
+
+    ``ok`` summarizes the answer; ``errors`` carries top-level issues
+    (config invalid, build failure, missing connection name, etc.);
+    ``connectors`` reports per-connection results so the UI can show
+    which credential needs attention.
+    """
+
+    ok: bool
+    errors: list[str] = Field(default_factory=list)
+    connectors: list[DryRunConnectorCheck] = Field(default_factory=list)
+
+
+class RunTriggerRequest(BaseModel):
+    """Body of ``POST /workspaces/{ws}/pipelines/{pid}/trigger``.
+
+    Intentionally empty for now — the action enqueues the *current*
+    PipelineVersion with no overrides. Leaving the body in place
+    (rather than collapsing to a parameterless POST) keeps room for
+    future fields (``config_overrides``, ``scheduled_at``, ...) without
+    a breaking change to the URL.
+    """
+
+
 class AuditLogEntry(BaseModel):
     """One row of the ``audit_log`` table, shaped for the ``/audit`` response."""
 
@@ -326,6 +360,8 @@ __all__ = [
     "ConnectionTestResult",
     "ConnectionUpdateRequest",
     "CurrentUser",
+    "DryRunConnectorCheck",
+    "DryRunResponse",
     "LoginRequest",
     "MembershipCreateRequest",
     "MembershipSummary",
@@ -342,6 +378,7 @@ __all__ = [
     "RunLogEntry",
     "RunMetricEntry",
     "RunSummary",
+    "RunTriggerRequest",
     "ScheduleCreateRequest",
     "ScheduleSummary",
     "ScheduleUpdateRequest",

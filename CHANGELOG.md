@@ -722,6 +722,28 @@
 ### Milestone
 - **Step 8.5e — Schedules CRUD + Runs read-only 완료 (2026-05-18)**: 6 schedule endpoint + 4 run read-only endpoint + croniter mode-aware 검증 + workspace/pipeline boundary 검증 + worker write 도메인 격리. 누적 코어 344 unit + 서버 **65 unit** + 서버 **171 it** (145 → 171, +26) + 코어 119 it = **699 tests** all green. mypy strict 코어 39 + 서버 55 src files OK, import-linter 2 contracts KEPT. **Step 8.5 (CRUD 도메인) 완전 종료** — workspaces / memberships / connections / pipelines / schedules / runs read 모두 ship. 다음은 **Step 8.6 (Action 엔드포인트)** — `POST /pipelines/{id}/dry-run` / `POST /pipelines/{id}/trigger` (run 큐잉) / `POST /runs/{id}/retry` / `GET /runs/{id}/logs` streaming. Step 9 worker queue와 짝지어 동작 — 8.6은 큐 enqueue만, 실제 execute는 Step 9.
 
+- **Pipeline + Run action endpoints** [Step 8.6]
+  - 새 `services/etlx-server/etlx_server/pipelines/dry_run.py`:
+    * `DryRunService(session, backend).run(pipeline, version, check_health=True)` — 워크스페이스 connection 이름들 resolve → `${SECRET:<path>}` placeholder를 backend로 풀이 → `ConnectionConfig.model_validate` → 코어 `build_connector`/`build_pipeline` → connector instance를 그대로 보관 → 병렬 `asyncio.to_thread(_blocking_health_check, connector)`로 connect/health/close. 단일 connector 실패 시 per-row 보고(`ConnectorCheck`); pipeline build 실패는 top-level errors. `DryRunResult{ok, errors, connectors}`.
+    * **첫 100 record 샘플은 의도적으로 미포함** — bounded read는 retry/timeout/back-pressure 정책과 묶여야 안전. 후속 UI 요구사항 생기면 worker(Step 9)의 `stop_after_records=N` 위에 얹는 방식이 옳다.
+  - `routers/pipelines.py` 2 신규:
+    * `POST /workspaces/{ws}/pipelines/{pid}/dry-run` Runner+ — read-only 검증, audit 없음. `_load_pipeline_and_current` 헬퍼(404 / 409 no current version).
+    * `POST /workspaces/{ws}/pipelines/{pid}/trigger` Runner+ — 202 Accepted, `RunRepository.add_manual`로 pending row enqueue(`schedule_id=NULL`, `triggered_by_user_id=ctx.user.id`), audit `run.trigger`(source=manual + version). 현재 버전 없는 파이프라인은 409. `RunTriggerRequest` body는 현재 빈 객체 — `config_overrides` / `scheduled_at` 같은 후속 필드를 위해 자리만 잡아둔 형태.
+  - `routers/runs.py` 2 신규:
+    * `POST /workspaces/{ws}/runs/{rid}/retry` Runner+ — 202 Accepted. `RunRepository.add_retry`가 failed/cancelled만 허용(`RunNotRetryableError` → 409), 새 row가 원본의 `pipeline_version_id` + `schedule_id` 상속(retry = "그 시도 다시", trigger와 구분), `result_json={"retry_of": original.id}` lineage, **원본 row는 절대 손 안 댐**. 워커가 status 전이의 단일 writer 원칙 유지. audit `run.retry`.
+    * `GET /workspaces/{ws}/runs/{rid}/logs/stream` Viewer+ — Server-Sent Events. `StreamingResponse` media_type=`text/event-stream`. `get_session_factory` Depends로 ~500ms마다 fresh `AsyncSession`(긴 트랜잭션 hold 방지) → 새 run_logs를 frame당 `event: log\ndata: {RunLogEntry JSON}\n\n`. run terminal(succeeded/failed/cancelled) + 2s idle 또는 `request.is_disconnected()` 시 graceful close. `Cache-Control: no-cache` + `X-Accel-Buffering: no`로 Nginx/CDN 버퍼링 방지. boundary check는 시작 시 한 번 + poll 루프에서 매번(다른 ws run UUID 추측 → 404 → 스트림 시작도 안 됨).
+  - `runs/repository.py` 확장: `add_manual(pipeline, version, triggered_by_user_id, result_json=None)` + `add_retry(original, *, triggered_by_user_id)` + `RunNotRetryableError`. write 메서드 둘 다 "새 pending row를 만들 뿐 기존 row는 손 안 댐" — 워커 단일 writer 원칙 보존.
+  - `auth/schemas.py` 확장: `DryRunConnectorCheck`(name/type/ok/error), `DryRunResponse`(ok/errors/connectors), `RunTriggerRequest`(현재 빈 — 후속 필드 placeholder).
+- **테스트 정규화** [Step 8.6]
+  - `services/etlx-server/tests/db/test_pipeline_actions_router.py` — 11 신규 it. dry-run happy(sqlite :memory:로 실제 connect/health_check 검증) / 누락 connection name / unknown connector type per-row 보고 / `${SECRET:...}` placeholder를 `StaticSecretBackend`로 풀이해서 happy / Viewer 403 / 404. trigger happy + 202 + Run row 직접 검증 + audit `run.trigger` after_json{source,version} / Viewer 403 / 현재 버전 없는 pipeline 409 / 404 / cross-workspace pipeline 404.
+  - `services/etlx-server/tests/db/test_run_actions_router.py` — 8 신규 it. retry happy + 202 + 원본 row unchanged + 새 row의 `result_json.retry_of` + audit `run.retry` / succeeded 409 / running 409 / cancelled OK(retry 가능) / Viewer 403 / cross-workspace 404. SSE stream은 terminal run에 대해 seed된 3 log row를 모두 frame으로 emit + terminal+idle 자동 close(8s timeout으로 bound), unknown run 404. 스트림 테스트는 `app.dependency_overrides[get_session_factory]`로 test session을 재사용하는 `_StubFactory`.
+
+### Decisions
+- (이번 슬라이스에서 신규 ADR 없음 — ADR-0021 worker queue + ADR-0023 §5 RBAC 적용)
+
+### Milestone
+- **Step 8.6 — Action 엔드포인트 완료 (2026-05-18)**: 4 신규 endpoint (dry-run / trigger / retry / SSE logs stream) + worker 단일 writer 원칙 유지(retry는 새 row 생성, 원본 unchanged). 누적 코어 344 unit + 서버 **65 unit** + 서버 **190 it** (171 → 190, +19) + 코어 119 it = **718 tests** all green. mypy strict 코어 39 + 서버 60 src files OK, import-linter 2 contracts KEPT. **Step 8 (API Server)의 코어 surface 사실상 종료** — auth / RBAC / audit / CRUD / actions / SSE 모두 ship, 남은 8.7은 end-to-end 시나리오 테스트 추가. 다음은 **Step 8.7 (시나리오 테스트)** 또는 **Step 9 (Execution Engine)** — 워커가 runs 큐 claim → 코어 `run_pipeline_yaml` 호출 + heartbeat + zombie 회수.
+
 ### Changed
 - (없음)
 

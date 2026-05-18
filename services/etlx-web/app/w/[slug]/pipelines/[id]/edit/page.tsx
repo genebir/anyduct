@@ -2,7 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
-import { PlayIcon, SaveIcon } from "lucide-react";
+import {
+  CheckCircle2Icon,
+  PlayIcon,
+  SaveIcon,
+  XCircleIcon,
+  ZapIcon,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Header } from "@/components/shell/header";
 import { Button } from "@/components/ui/button";
@@ -14,8 +20,10 @@ import {
   connectionsApi,
   pipelinesApi,
   type ConnectionSummary,
+  type DryRunResponse,
   type PipelineSummary,
 } from "@/lib/api";
+import { cn } from "@/lib/cn";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import {
   blankBuilder,
@@ -37,6 +45,8 @@ export default function PipelineEditorPage() {
   const [state, setState] = useState<BuilderState>(() => blankBuilder());
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [dryRunning, setDryRunning] = useState(false);
+  const [dryRunResult, setDryRunResult] = useState<DryRunResponse | null>(null);
   const loadedRef = useRef(false);
 
   // Load pipeline + connections.
@@ -138,6 +148,27 @@ export default function PipelineEditorPage() {
     }
   }, [ws, pipeline, state]);
 
+  const onDryRun = useCallback(async () => {
+    if (!ws || !pipeline) return;
+    setDryRunning(true);
+    setDryRunResult(null);
+    try {
+      const result = await pipelinesApi.dryRun(ws.id, pipeline.id);
+      setDryRunResult(result);
+      if (result.ok) {
+        toast.success("Dry run passed");
+      } else {
+        toast.error("Dry run reported issues — see panel below");
+      }
+    } catch (err) {
+      toast.error(
+        err instanceof ApiError ? err.message : "Dry run failed.",
+      );
+    } finally {
+      setDryRunning(false);
+    }
+  }, [ws, pipeline]);
+
   const onTrigger = useCallback(async () => {
     if (!ws || !pipeline) return;
     try {
@@ -163,6 +194,15 @@ export default function PipelineEditorPage() {
           <div className="flex gap-2">
             <Button
               variant="ghost"
+              onClick={onDryRun}
+              loading={dryRunning}
+              disabled={!pipeline?.current_version}
+            >
+              <ZapIcon size={16} />
+              Dry run
+            </Button>
+            <Button
+              variant="ghost"
               onClick={onTrigger}
               disabled={!pipeline?.current_version}
             >
@@ -178,13 +218,21 @@ export default function PipelineEditorPage() {
       />
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <Palette onAdd={addOperator} />
-        <div className="min-w-0 flex-1">
-          <BuilderCanvas
-            nodes={state.nodes}
-            selectedId={selectedId}
-            onSelect={selectNode}
-            onRemove={removeOperator}
-          />
+        <div className="flex min-w-0 flex-1 flex-col">
+          <div className="min-h-0 flex-1">
+            <BuilderCanvas
+              nodes={state.nodes}
+              selectedId={selectedId}
+              onSelect={selectNode}
+              onRemove={removeOperator}
+            />
+          </div>
+          {dryRunResult ? (
+            <DryRunPanel
+              result={dryRunResult}
+              onDismiss={() => setDryRunResult(null)}
+            />
+          ) : null}
         </div>
         <PropertiesPanel
           node={selectedNode}
@@ -193,5 +241,91 @@ export default function PipelineEditorPage() {
         />
       </div>
     </>
+  );
+}
+
+function DryRunPanel({
+  result,
+  onDismiss,
+}: {
+  result: DryRunResponse;
+  onDismiss: () => void;
+}) {
+  return (
+    <div className="max-h-72 shrink-0 overflow-y-auto border-t border-border-subtle bg-surface px-4 py-3 text-sm">
+      <header className="mb-2 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          {result.ok ? (
+            <CheckCircle2Icon size={16} className="text-success" />
+          ) : (
+            <XCircleIcon size={16} className="text-error" />
+          )}
+          <span className="font-semibold text-text">
+            Dry run {result.ok ? "passed" : "failed"}
+          </span>
+          <span className="text-xs text-text-muted">
+            ({result.connectors.length} connector
+            {result.connectors.length === 1 ? "" : "s"} checked)
+          </span>
+        </div>
+        <button
+          type="button"
+          onClick={onDismiss}
+          className="text-xs text-text-muted hover:text-text"
+        >
+          Dismiss
+        </button>
+      </header>
+
+      {result.errors.length > 0 ? (
+        <div className="mb-3 rounded-md border border-error/40 bg-error/10 p-3">
+          <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-error">
+            Config errors
+          </div>
+          <ul className="space-y-1 text-xs text-text">
+            {result.errors.map((err, i) => (
+              <li key={i} className="font-mono">
+                {err}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {result.connectors.length > 0 ? (
+        <ul className="space-y-1.5">
+          {result.connectors.map((c) => (
+            <li
+              key={c.name}
+              className={cn(
+                "flex items-start gap-2 rounded-sm border px-2 py-1.5",
+                c.ok
+                  ? "border-success/30 bg-success/10"
+                  : "border-error/40 bg-error/10",
+              )}
+            >
+              {c.ok ? (
+                <CheckCircle2Icon size={14} className="mt-0.5 text-success" />
+              ) : (
+                <XCircleIcon size={14} className="mt-0.5 text-error" />
+              )}
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="font-medium text-text">{c.name}</span>
+                  <span className="rounded-sm bg-overlay px-1.5 py-0.5 font-mono text-[11px] text-text-secondary">
+                    {c.type}
+                  </span>
+                </div>
+                {c.error ? (
+                  <pre className="mt-1 whitespace-pre-wrap break-words font-mono text-[11px] text-error">
+                    {c.error}
+                  </pre>
+                ) : null}
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
   );
 }

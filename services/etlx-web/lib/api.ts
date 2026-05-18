@@ -390,11 +390,29 @@ export const pipelinesApi = {
       method: "POST",
       json: {},
     }),
+  dryRun: (workspaceId: string, id: string) =>
+    api<DryRunResponse>(
+      `/workspaces/${workspaceId}/pipelines/${id}/dry-run`,
+      { method: "POST", json: {} },
+    ),
   delete: (workspaceId: string, id: string) =>
     api<void>(`/workspaces/${workspaceId}/pipelines/${id}`, {
       method: "DELETE",
     }),
 };
+
+export interface DryRunConnectorCheck {
+  name: string;
+  type: string;
+  ok: boolean;
+  error: string | null;
+}
+
+export interface DryRunResponse {
+  ok: boolean;
+  errors: string[];
+  connectors: DryRunConnectorCheck[];
+}
 
 export interface ScheduleCreateBody {
   name: string;

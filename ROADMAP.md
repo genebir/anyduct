@@ -449,6 +449,7 @@
 - [x] 좌측 Palette — 그룹별 operator 카탈로그(클릭 add). 우측 Properties 패널 — 선택된 노드의 필드 자동 폼(connection은 workspace의 같은 type connection만 select, JSON 필드는 inline validation).
 - [x] 저장 = `PATCH /pipelines/{id}` body.config → 코어 `PipelineConfig.model_validate` 통과 시 새 PipelineVersion(idempotent).
 - [x] 신규 파이프라인 생성 — list page의 "New pipeline" 버튼이 blank `PipelineConfig`(default postgres source+sink, empty connection)로 POST 후 즉시 editor로 이동.
+- [x] **Dry Run** — editor header에 `Dry run` 버튼. `POST /pipelines/{id}/dry-run`(server-side build + 병렬 `connector.health_check()`) 호출 후 canvas 아래 패널에 결과 표시. top-level config errors + per-connector check(ok/error 메시지 trace). Trigger 전에 안전하게 검증 가능.
 - [ ] DLQ 노드 — 아직 (core PipelineConfig는 단일 dlq optional, builder UI에서 노출 안 함).
 - [ ] Multi-branch / fan-out — core가 linear pipeline이라 의도적으로 미지원. 향후 graph 지원은 core 확장 필요.
 

@@ -10,6 +10,11 @@
 ## [Unreleased]
 
 ### Added
+- **Pipeline Dry Run UI** [Step 10.4] — third header button in `/w/[slug]/pipelines/[id]/edit`.
+  - Calls `POST /pipelines/{id}/dry-run` (which builds the pipeline server-side + parallel `connector.health_check()` per resolved connection — no I/O on the actual source/sink data).
+  - Results render in a collapsible panel between the canvas and properties panel: top "passed / failed" banner with a success or error icon, top-level config errors in a red-bordered block, then per-connector rows (success-tinted bg with check icon when ok, error-tinted bg with full error trace `<pre>` when not). Dismiss button clears the panel.
+  - Disabled until a `current_version` exists (same gate as Trigger). Standalone — no separate Save step required, since `/dry-run` reads from the current PipelineVersion.
+  - `pipelinesApi.dryRun` + `DryRunResponse` / `DryRunConnectorCheck` types added to `lib/api.ts`. Builder route grew 62 kB → 62.8 kB.
 - **Pipeline delete + Workspace edit/delete UI** [Step 10.3 / 10.6]
   - **Pipeline delete**: third action button on each row in `/w/[slug]/pipelines`, gated by `ConfirmDialog` with copy that calls out "All versions and schedules are removed; past runs stay for audit; pending/in-flight runs are left to complete (the worker can't re-fetch them after deletion)". Hits `DELETE /pipelines/{id}` and refreshes the list.
   - **Workspace edit**: `/w/[slug]/settings` is no longer read-only. Owners (and SuperAdmin) get name / slug / accent-color forms; slug changes hot-redirect to the new URL via `router.replace`. Non-Owners get a read-only display + the role line. Server's `WorkspaceSlugTakenError` 409 surfaces in the error toast unmodified.

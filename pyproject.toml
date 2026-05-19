@@ -95,6 +95,10 @@ dev = [
     "testcontainers[postgres,minio,kafka,mysql,mongodb,vault,localstack]>=4.7",
     "types-PyYAML>=6.0",
     "import-linter>=2.0",       # ADR-0022 단방향 의존 자동 검증
+    # Docs site (Step 6.4). mkdocs-material is the renderer; mkdocstrings
+    # pulls docstrings into a generated API reference.
+    "mkdocs-material>=9.5",
+    "mkdocstrings[python]>=0.26",
     # 통합 테스트에서 사용 (CI 통합 테스트 잡이 자동 실행)
     "psycopg[binary]>=3.1",
     "pymysql>=1.1",

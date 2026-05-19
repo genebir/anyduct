@@ -70,3 +70,6 @@ next-env.d.ts
 
 # --- Storybook (services/etlx-web) ---
 storybook-static/
+
+# --- mkdocs (Step 6.4) ---
+/site/

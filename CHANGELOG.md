@@ -10,6 +10,21 @@
 ## [Unreleased]
 
 ### Added
+- **mkdocs-material documentation site** [Step 6.4] — third release-blocker of ADR-0024 v0.1.0 critical path now done. `make docs` (= `uv run mkdocs build --strict`) produces a static site under `./site/`. `make docs-serve` for live-reload.
+  - New `mkdocs.yml` — Material theme (pink palette, Inter + JetBrains Mono, system-preference light/dark), `navigation.tabs.sticky` + `navigation.top` + code copy/annotate, `pymdownx.{superfences,highlight,inlinehilite,details,snippets,tabbed}` with Mermaid via `superfences.fence_code_format`, `mkdocstrings` Python handler configured for `sphinx` docstring style + `show_signature_annotations` + `separate_signature`.
+  - 9 new pages under `docs/`:
+    - `index.md` — overview code example, "What you get", design principles.
+    - `getting-started/install.md` — connector / orchestrator / observability / secret-backend extras matrix, `scripts/bootstrap.sh` dev install.
+    - `getting-started/quickstart.md` — 5-minute install → connections.yaml → pipeline.yaml → `etlx run` → programmatic alternative.
+    - `guides/connectors.md` — `BatchSource` / `BatchSink` / `StreamSource` / `StreamSink` ABC table, built-in catalog table, "adding your own" example with `@ConnectorRegistry.register("my-thing")`, reserved option-name conventions.
+    - `guides/pipelines.md` — `Pipeline` / `Task` fluent API, `RunResult` fields, stream mode + `arun_stream`, `RetryConfig` / `DlqConfig`, hook events (`pre_run` / `on_task_start` / `on_task_end` / `on_error` / `post_run`), YAML alternative.
+    - `guides/cursors.md` — Step 6.1 walkthrough: full resumable sync example, semantics matrix (exclusive `cursor_from` / inclusive `cursor_to`), state backend table (InMemory / File / DbCursorState), `BatchSource.read_since` four invariants, what this *doesn't* cover yet (lineage / multi-column / stream offsets).
+    - `guides/observability.md` — OTLP/gRPC wiring via `configure_otel(...)`, automatic metrics + span emit by the runtime (table of `etl_plugins.records.read` / `…written` / `etl_plugins.errors` / `etl_plugins.duration.seconds` and the `pipeline.run` / `pipeline.task` span attrs), in-memory mode for tests, custom counters/spans, logging.
+    - `reference/{core,connectors,observability}.md` — `mkdocstrings` `:::` auto-doc for the public API (Pipeline / Task / RunResult / Record / Schema / 4 ABCs / ConnectorRegistry / Cursor 3 implementations / `max_cursor_value` / `Context` / `Hook` / `TransformFn` / 12 exception classes + 7 connector classes + `Metrics` / `Tracer` / `configure_otel` / `OTelHandle`).
+    - `decisions.md` — index of ADR-0001 → ADR-0024 grouped by topic, links to the canonical `DECISIONS.md`.
+  - New `make docs` / `make docs-serve` Makefile targets.
+  - Debugging gotchas surfaced by `--strict` build: (a) `Pipeline.on` method name must be YAML-quoted (`"on"`) in mkdocstrings `members:` because bare `on` parses as `True`; (b) `Hook` / `TransformFn` live in `etl_plugins.core.pipeline`, not `etl_plugins.core.context` — the build refused to resolve the wrong path.
+  - Cumulative: docs-only slice, test counts unchanged at 909 project-wide.
 - **DB-backed `CursorState`** [Step 6.1] — closes the cursor abstraction in the service layer so incremental syncs are durable across worker restarts without a sidecar JSON file.
   - New `cursors` metadata table — composite PK `(workspace_id, name)`, `cursor_value: JSONB` (so any `CursorValue` round-trips without a type-discriminator column), `ON DELETE CASCADE` from `workspaces`. Alembic migration `0002_cursors` (`alembic upgrade head` from existing deployments).
   - New `etlx_server.cursors` package:

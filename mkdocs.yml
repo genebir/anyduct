@@ -1,0 +1,104 @@
+# mkdocs configuration for etl-plugins (Step 6.4).
+#
+# Build locally:    uv run mkdocs serve
+# Static output:    uv run mkdocs build  (→ ./site/)
+# CI gate:          make docs
+
+site_name: etl-plugins
+site_description: Backend-agnostic, orchestrator-agnostic Python ETL plugin library.
+site_url: https://etl-plugins.dev/
+repo_url: https://github.com/duarl/etl-plugins
+repo_name: duarl/etl-plugins
+edit_uri: edit/main/docs/
+
+docs_dir: docs
+
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - navigation.footer
+    - content.code.copy
+    - content.code.annotate
+    - search.suggest
+    - search.highlight
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: pink
+      accent: pink
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: pink
+      accent: pink
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+  font:
+    text: Inter
+    code: JetBrains Mono
+  icon:
+    repo: fontawesome/brands/github
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            docstring_style: sphinx
+            show_source: false
+            show_root_heading: true
+            show_signature_annotations: true
+            separate_signature: true
+            line_length: 88
+            members_order: source
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.snippets
+  - pymdownx.tabbed:
+      alternate_style: true
+
+nav:
+  - Home: index.md
+  - Getting started:
+      - Install: getting-started/install.md
+      - Quickstart: getting-started/quickstart.md
+  - Guides:
+      - Connectors: guides/connectors.md
+      - Pipelines & tasks: guides/pipelines.md
+      - Cursors & incremental sync: guides/cursors.md
+      - Observability (OTel): guides/observability.md
+  - Reference:
+      - Core API: reference/core.md
+      - Connectors API: reference/connectors.md
+      - Observability API: reference/observability.md
+  - Decisions:
+      - Architecture decisions: decisions.md

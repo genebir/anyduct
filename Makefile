@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help setup sync test test-it lint fmt typecheck up down clean pre-commit
+.PHONY: help setup sync test test-it lint fmt typecheck up down clean pre-commit docs docs-serve
 
 help:  ## Show this help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -41,6 +41,12 @@ down:  ## Stop local dev infra
 
 logs:  ## Tail dev infra logs
 	docker compose -f docker/docker-compose.dev.yml logs -f
+
+docs:  ## Build static docs site (strict — fails on broken refs)
+	uv run mkdocs build --strict
+
+docs-serve:  ## Live-reload docs at http://127.0.0.1:8000
+	uv run mkdocs serve
 
 clean:  ## Remove caches and build artifacts
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +

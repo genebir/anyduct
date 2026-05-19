@@ -11,6 +11,10 @@ repos:
     rev: v4.6.0
     hooks:
       - id: check-yaml
+        # mkdocs-material uses !!python/name: tags (e.g. for the Mermaid
+        # superfences fence formatter) that check-yaml's safe loader
+        # cannot construct. yamllint still lints the file structure.
+        exclude: ^mkdocs\.yml$
       - id: check-toml
       - id: check-json
       - id: check-added-large-files

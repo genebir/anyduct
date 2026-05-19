@@ -13,8 +13,35 @@
 
 set -euo pipefail
 
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+COMPOSE_FILE="$REPO_ROOT/docker/docker-compose.dev.yml"
+
+# Default DATABASE_URL for local dev — matches docker/docker-compose.dev.yml.
+# The host port defaults to 55432 to dodge a host-installed Postgres on 5432
+# (very common collision). Override via:
+#   LOCAL_PG_PORT=5432 etlx ...        # change just the port
+#   DATABASE_URL=postgresql+asyncpg://... etlx ...   # override the whole URL
+: "${LOCAL_PG_PORT:=55432}"
+export LOCAL_PG_PORT
+: "${DATABASE_URL:=postgresql+asyncpg://etl:etl@localhost:${LOCAL_PG_PORT}/etl_dev}"  # pragma: allowlist secret
+export DATABASE_URL
+
+# Auto-load dev JWT keypair from ``$REPO_ROOT/.run/`` if it exists. The
+# `etlx admin gen-jwt-keys` command writes the pair here. Without this the
+# FastAPI app boots without a JwtService and `/auth/login` returns 500.
+# Skip silently when the files don't exist so non-auth commands still work.
+_load_dev_jwt_env() {
+    local priv="$REPO_ROOT/.run/jwt_private.pem"
+    local pub="$REPO_ROOT/.run/jwt_public.pem"
+    if [[ -r "$priv" && -r "$pub" ]]; then
+        export AUTH_JWT_PRIVATE_KEY_PEM="$(cat "$priv")"
+        export AUTH_JWT_PUBLIC_KEY_PEM="$(cat "$pub")"
+    fi
+}
+_load_dev_jwt_env
+
 CORE_CMDS=(run run-stream test-connection list-connectors validate)
-SERVER_CMDS=(import-yaml export-yaml admin worker reaper scheduler stream-worker)
+SERVER_CMDS=(import-yaml export-yaml admin worker reaper scheduler stream-worker server db)
 
 usage() {
     cat <<'EOF'
@@ -28,17 +55,242 @@ Pipeline (etl-plugins core):
   validate          Validate a YAML config
 
 Service (etlx-server, requires metadata DB):
+  server run        Run the FastAPI app (uvicorn wrapper)
+  db upgrade|...    Metadata DB migrations (Alembic wrapper)
   admin             Admin bootstrap (e.g. `admin create-user`)
-  import-yaml       Import YAML configs into the metadata DB
-  export-yaml       Export metadata DB back to YAML
   worker            Run the batch worker (consumes runs queue)
   scheduler         Run the cron scheduler
   reaper            Run the zombie-run reaper
   stream-worker     Run the stream worker
+  import-yaml       Import YAML configs into the metadata DB
+  export-yaml       Export metadata DB back to YAML
+
+Web UI:
+  web run           Run the Next.js dev server (pnpm wrapper)
+
+Dev infra (orchestration sugar — Postgres + DB migrate + admin seed):
+  dev up [args]     docker compose up -d + db upgrade head + optional admin
+                    Flags: --no-docker, --no-migrate, --no-admin,
+                           --admin-email, --admin-name, --admin-password
+  dev down          docker compose down (keeps volumes)
+  dev reset         docker compose down -v (drops volumes — destructive)
+  dev status        Show docker, DB revision, admin count, dev URLs
+
+Env:
+  DATABASE_URL    Defaults to the docker-compose.dev URL; override to point
+                  at a different metadata DB.
 
 Run `etlx <subcommand> --help` for details on each.
 EOF
 }
+
+# Dispatch a server subcommand (handles two-word commands like `server run`,
+# `db upgrade`, `admin create-user`).
+run_server() {
+    exec uv run --package etlx-server etlx-server "$@"
+}
+
+# ---------- web -------------------------------------------------------------
+
+dispatch_web() {
+    local sub="${1:-}"
+    case "$sub" in
+        ""|-h|--help)
+            cat <<'EOF'
+etlx web — Next.js dev server (pnpm wrapper)
+
+Commands:
+  run [--port PORT]   Start `pnpm --filter @etlx/web dev` (default port 3000)
+  build               Run `pnpm --filter @etlx/web build`
+EOF
+            return 0
+            ;;
+        run)
+            shift
+            local port=3000
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    --port) port="$2"; shift 2 ;;
+                    *) echo "etlx web run: unknown flag '$1'" >&2; exit 2 ;;
+                esac
+            done
+            exec pnpm --filter @etlx/web dev --port "$port"
+            ;;
+        build)
+            shift
+            exec pnpm --filter @etlx/web build "$@"
+            ;;
+        *)
+            echo "etlx web: unknown subcommand '$sub'. Try 'etlx web --help'." >&2
+            exit 2
+            ;;
+    esac
+}
+
+# ---------- dev -------------------------------------------------------------
+
+dev_compose_up() {
+    if ! command -v docker >/dev/null; then
+        echo "etlx dev: 'docker' not found in PATH" >&2
+        exit 1
+    fi
+    docker compose -f "$COMPOSE_FILE" up -d postgres
+}
+
+dev_compose_down() {
+    docker compose -f "$COMPOSE_FILE" down "$@"
+}
+
+dev_wait_for_pg() {
+    # Poll the container's healthcheck up to ~30s. Postgres logs "ready to
+    # accept connections" twice (startup + post-bootstrap); the healthcheck
+    # `pg_isready` reflects the second one.
+    local i=0
+    while [[ $i -lt 30 ]]; do
+        local status
+        status="$(docker inspect -f '{{.State.Health.Status}}' etl-postgres 2>/dev/null || echo missing)"
+        if [[ "$status" == "healthy" ]]; then
+            return 0
+        fi
+        sleep 1
+        i=$((i + 1))
+    done
+    echo "etlx dev: postgres did not become healthy within 30s (status=$status)" >&2
+    exit 1
+}
+
+dev_up() {
+    local do_docker=1 do_migrate=1 do_admin=1
+    local admin_email="admin@example.com"
+    local admin_name="Admin"
+    local admin_password=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --no-docker)   do_docker=0; shift ;;
+            --no-migrate)  do_migrate=0; shift ;;
+            --no-admin)    do_admin=0; shift ;;
+            --admin-email)    admin_email="$2"; shift 2 ;;
+            --admin-name)     admin_name="$2"; shift 2 ;;
+            --admin-password) admin_password="$2"; shift 2 ;;
+            -h|--help)
+                cat <<'EOF'
+etlx dev up — bring up local stack in one command
+
+Steps (each can be skipped):
+  1. docker compose up -d postgres   (--no-docker to skip)
+  2. wait for healthcheck
+  3. alembic upgrade head            (--no-migrate to skip)
+  4. seed admin user                 (--no-admin to skip)
+
+Flags:
+  --admin-email EMAIL      Default: admin@example.com
+  --admin-name NAME        Default: Admin
+  --admin-password PASS    Default: prompted if missing and stdin is a TTY
+EOF
+                return 0
+                ;;
+            *) echo "etlx dev up: unknown flag '$1'" >&2; exit 2 ;;
+        esac
+    done
+
+    if [[ $do_docker -eq 1 ]]; then
+        echo "▶ docker compose up -d postgres"
+        dev_compose_up
+        echo "▶ waiting for postgres healthcheck …"
+        dev_wait_for_pg
+        echo "  ✓ postgres healthy"
+    fi
+
+    # JWT dev keypair — required for /auth/login. Idempotent: skips if both
+    # files already exist. Refreshes wrapper-side env vars after generation.
+    if [[ ! -r "$REPO_ROOT/.run/jwt_private.pem" || ! -r "$REPO_ROOT/.run/jwt_public.pem" ]]; then
+        echo "▶ generating dev JWT keypair → $REPO_ROOT/.run/"
+        uv run --package etlx-server etlx-server admin gen-jwt-keys --out-dir "$REPO_ROOT/.run"
+        _load_dev_jwt_env
+    fi
+
+    if [[ $do_migrate -eq 1 ]]; then
+        echo "▶ alembic upgrade head  (DATABASE_URL=$DATABASE_URL)"
+        uv run --package etlx-server etlx-server db upgrade head
+    fi
+
+    if [[ $do_admin -eq 1 ]]; then
+        echo "▶ admin user: $admin_email"
+        # `admin create-user` exits 1 with "already exists" — treat that as idempotent.
+        local args=(--email "$admin_email" --name "$admin_name" --superadmin)
+        if [[ -n "$admin_password" ]]; then
+            args+=(--password "$admin_password")
+        fi
+        if ! uv run --package etlx-server etlx-server admin create-user "${args[@]}" 2>&1; then
+            : # already-exists is fine; output already explains.
+        fi
+    fi
+
+    cat <<EOF
+
+✓ Local stack is up. Next:
+    etlx server run --reload       # FastAPI on http://localhost:8000
+    etlx web run                   # Next.js on http://localhost:3000
+    etlx worker run                # batch worker (optional)
+EOF
+}
+
+dev_down() {
+    dev_compose_down
+}
+
+dev_reset() {
+    echo "▶ docker compose down -v  (drops volumes — all DB state gone)"
+    dev_compose_down -v
+}
+
+dev_status() {
+    echo "─── Docker (etl-postgres)"
+    local status
+    status="$(docker inspect -f '{{.State.Status}} (health: {{.State.Health.Status}})' etl-postgres 2>/dev/null || echo "not running")"
+    echo "  $status"
+
+    echo "─── DATABASE_URL"
+    echo "  $DATABASE_URL"
+
+    echo "─── Metadata DB revision"
+    if uv run --package etlx-server etlx-server db current 2>&1 | tail -3; then :; fi
+
+    echo '─── Dev URLs (once "etlx server run" / "etlx web run" are running)'
+    echo "  http://localhost:8000/docs   (FastAPI Swagger)"
+    echo "  http://localhost:3000        (Next.js UI)"
+}
+
+dispatch_dev() {
+    local sub="${1:-}"
+    case "$sub" in
+        ""|-h|--help)
+            cat <<'EOF'
+etlx dev — local infra orchestration
+
+Commands:
+  up [flags]    docker compose up + db upgrade + admin seed (idempotent)
+  down          docker compose down (volumes kept)
+  reset         docker compose down -v (drops volumes — destructive)
+  status        Show docker + DB revision + URLs
+
+Run `etlx dev up --help` for flags.
+EOF
+            return 0
+            ;;
+        up)        shift; dev_up "$@" ;;
+        down)      shift; dev_down "$@" ;;
+        reset)     shift; dev_reset "$@" ;;
+        status)    shift; dev_status "$@" ;;
+        *)
+            echo "etlx dev: unknown subcommand '$sub'. Try 'etlx dev --help'." >&2
+            exit 2
+            ;;
+    esac
+}
+
+# ---------- top-level dispatch ---------------------------------------------
 
 if [[ $# -eq 0 || "${1-}" == "-h" || "${1-}" == "--help" ]]; then
     usage
@@ -47,6 +299,11 @@ fi
 
 cmd="$1"
 shift
+
+case "$cmd" in
+    web)  dispatch_web "$@"; exit $? ;;
+    dev)  dispatch_dev "$@"; exit $? ;;
+esac
 
 for c in "${CORE_CMDS[@]}"; do
     if [[ "$cmd" == "$c" ]]; then

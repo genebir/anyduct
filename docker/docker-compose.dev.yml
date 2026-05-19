@@ -6,7 +6,7 @@
 #   make logs       # 로그 tailing
 #
 # 호스트 포트:
-#   postgres : 5432
+#   postgres : ${LOCAL_PG_PORT:-55432}  (non-standard default to dodge host PG)
 #   kafka    : 9092
 #   minio    : 9000 (S3 API) / 9001 (콘솔)
 #   redis    : 6379
@@ -20,7 +20,9 @@ services:
       POSTGRES_PASSWORD: ${LOCAL_PG_PASSWORD:-etl}
       POSTGRES_DB: ${LOCAL_PG_DB:-etl_dev}
     ports:
-      - "5432:5432"
+      # Non-standard host port avoids the very common collision with a
+      # host-installed Postgres on 5432. Override via LOCAL_PG_PORT if needed.
+      - "${LOCAL_PG_PORT:-55432}:5432"
     volumes:
       - pg_data:/var/lib/postgresql/data
     healthcheck:

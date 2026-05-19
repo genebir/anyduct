@@ -44,11 +44,15 @@ reaper_app = typer.Typer(help="Zombie-run reaper process commands.")
 scheduler_app = typer.Typer(help="Cron scheduler process commands.")
 stream_worker_app = typer.Typer(help="Stream worker process commands.")
 admin_app = typer.Typer(help="One-shot admin / bootstrap commands.")
+server_app = typer.Typer(help="Run the FastAPI server (uvicorn wrapper).")
+db_app = typer.Typer(help="Metadata DB migrations (Alembic wrapper).")
 app.add_typer(worker_app, name="worker")
 app.add_typer(reaper_app, name="reaper")
 app.add_typer(scheduler_app, name="scheduler")
 app.add_typer(stream_worker_app, name="stream-worker")
 app.add_typer(admin_app, name="admin")
+app.add_typer(server_app, name="server")
+app.add_typer(db_app, name="db")
 
 
 def _database_url() -> str:
@@ -178,6 +182,141 @@ def create_user_cmd(
             await engine.dispose()
 
     asyncio.run(_run())
+
+
+@admin_app.command("gen-jwt-keys")
+def gen_jwt_keys_cmd(
+    out_dir: Path = typer.Option(  # noqa: B008
+        Path(".run"),
+        "--out-dir",
+        help="Directory to write `jwt_private.pem` + `jwt_public.pem`.",
+    ),
+    bits: int = typer.Option(2048, "--bits", help="RSA modulus size."),
+    force: bool = typer.Option(False, "--force", help="Overwrite existing keys (default: refuse)."),
+) -> None:
+    """Generate an RSA keypair for JWT RS256.
+
+    Local-dev convenience: run once, then ``etlx server run`` (via the
+    `etlx` wrapper) exports the PEMs as ``AUTH_JWT_PRIVATE_KEY_PEM`` /
+    ``AUTH_JWT_PUBLIC_KEY_PEM`` so the FastAPI app boots its
+    ``JwtService``. The default output dir is ``.run/`` which is already
+    in ``.gitignore``."""
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    priv_path = out_dir / "jwt_private.pem"
+    pub_path = out_dir / "jwt_public.pem"
+
+    if (priv_path.exists() or pub_path.exists()) and not force:
+        typer.echo(
+            f"refusing to overwrite existing keys at {out_dir}/ (use --force to replace)",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=bits)
+    priv_pem = key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+    pub_pem = key.public_key().public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+
+    priv_path.write_bytes(priv_pem)
+    priv_path.chmod(0o600)
+    pub_path.write_bytes(pub_pem)
+    pub_path.chmod(0o644)
+
+    typer.echo(f"wrote: {priv_path} (mode 0600)")
+    typer.echo(f"wrote: {pub_path}")
+
+
+# ---------- server (FastAPI) -----------------------------------------------
+
+
+@server_app.command("run")
+def server_run_cmd(
+    host: str = typer.Option("0.0.0.0", "--host", help="Bind address."),
+    port: int = typer.Option(8000, "--port", help="TCP port."),
+    reload: bool = typer.Option(False, "--reload", help="Hot-reload on source changes (dev only)."),
+    workers: int = typer.Option(1, "--workers", help="Worker processes (ignored when --reload)."),
+    log_level: str = typer.Option("info", "--log-level", help="uvicorn log level."),
+) -> None:
+    """Run the FastAPI app via uvicorn. Production should typically use a
+    process manager directly (gunicorn + uvicorn workers); this command
+    is for local dev and quick deploys."""
+    import uvicorn
+
+    uvicorn.run(
+        "etlx_server.main:app",
+        host=host,
+        port=port,
+        reload=reload,
+        workers=workers if not reload else 1,
+        log_level=log_level,
+    )
+
+
+# ---------- db (Alembic) ---------------------------------------------------
+
+
+def _alembic_cfg() -> object:
+    """Build the Alembic Config pointing at the bundled ``alembic.ini``.
+
+    Lazy-import alembic so the CLI startup stays fast for non-db commands."""
+    from pathlib import Path as _Path
+
+    from alembic.config import Config
+
+    server_dir = _Path(__file__).resolve().parent.parent
+    ini = server_dir / "alembic.ini"
+    cfg = Config(str(ini))
+    cfg.set_main_option("script_location", str(server_dir / "alembic"))
+    # env.py reads $DATABASE_URL itself; nothing else to wire here.
+    return cfg
+
+
+@db_app.command("upgrade")
+def db_upgrade_cmd(
+    revision: str = typer.Argument("head", help="Target revision (default: head)."),
+) -> None:
+    """Run ``alembic upgrade <revision>`` against ``$DATABASE_URL``."""
+    from alembic import command
+
+    _ = _database_url()  # surface env-var-missing error early
+    command.upgrade(_alembic_cfg(), revision)  # type: ignore[arg-type]
+
+
+@db_app.command("downgrade")
+def db_downgrade_cmd(
+    revision: str = typer.Argument(..., help="Target revision (e.g. -1, base, <rev>)."),
+) -> None:
+    """Run ``alembic downgrade <revision>`` against ``$DATABASE_URL``."""
+    from alembic import command
+
+    _ = _database_url()
+    command.downgrade(_alembic_cfg(), revision)  # type: ignore[arg-type]
+
+
+@db_app.command("current")
+def db_current_cmd() -> None:
+    """Show the current Alembic revision applied to ``$DATABASE_URL``."""
+    from alembic import command
+
+    _ = _database_url()
+    command.current(_alembic_cfg())  # type: ignore[arg-type]
+
+
+@db_app.command("history")
+def db_history_cmd() -> None:
+    """List all known Alembic revisions."""
+    from alembic import command
+
+    command.history(_alembic_cfg())  # type: ignore[arg-type]
 
 
 @worker_app.command("run")

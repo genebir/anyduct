@@ -187,7 +187,7 @@ def test_read_since_wraps_complex_query(
 ) -> None:
     """The wrapping ``SELECT * FROM (<query>) WHERE …`` shape should
     accept inner queries that already do JOINs / WHERE / aliases."""
-    inner = f"SELECT id, name, age FROM {sqlite_seeded} " f"WHERE age >= 25"
+    inner = f"SELECT id, name, age FROM {sqlite_seeded} WHERE age >= 25"
     with sqlite_connector:
         records = list(sqlite_connector.read_since("id", 1, query=inner))
     ids = [r.data["id"] for r in records]

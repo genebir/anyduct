@@ -41,7 +41,10 @@ kafka = ["aiokafka>=0.11"]
 airflow = ["apache-airflow>=2.10"]
 dagster = ["dagster>=1.9"]
 prefect = ["prefect>=3.0"]
-observability = []  # ["opentelemetry-sdk>=1.25", "opentelemetry-exporter-otlp>=1.25"] — Step 6
+observability = [
+    "opentelemetry-sdk>=1.25",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.25",
+]
 # Secret backends (Step 7.4). Each backend is opt-in to avoid bringing heavy
 # cloud SDKs into the default install. Users only install what they use.
 vault = ["hvac>=2.0"]
@@ -102,6 +105,10 @@ dev = [
     # Secret backend clients (Step 7.4) — needed for unit mocks + integration tests
     "hvac>=2.0",
     "google-cloud-secret-manager>=2.20",
+    # OTel SDK + OTLP exporter — tests configure_otel via InMemory readers,
+    # so the dev install needs both the SDK and the gRPC exporter.
+    "opentelemetry-sdk>=1.25",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.25",
     # services/etlx-server 테스트용 (workspace 통합 dev)
     "httpx>=0.27",              # FastAPI TestClient
 ]
@@ -167,6 +174,12 @@ ignore_missing_imports = true
 # [project.optional-dependencies] mongodb = ["pymongo>=4.6"] for users.
 [[tool.mypy.overrides]]
 module = ["pymongo", "pymongo.*", "bson", "bson.*"]
+ignore_missing_imports = true
+
+# OpenTelemetry — installed via [observability] extra. The SDK is lazy-imported
+# from etl_plugins.observability.otel so the core install stays free of it.
+[[tool.mypy.overrides]]
+module = ["opentelemetry", "opentelemetry.*"]
 ignore_missing_imports = true
 
 # passlib doesn't ship type stubs in a way our pinned mypy picks up.

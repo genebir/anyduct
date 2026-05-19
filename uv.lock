@@ -1365,6 +1365,10 @@ mongodb = [
 mysql = [
     { name = "pymysql" },
 ]
+observability = [
+    { name = "opentelemetry-exporter-otlp-proto-grpc" },
+    { name = "opentelemetry-sdk" },
+]
 postgres = [
     { name = "psycopg", extra = ["binary"] },
 ]
@@ -1389,6 +1393,8 @@ dev = [
     { name = "hvac" },
     { name = "import-linter" },
     { name = "mypy" },
+    { name = "opentelemetry-exporter-otlp-proto-grpc" },
+    { name = "opentelemetry-sdk" },
     { name = "pre-commit" },
     { name = "psycopg", extra = ["binary"] },
     { name = "pyarrow" },
@@ -1414,6 +1420,8 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.27" },
     { name = "hvac", marker = "extra == 'vault'", specifier = ">=2.0" },
     { name = "jinja2", specifier = ">=3.1" },
+    { name = "opentelemetry-exporter-otlp-proto-grpc", marker = "extra == 'observability'", specifier = ">=1.25" },
+    { name = "opentelemetry-sdk", marker = "extra == 'observability'", specifier = ">=1.25" },
     { name = "prefect", marker = "extra == 'prefect'", specifier = ">=3.0" },
     { name = "psycopg", extras = ["binary"], marker = "extra == 'postgres'", specifier = ">=3.1" },
     { name = "pyarrow", marker = "extra == 's3'", specifier = ">=16.0" },
@@ -1438,6 +1446,8 @@ dev = [
     { name = "hvac", specifier = ">=2.0" },
     { name = "import-linter", specifier = ">=2.0" },
     { name = "mypy", specifier = ">=1.11" },
+    { name = "opentelemetry-exporter-otlp-proto-grpc", specifier = ">=1.25" },
+    { name = "opentelemetry-sdk", specifier = ">=1.25" },
     { name = "pre-commit", specifier = ">=3.8" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.1" },
     { name = "pyarrow", specifier = ">=16.0" },

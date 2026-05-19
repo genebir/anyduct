@@ -14,7 +14,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "next lint",
     "storybook": "storybook dev -p 6006 --no-open",
-    "build-storybook": "storybook build"
+    "build-storybook": "storybook build",
+    "test-storybook": "test-storybook"
   },
   "dependencies": {
     "@xyflow/react": "^12.10.2",
@@ -34,6 +35,8 @@
     "@storybook/addon-themes": "^9.1.0",
     "@storybook/nextjs-vite": "^9.1.0",
     "@storybook/react-vite": "^9.1.0",
+    "@storybook/test-runner": "^0.23.0",
+    "axe-playwright": "^2.1.0",
     "@tailwindcss/postcss": "^4.3.0",
     "@tailwindcss/vite": "^4.3.0",
     "@types/node": "^22.0.0",

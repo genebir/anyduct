@@ -10,6 +10,13 @@
 ## [Unreleased]
 
 ### Added
+- **Provider mocks + Sidebar / Header / ConnectionForm stories** [Step 10.8] — last gap in story coverage closed.
+  - The three providers in `components/providers/` (`auth-provider.tsx` / `theme-provider.tsx` / `workspace-provider.tsx`) now `export` their `Context` objects and value types. Production code keeps using the high-level `*Provider` + `use*()` hooks; Storybook can wrap a story in the same `Context.Provider` with a hand-built value, so any component that reads via `useAuth()` / `useTheme()` / `useWorkspaces()` works without hitting the API or `next/navigation`.
+  - `.storybook/mocks/providers.tsx` ships `MockAuthProvider`, `MockThemeProvider`, `MockWorkspaceProvider`, and a `MockAppShell` combo that stacks all three with happy-path defaults. Exported `DEFAULT_USER` and `DEFAULT_WORKSPACES` keep stories consistent across components.
+  - `components/shell/header.stories.tsx` — 5 stories (title-only, with-subtitle, with-actions, anonymous state, light theme via swapped `MockThemeProvider initial="light"`).
+  - `components/shell/sidebar.stories.tsx` — 6 stories driven by Storybook 9's `parameters.nextjs.navigation.pathname` so the active-nav state lights up the right entry (pipelines-active, overview-active, settings-active, blue-workspace `currentIndex=1`, no-workspaces, solo).
+  - `components/connections/connection-form.stories.tsx` — 4 stories (create, edit-postgres, edit-http, edit-mongo). The "Save" button intentionally 401s inside Storybook — these stories are for visual + a11y verification of the connector-type-aware multi-step form.
+  - 12 components × ~53 stories now in the catalog. `pnpm --filter @etlx/web {typecheck,build,build-storybook}` all green.
 - **Storybook test-runner + higher-level stories** [Step 10.8 follow-up] — axe-core CI gate is now wired, plus two more component stories shipped.
   - `.storybook/test-runner.ts` ships an `@storybook/test-runner` config that injects axe via `axe-playwright` and calls `checkA11y('#storybook-root')` on every story's `postVisit` — failing any WCAG AA violation. Individual stories opt out with `parameters.a11y.disable = true` (no current story does). New script: `pnpm --filter @etlx/web test-storybook`. CI runbook documented in `.storybook/README.md` (build → static serve → `test-storybook --url` + first-time Playwright chromium install).
   - `components/builder/pipeline-node.stories.tsx` — 6 stories rendered inside a mini `@xyflow/react` canvas so source/target handle placement, accent-tinted icon chip, and the ring-on-select state all match the production builder. Covers postgres source, filter transform, s3 sink, mongo source, selected state, and not-configured fallback.

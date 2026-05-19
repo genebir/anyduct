@@ -19,7 +19,9 @@ interface ThemeContextValue {
   toggleTheme: () => void;
 }
 
-const ThemeContext = createContext<ThemeContextValue | null>(null);
+/** Exported so Storybook can build a fake Provider — see auth-provider.tsx. */
+export const ThemeContext = createContext<ThemeContextValue | null>(null);
+export type { ThemeContextValue, Theme };
 
 function applyTheme(theme: Theme) {
   if (typeof document === "undefined") return;

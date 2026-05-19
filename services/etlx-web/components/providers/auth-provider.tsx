@@ -32,7 +32,13 @@ interface AuthContextValue {
   refreshUser: () => Promise<void>;
 }
 
-const AuthContext = createContext<AuthContextValue | null>(null);
+/**
+ * Exported so Storybook can build a fake Provider that satisfies
+ * ``useAuth()`` without hitting the API. Production code should keep using
+ * ``AuthProvider`` + ``useAuth()``.
+ */
+export const AuthContext = createContext<AuthContextValue | null>(null);
+export type { AuthContextValue, AuthState };
 
 const PUBLIC_ROUTES = new Set(["/login"]);
 

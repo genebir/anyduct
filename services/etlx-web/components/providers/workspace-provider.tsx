@@ -22,7 +22,9 @@ interface WorkspaceContextValue {
   loading: boolean;
 }
 
-const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
+/** Exported so Storybook can build a fake Provider — see auth-provider.tsx. */
+export const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
+export type { WorkspaceContextValue };
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const { state: authState } = useAuth();

@@ -10,6 +10,15 @@
 ## [Unreleased]
 
 ### Added
+- **DB-backed `CursorState`** [Step 6.1] — closes the cursor abstraction in the service layer so incremental syncs are durable across worker restarts without a sidecar JSON file.
+  - New `cursors` metadata table — composite PK `(workspace_id, name)`, `cursor_value: JSONB` (so any `CursorValue` round-trips without a type-discriminator column), `ON DELETE CASCADE` from `workspaces`. Alembic migration `0002_cursors` (`alembic upgrade head` from existing deployments).
+  - New `etlx_server.cursors` package:
+    - `CursorRepository` — async (asyncpg, same `AsyncSession` lifecycle as the rest of the service). `get` / `list_for_workspace` / `upsert` (via Postgres `INSERT … ON CONFLICT DO UPDATE RETURNING`) / `delete`. Mutations stay in the caller's transaction so a worker can pair the watermark write with its Run row commit.
+    - `DbCursorState` — sync, implements the core `etl_plugins.core.cursor.CursorState` ABC. Uses a dedicated **psycopg v3 sync engine** (separate from the FastAPI app's asyncpg engine) — asyncpg pools are bound to their creating event loop, so calling sync code that internally re-enters asyncio fails with "Future attached to a different loop". A sync engine has no such constraint and can be driven from any thread, which matches the production worker pattern where Pipeline.run is pushed onto `asyncio.to_thread`.
+    - `DbCursorState.from_url(url, *, workspace_id)` swaps the `+asyncpg` driver suffix for `+psycopg` so callers can reuse the same `DATABASE_URL` env var the FastAPI app uses.
+  - `datetime` values are wrapped as ISO-8601 strings before insertion (JSONB stores them as text). The core docstring already promises strict `>` semantics on ISO-8601 — lexicographic order matches chronological order, so resume works on either the wrapped string or the real datetime.
+  - 18 new integration tests against a testcontainers Postgres: `test_cursors_repository.py` covers get-missing / insert / update / JSON-able value types / delete / delete-missing / cross-workspace isolation / list ordering / FK cascade on workspace delete. `test_cursors_state.py` exercises the sync API via `asyncio.to_thread` (mirroring the worker), plus a `from_url` builder check.
+  - Cumulative: **241 server integration tests (was 223, +18); 909 tests project-wide all green**; mypy strict + ruff + lint-imports green.
 - **`read_since` on Postgres / MySQL / MongoDB connectors** [Step 6.1] — the last three production connectors now implement cursored reads, completing ADR-0024's "every batch source can incrementally sync" promise.
   - **`PostgresConnector.read_since`**: wraps the user's SELECT as a subquery + WHERE + ORDER BY using `psycopg.sql.SQL` / `Identifier` so the cursor-column identifier is properly quoted and the cursor value is bound as a server-side parameter. Re-uses the named server-side cursor + `itersize` chunking from the existing `read()` path.
   - **`MySQLConnector.read_since`**: same wrap pattern with `_ident` backtick-quoting + `%s` bind. Streams via `SSDictCursor.fetchmany(chunk_size)` so memory stays bounded for large windows.

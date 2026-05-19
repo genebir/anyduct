@@ -32,6 +32,7 @@ from etl_plugins.observability.metrics import (
     RECORDS_WRITTEN_TOTAL,
     get_metrics,
 )
+from etl_plugins.observability.tracing import get_tracer
 from etl_plugins.utils.retry import retryable
 
 TransformFn = Callable[[Record], Record | None]
@@ -177,6 +178,7 @@ class Pipeline:
         conns = connectors or {}
         start = time.monotonic()
         metrics = get_metrics()
+        tracer = get_tracer()
         attrs = {"pipeline": self.name, "mode": self.mode}
 
         result = RunResult(run_id=ctx.run_id, pipeline_name=self.name, success=False)
@@ -184,6 +186,19 @@ class Pipeline:
         if self.retry is not None:
             task_runner = retryable(**self._retry_kwargs())(task_runner)
 
+        # ``pipeline.run`` span wraps the whole sequence of tasks plus the
+        # bookkeeping that emits aggregate counters. Task-level spans are
+        # opened inside _run_dispatch below so they're nested children.
+        run_span = tracer.start_span(
+            "pipeline.run",
+            attributes={
+                "pipeline": self.name,
+                "mode": self.mode,
+                "run_id": ctx.run_id,
+                **({"cursor_from": str(cursor_from)} if cursor_from is not None else {}),
+                **({"cursor_to": str(cursor_to)} if cursor_to is not None else {}),
+            },
+        )
         self._fire("pre_run", ctx)
         try:
             for task in self.tasks:
@@ -193,7 +208,26 @@ class Pipeline:
                         "when Pipeline.run is called with cursor_from/cursor_to."
                     )
                 self._fire("on_task_start", ctx, task)
-                read_count, write_count, task_max = task_runner(task, conns, cursor_from, cursor_to)
+                task_span = tracer.start_span(
+                    "pipeline.task",
+                    attributes={
+                        "pipeline": self.name,
+                        "task": task.name or task.source or "unknown",
+                        "source": task.source or "",
+                        "sink": task.sink or "",
+                    },
+                )
+                try:
+                    read_count, write_count, task_max = task_runner(
+                        task, conns, cursor_from, cursor_to
+                    )
+                    task_span.set_attribute("records_read", read_count)
+                    task_span.set_attribute("records_written", write_count)
+                except Exception as exc:
+                    task_span.record_exception(exc)
+                    raise
+                finally:
+                    task_span.end()
                 result.records_read += read_count
                 result.records_written += write_count
                 if task_max is not None and (
@@ -204,14 +238,21 @@ class Pipeline:
                 metrics.counter(RECORDS_WRITTEN_TOTAL).add(write_count, attrs)
                 self._fire("on_task_end", ctx, task, write_count)
             result.success = True
+            run_span.set_attribute("success", True)
+            run_span.set_attribute("records_read_total", result.records_read)
+            run_span.set_attribute("records_written_total", result.records_written)
         except Exception as exc:
             result.error = exc
             metrics.counter(ERRORS_TOTAL).add(1, {**attrs, "phase": "run"})
+            run_span.set_attribute("success", False)
+            run_span.record_exception(exc)
             self._fire("on_error", ctx, exc)
             raise
         finally:
             result.duration_seconds = time.monotonic() - start
             metrics.histogram(DURATION_SECONDS).record(result.duration_seconds, attrs)
+            run_span.set_attribute("duration_seconds", result.duration_seconds)
+            run_span.end()
             self._fire("post_run", ctx, result)
 
         return result

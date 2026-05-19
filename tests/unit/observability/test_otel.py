@@ -195,6 +195,125 @@ def test_otel_span_wrapper_is_a_span(otel: OTelHandle) -> None:
         span.end()
 
 
+# --- Pipeline span emit (Step 6.2 follow-up) -------------------------------
+
+
+def test_pipeline_run_emits_run_and_task_spans(otel: OTelHandle) -> None:
+    """``Pipeline.run`` opens a ``pipeline.run`` span with one nested
+    ``pipeline.task`` per task, carrying the standard attrs."""
+    from etl_plugins.core.pipeline import Pipeline, Task
+    from etl_plugins.core.record import Record
+    from tests.fixtures.connectors import InMemoryBatchSink, InMemoryBatchSource
+
+    source = InMemoryBatchSource([Record(data={"id": 1}), Record(data={"id": 2})])
+    sink = InMemoryBatchSink()
+
+    Pipeline("orders-sync").add(
+        Task.extract("src", "q", name="extract-users").load("snk", table="users")
+    ).run(connectors={"src": source, "snk": sink})
+
+    assert otel.span_exporter is not None
+    otel.tracer_provider.force_flush()
+    spans_by_name = {s.name: s for s in otel.span_exporter.get_finished_spans()}
+    assert "pipeline.run" in spans_by_name
+    assert "pipeline.task" in spans_by_name
+
+    run_span = spans_by_name["pipeline.run"]
+    assert run_span.attributes is not None
+    assert run_span.attributes["pipeline"] == "orders-sync"
+    assert run_span.attributes["mode"] == "batch"
+    assert run_span.attributes["success"] is True
+    assert run_span.attributes["records_read_total"] == 2
+    assert run_span.attributes["records_written_total"] == 2
+
+    task_span = spans_by_name["pipeline.task"]
+    assert task_span.attributes is not None
+    assert task_span.attributes["pipeline"] == "orders-sync"
+    assert task_span.attributes["task"] == "extract-users"
+    assert task_span.attributes["source"] == "src"
+    assert task_span.attributes["sink"] == "snk"
+    assert task_span.attributes["records_read"] == 2
+    assert task_span.attributes["records_written"] == 2
+
+
+def test_pipeline_run_failure_records_exception_on_run_span(
+    otel: OTelHandle,
+) -> None:
+    """Transform errors propagate and surface as an exception event on the
+    ``pipeline.run`` span; ``success`` flips to False."""
+    from etl_plugins.core.exceptions import TransformError
+    from etl_plugins.core.pipeline import Pipeline, Task
+    from etl_plugins.core.record import Record
+    from tests.fixtures.connectors import InMemoryBatchSink, InMemoryBatchSource
+
+    def boom(_: Record) -> Record:
+        raise ValueError("kaboom")
+
+    source = InMemoryBatchSource([Record(data={"id": 1})])
+    sink = InMemoryBatchSink()
+
+    with pytest.raises(TransformError):
+        Pipeline("broken").add(Task.extract("src", "q").transform(boom).load("snk", table="x")).run(
+            connectors={"src": source, "snk": sink}
+        )
+
+    assert otel.span_exporter is not None
+    otel.tracer_provider.force_flush()
+    spans_by_name = {s.name: s for s in otel.span_exporter.get_finished_spans()}
+    run_span = spans_by_name["pipeline.run"]
+    assert run_span.attributes is not None
+    assert run_span.attributes["success"] is False
+    assert any(ev.name == "exception" for ev in run_span.events)
+    # Task span also carries the same exception event.
+    task_span = spans_by_name["pipeline.task"]
+    assert any(ev.name == "exception" for ev in task_span.events)
+
+
+def test_pipeline_run_span_carries_cursor_bounds_when_cursored(
+    otel: OTelHandle,
+) -> None:
+    from etl_plugins.core.pipeline import Pipeline, Task
+    from etl_plugins.core.record import Record
+    from tests.fixtures.connectors import InMemoryBatchSink, InMemoryBatchSource
+
+    source = InMemoryBatchSource(
+        [Record(data={"id": 1}), Record(data={"id": 2}), Record(data={"id": 3})]
+    )
+    sink = InMemoryBatchSink()
+
+    Pipeline("incr").add(Task.extract("src", "q", cursor_column="id").load("snk", table="x")).run(
+        connectors={"src": source, "snk": sink}, cursor_from=1, cursor_to=2
+    )
+
+    assert otel.span_exporter is not None
+    otel.tracer_provider.force_flush()
+    run_span = next(s for s in otel.span_exporter.get_finished_spans() if s.name == "pipeline.run")
+    assert run_span.attributes is not None
+    assert run_span.attributes["cursor_from"] == "1"
+    assert run_span.attributes["cursor_to"] == "2"
+
+
+def test_pipeline_run_with_no_otel_backend_is_a_noop() -> None:
+    """When the tracer is the default NoOp (no configure_otel call), Pipeline.run
+    must not raise — i.e. the NoOp span path stays exercised."""
+    from etl_plugins.core.pipeline import Pipeline, Task
+    from etl_plugins.core.record import Record
+    from tests.fixtures.connectors import InMemoryBatchSink, InMemoryBatchSource
+
+    # Ensure we're on NoOp (other tests with `otel` fixture clean up; this
+    # one runs without the fixture).
+    reset_metrics()
+    reset_tracer()
+    source = InMemoryBatchSource([Record(data={"id": 1})])
+    sink = InMemoryBatchSink()
+    result = (
+        Pipeline("p")
+        .add(Task.extract("src", "q").load("snk", table="t"))
+        .run(connectors={"src": source, "snk": sink})
+    )
+    assert result.success is True
+
+
 # --- helpers ---------------------------------------------------------------
 
 

@@ -55,6 +55,27 @@ class InMemoryBatchSource(BatchSource):
         self.last_chunk_size = chunk_size
         yield from self._records
 
+    def read_since(
+        self,
+        cursor_column: str,
+        cursor_value: Any,
+        *,
+        query: str | None = None,
+        chunk_size: int = 10_000,
+        **options: Any,
+    ) -> Iterator[Record]:
+        """Return records strictly greater than ``cursor_value`` on
+        ``cursor_column``, ordered ascending — Step 6.1 contract."""
+        self.last_query = query
+        self.last_chunk_size = chunk_size
+        rows = [r for r in self._records if cursor_column in r.data]
+        rows.sort(key=lambda r: r.data[cursor_column])
+        for r in rows:
+            v = r.data[cursor_column]
+            if cursor_value is not None and not (v > cursor_value):
+                continue
+            yield r
+
 
 class InMemoryBatchSink(BatchSink):
     """Collects records into ``self.records``."""

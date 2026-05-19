@@ -22,6 +22,7 @@ from etl_plugins.core.connector import (
     StreamSource,
 )
 from etl_plugins.core.context import Context
+from etl_plugins.core.cursor import CursorValue
 from etl_plugins.core.exceptions import PipelineError, TaskError, TransformError
 from etl_plugins.core.record import Record
 from etl_plugins.observability.metrics import (
@@ -48,6 +49,10 @@ class Task:
     source: str | None = None
     query: str | None = None
     source_options: dict[str, Any] = field(default_factory=dict)
+    # Cursor column for incremental reads (Step 6.1). When set, ``Pipeline.run``
+    # with ``cursor_from`` / ``cursor_to`` routes through ``source.read_since``;
+    # the field must exist on every emitted record's ``data``.
+    cursor_column: str | None = None
     transforms: list[TransformFn] = field(default_factory=list)
     sink: str | None = None
     sink_table: str | None = None
@@ -62,9 +67,16 @@ class Task:
         query: str | None = None,
         *,
         name: str | None = None,
+        cursor_column: str | None = None,
         **options: Any,
     ) -> Task:
-        return cls(name=name, source=source, query=query, source_options=dict(options))
+        return cls(
+            name=name,
+            source=source,
+            query=query,
+            source_options=dict(options),
+            cursor_column=cursor_column,
+        )
 
     def transform(self, fn: TransformFn) -> Task:
         self.transforms.append(fn)
@@ -98,6 +110,11 @@ class RunResult:
     records_written: int = 0
     duration_seconds: float = 0.0
     error: BaseException | None = None
+    # Max cursor value seen across all tasks during a cursored run (Step 6.1).
+    # ``None`` either means the pipeline wasn't cursored or no records were
+    # emitted. Callers persist this back into their CursorState for the next
+    # resume.
+    new_cursor: CursorValue = None
 
 
 @dataclass
@@ -130,11 +147,31 @@ class Pipeline:
         context: Context | None = None,
         *,
         connectors: dict[str, Connector] | None = None,
+        cursor_from: CursorValue = None,
+        cursor_to: CursorValue = None,
     ) -> RunResult:
+        """Run the batch pipeline.
+
+        Step 6.1 backfill parameters:
+
+        * ``cursor_from`` — exclusive lower bound on each task's
+          ``cursor_column`` (only records with value ``> cursor_from``).
+          ``None`` means "no lower bound" (full backfill or first run).
+        * ``cursor_to`` — inclusive upper bound (records with value
+          ``<= cursor_to``). ``None`` means "no upper bound" (tail).
+        * If either is set, every task must have ``cursor_column`` defined;
+          a ``TaskError`` is raised otherwise. The source connector must
+          implement :meth:`BatchSource.read_since`.
+
+        ``RunResult.new_cursor`` carries the max cursor value seen across
+        all tasks — persist it via ``CursorState`` for the next resume.
+        """
         if self.mode != "batch":
             raise PipelineError(
                 f"Pipeline.run is batch-only — for mode={self.mode!r} use arun_stream()"
             )
+
+        cursored = cursor_from is not None or cursor_to is not None
 
         ctx = context or Context(pipeline_name=self.name)
         conns = connectors or {}
@@ -150,10 +187,19 @@ class Pipeline:
         self._fire("pre_run", ctx)
         try:
             for task in self.tasks:
+                if cursored and not task.cursor_column:
+                    raise TaskError(
+                        f"Task {task.name or task.source!r}: cursor_column is required "
+                        "when Pipeline.run is called with cursor_from/cursor_to."
+                    )
                 self._fire("on_task_start", ctx, task)
-                read_count, write_count = task_runner(task, conns)
+                read_count, write_count, task_max = task_runner(task, conns, cursor_from, cursor_to)
                 result.records_read += read_count
                 result.records_written += write_count
+                if task_max is not None and (
+                    result.new_cursor is None or task_max > result.new_cursor  # type: ignore[operator]
+                ):
+                    result.new_cursor = task_max
                 metrics.counter(RECORDS_READ_TOTAL).add(read_count, attrs)
                 metrics.counter(RECORDS_WRITTEN_TOTAL).add(write_count, attrs)
                 self._fire("on_task_end", ctx, task, write_count)
@@ -174,7 +220,9 @@ class Pipeline:
         self,
         task: Task,
         connectors: dict[str, Connector],
-    ) -> tuple[int, int]:
+        cursor_from: CursorValue = None,
+        cursor_to: CursorValue = None,
+    ) -> tuple[int, int, CursorValue]:
         if not task.source:
             raise TaskError(f"Task missing source: {task!r}")
         if not task.sink:
@@ -192,12 +240,44 @@ class Pipeline:
             raise TaskError(f"Sink '{task.sink}' is not a BatchSink")
 
         records_read = 0
+        new_cursor: CursorValue = None
         dlq_enabled = self.dlq is not None
         metrics = get_metrics()
 
+        cursored = cursor_from is not None or cursor_to is not None
+        cursor_col = task.cursor_column if cursored else None
+
+        def _source_iter() -> Iterator[Record]:
+            if cursor_col is not None:
+                yield from source.read_since(
+                    cursor_col,
+                    cursor_from,
+                    query=task.query,
+                    **task.source_options,
+                )
+            else:
+                yield from source.read(query=task.query, **task.source_options)
+
         def _read_and_transform() -> Iterator[Record]:
-            nonlocal records_read
-            for raw in source.read(query=task.query, **task.source_options):
+            nonlocal records_read, new_cursor
+            for raw in _source_iter():
+                # Inclusive upper bound — skip rows beyond cursor_to. We still
+                # consume them from the iterator so a non-ordered source doesn't
+                # block on a buffered tail; ``read_since`` contracts ordering
+                # ascending, so an ordered source will see strictly increasing
+                # values and won't yield anything past cursor_to once the
+                # break triggers (we ``return`` below to short-circuit).
+                if cursor_col is not None:
+                    cv = raw.data.get(cursor_col)
+                    # cv is Any (Record.data is dict[str, Any]); the
+                    # caller is responsible for picking a column whose
+                    # values are mutually comparable with cursor_to /
+                    # new_cursor.
+                    if cursor_to is not None and cv is not None and cv > cursor_to:
+                        # Ordering is ascending — anything after this is also > cursor_to.
+                        return
+                    if cv is not None and (new_cursor is None or cv > new_cursor):
+                        new_cursor = cv
                 records_read += 1
                 record: Record | None = raw
                 try:
@@ -229,7 +309,7 @@ class Pipeline:
             table=task.sink_table,
             **task.sink_options,
         )
-        return records_read, written
+        return records_read, written, new_cursor
 
     def _fire(self, event: str, *args: Any) -> None:
         for hook in self._hooks.get(event, []):

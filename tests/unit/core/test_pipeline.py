@@ -279,3 +279,143 @@ def test_duration_recorded(
         .run(connectors={"src": in_memory_source, "snk": in_memory_sink})
     )
     assert result.duration_seconds >= 0
+
+
+# ---------- Pipeline.run cursor backfill (Step 6.1) ----------
+
+
+def test_task_extract_captures_cursor_column() -> None:
+    t = Task.extract("pg", "SELECT id, ts FROM t", cursor_column="ts")
+    assert t.cursor_column == "ts"
+    # cursor_column must not leak into source_options.
+    assert "cursor_column" not in t.source_options
+
+
+def test_run_without_cursor_uses_regular_read(
+    in_memory_source: InMemoryBatchSource,
+    in_memory_sink: InMemoryBatchSink,
+    sample_records: list[Record],
+) -> None:
+    """Backwards compat: a pipeline without cursor params behaves exactly
+    like before — cursor_column on the task is ignored."""
+    result = (
+        Pipeline("p")
+        .add(Task.extract("src", "q", cursor_column="id").load("snk", table="T"))
+        .run(connectors={"src": in_memory_source, "snk": in_memory_sink})
+    )
+    assert result.records_read == len(sample_records)
+    assert result.new_cursor is None  # not a cursored run
+
+
+def test_run_with_cursor_from_filters_strictly(
+    in_memory_source: InMemoryBatchSource,
+    in_memory_sink: InMemoryBatchSink,
+) -> None:
+    """``cursor_from=1`` returns ids 2 and 3 only; id 1 is excluded."""
+    result = (
+        Pipeline("p")
+        .add(Task.extract("src", "q", cursor_column="id").load("snk", table="T"))
+        .run(
+            connectors={"src": in_memory_source, "snk": in_memory_sink},
+            cursor_from=1,
+        )
+    )
+    assert result.records_read == 2
+    assert sorted(r.data["id"] for r in in_memory_sink.records) == [2, 3]
+    assert result.new_cursor == 3
+
+
+def test_run_with_cursor_to_caps_upper_bound(
+    in_memory_source: InMemoryBatchSource,
+    in_memory_sink: InMemoryBatchSink,
+) -> None:
+    """``cursor_to=2`` keeps ids 1 and 2 (inclusive); 3 is excluded."""
+    result = (
+        Pipeline("p")
+        .add(Task.extract("src", "q", cursor_column="id").load("snk", table="T"))
+        .run(
+            connectors={"src": in_memory_source, "snk": in_memory_sink},
+            cursor_to=2,
+        )
+    )
+    assert sorted(r.data["id"] for r in in_memory_sink.records) == [1, 2]
+    assert result.new_cursor == 2
+
+
+def test_run_with_cursor_window(
+    in_memory_source: InMemoryBatchSource,
+    in_memory_sink: InMemoryBatchSink,
+) -> None:
+    """``cursor_from=1, cursor_to=2`` → only id 2 (exclusive lower, inclusive upper)."""
+    result = (
+        Pipeline("p")
+        .add(Task.extract("src", "q", cursor_column="id").load("snk", table="T"))
+        .run(
+            connectors={"src": in_memory_source, "snk": in_memory_sink},
+            cursor_from=1,
+            cursor_to=2,
+        )
+    )
+    assert [r.data["id"] for r in in_memory_sink.records] == [2]
+    assert result.new_cursor == 2
+
+
+def test_run_cursor_requires_cursor_column_on_task(
+    in_memory_source: InMemoryBatchSource,
+    in_memory_sink: InMemoryBatchSink,
+) -> None:
+    """A cursored run with no ``cursor_column`` on the task is a config error."""
+    with pytest.raises(TaskError, match="cursor_column"):
+        Pipeline("p").add(Task.extract("src", "q").load("snk", table="T")).run(
+            connectors={"src": in_memory_source, "snk": in_memory_sink},
+            cursor_from=0,
+        )
+
+
+def test_run_two_batch_resume_is_idempotent(
+    in_memory_source: InMemoryBatchSource,
+    in_memory_sink: InMemoryBatchSink,
+) -> None:
+    """First run reads everything from cursor_from=0; second resumes from
+    result.new_cursor and yields nothing — no overlap, no rewind."""
+    pipeline = Pipeline("p").add(
+        Task.extract("src", "q", cursor_column="id").load("snk", table="T")
+    )
+    first = pipeline.run(
+        connectors={"src": in_memory_source, "snk": in_memory_sink},
+        cursor_from=0,
+    )
+    assert first.records_read == 3
+    assert first.new_cursor == 3
+    in_memory_sink.records.clear()
+    second = pipeline.run(
+        connectors={"src": in_memory_source, "snk": in_memory_sink},
+        cursor_from=first.new_cursor,
+    )
+    assert second.records_read == 0
+    assert second.new_cursor is None
+    assert in_memory_sink.records == []
+
+
+def test_run_cursor_tracks_max_across_tasks(
+    sample_records: list[Record],
+    in_memory_sink: InMemoryBatchSink,
+) -> None:
+    """Two tasks, two sources — RunResult.new_cursor is the overall max."""
+    src1 = InMemoryBatchSource(sample_records)
+    src2 = InMemoryBatchSource(
+        [
+            Record(data={"id": 10}),
+            Record(data={"id": 20}),
+        ]
+    )
+    pipeline = (
+        Pipeline("p")
+        .add(Task.extract("src1", "q", cursor_column="id").load("snk", table="T1"))
+        .add(Task.extract("src2", "q", cursor_column="id").load("snk", table="T2"))
+    )
+    result = pipeline.run(
+        connectors={"src1": src1, "src2": src2, "snk": in_memory_sink},
+        cursor_from=0,
+    )
+    assert result.new_cursor == 20

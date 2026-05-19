@@ -63,8 +63,8 @@ def test_configure_otel_in_memory_returns_readers() -> None:
         reset_tracer()
 
 
-def test_configure_otel_rejects_no_endpoint_when_not_in_memory() -> None:
-    with pytest.raises(ValueError, match="otlp_endpoint"):
+def test_configure_otel_rejects_no_backend() -> None:
+    with pytest.raises(ValueError, match="at least one of"):
         configure_otel(in_memory=False)
 
 
@@ -312,6 +312,143 @@ def test_pipeline_run_with_no_otel_backend_is_a_noop() -> None:
         .run(connectors={"src": source, "snk": sink})
     )
     assert result.success is True
+
+
+# --- Prometheus exporter (Step 6.2) ---------------------------------------
+
+
+def _free_port() -> int:
+    """Pick a free TCP port for the in-process Prometheus scrape server.
+
+    Closes the socket immediately so the OS can re-bind it from another
+    thread — there's a brief TOCTOU window but it's been good enough for
+    test infra everywhere I've seen this pattern."""
+    import socket
+
+    s = socket.socket()
+    try:
+        s.bind(("127.0.0.1", 0))
+        return int(s.getsockname()[1])
+    finally:
+        s.close()
+
+
+def _scrape(port: int) -> str:
+    """GET http://127.0.0.1:<port>/metrics and return the body."""
+    import urllib.request
+
+    with urllib.request.urlopen(f"http://127.0.0.1:{port}/metrics", timeout=2.0) as resp:
+        return resp.read().decode("utf-8")
+
+
+@pytest.fixture
+def otel_prom() -> Iterator[tuple[OTelHandle, int]]:
+    """Configure OTel with an in-process Prometheus scrape server on a
+    free port. Tear down everything after the test — the scrape server
+    is a daemon thread but explicit shutdown avoids port leaks across
+    rapid-fire test runs."""
+    port = _free_port()
+    handle = configure_otel(
+        service_name="etlx-prom-test",
+        prometheus_port=port,
+        prometheus_addr="127.0.0.1",
+    )
+    yield handle, port
+    handle.shutdown()
+    reset_metrics()
+    reset_tracer()
+
+
+def test_configure_otel_starts_prometheus_scrape_server(
+    otel_prom: tuple[OTelHandle, int],
+) -> None:
+    handle, port = otel_prom
+    assert handle.prometheus_reader is not None
+    assert handle.prometheus_server is not None
+    # Endpoint responds; basic OpenMetrics-style headers/body.
+    body = _scrape(port)
+    # Either an empty registry returns "" or HELP/TYPE comments. Both fine.
+    assert isinstance(body, str)
+
+
+def test_prometheus_scrape_exposes_emitted_counter(
+    otel_prom: tuple[OTelHandle, int],
+) -> None:
+    handle, port = otel_prom
+    counter = get_metrics().counter("etlx.records.read", description="rows", unit="1")
+    counter.add(4, {"pipeline": "p1"})
+    counter.add(7, {"pipeline": "p1"})
+    # Force-collect so the reader pushes into prometheus_client REGISTRY.
+    assert handle.prometheus_reader is not None
+    handle.prometheus_reader.collect()
+
+    body = _scrape(port)
+    # Prometheus normalizes "." to "_". A counter named etlx.records.read
+    # becomes etlx_records_read_total (the exporter appends `_total` for
+    # OTel monotonic counters per OpenMetrics convention).
+    assert "etlx_records_read" in body
+    # The 11 records (4 + 7) should sum into a single labeled series.
+    assert 'pipeline="p1"' in body
+    assert "11" in body  # sum across both adds
+
+
+def test_prometheus_only_no_otlp_no_in_memory_works() -> None:
+    """Prometheus alone (no OTLP, no InMemory) is a valid configuration."""
+    port = _free_port()
+    handle = configure_otel(prometheus_port=port, prometheus_addr="127.0.0.1")
+    try:
+        assert handle.prometheus_reader is not None
+        assert handle.metric_reader is None  # no InMemory
+        assert handle.span_exporter is None  # no InMemory
+        # Tracer is still an OTelTracer but with no exporter — spans are
+        # created and dropped, which is fine for prometheus-only setups.
+        assert isinstance(get_tracer(), OTelTracer)
+    finally:
+        handle.shutdown()
+        reset_metrics()
+        reset_tracer()
+
+
+def test_prometheus_coexists_with_in_memory() -> None:
+    """Setting both prometheus_port and in_memory=True attaches both
+    readers to the same MeterProvider — used in tests that want to
+    inspect emits in-process *and* verify the Prometheus surface."""
+    port = _free_port()
+    handle = configure_otel(in_memory=True, prometheus_port=port, prometheus_addr="127.0.0.1")
+    try:
+        assert handle.metric_reader is not None
+        assert handle.prometheus_reader is not None
+
+        counter = get_metrics().counter("etlx.coexist")
+        counter.add(3)
+
+        # Both surfaces see the emit.
+        in_mem = _flatten_metrics(handle.metric_reader.get_metrics_data())
+        assert "etlx.coexist" in in_mem
+        handle.prometheus_reader.collect()
+        body = _scrape(port)
+        assert "etlx_coexist" in body
+    finally:
+        handle.shutdown()
+        reset_metrics()
+        reset_tracer()
+
+
+def test_prometheus_shutdown_closes_server() -> None:
+    """OTelHandle.shutdown() tears down the WSGI server cleanly; the
+    port is reusable immediately after."""
+    import urllib.error
+
+    port = _free_port()
+    handle = configure_otel(prometheus_port=port, prometheus_addr="127.0.0.1")
+    # Verify it's up.
+    _scrape(port)
+    handle.shutdown()
+    reset_metrics()
+    reset_tracer()
+    # After shutdown the server should refuse / fail to connect.
+    with pytest.raises((urllib.error.URLError, ConnectionRefusedError, OSError)):
+        _scrape(port)
 
 
 # --- helpers ---------------------------------------------------------------

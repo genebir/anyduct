@@ -47,11 +47,13 @@ force you to import all three.
 ## Observability extras
 
 ```bash
-pip install 'etl-plugins[observability]'    # OTel SDK + OTLP/gRPC exporter
+pip install 'etl-plugins[observability]'    # OTel SDK + OTLP/gRPC + Prometheus
 ```
 
 Without this extra, `Metrics` and `Tracer` default to NoOp — calls are
-free and the dependency footprint stays minimal.
+free and the dependency footprint stays minimal. The extra ships three
+metric backends behind one switch (`configure_otel`): InMemory (tests),
+OTLP/gRPC (push), Prometheus (pull).
 
 ## Secret backend extras
 

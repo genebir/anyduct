@@ -33,6 +33,37 @@ handle.shutdown()  # flush + tear down both providers at process exit
 `get_metrics().counter(...).add(...)` and `get_tracer().start_span(...)`
 emit lands on the OTel SDK, which batches + ships over OTLP/gRPC.
 
+## Prometheus scrape endpoint
+
+For Prometheus pull-model deployments, set `prometheus_port` instead of
+(or in addition to) `otlp_endpoint`:
+
+```python
+handle = configure_otel(
+    service_name="etlx-worker",
+    prometheus_port=9090,
+    prometheus_addr="0.0.0.0",      # default — bind to all interfaces
+)
+```
+
+This starts an in-process WSGI server on the given port that exposes
+`/metrics` in Prometheus text format. The handle's `shutdown()` tears
+the server down cleanly. Counters and histograms emitted through
+`get_metrics()` land in `prometheus_client.REGISTRY` and are visible
+on the scrape endpoint.
+
+Notes:
+
+* Prometheus is **metrics-only**. Traces still need `otlp_endpoint` (or
+  `in_memory=True` for tests) to land somewhere.
+* OTel metric names use dots (`etl_plugins.records.read`); the
+  Prometheus exporter normalizes them to underscores
+  (`etl_plugins_records_read_total`) per OpenMetrics convention. Monotonic
+  counters get an automatic `_total` suffix.
+* You can combine modes — `configure_otel(otlp_endpoint=..., prometheus_port=...)`
+  attaches both readers to the same MeterProvider so you get OTLP push
+  and Prometheus scrape on the same process.
+
 ## What the runtime emits for free
 
 For every pipeline run:

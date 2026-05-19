@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help setup sync test test-it lint fmt typecheck up down clean pre-commit docs docs-serve
+.PHONY: help setup sync test test-it lint fmt typecheck up down clean pre-commit docs docs-serve etlx
 
 help:  ## Show this help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -41,6 +41,9 @@ down:  ## Stop local dev infra
 
 logs:  ## Tail dev infra logs
 	docker compose -f docker/docker-compose.dev.yml logs -f
+
+etlx:  ## Run unified `etlx` CLI (forwards to scripts/etlx); pass args via ARGS=
+	@./scripts/etlx $(ARGS)
 
 docs:  ## Build static docs site (strict — fails on broken refs)
 	uv run mkdocs build --strict

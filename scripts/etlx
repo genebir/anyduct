@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# etlx — single entry point for the etl-plugins core CLI + etlx-server admin CLI.
+#
+# The two CLIs live in separate packages on purpose (ADR-0017: core stays
+# unaware of services). This wrapper routes a subcommand to the right
+# package's console script so users get one command for everything.
+#
+# Install: symlink into PATH, e.g.
+#   ln -s "$(pwd)/scripts/etlx" ~/.local/bin/etlx
+#
+# Or use directly:
+#   ./scripts/etlx <subcommand> [args...]
+
+set -euo pipefail
+
+CORE_CMDS=(run run-stream test-connection list-connectors validate)
+SERVER_CMDS=(import-yaml export-yaml admin worker reaper scheduler stream-worker)
+
+usage() {
+    cat <<'EOF'
+etlx — unified ETL CLI dispatcher
+
+Pipeline (etl-plugins core):
+  run               Run a batch pipeline (YAML config)
+  run-stream        Run a stream pipeline
+  test-connection   Test connector health
+  list-connectors   List installed connector types
+  validate          Validate a YAML config
+
+Service (etlx-server, requires metadata DB):
+  admin             Admin bootstrap (e.g. `admin create-user`)
+  import-yaml       Import YAML configs into the metadata DB
+  export-yaml       Export metadata DB back to YAML
+  worker            Run the batch worker (consumes runs queue)
+  scheduler         Run the cron scheduler
+  reaper            Run the zombie-run reaper
+  stream-worker     Run the stream worker
+
+Run `etlx <subcommand> --help` for details on each.
+EOF
+}
+
+if [[ $# -eq 0 || "${1-}" == "-h" || "${1-}" == "--help" ]]; then
+    usage
+    exit 0
+fi
+
+cmd="$1"
+shift
+
+for c in "${CORE_CMDS[@]}"; do
+    if [[ "$cmd" == "$c" ]]; then
+        exec uv run etlx "$cmd" "$@"
+    fi
+done
+
+for c in "${SERVER_CMDS[@]}"; do
+    if [[ "$cmd" == "$c" ]]; then
+        exec uv run --package etlx-server etlx-server "$cmd" "$@"
+    fi
+done
+
+echo "etlx: unknown subcommand '$cmd'. Try 'etlx --help'." >&2
+exit 2

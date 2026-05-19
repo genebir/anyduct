@@ -119,6 +119,64 @@ class SQLiteConnector(BatchSource, BatchSink):
         except sqlite3.Error as exc:
             raise ReadError(f"sqlite read failed: {exc}") from exc
 
+    # ---------- BatchSource: cursored ---------------------------------------
+
+    def read_since(
+        self,
+        cursor_column: str,
+        cursor_value: Any,
+        *,
+        query: str | None = None,
+        chunk_size: int = 10_000,
+        **options: Any,
+    ) -> Iterator[Record]:
+        """Read records strictly greater than ``cursor_value`` on ``cursor_column``.
+
+        ``query`` must be a complete SELECT statement that exposes the
+        cursor column in its projection (Step 6.1, ADR-0024). The connector
+        wraps it as::
+
+            SELECT * FROM (<query>)
+            WHERE <cursor_column> > ?
+            ORDER BY <cursor_column>
+
+        and binds ``cursor_value`` as a parameter so callers don't have to
+        worry about quoting. ``cursor_value=None`` drops the WHERE clause
+        and returns every row ordered ascending — the "no progress yet,
+        start from the beginning" entry point.
+        """
+        if not query:
+            raise ReadError(
+                "SQLiteConnector.read_since requires 'query' (a SELECT exposing cursor_column)"
+            )
+        if self._conn is None:
+            raise ConnectError("SQLiteConnector is not connected")
+
+        col = _ident(cursor_column)
+        if cursor_value is None:
+            wrapped = f"SELECT * FROM ({query}) ORDER BY {col}"
+            params: tuple[Any, ...] = ()
+        else:
+            wrapped = f"SELECT * FROM ({query}) WHERE {col} > ? ORDER BY {col}"
+            params = (cursor_value,)
+
+        try:
+            cur = self._conn.execute(wrapped, params)
+            try:
+                while True:
+                    rows = cur.fetchmany(chunk_size)
+                    if not rows:
+                        return
+                    for row in rows:
+                        yield Record(
+                            data=dict(row),
+                            metadata={"source": "sqlite", "cursor_column": cursor_column},
+                        )
+            finally:
+                cur.close()
+        except sqlite3.Error as exc:
+            raise ReadError(f"sqlite read_since failed: {exc}") from exc
+
     # ---------- BatchSink --------------------------------------------------
 
     def write(

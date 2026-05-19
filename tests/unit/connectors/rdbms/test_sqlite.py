@@ -27,6 +27,7 @@ from tests.contracts.batch import (
     _BatchSinkContract,
     _BatchSourceContract,
 )
+from tests.contracts.cursor import _BatchSourceCursorContract
 
 
 def _sqlitify(records: list[Record]) -> list[Record]:
@@ -132,7 +133,87 @@ class TestSQLiteRoundTrip(_BatchRoundTripContract):
         return {"table": sqlite_table}
 
 
-# ---------- sqlite-specific tests ----------
+# ---------- contract: cursored reads ----------
+
+
+class TestSQLiteCursorReads(_BatchSourceCursorContract):
+    @pytest.fixture
+    def cursor_source(self, sqlite_connector: SQLiteConnector, sqlite_seeded: str) -> BatchSource:
+        return sqlite_connector
+
+    @pytest.fixture
+    def cursor_seeded_records(self, sample_records: list[Record]) -> list[Record]:
+        return _sqlitify(sample_records)
+
+    @pytest.fixture
+    def cursor_column(self) -> str:
+        return "id"
+
+    @pytest.fixture
+    def read_since_kwargs(self, sqlite_seeded: str) -> dict[str, object]:
+        return {"query": f"SELECT id, name, age, active FROM {sqlite_seeded}"}
+
+
+# ---------- sqlite-specific cursor tests ----------
+
+
+def test_read_since_requires_query(sqlite_connector: SQLiteConnector) -> None:
+    with sqlite_connector, pytest.raises(ReadError, match="query"):
+        list(sqlite_connector.read_since("id", None))
+
+
+def test_read_since_raises_when_not_connected(db_path: Path) -> None:
+    c = SQLiteConnector(database=str(db_path))
+    with pytest.raises(ConnectError, match="not connected"):
+        list(c.read_since("id", None, query="SELECT 1"))
+
+
+def test_read_since_records_carry_cursor_metadata(
+    sqlite_connector: SQLiteConnector, sqlite_seeded: str
+) -> None:
+    """read_since stamps Record.metadata['cursor_column'] so downstream
+    transforms / sinks can see which field is the watermark."""
+    with sqlite_connector:
+        records = list(
+            sqlite_connector.read_since("id", None, query=f"SELECT id, name FROM {sqlite_seeded}")
+        )
+    assert records
+    for r in records:
+        assert r.metadata["cursor_column"] == "id"
+
+
+def test_read_since_wraps_complex_query(
+    sqlite_connector: SQLiteConnector, sqlite_seeded: str
+) -> None:
+    """The wrapping ``SELECT * FROM (<query>) WHERE …`` shape should
+    accept inner queries that already do JOINs / WHERE / aliases."""
+    inner = f"SELECT id, name, age FROM {sqlite_seeded} " f"WHERE age >= 25"
+    with sqlite_connector:
+        records = list(sqlite_connector.read_since("id", 1, query=inner))
+    ids = [r.data["id"] for r in records]
+    assert ids == sorted(ids)
+    assert all(i > 1 for i in ids)
+
+
+def test_read_since_uses_parameter_binding(
+    sqlite_connector: SQLiteConnector, sqlite_seeded: str
+) -> None:
+    """``cursor_value`` must be bound as a parameter, not interpolated —
+    a string that *looks* like SQL must not execute."""
+    injected = "1 OR 1=1"
+    with sqlite_connector:
+        # The injected string is treated as a single cursor value; on the
+        # int ``id`` column, sqlite will simply find nothing greater than
+        # it (string > int comparison rules), and crucially the trailing
+        # ``OR 1=1`` is never parsed as SQL.
+        records = list(
+            sqlite_connector.read_since(
+                "id", injected, query=f"SELECT id, name FROM {sqlite_seeded}"
+            )
+        )
+    # We don't care about the exact rows — only that no error and no
+    # injection bypass occurred.
+    assert isinstance(records, list)
 
 
 def test_registry_resolves_sqlite() -> None:

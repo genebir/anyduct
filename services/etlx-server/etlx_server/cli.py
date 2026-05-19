@@ -28,7 +28,10 @@ from sqlalchemy import select
 
 from etl_plugins.config.secrets import get_secret_backend
 from etl_plugins.observability.logging import configure_logging
+from etlx_server.auth.password_service import PasswordService
+from etlx_server.db.enums import AuthMethod
 from etlx_server.db.models import Workspace
+from etlx_server.db.models.workspace import User
 from etlx_server.db.session import make_engine, make_session_factory
 from etlx_server.io.yaml_sync import export_workspace, import_yaml_dir
 from etlx_server.scheduler import Scheduler
@@ -40,10 +43,12 @@ worker_app = typer.Typer(help="Worker process commands.")
 reaper_app = typer.Typer(help="Zombie-run reaper process commands.")
 scheduler_app = typer.Typer(help="Cron scheduler process commands.")
 stream_worker_app = typer.Typer(help="Stream worker process commands.")
+admin_app = typer.Typer(help="One-shot admin / bootstrap commands.")
 app.add_typer(worker_app, name="worker")
 app.add_typer(reaper_app, name="reaper")
 app.add_typer(scheduler_app, name="scheduler")
 app.add_typer(stream_worker_app, name="stream-worker")
+app.add_typer(admin_app, name="admin")
 
 
 def _database_url() -> str:
@@ -121,6 +126,54 @@ def export_yaml_cmd(
                 f"exported: connections={result.connections_written} "
                 f"pipelines={result.pipelines_written} -> {to}"
             )
+        finally:
+            await engine.dispose()
+
+    asyncio.run(_run())
+
+
+@admin_app.command("create-user")
+def create_user_cmd(
+    email: str = typer.Option(..., "--email", help="Login email (unique)."),
+    name: str = typer.Option(..., "--name", help="Display name."),
+    password: str = typer.Option(
+        ...,
+        "--password",
+        prompt=True,
+        hide_input=True,
+        confirmation_prompt=True,
+        help="Login password (prompted if omitted).",
+    ),
+    superadmin: bool = typer.Option(
+        False, "--superadmin", help="Grant cross-workspace SuperAdmin privileges."
+    ),
+) -> None:
+    """Seed a local-auth user. Use this once at deploy time to bootstrap
+    the first admin — subsequent users join via OIDC or invite flows."""
+
+    async def _run() -> None:
+        engine = make_engine(_database_url())
+        factory = make_session_factory(engine)
+        try:
+            async with factory() as session:
+                existing = (
+                    await session.execute(select(User).where(User.email == email))
+                ).scalar_one_or_none()
+                if existing is not None:
+                    typer.echo(f"error: user with email={email!r} already exists", err=True)
+                    raise typer.Exit(1)
+                user = User(
+                    email=email,
+                    name=name,
+                    auth_method=AuthMethod.LOCAL,
+                    password_hash=PasswordService().hash(password),
+                    is_superadmin=superadmin,
+                )
+                session.add(user)
+                await session.commit()
+                await session.refresh(user)
+            badge = " (superadmin)" if superadmin else ""
+            typer.echo(f"created: user id={user.id} email={email}{badge}")
         finally:
             await engine.dispose()
 

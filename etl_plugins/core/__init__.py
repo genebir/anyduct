@@ -8,6 +8,14 @@ from etl_plugins.core.connector import (
     StreamSource,
 )
 from etl_plugins.core.context import Context
+from etl_plugins.core.cursor import (
+    Cursor,
+    CursorState,
+    CursorValue,
+    FileCursorState,
+    InMemoryCursorState,
+    max_cursor_value,
+)
 from etl_plugins.core.exceptions import (
     ConfigError,
     ConnectError,
@@ -36,9 +44,14 @@ __all__ = [
     "ConnectorError",
     "ConnectorRegistry",
     "Context",
+    "Cursor",
+    "CursorState",
+    "CursorValue",
     "ETLError",
     "Field",
+    "FileCursorState",
     "Hook",
+    "InMemoryCursorState",
     "Pipeline",
     "PipelineError",
     "ReadError",
@@ -55,4 +68,5 @@ __all__ = [
     "TransformError",
     "TransformFn",
     "WriteError",
+    "max_cursor_value",
 ]

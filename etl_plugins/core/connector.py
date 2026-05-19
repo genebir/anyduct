@@ -57,6 +57,36 @@ class BatchSource(Connector):
         **options: Any,
     ) -> Iterator[Record]: ...
 
+    def read_since(
+        self,
+        cursor_column: str,
+        cursor_value: Any,
+        *,
+        query: str | None = None,
+        chunk_size: int = 10_000,
+        **options: Any,
+    ) -> Iterator[Record]:
+        """Read records strictly greater than ``cursor_value`` on ``cursor_column``.
+
+        Optional — connectors that don't support cursored reads keep the
+        default and raise :class:`NotImplementedError` if a caller asks
+        for one. Implementations should:
+
+        * Return records ordered by ``cursor_column`` ascending so the
+          caller can fold the new max into its watermark progressively.
+        * Treat ``cursor_value=None`` as "no watermark yet, return everything".
+        * Apply the strict ``>`` semantics (equal values are assumed already
+          processed, otherwise resume would re-emit them).
+
+        See :mod:`etl_plugins.core.cursor` for the value type + state
+        store, and ADR-0024 for the design rationale.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support cursored reads "
+            "(read_since). Use read() with an explicit WHERE clause "
+            "or implement read_since on the connector."
+        )
+
 
 class BatchSink(Connector):
     """Writes records in chunks. Returns the number of records written."""

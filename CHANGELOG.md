@@ -9,6 +9,14 @@
 
 ## [Unreleased]
 
+(no unreleased changes)
+
+## [0.1.0] - 2026-05-19
+
+First public release of the core `etl-plugins` library. Closes
+ADR-0024's v0.1.0 critical path: Cursor + OTel/Prometheus + contract
+suite + mkdocs site.
+
 ### Added
 - **Prometheus exporter for `configure_otel`** [Step 6.2] — fifth release-blocker on ADR-0024's v0.1.0 critical path closed. Third concrete `Metrics` backend after NoOp and OTLP push. Pull-model deployments now get a `/metrics` scrape endpoint on the worker process without standing up an OTel collector.
   - New `configure_otel(prometheus_port=<int>, prometheus_addr="0.0.0.0")` kwargs. When `prometheus_port` is set, the function attaches a `PrometheusMetricReader` to the MeterProvider and starts an in-process WSGI scrape server via `prometheus_client.start_http_server` on the given port. Returned `OTelHandle` gains `.prometheus_reader` and `.prometheus_server` fields; `handle.shutdown()` calls `server.shutdown()` + `server.server_close()` + `thread.join(timeout=2.0)` so the port releases immediately and rapid-fire test runs don't leak ports.

@@ -75,7 +75,7 @@ from etl_plugins.utils import (
     run_sync_in_thread,
 )
 
-__version__ = "0.0.1"
+__version__ = "0.1.0"
 
 __all__ = [
     "BatchSink",

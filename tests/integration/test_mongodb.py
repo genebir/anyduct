@@ -20,6 +20,7 @@ from tests.contracts.batch import (
     _BatchSinkContract,
     _BatchSourceContract,
 )
+from tests.contracts.cursor import _BatchSourceCursorContract
 
 pytestmark = pytest.mark.it
 
@@ -39,6 +40,15 @@ class _StripIdConnector(MongoDBConnector):
 
     def read(self, query=None, *, chunk_size=10_000, **options):  # type: ignore[override, no-untyped-def]
         for r in super().read(query, chunk_size=chunk_size, **options):
+            data = {k: v for k, v in r.data.items() if k != "_id"}
+            yield Record(data=data, metadata=r.metadata, schema_version=r.schema_version)
+
+    def read_since(  # type: ignore[override, no-untyped-def]
+        self, cursor_column, cursor_value, *, query=None, chunk_size=10_000, **options
+    ):
+        for r in super().read_since(
+            cursor_column, cursor_value, query=query, chunk_size=chunk_size, **options
+        ):
             data = {k: v for k, v in r.data.items() if k != "_id"}
             yield Record(data=data, metadata=r.metadata, schema_version=r.schema_version)
 
@@ -88,6 +98,27 @@ class TestMongoRoundTrip(_BatchRoundTripContract):
     @pytest.fixture
     def write_kwargs(self, mongo_collection: str) -> dict[str, object]:
         return {"table": mongo_collection}
+
+
+# ---------- contract: cursored reads ----------
+
+
+class TestMongoCursorReads(_BatchSourceCursorContract):
+    @pytest.fixture
+    def cursor_source(self, mongo_uri: str, mongo_seeded: str) -> BatchSource:
+        return _StripIdConnector(uri=mongo_uri, database="test")
+
+    @pytest.fixture
+    def cursor_seeded_records(self, sample_records: list[Record]) -> list[Record]:
+        return sample_records
+
+    @pytest.fixture
+    def cursor_column(self) -> str:
+        return "id"
+
+    @pytest.fixture
+    def read_since_kwargs(self, mongo_seeded: str) -> dict[str, object]:
+        return {"query": mongo_seeded}
 
 
 # ---------- mongo-specific tests ----------

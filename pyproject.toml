@@ -168,6 +168,12 @@ ignore_missing_imports = true
 module = ["pymysql", "pymysql.*"]
 ignore_missing_imports = true
 
+# psycopg is installed via [postgres] extra; pre-commit's isolated mypy
+# venv doesn't get it, so silence the missing-stub error there.
+[[tool.mypy.overrides]]
+module = ["psycopg", "psycopg.*"]
+ignore_missing_imports = true
+
 # pymongo ships type stubs as of 4.6, but the lazy-imported path in our
 # optional-extra connector module means mypy can still flag it when the
 # extra isn't installed in the hook's venv. We rely on pyproject's

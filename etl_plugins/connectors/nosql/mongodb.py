@@ -195,6 +195,57 @@ class MongoDBConnector(BatchSource, BatchSink):
         except PyMongoError as e:
             raise ReadError(f"mongodb: read from {query!r} failed: {e}") from e
 
+    # --- BatchSource: cursored --------------------------------------------
+
+    def read_since(
+        self,
+        cursor_column: str,
+        cursor_value: Any,
+        *,
+        query: str | None = None,
+        chunk_size: int = 10_000,
+        **options: Any,
+    ) -> Iterator[Record]:
+        """Read documents whose ``cursor_column`` is strictly greater than
+        ``cursor_value``, sorted ascending — Step 6.1 / ADR-0024 contract.
+
+        ``query`` is the collection name (matching :meth:`read`). Any extra
+        ``filter`` in ``options`` is merged into the cursor filter via an
+        ``$and`` so users can still constrain the resultset further. Other
+        read options (``projection``, ``batch_size``, ``limit``) are
+        forwarded verbatim; the sort is forced to ``[(cursor_column, 1)]``
+        to satisfy the contract.
+        """
+        if not query:
+            raise ReadError("MongoDBConnector.read_since requires a collection name (query)")
+        self.connect()
+        coll = self.database[query]
+        projection = options.get("projection")
+        batch_size = int(options.get("batch_size", chunk_size))
+        limit = int(options.get("limit", 0))
+
+        cursor_filter: dict[str, Any] = {}
+        if cursor_value is not None:
+            cursor_filter = {cursor_column: {"$gt": cursor_value}}
+        extra_filter = options.get("filter") or {}
+        if extra_filter and cursor_filter:
+            combined: dict[str, Any] = {"$and": [cursor_filter, extra_filter]}
+        else:
+            combined = extra_filter or cursor_filter
+
+        try:
+            mongo_cursor = coll.find(combined, projection=projection, batch_size=batch_size)
+            mongo_cursor = mongo_cursor.sort([(cursor_column, 1)])
+            if limit > 0:
+                mongo_cursor = mongo_cursor.limit(limit)
+            for doc in mongo_cursor:
+                yield Record(
+                    data=dict(doc),
+                    metadata={"source": "mongodb", "cursor_column": cursor_column},
+                )
+        except PyMongoError as e:
+            raise ReadError(f"mongodb: read_since on {query!r} failed: {e}") from e
+
     # --- BatchSink --------------------------------------------------------
 
     def write(

@@ -135,6 +135,61 @@ class PostgresConnector(BatchSource, BatchSink):
         except psycopg.Error as exc:
             raise ReadError(f"postgres read failed: {exc}") from exc
 
+    # ---------- BatchSource: cursored ---------------------------------------
+
+    def read_since(
+        self,
+        cursor_column: str,
+        cursor_value: Any,
+        *,
+        query: str | None = None,
+        chunk_size: int = 10_000,
+        **options: Any,
+    ) -> Iterator[Record]:
+        """Read records strictly greater than ``cursor_value`` on ``cursor_column``.
+
+        Wraps the user's SELECT as a subquery + WHERE + ORDER BY identical
+        in spirit to :meth:`SQLiteConnector.read_since` — see Step 6.1 /
+        ADR-0024. The cursor column identifier is interpolated via
+        ``psycopg.sql.Identifier`` (no SQL injection risk) and the cursor
+        value is bound as a server-side parameter.
+        """
+        if not query:
+            raise ReadError(
+                "PostgresConnector.read_since requires 'query' (a SELECT exposing cursor_column)"
+            )
+        if self._conn is None:
+            raise ConnectError("PostgresConnector is not connected")
+
+        col = sql.Identifier(cursor_column)
+        if cursor_value is None:
+            wrapped = sql.SQL("SELECT * FROM ({inner}) AS _inner ORDER BY {col}").format(
+                inner=sql.SQL(query),
+                col=col,
+            )
+            params: tuple[Any, ...] = ()
+        else:
+            wrapped = sql.SQL(
+                "SELECT * FROM ({inner}) AS _inner WHERE {col} > %s ORDER BY {col}"
+            ).format(inner=sql.SQL(query), col=col)
+            params = (cursor_value,)
+
+        cursor_name = str(options.get("cursor_name") or f"etl_{uuid4().hex[:8]}")
+        try:
+            with self._conn.cursor(name=cursor_name) as cur:
+                cur.itersize = chunk_size
+                cur.execute(wrapped, params)
+                if cur.description is None:
+                    return
+                columns = [d.name for d in cur.description]
+                for row in cur:
+                    yield Record(
+                        data=dict(zip(columns, row, strict=False)),
+                        metadata={"source": "postgres", "cursor_column": cursor_column},
+                    )
+        except psycopg.Error as exc:
+            raise ReadError(f"postgres read_since failed: {exc}") from exc
+
     # ---------- BatchSink --------------------------------------------------
 
     def write(

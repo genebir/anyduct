@@ -132,6 +132,58 @@ class MySQLConnector(BatchSource, BatchSink):
         except pymysql.MySQLError as exc:
             raise ReadError(f"mysql read failed: {exc}") from exc
 
+    # ---------- BatchSource: cursored ---------------------------------------
+
+    def read_since(
+        self,
+        cursor_column: str,
+        cursor_value: Any,
+        *,
+        query: str | None = None,
+        chunk_size: int = 10_000,
+        **options: Any,
+    ) -> Iterator[Record]:
+        """Read records strictly greater than ``cursor_value`` on ``cursor_column``.
+
+        Wraps the user's SELECT as a subquery + WHERE + ORDER BY identical
+        in spirit to :meth:`SQLiteConnector.read_since` — see Step 6.1 /
+        ADR-0024. The cursor column identifier is quoted via ``_ident``
+        (backticks) and the cursor value is bound as a server-side
+        parameter, so neither path is injection-prone.
+        """
+        if not query:
+            raise ReadError(
+                "MySQLConnector.read_since requires 'query' (a SELECT exposing cursor_column)"
+            )
+        if self._conn is None or not self._conn.open:
+            raise ConnectError("MySQLConnector is not connected")
+
+        col = _ident(cursor_column)
+        if cursor_value is None:
+            wrapped = f"SELECT * FROM ({query}) AS _inner ORDER BY {col}"
+            params: tuple[Any, ...] = ()
+        else:
+            wrapped = f"SELECT * FROM ({query}) AS _inner WHERE {col} > %s ORDER BY {col}"
+            params = (cursor_value,)
+
+        try:
+            cur = self._conn.cursor(SSDictCursor)
+            try:
+                cur.execute(wrapped, params)
+                while True:
+                    rows = cur.fetchmany(chunk_size)
+                    if not rows:
+                        return
+                    for row in rows:
+                        yield Record(
+                            data=dict(row),
+                            metadata={"source": "mysql", "cursor_column": cursor_column},
+                        )
+            finally:
+                cur.close()
+        except pymysql.MySQLError as exc:
+            raise ReadError(f"mysql read_since failed: {exc}") from exc
+
     # ---------- BatchSink --------------------------------------------------
 
     def write(

@@ -22,6 +22,7 @@ from tests.contracts.batch import (
     _BatchSinkContract,
     _BatchSourceContract,
 )
+from tests.contracts.cursor import _BatchSourceCursorContract
 
 pytestmark = pytest.mark.it
 
@@ -64,6 +65,35 @@ class TestPostgresRoundTrip(_BatchRoundTripContract):
     @pytest.fixture
     def round_trip_connector(self, pg_connector: PostgresConnector, pg_table: str) -> BatchSource:
         return pg_connector
+
+    @pytest.fixture
+    def read_kwargs(self, pg_table: str) -> dict[str, object]:
+        return {"query": f"SELECT id, name, age, active FROM {pg_table}"}
+
+    @pytest.fixture
+    def write_kwargs(self, pg_table: str) -> dict[str, object]:
+        return {"table": pg_table}
+
+
+# ---------- contract: cursored reads ----------
+
+
+class TestPostgresCursorReads(_BatchSourceCursorContract):
+    @pytest.fixture
+    def cursor_source(self, pg_connector: PostgresConnector, pg_seeded: str) -> BatchSource:
+        return pg_connector
+
+    @pytest.fixture
+    def cursor_seeded_records(self, sample_records: list[Record]) -> list[Record]:
+        return sample_records
+
+    @pytest.fixture
+    def cursor_column(self) -> str:
+        return "id"
+
+    @pytest.fixture
+    def read_since_kwargs(self, pg_seeded: str) -> dict[str, object]:
+        return {"query": f"SELECT id, name, age, active FROM {pg_seeded}"}
 
     @pytest.fixture
     def read_kwargs(self, pg_table: str) -> dict[str, object]:

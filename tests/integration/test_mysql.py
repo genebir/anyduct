@@ -22,6 +22,7 @@ from tests.contracts.batch import (
     _BatchSinkContract,
     _BatchSourceContract,
 )
+from tests.contracts.cursor import _BatchSourceCursorContract
 
 pytestmark = pytest.mark.it
 
@@ -93,6 +94,27 @@ class TestMySQLRoundTrip(_BatchRoundTripContract):
     @pytest.fixture
     def write_kwargs(self, mysql_table: str) -> dict[str, object]:
         return {"table": mysql_table}
+
+
+# ---------- contract: cursored reads ----------
+
+
+class TestMySQLCursorReads(_BatchSourceCursorContract):
+    @pytest.fixture
+    def cursor_source(self, mysql_connector: MySQLConnector, mysql_seeded: str) -> BatchSource:
+        return mysql_connector
+
+    @pytest.fixture
+    def cursor_seeded_records(self, sample_records: list[Record]) -> list[Record]:
+        return _mysqlify(sample_records)
+
+    @pytest.fixture
+    def cursor_column(self) -> str:
+        return "id"
+
+    @pytest.fixture
+    def read_since_kwargs(self, mysql_seeded: str) -> dict[str, object]:
+        return {"query": f"SELECT id, name, age, active FROM `{mysql_seeded}`"}
 
 
 # ---------- mysql-specific tests ----------

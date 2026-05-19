@@ -115,6 +115,25 @@ class _BatchSourceCursorContract:
             result = list(cursor_source.read_since(cursor_column, top, **read_since_kwargs))
         assert result == []
 
+    def test_read_since_stamps_cursor_column_metadata(
+        self,
+        cursor_source: BatchSource,
+        cursor_seeded_records: list[Record],
+        cursor_column: str,
+        read_since_kwargs: dict[str, object],
+    ) -> None:
+        """Every record emitted by ``read_since`` must carry
+        ``metadata['cursor_column']`` so downstream transforms / sinks can
+        identify the watermark column without re-parsing the query.
+        Documented in ``docs/guides/cursors.md`` and enforced here."""
+        with cursor_source:
+            result = list(cursor_source.read_since(cursor_column, None, **read_since_kwargs))
+        assert result, "seed must yield at least one record"
+        for r in result:
+            assert (
+                r.metadata.get("cursor_column") == cursor_column
+            ), f"record emitted without cursor_column metadata: {r!r}"
+
     def test_read_since_resume_is_idempotent(
         self,
         cursor_source: BatchSource,

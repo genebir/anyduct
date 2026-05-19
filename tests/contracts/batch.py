@@ -75,6 +75,38 @@ class _BatchSourceContract:
             assert source.health_check() is True
         assert source.health_check() is False
 
+    def test_close_is_idempotent(self, source: BatchSource) -> None:
+        """Calling close() repeatedly must not raise — finally-blocks and
+        zombie reapers depend on it."""
+        source.connect()
+        source.close()
+        source.close()  # second call — must not raise
+        assert source.health_check() is False
+
+    def test_close_before_connect_is_noop(self, source: BatchSource) -> None:
+        """A fresh, never-connected source must allow close() without raising."""
+        source.close()
+        assert source.health_check() is False
+
+    def test_reconnect_after_close(
+        self,
+        source: BatchSource,
+        seeded_records: list[Record],
+        read_kwargs: dict[str, object],
+    ) -> None:
+        """The same instance can be opened, closed, and opened again — workers
+        spawn one connector per run and may reuse instances across runs."""
+        source.connect()
+        first = list(source.read(**read_kwargs))
+        source.close()
+        assert source.health_check() is False
+        source.connect()
+        try:
+            second = list(source.read(**read_kwargs))
+        finally:
+            source.close()
+        assert normalize_payloads(first) == normalize_payloads(second)
+
     def test_read_returns_iterator(
         self,
         source: BatchSource,
@@ -146,6 +178,43 @@ class _BatchSinkContract:
         assert sink.health_check() is True
         sink.close()
         assert sink.health_check() is False
+
+    def test_close_is_idempotent(self, sink: BatchSink) -> None:
+        sink.connect()
+        sink.close()
+        sink.close()  # second call — must not raise
+        assert sink.health_check() is False
+
+    def test_close_before_connect_is_noop(self, sink: BatchSink) -> None:
+        sink.close()
+        assert sink.health_check() is False
+
+    def test_reconnect_after_close(
+        self,
+        sink: BatchSink,
+        sample_records: list[Record],
+        write_kwargs: dict[str, object],
+    ) -> None:
+        """The sink instance can be opened, written, closed, and re-opened —
+        long-running workers reuse connector instances across runs.
+
+        Only checks the lifecycle plumbing (health_check + a benign empty
+        write on the second cycle). PK-uniqueness on real stores would make
+        a second non-empty write to the same table flake; that's a
+        sink-specific concern handled by the connector's own test class via
+        ``mode="overwrite"`` / ``mode="upsert"``."""
+        sink.connect()
+        n = sink.write(iter(sample_records), **write_kwargs)
+        assert n == len(sample_records)
+        sink.close()
+        assert sink.health_check() is False
+        sink.connect()
+        assert sink.health_check() is True
+        try:
+            empty_n = sink.write(iter([]), **write_kwargs)
+        finally:
+            sink.close()
+        assert empty_n == 0
 
     def test_write_returns_int_count(
         self,

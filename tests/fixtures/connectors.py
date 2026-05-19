@@ -74,7 +74,11 @@ class InMemoryBatchSource(BatchSource):
             v = r.data[cursor_column]
             if cursor_value is not None and not (v > cursor_value):
                 continue
-            yield r
+            yield Record(
+                data=r.data,
+                metadata={**r.metadata, "cursor_column": cursor_column},
+                schema_version=r.schema_version,
+            )
 
 
 class InMemoryBatchSink(BatchSink):

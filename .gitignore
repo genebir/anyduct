@@ -67,3 +67,6 @@ out/
 next-env.d.ts
 *.tsbuildinfo
 .pnpm-store/
+
+# --- Storybook (services/etlx-web) ---
+storybook-static/

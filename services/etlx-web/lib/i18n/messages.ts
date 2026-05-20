@@ -315,6 +315,10 @@ export const en = {
   "builder.moveLeft": "Move earlier",
   "builder.moveRight": "Move later",
   "builder.stepLabel": "Step {n} of {total}",
+  "builder.flowTitle": "Pipeline flow",
+  "builder.flowNeedsConnection": "connection needed",
+  "builder.flowNoTransforms": "no transforms",
+  "builder.flowHint": "Click a step to configure it, or drag a transform to reorder.",
 
   // runs list
   "runs.colReadWritten": "Read / Written",
@@ -725,6 +729,10 @@ export const ko: Messages = {
   "builder.moveLeft": "앞으로 이동",
   "builder.moveRight": "뒤로 이동",
   "builder.stepLabel": "{total}단계 중 {n}번째",
+  "builder.flowTitle": "파이프라인 흐름",
+  "builder.flowNeedsConnection": "연결 필요",
+  "builder.flowNoTransforms": "변환 없음",
+  "builder.flowHint": "단계를 클릭해 설정하거나, 변환을 드래그해 순서를 바꾸세요.",
 
   "runs.colReadWritten": "읽음 / 기록",
   "runs.emptyTitle": "아직 실행이 없습니다",

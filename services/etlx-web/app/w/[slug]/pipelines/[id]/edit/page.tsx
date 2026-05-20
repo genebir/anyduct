@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import {
   CheckCircle2Icon,
+  ChevronRightIcon,
   PlayIcon,
   SaveIcon,
   XCircleIcon,
@@ -25,7 +26,7 @@ import {
   type PipelineSummary,
 } from "@/lib/api";
 import { cn } from "@/lib/cn";
-import { findOperator } from "@/lib/operators";
+import { findOperator, OPERATOR_KIND_ACCENT } from "@/lib/operators";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import { useLocale } from "@/components/providers/locale-provider";
 import type { Messages } from "@/lib/i18n/messages";
@@ -326,6 +327,12 @@ export default function PipelineEditorPage() {
           </div>
         }
       />
+      <FlowSummary
+        nodes={state.nodes}
+        selectedId={selectedId}
+        onSelect={selectNode}
+        t={t}
+      />
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <Palette onAdd={addOperator} />
         <div className="flex min-w-0 flex-1 flex-col">
@@ -367,6 +374,89 @@ export default function PipelineEditorPage() {
         )}
       </div>
     </>
+  );
+}
+
+/**
+ * Plain-language read of the pipeline: source → transforms → sink as
+ * clickable chips. Gives non-developers an at-a-glance "what does this do"
+ * without decoding the canvas, and surfaces missing connections inline.
+ */
+function FlowSummary({
+  nodes,
+  selectedId,
+  onSelect,
+  t,
+}: {
+  nodes: BuilderNode[];
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+  t: Translate;
+}) {
+  const ordered = reorderNodes(nodes);
+  const chips = ordered.map((n) => {
+    const op = findOperator(n.operatorId);
+    const kind = op?.kind ?? "transform";
+    const needsConnection =
+      (kind === "source" || kind === "sink") && !n.data.connection;
+    const sub =
+      kind === "source" || kind === "sink"
+        ? needsConnection
+          ? t("builder.flowNeedsConnection")
+          : String(n.data.connection)
+        : null;
+    return { id: n.id, label: op?.label ?? n.operatorId, kind, needsConnection, sub };
+  });
+
+  return (
+    <div className="flex shrink-0 items-center gap-2 overflow-x-auto border-b border-border-subtle bg-surface px-4 py-2.5">
+      <span className="shrink-0 text-[11px] font-semibold uppercase tracking-wider text-text-muted">
+        {t("builder.flowTitle")}
+      </span>
+      <div className="flex items-center gap-1.5">
+        {chips.map((c, i) => (
+          <div key={c.id} className="flex items-center gap-1.5">
+            {i > 0 ? (
+              <ChevronRightIcon size={14} className="shrink-0 text-text-muted" />
+            ) : null}
+            <button
+              type="button"
+              onClick={() => onSelect(c.id)}
+              className={cn(
+                "flex shrink-0 items-center gap-2 rounded-md border px-2.5 py-1.5 text-left transition duration-150",
+                selectedId === c.id
+                  ? "border-accent bg-overlay"
+                  : c.needsConnection
+                    ? "border-warning/50 hover:border-warning"
+                    : "border-border-subtle hover:border-border-strong hover:bg-overlay",
+              )}
+            >
+              <span
+                aria-hidden
+                className="inline-block h-2 w-2 rounded-full"
+                style={{ background: OPERATOR_KIND_ACCENT[c.kind] }}
+              />
+              <span className="flex flex-col leading-tight">
+                <span className="text-sm font-medium text-text">{c.label}</span>
+                {c.sub ? (
+                  <span
+                    className={cn(
+                      "text-[11px]",
+                      c.needsConnection ? "text-warning" : "text-text-muted",
+                    )}
+                  >
+                    {c.sub}
+                  </span>
+                ) : null}
+              </span>
+            </button>
+          </div>
+        ))}
+      </div>
+      <span className="ml-auto hidden shrink-0 text-[11px] text-text-muted lg:block">
+        {t("builder.flowHint")}
+      </span>
+    </div>
   );
 }
 

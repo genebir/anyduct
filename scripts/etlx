@@ -13,7 +13,13 @@
 
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Resolve symlinks first — when this script is invoked via a symlink in
+# PATH (e.g. ~/.local/bin/etlx → /path/to/repo/scripts/etlx), BASH_SOURCE
+# is the symlink, not the target. `realpath` (GNU coreutils) gives us the
+# actual repo path so REPO_ROOT lands on the monorepo root, not on
+# ~/.local.
+SCRIPT_PATH="$(realpath "${BASH_SOURCE[0]}" 2>/dev/null || readlink -f "${BASH_SOURCE[0]}")"
+REPO_ROOT="$(cd "$(dirname "$SCRIPT_PATH")/.." && pwd)"
 COMPOSE_FILE="$REPO_ROOT/docker/docker-compose.dev.yml"
 
 # Default DATABASE_URL for local dev — matches docker/docker-compose.dev.yml.

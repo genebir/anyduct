@@ -1,0 +1,193 @@
+# Deployment
+
+This page covers shipping the **services** (`etlx-server` + `etlx-web`) to a
+real environment. For installing the pure Python library, see
+[Install](getting-started/install.md). For local development without
+containers, see [Quickstart](getting-started/quickstart.md).
+
+The reference deployment is `services/docker-compose.prod.yml` — every
+container, env var, and dependency edge listed here is exercised by that
+file, and the Helm chart (Step 11) will follow the same topology.
+
+## Topology
+
+```
+                 ┌──────────────┐
+                 │   etlx-web   │  3000  (Next.js standalone)
+                 └───────┬──────┘
+                         │  REST + SSE
+                 ┌───────▼──────┐
+                 │  etlx-server │  8000  (FastAPI / uvicorn)
+                 └───────┬──────┘
+                         │
+   ┌─────────────────────┼──────────────────────────┐
+   │                     │                          │
+┌──▼──────┐   ┌──────────▼─────────┐  ┌─────────────▼────────┐
+│ migrate │   │ workers (3+ procs) │  │     metadata-db      │
+│ (init)  │   │ worker / scheduler │  │  Postgres 16-alpine  │
+│         │   │ reaper / stream    │  │                      │
+└─────────┘   └────────────────────┘  └──────────────────────┘
+```
+
+Five process types share one image (`etlx-server:prod`); they differ only
+in `command`. The web image (`etlx-web:prod`) is standalone — no Node
+modules at runtime, just `node server.js`.
+
+## Images
+
+### `etlx-server`
+
+```bash
+docker build -f services/etlx-server/Dockerfile -t etlx-server:<tag> .
+```
+
+* Build context = repo root (the uv workspace needs `etl_plugins/` +
+  `services/etlx-server/`).
+* Multi-stage: `python:3.11-slim` + uv → resolves the lockfile into
+  `/app/.venv`; final image runs as UID 10001 with `tini` as PID 1.
+* `CMD` defaults to uvicorn. Override for workers (see below).
+* `HEALTHCHECK` probes `/ready` (DB ping). Workers in compose disable
+  this — they don't expose HTTP.
+
+### `etlx-web`
+
+```bash
+docker build -f services/etlx-web/Dockerfile \
+    --build-arg NEXT_PUBLIC_API_URL=https://api.example.com \
+    -t etlx-web:<tag> .
+```
+
+* `NEXT_PUBLIC_*` is inlined at build time — change it by rebuilding.
+  Runtime env vars do **not** override values Next has already inlined
+  into the client bundle.
+* Multi-stage: deps → builder → minimal node:22-alpine + standalone.
+* Runs as UID 10001 with `tini` as PID 1.
+
+## Environment variables
+
+`.env.example` is the source of truth. The high-impact ones:
+
+| Variable | Required? | Notes |
+|---|---|---|
+| `DATABASE_URL` | yes | `postgresql+asyncpg://USER:PASS@host:port/db` |
+| `AUTH_JWT_PRIVATE_KEY_PEM` | yes | Full PEM body. Generate with `etlx admin gen-jwt-keys`. |
+| `AUTH_JWT_PUBLIC_KEY_PEM` | yes | matching public key |
+| `AUTH_JWT_ISSUER` / `AUDIENCE` | no | defaults `etlx-server` / `etlx` |
+| `CORS_ORIGINS` | no | **JSON array.** Example: `["https://app.example.com"]` |
+| `SECRET_BACKEND` | no | `env` (default), `file`, `vault`, `aws_sm`, `gcp_sm` |
+| `ENVIRONMENT` | no | `production` hides `/docs` and `/redoc` |
+| `SERVICE_NAME` | no | stamped onto OTel resource attributes |
+
+JWT keys are PEM blobs. In Kubernetes, mount them as a `Secret`:
+
+```yaml
+- name: AUTH_JWT_PRIVATE_KEY_PEM
+  valueFrom:
+    secretKeyRef:
+      name: etlx-jwt
+      key: private.pem
+```
+
+In compose, export from local files (the pattern used in
+`docker-compose.prod.yml`):
+
+```bash
+export AUTH_JWT_PRIVATE_KEY_PEM="$(cat /etc/etlx/jwt_private.pem)"
+export AUTH_JWT_PUBLIC_KEY_PEM="$(cat /etc/etlx/jwt_public.pem)"
+```
+
+## One-command local production stack
+
+```bash
+# 1. Generate JWT keypair (one time per deploy)
+etlx admin gen-jwt-keys --out-dir .run
+
+# 2. Export the PEMs so compose's env interpolation picks them up
+export AUTH_JWT_PRIVATE_KEY_PEM="$(cat .run/jwt_private.pem)"
+export AUTH_JWT_PUBLIC_KEY_PEM="$(cat .run/jwt_public.pem)"
+
+# 3. Build + start the whole stack (db → migrate → server/workers → web)
+docker compose -f services/docker-compose.prod.yml up -d --build
+
+# 4. Seed an admin user
+docker compose -f services/docker-compose.prod.yml exec etlx-server \
+    etlx-server admin create-user --email you@example.com --name You --superadmin
+
+# 5. Open the UI
+xdg-open http://localhost:3000      # or just visit it
+```
+
+`docker compose ... down` stops everything. Add `-v` to also drop the
+metadata DB volume.
+
+## Migrations
+
+The `etlx-migrate` service runs `alembic upgrade head` once and exits;
+other services use `depends_on: { etlx-migrate: { condition:
+service_completed_successfully } }` so they don't race the schema. In
+Kubernetes this becomes a `Job` (preferred) or an `initContainer`.
+
+Manual runs:
+
+```bash
+docker compose -f services/docker-compose.prod.yml run --rm etlx-migrate \
+    etlx-server db current        # show current revision
+docker compose -f services/docker-compose.prod.yml run --rm etlx-migrate \
+    etlx-server db upgrade head   # apply pending
+docker compose -f services/docker-compose.prod.yml run --rm etlx-migrate \
+    etlx-server db downgrade -1   # rollback one revision
+```
+
+## Worker scaling
+
+The batch worker (`etlx-worker`), scheduler, reaper, and stream-worker
+are each separate processes. Scale the worker independently when run
+throughput needs it:
+
+```bash
+docker compose -f services/docker-compose.prod.yml up -d --scale etlx-worker=4
+```
+
+The worker uses `FOR UPDATE SKIP LOCKED` on the runs queue, so multiple
+replicas are safe (ADR-0021). The stream-worker and scheduler are
+**single-replica** — running multiple instances will double-fire
+schedules or duplicate stream consumers (Step 11.x will add leader
+election).
+
+## Health, readiness, observability
+
+* `GET /health` — liveness. Always 200 while the process is running.
+* `GET /ready` — readiness. 200 only when the metadata DB responds to
+  `SELECT 1`. Use this in Kubernetes `readinessProbe`.
+* OTel + Prometheus exporter: see [Observability](guides/observability.md).
+  Default backend is NoOp; opt in via `configure_otel(...)` at process
+  startup (Step 11 will wire this from env vars).
+
+## Backups
+
+The metadata DB is the only stateful surface this stack owns. Snapshot
+the `metadata_pgdata` volume (compose) or your managed Postgres (RDS,
+Cloud SQL, ...) with the usual `pg_dump` cadence. Cursors, connection
+secret references, runs history, and audit log are all in this DB.
+
+```bash
+docker compose -f services/docker-compose.prod.yml exec metadata-db \
+    pg_dump -U etlx etlx > backup-$(date +%F).sql
+```
+
+Secret values live in the configured `SECRET_BACKEND` (Vault / AWS SM /
+GCP SM / file). Back those up independently per the vendor's
+documentation — the metadata DB only holds `${SECRET:...}` placeholders,
+not the secret bytes.
+
+## What this stack does **not** include
+
+* **Reverse proxy / TLS.** Put a real proxy (Caddy, Traefik, nginx, an
+  ingress controller) in front. The default container listens on plain
+  HTTP. `CORS_ORIGINS` should match the public URL of the web UI.
+* **Leader election** for scheduler / stream-worker (single-replica only
+  today — see Worker scaling).
+* **Multi-region replication** of the metadata DB. Set up read replicas
+  + failover at the Postgres layer if you need it.
+* **Helm chart.** Coming in Step 11. The compose file mirrors the
+  intended deployment shape so the chart is a straight translation.

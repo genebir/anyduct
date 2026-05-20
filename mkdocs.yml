@@ -96,6 +96,7 @@ nav:
       - Pipelines & tasks: guides/pipelines.md
       - Cursors & incremental sync: guides/cursors.md
       - Observability (OTel): guides/observability.md
+      - Deployment: deployment.md
   - Reference:
       - Core API: reference/core.md
       - Connectors API: reference/connectors.md

@@ -1,0 +1,62 @@
+# Shared .dockerignore for both server + web Dockerfiles (build context =
+# repo root). Anything excluded here doesn't get sent to BuildKit, which
+# both shrinks the context and avoids accidentally embedding dev state /
+# secrets into the image.
+
+# --- VCS ---
+.git
+.gitignore
+.gitattributes
+
+# --- Python caches / venvs / artifacts ---
+**/__pycache__
+**/*.py[cod]
+**/*.egg-info
+.venv
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov
+dist
+build
+
+# --- Node / Next caches (web pulls a different ignore set, but excluding
+#     these globally is safe — neither image needs them) ---
+**/node_modules
+**/.next
+**/.turbo
+**/out
+**/storybook-static
+**/.pnpm-store
+
+# --- Local dev / runtime state (NEVER ship to an image) ---
+.env
+.env.*
+!.env.example
+.run
+secrets
+
+# --- Docs / IDE / OS noise ---
+docs
+site
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+*.log
+
+# --- Tests (not needed at runtime; tests use testcontainers anyway) ---
+tests
+**/tests
+**/test_*.py
+
+# --- The other service's source (excluded per-image via the explicit
+#     COPY allowlist in each Dockerfile, but kept out of the context too) ---
+# Server Dockerfile only copies etl_plugins/ + services/etlx-server/.
+# Web Dockerfile only copies services/etlx-web/ + pnpm workspace files.
+
+# --- Docker / compose files don't need to ship inside the image ---
+**/Dockerfile*
+**/docker-compose*.yml
+docker/

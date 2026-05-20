@@ -55,16 +55,31 @@ def resolve_placeholders(obj: Any, backend: SecretBackend) -> Any:
 
 
 def referenced_connection_names(cfg: PipelineConfig) -> list[str]:
-    """Source + sink + (optional) DLQ, deduped, traversal order preserved."""
+    """Every referenced connection, deduped, traversal order preserved.
+
+    Handles all three pipeline shapes: single-task, Task-orchestration DAG
+    (ADR-0028, via ``effective_tasks()``), and dataflow graph (ADR-0030, via
+    the graph's source/sink nodes).
+    """
     seen: set[str] = set()
     names: list[str] = []
-    for n in (cfg.source.connection, cfg.sink.connection):
-        if n not in seen:
+
+    def _add(n: str | None) -> None:
+        if n and n not in seen:
             seen.add(n)
             names.append(n)
-    if cfg.dlq is not None and cfg.dlq.connection not in seen:
-        seen.add(cfg.dlq.connection)
-        names.append(cfg.dlq.connection)
+
+    if cfg.graph is not None:
+        for node in cfg.graph.nodes:
+            if node.type in ("source", "sink"):
+                _add(node.connection)
+    else:
+        for task in cfg.effective_tasks():
+            _add(task.source.connection)
+            for s in task.effective_sinks():
+                _add(s.connection)
+    if cfg.dlq is not None:
+        _add(cfg.dlq.connection)
     return names
 
 

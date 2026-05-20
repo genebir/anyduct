@@ -44,7 +44,7 @@ from etl_plugins.core.pipeline import Pipeline as CorePipeline
 from etl_plugins.core.pipeline import RunResult
 from etl_plugins.runtime.builder import build_connector, build_pipeline
 from etlx_server.db.enums import PipelineMode, RunStatus
-from etlx_server.db.models import Pipeline, PipelineVersion, Run
+from etlx_server.db.models import Pipeline, PipelineTrigger, PipelineVersion, Run
 from etlx_server.pipelines.runtime import (
     load_connections_by_name,
     referenced_connection_names,
@@ -64,6 +64,11 @@ _MAX_ERROR_MESSAGE_LEN = 2000
 # (Step 9.3b) uses this stamp to spot stuck workers; the interval just
 # needs to be comfortably below the reaper's idle threshold (default 60s).
 _HEARTBEAT_INTERVAL_SECONDS = 10.0
+
+# Safety cap on the call-pipeline trigger chain length (ADR-0029). Cycles are
+# already prevented by the visited-set check; this bounds a pathological deep
+# fan even in a DAG with no cycles.
+_MAX_TRIGGER_CHAIN = 50
 
 
 class _PipelineBuildError(Exception):
@@ -189,6 +194,10 @@ class RunExecutor:
                             records_written=result.records_written,
                             duration_seconds=result.duration_seconds,
                         )
+                        # Call-pipeline (ADR-0029): enqueue downstream pipelines
+                        # on success, fire-and-forget. Same transaction as the
+                        # success write so it's all-or-nothing.
+                        await self._trigger_downstream(session, run, log)
                     except Exception as e:
                         # Any exception coming out of ``pipeline.run`` lands here.
                         # The core re-raises after recording metrics, so the
@@ -208,6 +217,61 @@ class RunExecutor:
                     return run
                 finally:
                     current_run_id.reset(ctx_token)
+
+    async def _trigger_downstream(self, session: AsyncSession, run: Run, log: Any) -> None:
+        """Enqueue runs of pipelines this one triggers on success (ADR-0029).
+
+        Fire-and-forget. A ``trigger_chain`` carried on each run's
+        ``result_json`` records the pipeline lineage so we never re-enqueue a
+        pipeline already in the chain (cycle break), and a hard cap bounds depth.
+        """
+        prior_chain = list((run.result_json or {}).get("trigger_chain") or [])
+        if len(prior_chain) >= _MAX_TRIGGER_CHAIN:
+            log.warning("run.trigger_chain_capped", depth=len(prior_chain))
+            return
+        new_chain = [*prior_chain, str(run.pipeline_id)]
+
+        target_ids = (
+            (
+                await session.execute(
+                    select(PipelineTrigger.target_pipeline_id).where(
+                        PipelineTrigger.source_pipeline_id == run.pipeline_id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+        for target_id in target_ids:
+            if str(target_id) in new_chain:
+                continue  # cycle — target already ran upstream in this lineage
+            current = (
+                await session.execute(
+                    select(PipelineVersion).where(
+                        PipelineVersion.pipeline_id == target_id,
+                        PipelineVersion.is_current.is_(True),
+                    )
+                )
+            ).scalar_one_or_none()
+            if current is None:
+                log.warning("run.trigger_skipped_no_version", target_pipeline_id=str(target_id))
+                continue
+            target_pipeline = (
+                await session.execute(select(Pipeline).where(Pipeline.id == target_id))
+            ).scalar_one()
+            session.add(
+                Run(
+                    workspace_id=target_pipeline.workspace_id,
+                    pipeline_id=target_id,
+                    pipeline_version_id=current.id,
+                    schedule_id=None,
+                    triggered_by_user_id=None,
+                    status=RunStatus.PENDING,
+                    result_json={"triggered_by_run": str(run.id), "trigger_chain": new_chain},
+                )
+            )
+            log.info("run.triggered_downstream", target_pipeline_id=str(target_id))
 
     async def _build(
         self,

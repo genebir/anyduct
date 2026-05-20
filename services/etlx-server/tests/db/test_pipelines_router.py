@@ -151,6 +151,192 @@ async def test_post_creates_pipeline_with_version_1(session: AsyncSession) -> No
     assert rows[0].after_json["current_version"] == 1
 
 
+async def test_post_fanout_config_round_trips(session: AsyncSession) -> None:
+    """Fan-out (multiple sinks, ADR-0026) survives validate → dump → store."""
+    user = await _seed_user(session, email="pp-fanout@example.com")
+    ws = await _seed_workspace(session, slug="pp-fanout", user=user, role=WorkspaceRole.EDITOR)
+    app = _build_app(session)
+    async with _client(app) as client:
+        token = await _login(client, email=user.email)
+        resp = await client.post(
+            f"/workspaces/{ws.id}/pipelines",
+            json={
+                "name": "fan-out",
+                "config": {
+                    "source": {"connection": "src", "query": "select 1"},
+                    "sinks": [
+                        {"connection": "warehouse", "table": "t", "mode": "append"},
+                        {"connection": "archive", "table": "t", "mode": "overwrite"},
+                    ],
+                },
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    assert resp.status_code == 201, resp.text
+    cfg = resp.json()["current_config_json"]
+    assert cfg["sink"] is None
+    assert [s["connection"] for s in cfg["sinks"]] == ["warehouse", "archive"]
+
+
+async def test_post_dag_config_round_trips(session: AsyncSession) -> None:
+    """Multi-task DAG (ADR-0028) survives validate → dump → store."""
+    user = await _seed_user(session, email="pp-dag@example.com")
+    ws = await _seed_workspace(session, slug="pp-dag", user=user, role=WorkspaceRole.EDITOR)
+    app = _build_app(session)
+    async with _client(app) as client:
+        token = await _login(client, email=user.email)
+        resp = await client.post(
+            f"/workspaces/{ws.id}/pipelines",
+            json={
+                "name": "etl-dag",
+                "config": {
+                    "tasks": [
+                        {
+                            "name": "stage",
+                            "source": {"connection": "src", "query": "select 1"},
+                            "sink": {"connection": "dst", "table": "staging"},
+                        },
+                        {
+                            "name": "publish",
+                            "source": {"connection": "dst", "query": "select * from staging"},
+                            "sink": {"connection": "dst", "table": "final"},
+                            "depends_on": ["stage"],
+                        },
+                    ]
+                },
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    assert resp.status_code == 201, resp.text
+    cfg = resp.json()["current_config_json"]
+    assert cfg["source"] is None
+    assert [t["name"] for t in cfg["tasks"]] == ["stage", "publish"]
+    assert cfg["tasks"][1]["depends_on"] == ["stage"]
+
+
+async def test_pipeline_triggers_set_and_get(session: AsyncSession) -> None:
+    """PUT then GET downstream triggers (ADR-0029)."""
+    user = await _seed_user(session, email="pp-trig@example.com")
+    ws = await _seed_workspace(session, slug="pp-trig", user=user, role=WorkspaceRole.EDITOR)
+    app = _build_app(session)
+    async with _client(app) as client:
+        token = await _login(client, email=user.email)
+        headers = {"Authorization": f"Bearer {token}"}
+        a = (
+            await client.post(
+                f"/workspaces/{ws.id}/pipelines",
+                json={"name": "a", "config": _sample_config()},
+                headers=headers,
+            )
+        ).json()
+        b = (
+            await client.post(
+                f"/workspaces/{ws.id}/pipelines",
+                json={"name": "b", "config": _sample_config()},
+                headers=headers,
+            )
+        ).json()
+
+        put = await client.put(
+            f"/workspaces/{ws.id}/pipelines/{a['id']}/triggers",
+            json={"target_pipeline_ids": [b["id"]]},
+            headers=headers,
+        )
+        assert put.status_code == 200, put.text
+        assert put.json()["target_pipeline_ids"] == [b["id"]]
+
+        got = await client.get(f"/workspaces/{ws.id}/pipelines/{a['id']}/triggers", headers=headers)
+        assert got.json()["target_pipeline_ids"] == [b["id"]]
+
+    rows = await _audit_rows(session, resource_id=UUID(a["id"]))
+    assert "pipeline.triggers_set" in [r.action for r in rows]
+
+
+async def test_pipeline_triggers_reject_self_and_missing(session: AsyncSession) -> None:
+    user = await _seed_user(session, email="pp-trig2@example.com")
+    ws = await _seed_workspace(session, slug="pp-trig2", user=user, role=WorkspaceRole.EDITOR)
+    app = _build_app(session)
+    async with _client(app) as client:
+        token = await _login(client, email=user.email)
+        headers = {"Authorization": f"Bearer {token}"}
+        a = (
+            await client.post(
+                f"/workspaces/{ws.id}/pipelines",
+                json={"name": "a", "config": _sample_config()},
+                headers=headers,
+            )
+        ).json()
+        # self-trigger → 400
+        self_resp = await client.put(
+            f"/workspaces/{ws.id}/pipelines/{a['id']}/triggers",
+            json={"target_pipeline_ids": [a["id"]]},
+            headers=headers,
+        )
+        assert self_resp.status_code == 400, self_resp.text
+        # unknown target → 404
+        missing = await client.put(
+            f"/workspaces/{ws.id}/pipelines/{a['id']}/triggers",
+            json={"target_pipeline_ids": [str(uuid4())]},
+            headers=headers,
+        )
+        assert missing.status_code == 404, missing.text
+
+
+async def test_post_graph_config_round_trips(session: AsyncSession) -> None:
+    """Dataflow graph (ADR-0030) survives validate → dump → store."""
+    user = await _seed_user(session, email="pp-graph@example.com")
+    ws = await _seed_workspace(session, slug="pp-graph", user=user, role=WorkspaceRole.EDITOR)
+    app = _build_app(session)
+    async with _client(app) as client:
+        token = await _login(client, email=user.email)
+        resp = await client.post(
+            f"/workspaces/{ws.id}/pipelines",
+            json={
+                "name": "graph",
+                "config": {
+                    "graph": {
+                        "nodes": [
+                            {"id": "s", "type": "source", "connection": "src", "query": "select 1"},
+                            {"id": "ka", "type": "sink", "connection": "dst", "table": "a"},
+                            {"id": "kb", "type": "sink", "connection": "dst", "table": "b"},
+                        ],
+                        "edges": [
+                            {"from_node": "s", "to_node": "ka", "when": "data['t'] == 'a'"},
+                            {"from_node": "s", "to_node": "kb", "when": "data['t'] == 'b'"},
+                        ],
+                    }
+                },
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    assert resp.status_code == 201, resp.text
+    cfg = resp.json()["current_config_json"]
+    assert cfg["source"] is None
+    assert [n["id"] for n in cfg["graph"]["nodes"]] == ["s", "ka", "kb"]
+    assert cfg["graph"]["edges"][0]["when"] == "data['t'] == 'a'"
+
+
+async def test_post_both_sink_and_sinks_returns_422(session: AsyncSession) -> None:
+    user = await _seed_user(session, email="pp-both@example.com")
+    ws = await _seed_workspace(session, slug="pp-both", user=user, role=WorkspaceRole.EDITOR)
+    app = _build_app(session)
+    async with _client(app) as client:
+        token = await _login(client, email=user.email)
+        resp = await client.post(
+            f"/workspaces/{ws.id}/pipelines",
+            json={
+                "name": "bad",
+                "config": {
+                    "source": {"connection": "src"},
+                    "sink": {"connection": "a"},
+                    "sinks": [{"connection": "b"}],
+                },
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    assert resp.status_code == 422, resp.text
+
+
 async def test_post_invalid_config_returns_422(session: AsyncSession) -> None:
     user = await _seed_user(session, email="pp-bad@example.com")
     ws = await _seed_workspace(session, slug="pp-bad", user=user, role=WorkspaceRole.EDITOR)

@@ -32,6 +32,7 @@ from etlx_server.db.enums import RunStatus
 from etlx_server.db.models import (
     Connection,
     Pipeline,
+    PipelineTrigger,
     PipelineVersion,
     Run,
     Workspace,
@@ -295,6 +296,152 @@ async def test_executor_happy_path_sqlite(session: AsyncSession, tmp_path: Path)
     finally:
         conn.close()
     assert rows == [(1, "alice"), (2, "bob"), (3, "carol")]
+
+
+async def test_executor_triggers_downstream_on_success(
+    session: AsyncSession, tmp_path: Path
+) -> None:
+    """A successful run enqueues a PENDING run for each downstream pipeline (ADR-0029)."""
+    db_path = _prepare_sqlite_fixture(tmp_path)
+    ws = await _seed_workspace(session, slug="we-trig")
+    await _seed_connection(session, workspace_id=ws.id, name="src", config={"database": db_path})
+    await _seed_connection(session, workspace_id=ws.id, name="dst", config={"database": db_path})
+    cfg = {
+        "name": "a",
+        "source": {"connection": "src", "query": "SELECT id, name FROM seed"},
+        "sink": {"connection": "dst", "table": "out", "mode": "append"},
+    }
+    a, a_v = await _seed_pipeline(session, workspace_id=ws.id, name="a", config=cfg)
+    b, _b_v = await _seed_pipeline(session, workspace_id=ws.id, name="b", config=cfg)
+    session.add(PipelineTrigger(source_pipeline_id=a.id, target_pipeline_id=b.id))
+    await session.flush()
+
+    run = await _seed_pending_run(
+        session, workspace_id=ws.id, pipeline_id=a.id, pipeline_version_id=a_v.id
+    )
+    claimed = await claim_pending_run(session, worker_id="worker-A")
+    assert claimed is not None and claimed.id == run.id
+    await session.commit()
+
+    await RunExecutor(
+        _SessionFactoryAdapter(session), StaticSecretBackend(), worker_id="worker-A"
+    ).execute(run.id)
+
+    triggered = (
+        (
+            await session.execute(
+                select(Run).where(Run.pipeline_id == b.id, Run.status == RunStatus.PENDING)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(triggered) == 1
+    assert triggered[0].result_json["triggered_by_run"] == str(run.id)
+    assert triggered[0].result_json["trigger_chain"] == [str(a.id)]
+    assert triggered[0].triggered_by_user_id is None
+
+
+async def test_executor_trigger_cycle_is_broken(session: AsyncSession, tmp_path: Path) -> None:
+    """A target already in the trigger chain is not re-enqueued (cycle guard)."""
+    db_path = _prepare_sqlite_fixture(tmp_path)
+    ws = await _seed_workspace(session, slug="we-cycle")
+    await _seed_connection(session, workspace_id=ws.id, name="src", config={"database": db_path})
+    await _seed_connection(session, workspace_id=ws.id, name="dst", config={"database": db_path})
+    cfg = {
+        "name": "x",
+        "source": {"connection": "src", "query": "SELECT id, name FROM seed"},
+        "sink": {"connection": "dst", "table": "out", "mode": "append"},
+    }
+    a, _a_v = await _seed_pipeline(session, workspace_id=ws.id, name="a", config=cfg)
+    b, b_v = await _seed_pipeline(session, workspace_id=ws.id, name="b", config=cfg)
+    # B → A edge; B's run was triggered by A (chain already contains A).
+    session.add(PipelineTrigger(source_pipeline_id=b.id, target_pipeline_id=a.id))
+    await session.flush()
+    run = await _seed_pending_run(
+        session, workspace_id=ws.id, pipeline_id=b.id, pipeline_version_id=b_v.id
+    )
+    run.result_json = {"trigger_chain": [str(a.id)]}
+    claimed = await claim_pending_run(session, worker_id="worker-A")
+    assert claimed is not None
+    await session.commit()
+
+    await RunExecutor(
+        _SessionFactoryAdapter(session), StaticSecretBackend(), worker_id="worker-A"
+    ).execute(run.id)
+
+    # A must NOT be re-enqueued (it's already upstream in the chain).
+    a_runs = (await session.execute(select(Run).where(Run.pipeline_id == a.id))).scalars().all()
+    assert a_runs == []
+
+
+async def test_executor_runs_graph_with_branching(session: AsyncSession, tmp_path: Path) -> None:
+    """A dataflow graph (ADR-0030) routes records to branch sinks by edge `when`."""
+    db_path = tmp_path / "graph_e2e.db"
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.execute("CREATE TABLE seed (id INTEGER, kind TEXT)")
+        conn.executemany(
+            "INSERT INTO seed (id, kind) VALUES (?, ?)",
+            [(1, "hi"), (2, "lo"), (3, "hi")],
+        )
+        conn.execute("CREATE TABLE out_hi (id INTEGER, kind TEXT)")
+        conn.execute("CREATE TABLE out_lo (id INTEGER, kind TEXT)")
+        conn.commit()
+    finally:
+        conn.close()
+
+    ws = await _seed_workspace(session, slug="we-graph")
+    await _seed_connection(
+        session, workspace_id=ws.id, name="src", config={"database": str(db_path)}
+    )
+    await _seed_connection(
+        session, workspace_id=ws.id, name="dst", config={"database": str(db_path)}
+    )
+    cfg = {
+        "name": "g",
+        "graph": {
+            "nodes": [
+                {
+                    "id": "s",
+                    "type": "source",
+                    "connection": "src",
+                    "query": "SELECT id, kind FROM seed",
+                },
+                {"id": "hi", "type": "sink", "connection": "dst", "table": "out_hi"},
+                {"id": "lo", "type": "sink", "connection": "dst", "table": "out_lo"},
+            ],
+            "edges": [
+                {"from_node": "s", "to_node": "hi", "when": "data['kind'] == 'hi'"},
+                {"from_node": "s", "to_node": "lo", "when": "data['kind'] == 'lo'"},
+            ],
+        },
+    }
+    p, pv = await _seed_pipeline(session, workspace_id=ws.id, name="g", config=cfg)
+    run = await _seed_pending_run(
+        session, workspace_id=ws.id, pipeline_id=p.id, pipeline_version_id=pv.id
+    )
+    claimed = await claim_pending_run(session, worker_id="worker-A")
+    assert claimed is not None
+    await session.commit()
+
+    await RunExecutor(
+        _SessionFactoryAdapter(session), StaticSecretBackend(), worker_id="worker-A"
+    ).execute(run.id)
+
+    refreshed = (await session.execute(select(Run).where(Run.id == run.id))).scalar_one()
+    assert refreshed.status == RunStatus.SUCCEEDED, (
+        refreshed.error_class,
+        refreshed.error_message,
+    )
+    conn = sqlite3.connect(str(db_path))
+    try:
+        hi = conn.execute("SELECT id FROM out_hi ORDER BY id").fetchall()
+        lo = conn.execute("SELECT id FROM out_lo ORDER BY id").fetchall()
+    finally:
+        conn.close()
+    assert hi == [(1,), (3,)]
+    assert lo == [(2,)]
 
 
 async def test_executor_records_failure_on_unknown_connector_type(

@@ -40,6 +40,7 @@ from etlx_server.auth.schemas import (
     DryRunResponse,
     PipelineCreateRequest,
     PipelineSummary,
+    PipelineTriggersBody,
     PipelineUpdateRequest,
     PipelineVersionEntry,
     RunSummary,
@@ -57,6 +58,7 @@ from etlx_server.pipelines.repository import (
     PipelineNameTakenError,
     PipelineRepository,
 )
+from etlx_server.pipelines.triggers import PipelineTriggerRepository
 from etlx_server.runs.repository import RunRepository
 
 router = APIRouter(prefix="/workspaces/{workspace_id}/pipelines", tags=["pipelines"])
@@ -252,6 +254,69 @@ async def list_pipeline_versions(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="pipeline not found")
     versions = await repo.list_versions(pipeline_id=pipeline.id)
     return [PipelineVersionEntry.model_validate(v) for v in versions]
+
+
+# --- Downstream triggers (call-pipeline, ADR-0029) -------------------------
+
+
+@router.get("/{pipeline_id}/triggers", response_model=PipelineTriggersBody)
+async def get_pipeline_triggers(
+    pipeline_id: UUID,
+    ctx: WorkspaceContext = _require_viewer,
+    session: AsyncSession = Depends(get_session),  # noqa: B008
+) -> PipelineTriggersBody:
+    repo = PipelineRepository(session)
+    pipeline = await repo.get(workspace_id=ctx.workspace.id, pipeline_id=pipeline_id)
+    if pipeline is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="pipeline not found")
+    targets = await PipelineTriggerRepository(session).list_targets(source_pipeline_id=pipeline.id)
+    return PipelineTriggersBody(target_pipeline_ids=targets)
+
+
+@router.put("/{pipeline_id}/triggers", response_model=PipelineTriggersBody)
+async def set_pipeline_triggers(
+    pipeline_id: UUID,
+    body: PipelineTriggersBody,
+    ctx: WorkspaceContext = _require_editor,
+    session: AsyncSession = Depends(get_session),  # noqa: B008
+    audit: AuditService = Depends(get_audit_service),  # noqa: B008
+) -> PipelineTriggersBody:
+    repo = PipelineRepository(session)
+    pipeline = await repo.get(workspace_id=ctx.workspace.id, pipeline_id=pipeline_id)
+    if pipeline is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="pipeline not found")
+
+    # Every target must be a pipeline in the same workspace; a self-trigger is
+    # nonsensical (and the worker would skip it as a cycle anyway).
+    targets: list[UUID] = []
+    for target_id in dict.fromkeys(body.target_pipeline_ids):  # dedupe, keep order
+        if target_id == pipeline.id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="a pipeline cannot trigger itself",
+            )
+        target = await repo.get(workspace_id=ctx.workspace.id, pipeline_id=target_id)
+        if target is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"target pipeline {target_id} not found in workspace",
+            )
+        targets.append(target_id)
+
+    trigger_repo = PipelineTriggerRepository(session)
+    before = await trigger_repo.list_targets(source_pipeline_id=pipeline.id)
+    await trigger_repo.set_targets(source_pipeline_id=pipeline.id, target_pipeline_ids=targets)
+    await audit.record(
+        actor_user_id=ctx.user.id,
+        workspace_id=ctx.workspace.id,
+        action="pipeline.triggers_set",
+        resource_type="pipeline",
+        resource_id=str(pipeline.id),
+        before={"target_pipeline_ids": [str(t) for t in before]},
+        after={"target_pipeline_ids": [str(t) for t in targets]},
+    )
+    await session.commit()
+    return PipelineTriggersBody(target_pipeline_ids=targets)
 
 
 # --- Action endpoints (Step 8.6) -------------------------------------------

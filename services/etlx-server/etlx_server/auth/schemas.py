@@ -206,6 +206,12 @@ class PipelineUpdateRequest(BaseModel):
     config: dict[str, Any] | None = None
 
 
+class PipelineTriggersBody(BaseModel):
+    """GET/PUT body for downstream pipeline triggers (ADR-0029)."""
+
+    target_pipeline_ids: list[UUID] = Field(default_factory=list)
+
+
 class ScheduleSummary(BaseModel):
     """One row of ``GET /workspaces/{ws}/pipelines/{pid}/schedules``."""
 

@@ -63,6 +63,28 @@ class PipelineVersion(UUIDMixin, TimestampMixin, Base):
     pipeline: Mapped[Pipeline] = relationship(back_populates="versions")
 
 
+class PipelineTrigger(UUIDMixin, TimestampMixin, Base):
+    """Downstream pipeline to trigger on success (ADR-0029).
+
+    A directed edge: when ``source_pipeline`` finishes a run successfully, the
+    worker enqueues a run of ``target_pipeline``. Fire-and-forget for v1 — the
+    source does not wait for the target. Cycles are broken at run time via the
+    run's ``result_json.trigger_chain``.
+    """
+
+    __tablename__ = "pipeline_triggers"
+    __table_args__ = (
+        UniqueConstraint("source_pipeline_id", "target_pipeline_id", name="uq_pipeline_trigger"),
+    )
+
+    source_pipeline_id: Mapped[UUID] = mapped_column(
+        ForeignKey("pipelines.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    target_pipeline_id: Mapped[UUID] = mapped_column(
+        ForeignKey("pipelines.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+
+
 class Schedule(UUIDMixin, TimestampMixin, Base):
     """Trigger policy attached to a pipeline."""
 

@@ -3,6 +3,7 @@ import { DataTable, type Column } from "./data-table";
 import { StatusBadge } from "./status-badge";
 import { EmptyState } from "./empty-state";
 import { InboxIcon } from "lucide-react";
+import { MockLocaleProvider } from "../../.storybook/mocks/providers";
 
 interface Pipeline {
   id: string;
@@ -63,6 +64,13 @@ const meta: Meta<typeof DataTable<Pipeline>> = {
   title: "Primitives/DataTable",
   component: DataTable<Pipeline>,
   tags: ["autodocs"],
+  decorators: [
+    (Story) => (
+      <MockLocaleProvider>
+        <Story />
+      </MockLocaleProvider>
+    ),
+  ],
 };
 
 export default meta;

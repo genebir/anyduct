@@ -19,29 +19,17 @@ import {
 } from "@/lib/api";
 import { useAuth } from "@/components/providers/auth-provider";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
+import { useLocale } from "@/components/providers/locale-provider";
+import type { Messages } from "@/lib/i18n/messages";
 import { cn } from "@/lib/cn";
 
-const ROLES: { value: Role; label: string; description: string }[] = [
-  {
-    value: "owner",
-    label: "Owner",
-    description: "Full control + manage members.",
-  },
-  {
-    value: "editor",
-    label: "Editor",
-    description: "Edit connections / pipelines / schedules.",
-  },
-  {
-    value: "runner",
-    label: "Runner",
-    description: "Trigger runs and test connections.",
-  },
-  {
-    value: "viewer",
-    label: "Viewer",
-    description: "Read-only access to everything.",
-  },
+type Translate = (key: keyof Messages, vars?: Record<string, string | number>) => string;
+
+const ROLES: { value: Role; labelKey: keyof Messages; descKey: keyof Messages }[] = [
+  { value: "owner", labelKey: "roles.owner", descKey: "roles.ownerDesc" },
+  { value: "editor", labelKey: "roles.editor", descKey: "roles.editorDesc" },
+  { value: "runner", labelKey: "roles.runner", descKey: "roles.runnerDesc" },
+  { value: "viewer", labelKey: "roles.viewer", descKey: "roles.viewerDesc" },
 ];
 
 const ROLE_BADGE: Record<Role, string> = {
@@ -55,6 +43,7 @@ export default function MembersPage() {
   const { slug } = useParams<{ slug: string }>();
   const ws = useWorkspaceFromSlug(slug);
   const { state: authState } = useAuth();
+  const { t } = useLocale();
   const [rows, setRows] = useState<MembershipSummary[] | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [email, setEmail] = useState("");
@@ -76,7 +65,7 @@ export default function MembersPage() {
       setRows(list);
     } catch (err) {
       toast.error(
-        err instanceof ApiError ? err.message : "Couldn't load members.",
+        err instanceof ApiError ? err.message : t("members.loadFailed"),
       );
       setRows([]);
     }
@@ -93,14 +82,14 @@ export default function MembersPage() {
     setSubmitting(true);
     try {
       await membershipsApi.add(ws.id, { email: email.trim(), role: newRole });
-      toast.success(`Added ${email.trim()}`);
+      toast.success(t("members.added", { email: email.trim() }));
       setEmail("");
       setNewRole("viewer");
       setAddOpen(false);
       await refresh(ws.id);
     } catch (err) {
       toast.error(
-        err instanceof ApiError ? err.message : "Couldn't add member.",
+        err instanceof ApiError ? err.message : t("members.addFailed"),
       );
     } finally {
       setSubmitting(false);
@@ -112,11 +101,16 @@ export default function MembersPage() {
     setUpdating(row.user_id);
     try {
       await membershipsApi.updateRole(ws.id, row.user_id, role);
-      toast.success(`${row.email} → ${role}`);
+      toast.success(
+        t("members.roleChanged", {
+          email: row.email,
+          role: t(`roles.${role}` as keyof Messages),
+        }),
+      );
       await refresh(ws.id);
     } catch (err) {
       toast.error(
-        err instanceof ApiError ? err.message : "Couldn't change role.",
+        err instanceof ApiError ? err.message : t("members.roleChangeFailed"),
       );
     } finally {
       setUpdating(null);
@@ -128,12 +122,12 @@ export default function MembersPage() {
     setRemoving(true);
     try {
       await membershipsApi.remove(ws.id, pendingRemove.user_id);
-      toast.success(`Removed ${pendingRemove.email}`);
+      toast.success(t("members.removed", { email: pendingRemove.email }));
       setPendingRemove(null);
       await refresh(ws.id);
     } catch (err) {
       toast.error(
-        err instanceof ApiError ? err.message : "Couldn't remove member.",
+        err instanceof ApiError ? err.message : t("members.removeFailed"),
       );
     } finally {
       setRemoving(false);
@@ -143,7 +137,7 @@ export default function MembersPage() {
   const columns: Column<MembershipSummary>[] = [
     {
       key: "user",
-      header: "User",
+      header: t("members.colUser"),
       cell: (r) => (
         <div className="min-w-0">
           <div className="truncate font-medium text-text">{r.name}</div>
@@ -153,7 +147,7 @@ export default function MembersPage() {
     },
     {
       key: "role",
-      header: "Role",
+      header: t("common.role"),
       className: "w-48",
       cell: (r) =>
         canManage && r.user_id !== currentUserId ? (
@@ -167,7 +161,7 @@ export default function MembersPage() {
           >
             {ROLES.map((opt) => (
               <option key={opt.value} value={opt.value}>
-                {opt.label}
+                {t(opt.labelKey)}
               </option>
             ))}
           </select>
@@ -178,7 +172,7 @@ export default function MembersPage() {
               ROLE_BADGE[r.role],
             )}
           >
-            {r.role}
+            {t(`roles.${r.role}` as keyof Messages)}
           </span>
         ),
     },
@@ -190,7 +184,7 @@ export default function MembersPage() {
             className: "w-32 text-right",
             cell: (row) =>
               row.user_id === currentUserId ? (
-                <span className="text-xs text-text-muted">You</span>
+                <span className="text-xs text-text-muted">{t("members.you")}</span>
               ) : (
                 <Button
                   size="sm"
@@ -199,7 +193,7 @@ export default function MembersPage() {
                     e.stopPropagation();
                     setPendingRemove(row);
                   }}
-                  aria-label={`Remove ${row.email}`}
+                  aria-label={t("members.removeAria", { email: row.email })}
                   className="hover:text-error"
                 >
                   <Trash2Icon size={14} />
@@ -213,8 +207,12 @@ export default function MembersPage() {
   return (
     <>
       <Header
-        title="Members"
-        subtitle={ws ? `Workspace ${ws.name}` : "Loading workspace…"}
+        title={t("nav.members")}
+        subtitle={
+          ws
+            ? t("common.workspaceSubtitle", { name: ws.name })
+            : t("common.loadingWorkspace")
+        }
         actions={
           canManage ? (
             <Button
@@ -223,7 +221,7 @@ export default function MembersPage() {
               onClick={() => setAddOpen((v) => !v)}
             >
               <PlusIcon size={16} />
-              Add member
+              {t("members.add")}
             </Button>
           ) : null
         }
@@ -232,8 +230,8 @@ export default function MembersPage() {
         {!canManage ? (
           <Card>
             <CardHeader
-              title="Read-only"
-              description="Only workspace Owners can add, change roles for, or remove members."
+              title={t("members.readOnly")}
+              description={t("members.readOnlyDesc")}
             />
           </Card>
         ) : null}
@@ -241,25 +239,25 @@ export default function MembersPage() {
         {addOpen && canManage && ws ? (
           <Card>
             <CardHeader
-              title="Add by email"
-              description="The user must already have signed in once so their account exists in the metadata DB."
+              title={t("members.addByEmail")}
+              description={t("members.addByEmailDesc")}
             />
             <form onSubmit={onAdd} className="grid gap-4 md:grid-cols-[2fr_1fr_auto]">
               <label className="flex flex-col gap-1.5">
                 <span className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
-                  Email
+                  {t("common.email")}
                 </span>
                 <Input
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="alice@example.com"
+                  placeholder={t("members.emailPlaceholder")}
                   required
                 />
               </label>
               <label className="flex flex-col gap-1.5">
                 <span className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
-                  Role
+                  {t("common.role")}
                 </span>
                 <select
                   value={newRole}
@@ -268,7 +266,7 @@ export default function MembersPage() {
                 >
                   {ROLES.map((opt) => (
                     <option key={opt.value} value={opt.value}>
-                      {opt.label}
+                      {t(opt.labelKey)}
                     </option>
                   ))}
                 </select>
@@ -280,21 +278,21 @@ export default function MembersPage() {
                   onClick={() => setAddOpen(false)}
                   disabled={submitting}
                 >
-                  Cancel
+                  {t("common.cancel")}
                 </Button>
                 <Button type="submit" loading={submitting}>
-                  Add
+                  {t("common.add")}
                 </Button>
               </div>
             </form>
-            <RoleLegend />
+            <RoleLegend t={t} />
           </Card>
         ) : null}
 
         <Card>
           {rows === null ? (
             <div className="py-12 text-center text-sm text-text-muted">
-              Loading…
+              {t("common.loading")}
             </div>
           ) : (
             <DataTable
@@ -303,8 +301,8 @@ export default function MembersPage() {
               emptyState={
                 <EmptyState
                   icon={<UsersIcon size={36} strokeWidth={1.5} />}
-                  title="No members"
-                  description="Invite teammates by email once they've signed in at least once."
+                  title={t("members.emptyTitle")}
+                  description={t("members.emptyDesc")}
                 />
               }
             />
@@ -316,11 +314,11 @@ export default function MembersPage() {
         open={pendingRemove !== null}
         title={
           pendingRemove
-            ? `Remove ${pendingRemove.email}?`
-            : "Remove member?"
+            ? t("members.removeTitle", { email: pendingRemove.email })
+            : t("members.removeTitleFallback")
         }
-        description="They lose access to this workspace immediately. Re-add at any time if you change your mind."
-        confirmLabel="Remove"
+        description={t("members.removeDesc")}
+        confirmLabel={t("common.remove")}
         destructive
         loading={removing}
         onConfirm={onConfirmRemove}
@@ -330,7 +328,7 @@ export default function MembersPage() {
   );
 }
 
-function RoleLegend() {
+function RoleLegend({ t }: { t: Translate }) {
   return (
     <dl className="mt-5 grid gap-2 border-t border-border-subtle pt-4 text-xs sm:grid-cols-2">
       {ROLES.map((r) => (
@@ -341,9 +339,9 @@ function RoleLegend() {
               ROLE_BADGE[r.value],
             )}
           >
-            {r.label}
+            {t(r.labelKey)}
           </dt>
-          <dd className="text-text-muted">{r.description}</dd>
+          <dd className="text-text-muted">{t(r.descKey)}</dd>
         </div>
       ))}
     </dl>

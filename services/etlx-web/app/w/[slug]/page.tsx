@@ -27,8 +27,12 @@ import {
   type ScheduleSummary,
 } from "@/lib/api";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
+import { useLocale } from "@/components/providers/locale-provider";
+import type { Messages } from "@/lib/i18n/messages";
 import { cn } from "@/lib/cn";
 import { toast } from "sonner";
+
+type Translate = (key: keyof Messages, vars?: Record<string, string | number>) => string;
 
 interface ScheduleRow extends ScheduleSummary {
   pipeline_name: string;
@@ -39,6 +43,7 @@ const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 export default function WorkspaceHomePage() {
   const { slug } = useParams<{ slug: string }>();
   const ws = useWorkspaceFromSlug(slug);
+  const { t } = useLocale();
   const [pipelines, setPipelines] = useState<PipelineSummary[] | null>(null);
   const [connections, setConnections] = useState<ConnectionSummary[] | null>(null);
   const [schedules, setSchedules] = useState<ScheduleRow[] | null>(null);
@@ -70,7 +75,7 @@ export default function WorkspaceHomePage() {
       } catch (err) {
         if (!cancelled) {
           toast.error(
-            err instanceof ApiError ? err.message : "Couldn't load workspace.",
+            err instanceof ApiError ? err.message : t("common.loadFailed"),
           );
         }
       }
@@ -82,7 +87,7 @@ export default function WorkspaceHomePage() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [ws]);
+  }, [ws, t]);
 
   const recentRuns = useMemo(() => runs?.slice(0, 10) ?? [], [runs]);
   const failingRuns = useMemo(
@@ -101,46 +106,42 @@ export default function WorkspaceHomePage() {
   return (
     <>
       <Header
-        title={ws ? `${ws.name} overview` : "Loading…"}
-        subtitle={
-          ws
-            ? "Live snapshot of your workspace — refreshes every 10 s."
-            : undefined
-        }
+        title={ws ? t("overview.title", { name: ws.name }) : t("common.loading")}
+        subtitle={ws ? t("overview.subtitle") : undefined}
       />
       <main className="mx-auto w-full max-w-6xl flex-1 space-y-6 overflow-y-auto px-6 py-8">
         <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <StatCard
-            label="Pipelines"
+            label={t("nav.pipelines")}
             value={pipelines?.length}
             icon={<WorkflowIcon size={18} />}
             href={ws ? `/w/${ws.slug}/pipelines` : "#"}
           />
           <StatCard
-            label="Active schedules"
+            label={t("overview.activeSchedules")}
             value={schedules ? activeSchedules : undefined}
             icon={<CalendarClockIcon size={18} />}
             href={ws ? `/w/${ws.slug}/schedules` : "#"}
             sub={
               schedules && schedules.length > 0
-                ? `${schedules.length - activeSchedules} paused`
+                ? t("overview.paused", { n: schedules.length - activeSchedules })
                 : undefined
             }
           />
           <StatCard
-            label="Connections"
+            label={t("nav.connections")}
             value={connections?.length}
             icon={<CableIcon size={18} />}
             href={ws ? `/w/${ws.slug}/connections` : "#"}
           />
           <StatCard
-            label="Runs today"
+            label={t("overview.runsToday")}
             value={runs ? runsToday : undefined}
             icon={<ActivityIcon size={18} />}
             href={ws ? `/w/${ws.slug}/runs` : "#"}
             sub={
               runs && runs.length > 0
-                ? `${runs.length} in last batch`
+                ? t("overview.inLastBatch", { n: runs.length })
                 : undefined
             }
           />
@@ -149,19 +150,20 @@ export default function WorkspaceHomePage() {
         <section className="grid gap-6 lg:grid-cols-[2fr_1fr]">
           <Card>
             <SectionTitle
-              title="Recent runs"
-              hint="Newest 10. Click to see logs + metrics."
+              title={t("overview.recentRuns")}
+              hint={t("overview.recentRunsHint")}
+              viewAllLabel={t("overview.viewAll")}
               link={ws ? `/w/${ws.slug}/runs` : null}
             />
             {runs === null ? (
               <div className="py-8 text-center text-sm text-text-muted">
-                Loading…
+                {t("common.loading")}
               </div>
             ) : recentRuns.length === 0 ? (
               <EmptyState
                 icon={<ActivityIcon size={32} strokeWidth={1.5} />}
-                title="No runs yet"
-                description="Trigger a pipeline or attach a cron schedule to get started."
+                title={t("overview.noRunsTitle")}
+                description={t("overview.noRunsDesc")}
               />
             ) : (
               <ul className="divide-y divide-border-subtle">
@@ -174,13 +176,16 @@ export default function WorkspaceHomePage() {
                       <StatusBadge status={r.status} />
                       <div className="min-w-0">
                         <div className="truncate font-mono text-xs text-text-secondary">
-                          run {r.id.slice(0, 8)}…
+                          {t("overview.run", { id: r.id.slice(0, 8) })}
                         </div>
                         <div className="truncate text-[11px] text-text-muted">
-                          pipeline {r.pipeline_id.slice(0, 8)}…
+                          {t("overview.pipelineRef", {
+                            id: r.pipeline_id.slice(0, 8),
+                          })}
+                          {"  ·  "}
                           {r.schedule_id
-                            ? "  ·  scheduled"
-                            : "  ·  manual"}
+                            ? t("overview.scheduled")
+                            : t("overview.manual")}
                         </div>
                       </div>
                       <div className="text-right text-xs text-text-secondary">
@@ -199,18 +204,19 @@ export default function WorkspaceHomePage() {
 
           <Card>
             <SectionTitle
-              title="Recent failures"
-              hint="Top 5 failed in the latest batch."
+              title={t("overview.recentFailures")}
+              hint={t("overview.recentFailuresHint")}
+              viewAllLabel={t("overview.viewAll")}
               link={ws ? `/w/${ws.slug}/runs` : null}
             />
             {runs === null ? (
               <div className="py-8 text-center text-sm text-text-muted">
-                Loading…
+                {t("common.loading")}
               </div>
             ) : failingRuns.length === 0 ? (
               <div className="flex items-center gap-2 rounded-md border border-success/30 bg-success/10 px-3 py-2 text-xs text-success">
                 <AlertTriangleIcon size={14} />
-                Nothing failing right now.
+                {t("overview.nothingFailing")}
               </div>
             ) : (
               <ul className="space-y-2">
@@ -222,15 +228,17 @@ export default function WorkspaceHomePage() {
                     >
                       <div className="flex items-center justify-between gap-2">
                         <span className="font-mono text-error">
-                          {r.error_class ?? "Failed"}
+                          {r.error_class ?? t("status.failed")}
                         </span>
                         <span className="text-text-muted">
-                          {fmtTime(r.finished_at ?? r.started_at)}
+                          {fmtTime(r.finished_at ?? r.started_at, t)}
                         </span>
                       </div>
                       <div className="mt-0.5 truncate text-[11px] text-text-muted">
-                        run {r.id.slice(0, 8)}… · pipeline{" "}
-                        {r.pipeline_id.slice(0, 8)}…
+                        {t("overview.run", { id: r.id.slice(0, 8) })} ·{" "}
+                        {t("overview.pipelineRef", {
+                          id: r.pipeline_id.slice(0, 8),
+                        })}
                       </div>
                     </Link>
                   </li>
@@ -285,10 +293,12 @@ function SectionTitle({
   title,
   hint,
   link,
+  viewAllLabel,
 }: {
   title: string;
   hint?: string;
   link: string | null;
+  viewAllLabel: string;
 }) {
   return (
     <div className="mb-4 flex items-baseline justify-between gap-3 border-b border-border-subtle pb-3">
@@ -303,7 +313,7 @@ function SectionTitle({
           href={link}
           className="text-xs text-text-secondary transition duration-150 hover:text-accent"
         >
-          View all →
+          {viewAllLabel}
         </Link>
       ) : null}
     </div>
@@ -317,12 +327,12 @@ function fmtDuration(s: number | null): string {
   return `${Math.floor(s / 60)}m ${Math.round(s % 60)}s`;
 }
 
-function fmtTime(ts: string | null): string {
+function fmtTime(ts: string | null, t: Translate): string {
   if (!ts) return "—";
   const d = new Date(ts);
   const ms = Date.now() - d.getTime();
-  if (ms < 60_000) return "just now";
-  if (ms < 3600_000) return `${Math.floor(ms / 60_000)}m ago`;
-  if (ms < 86_400_000) return `${Math.floor(ms / 3_600_000)}h ago`;
+  if (ms < 60_000) return t("time.justNow");
+  if (ms < 3600_000) return t("time.minutesAgo", { n: Math.floor(ms / 60_000) });
+  if (ms < 86_400_000) return t("time.hoursAgo", { n: Math.floor(ms / 3_600_000) });
   return d.toLocaleDateString();
 }

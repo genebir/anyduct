@@ -5,14 +5,18 @@ import cronstrue from "cronstrue";
 import { CronExpressionParser } from "cron-parser";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/cn";
+import { useLocale } from "@/components/providers/locale-provider";
+import type { Messages } from "@/lib/i18n/messages";
 
-const PRESETS: { label: string; expr: string }[] = [
-  { label: "Every minute", expr: "* * * * *" },
-  { label: "Every 5 min", expr: "*/5 * * * *" },
-  { label: "Hourly", expr: "0 * * * *" },
-  { label: "Daily 03:00", expr: "0 3 * * *" },
-  { label: "Weekdays 09:00", expr: "0 9 * * 1-5" },
-  { label: "Monthly", expr: "0 0 1 * *" },
+type Translate = (key: keyof Messages, vars?: Record<string, string | number>) => string;
+
+const PRESETS: { labelKey: keyof Messages; expr: string }[] = [
+  { labelKey: "cron.everyMinute", expr: "* * * * *" },
+  { labelKey: "cron.every5", expr: "*/5 * * * *" },
+  { labelKey: "cron.hourly", expr: "0 * * * *" },
+  { labelKey: "cron.daily3", expr: "0 3 * * *" },
+  { labelKey: "cron.weekdays9", expr: "0 9 * * 1-5" },
+  { labelKey: "cron.monthly", expr: "0 0 1 * *" },
 ];
 
 /**
@@ -34,7 +38,11 @@ export function CronInput({
   disabled?: boolean;
   allowEmpty?: boolean;
 }) {
-  const description = useMemo(() => describe(value, allowEmpty), [value, allowEmpty]);
+  const { t } = useLocale();
+  const description = useMemo(
+    () => describe(value, allowEmpty, t),
+    [value, allowEmpty, t],
+  );
   const upcoming = useMemo(
     () => (description.kind === "ok" ? nextFirings(value, 3) : []),
     [value, description.kind],
@@ -46,7 +54,7 @@ export function CronInput({
         value={value}
         disabled={disabled}
         onChange={(e) => onChange(e.target.value)}
-        placeholder={allowEmpty ? "(leave blank for stream)" : "0 3 * * *"}
+        placeholder={allowEmpty ? t("cron.placeholderStream") : "0 3 * * *"}
         className="font-mono"
         invalid={description.kind === "error"}
       />
@@ -63,7 +71,7 @@ export function CronInput({
               value === preset.expr && "border-accent text-accent",
             )}
           >
-            {preset.label}
+            {t(preset.labelKey)}
           </button>
         ))}
       </div>
@@ -82,13 +90,13 @@ export function CronInput({
       {upcoming.length > 0 ? (
         <div className="rounded-md border border-border-subtle bg-elevated/40 p-2">
           <div className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">
-            Next firings (your timezone)
+            {t("cron.nextFirings")}
           </div>
           <ul className="mt-1 space-y-0.5 font-mono text-[11px] text-text-secondary">
             {upcoming.map((d, i) => (
               <li key={i} className="flex justify-between gap-3">
                 <span>{d.toLocaleString()}</span>
-                <span className="text-text-muted">{relative(d)}</span>
+                <span className="text-text-muted">{relative(d, t)}</span>
               </li>
             ))}
           </ul>
@@ -109,32 +117,31 @@ function nextFirings(expr: string, n: number): Date[] {
   return out;
 }
 
-function relative(d: Date): string {
+function relative(d: Date, t: Translate): string {
   const delta = d.getTime() - Date.now();
-  if (delta < 0) return "past";
+  if (delta < 0) return t("time.past");
   const seconds = Math.floor(delta / 1000);
-  if (seconds < 60) return `in ${seconds}s`;
+  if (seconds < 60) return t("time.inSeconds", { n: seconds });
   const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `in ${minutes}m`;
+  if (minutes < 60) return t("time.inMinutes", { n: minutes });
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `in ${hours}h ${minutes % 60}m`;
+  if (hours < 24) return t("time.inHoursMinutes", { h: hours, m: minutes % 60 });
   const days = Math.floor(hours / 24);
-  if (days < 30) return `in ${days}d ${hours % 24}h`;
+  if (days < 30) return t("time.inDaysHours", { d: days, h: hours % 24 });
   const months = Math.floor(days / 30);
-  return `in ~${months}mo`;
+  return t("time.inMonths", { n: months });
 }
 
 function describe(
   expr: string,
   allowEmpty: boolean,
+  t: Translate,
 ): { kind: "ok" | "empty" | "error"; text: string } {
   const trimmed = expr.trim();
   if (trimmed === "") {
     return {
       kind: "empty",
-      text: allowEmpty
-        ? "Empty cron: stream pipelines run continuously, the scheduler ignores this row."
-        : "Cron expression is required for batch schedules.",
+      text: allowEmpty ? t("cron.emptyStream") : t("cron.required"),
     };
   }
   try {
@@ -142,7 +149,7 @@ function describe(
   } catch (err) {
     return {
       kind: "error",
-      text: err instanceof Error ? err.message : "Invalid cron expression.",
+      text: err instanceof Error ? err.message : t("cron.invalid"),
     };
   }
 }

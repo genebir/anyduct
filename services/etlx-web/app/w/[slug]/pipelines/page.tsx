@@ -14,39 +14,46 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ApiError, pipelinesApi, type PipelineSummary } from "@/lib/api";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
+import { useLocale } from "@/components/providers/locale-provider";
+import type { Messages } from "@/lib/i18n/messages";
 import { blankBuilder, serialize } from "@/lib/pipeline-config";
 
-const COLUMNS: Column<PipelineSummary>[] = [
-  {
-    key: "name",
-    header: "Pipeline",
-    cell: (r) => (
-      <div>
-        <div className="font-medium text-text">{r.name}</div>
-        {r.description ? (
-          <div className="text-xs text-text-muted">{r.description}</div>
-        ) : null}
-      </div>
-    ),
-  },
-  {
-    key: "version",
-    header: "Version",
-    cell: (r) =>
-      r.current_version ? (
-        <span className="font-mono text-xs text-text-secondary">
-          v{r.current_version}
-        </span>
-      ) : (
-        <span className="text-text-muted">—</span>
+type Translate = (key: keyof Messages, vars?: Record<string, string | number>) => string;
+
+function buildColumns(t: Translate): Column<PipelineSummary>[] {
+  return [
+    {
+      key: "name",
+      header: t("common.pipeline"),
+      cell: (r) => (
+        <div>
+          <div className="font-medium text-text">{r.name}</div>
+          {r.description ? (
+            <div className="text-xs text-text-muted">{r.description}</div>
+          ) : null}
+        </div>
       ),
-  },
-];
+    },
+    {
+      key: "version",
+      header: t("common.version"),
+      cell: (r) =>
+        r.current_version ? (
+          <span className="font-mono text-xs text-text-secondary">
+            v{r.current_version}
+          </span>
+        ) : (
+          <span className="text-text-muted">—</span>
+        ),
+    },
+  ];
+}
 
 export default function PipelinesPage() {
   const router = useRouter();
   const { slug } = useParams<{ slug: string }>();
   const ws = useWorkspaceFromSlug(slug);
+  const { t } = useLocale();
   const [rows, setRows] = useState<PipelineSummary[] | null>(null);
   const [triggering, setTriggering] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -67,7 +74,7 @@ export default function PipelinesPage() {
       } catch (err) {
         if (!cancelled) {
           toast.error(
-            err instanceof ApiError ? err.message : "Couldn't load pipelines.",
+            err instanceof ApiError ? err.message : t("pipelines.loadFailed"),
           );
           setRows([]);
         }
@@ -76,7 +83,7 @@ export default function PipelinesPage() {
     return () => {
       cancelled = true;
     };
-  }, [ws]);
+  }, [ws, t]);
 
   async function onCreate() {
     if (!ws || !newName.trim()) return;
@@ -90,11 +97,11 @@ export default function PipelinesPage() {
         name: newName.trim(),
         config,
       });
-      toast.success(`Created ${created.name}`);
+      toast.success(t("pipelines.created", { name: created.name }));
       router.push(`/w/${ws.slug}/pipelines/${created.id}/edit`);
     } catch (err) {
       toast.error(
-        err instanceof ApiError ? err.message : "Couldn't create pipeline.",
+        err instanceof ApiError ? err.message : t("pipelines.createFailed"),
       );
     } finally {
       setSubmitting(false);
@@ -106,13 +113,13 @@ export default function PipelinesPage() {
     setDeleting(true);
     try {
       await pipelinesApi.delete(ws.id, pendingDelete.id);
-      toast.success(`Deleted ${pendingDelete.name}`);
+      toast.success(t("pipelines.deleted", { name: pendingDelete.name }));
       setPendingDelete(null);
       const list = await pipelinesApi.list(ws.id);
       setRows(list);
     } catch (err) {
       toast.error(
-        err instanceof ApiError ? err.message : "Couldn't delete pipeline.",
+        err instanceof ApiError ? err.message : t("pipelines.deleteFailed"),
       );
     } finally {
       setDeleting(false);
@@ -124,10 +131,10 @@ export default function PipelinesPage() {
     setTriggering(row.id);
     try {
       await pipelinesApi.trigger(ws.id, row.id);
-      toast.success(`Run queued for ${row.name}`);
+      toast.success(t("pipelines.runQueued", { name: row.name }));
     } catch (err) {
       toast.error(
-        err instanceof ApiError ? err.message : "Trigger failed.",
+        err instanceof ApiError ? err.message : t("pipelines.triggerFailed"),
       );
     } finally {
       setTriggering(null);
@@ -137,8 +144,12 @@ export default function PipelinesPage() {
   return (
     <>
       <Header
-        title="Pipelines"
-        subtitle={ws ? `Workspace ${ws.name}` : "Loading workspace…"}
+        title={t("nav.pipelines")}
+        subtitle={
+          ws
+            ? t("common.workspaceSubtitle", { name: ws.name })
+            : t("common.loadingWorkspace")
+        }
         actions={
           <Button
             variant="primary"
@@ -146,7 +157,7 @@ export default function PipelinesPage() {
             onClick={() => setCreating((v) => !v)}
           >
             <PlusIcon size={16} />
-            New pipeline
+            {t("pipelines.new")}
           </Button>
         }
       />
@@ -156,12 +167,12 @@ export default function PipelinesPage() {
             <div className="flex items-end gap-3">
               <label className="flex flex-1 flex-col gap-1.5">
                 <span className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
-                  Pipeline name
+                  {t("pipelines.nameLabel")}
                 </span>
                 <Input
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
-                  placeholder="orders-sync"
+                  placeholder={t("pipelines.namePlaceholder")}
                 />
               </label>
               <Button
@@ -169,27 +180,26 @@ export default function PipelinesPage() {
                 onClick={() => setCreating(false)}
                 disabled={submitting}
               >
-                Cancel
+                {t("common.cancel")}
               </Button>
               <Button onClick={onCreate} loading={submitting}>
-                Create &amp; open builder
+                {t("pipelines.createOpen")}
               </Button>
             </div>
             <p className="mt-3 text-xs text-text-muted">
-              Starts a blank pipeline with default Postgres source and sink —
-              configure both in the visual builder.
+              {t("pipelines.createHelp")}
             </p>
           </Card>
         ) : null}
         <Card>
           {rows === null ? (
             <div className="py-12 text-center text-sm text-text-muted">
-              Loading…
+              {t("common.loading")}
             </div>
           ) : (
             <DataTable
               columns={[
-                ...COLUMNS,
+                ...buildColumns(t),
                 {
                   key: "actions",
                   header: "",
@@ -202,7 +212,7 @@ export default function PipelinesPage() {
                         }
                       >
                         <Button size="sm" variant="secondary">
-                          Open builder
+                          {t("pipelines.openBuilder")}
                         </Button>
                       </Link>
                       <Button
@@ -215,7 +225,7 @@ export default function PipelinesPage() {
                         }}
                         disabled={!row.current_version}
                       >
-                        Trigger
+                        {t("common.trigger")}
                       </Button>
                       <Button
                         size="sm"
@@ -224,7 +234,7 @@ export default function PipelinesPage() {
                           e.stopPropagation();
                           setPendingDelete(row);
                         }}
-                        aria-label={`Delete ${row.name}`}
+                        aria-label={t("pipelines.deleteAria", { name: row.name })}
                         className="hover:text-error"
                       >
                         <Trash2Icon size={14} />
@@ -237,12 +247,12 @@ export default function PipelinesPage() {
               emptyState={
                 <EmptyState
                   icon={<WorkflowIcon size={36} strokeWidth={1.5} />}
-                  title="No pipelines yet"
-                  description="Pipelines are graphs of source → transform → sink. Use the visual builder to design one without writing YAML."
+                  title={t("pipelines.emptyTitle")}
+                  description={t("pipelines.emptyDesc")}
                   action={
                     <Button onClick={() => setCreating(true)}>
                       <PlusIcon size={16} />
-                      New pipeline
+                      {t("pipelines.new")}
                     </Button>
                   }
                 />
@@ -254,9 +264,13 @@ export default function PipelinesPage() {
 
       <ConfirmDialog
         open={pendingDelete !== null}
-        title={pendingDelete ? `Delete ${pendingDelete.name}?` : "Delete pipeline?"}
-        description="All versions and schedules of this pipeline are removed. Past runs stay in the runs table for audit. Pending and in-flight runs are left to complete on their own — the worker won't be able to re-fetch them after deletion."
-        confirmLabel="Delete"
+        title={
+          pendingDelete
+            ? t("pipelines.deleteTitle", { name: pendingDelete.name })
+            : t("pipelines.deleteTitleFallback")
+        }
+        description={t("pipelines.deleteDesc")}
+        confirmLabel={t("common.delete")}
         destructive
         loading={deleting}
         onConfirm={onConfirmDelete}

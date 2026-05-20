@@ -3,20 +3,22 @@
 import { PlusIcon } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { OPERATOR_GROUPS } from "@/lib/operators";
+import { useLocale } from "@/components/providers/locale-provider";
 
 export function Palette({
   onAdd,
 }: {
   onAdd: (operatorId: string) => void;
 }) {
+  const { t } = useLocale();
   return (
     <aside className="flex w-64 shrink-0 flex-col gap-4 overflow-y-auto border-r border-border-subtle bg-surface px-3 py-4">
       <div>
         <div className="px-1 text-[11px] font-semibold uppercase tracking-widest text-text-muted">
-          Operators
+          {t("builder.operators")}
         </div>
         <p className="mt-1 px-1 text-xs text-text-secondary">
-          Click to add — pipelines run as source → transforms → sink.
+          {t("builder.operatorsHint")}
         </p>
       </div>
       {OPERATOR_GROUPS.map((group) => (

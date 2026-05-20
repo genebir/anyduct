@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { useState } from "react";
 import { CronInput } from "./cron-input";
+import { MockLocaleProvider } from "../../.storybook/mocks/providers";
 
 /**
  * Stateful wrapper so each story renders a fully interactive cron editor —
@@ -26,6 +27,13 @@ const meta: Meta<typeof CronInputDemo> = {
   title: "Schedules/CronInput",
   component: CronInputDemo,
   tags: ["autodocs"],
+  decorators: [
+    (Story) => (
+      <MockLocaleProvider>
+        <Story />
+      </MockLocaleProvider>
+    ),
+  ],
 };
 
 export default meta;

@@ -16,6 +16,7 @@ import {
 } from "@/lib/api";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import { useWorkspaces } from "@/components/providers/workspace-provider";
+import { useLocale } from "@/components/providers/locale-provider";
 
 const PRESET_COLORS = [
   "#FF3D8B",
@@ -33,13 +34,18 @@ export default function SettingsPage() {
   const { slug } = useParams<{ slug: string }>();
   const ws = useWorkspaceFromSlug(slug);
   const { refresh } = useWorkspaces();
+  const { t } = useLocale();
   const isOwner = ws?.role === "owner" || ws?.role == null;
 
   return (
     <>
       <Header
-        title="Settings"
-        subtitle={ws ? `Workspace ${ws.name}` : "Loading workspace…"}
+        title={t("nav.settings")}
+        subtitle={
+          ws
+            ? t("common.workspaceSubtitle", { name: ws.name })
+            : t("common.loadingWorkspace")
+        }
       />
       <main className="mx-auto w-full max-w-3xl flex-1 space-y-6 overflow-y-auto px-6 py-8">
         {ws ? (
@@ -57,7 +63,7 @@ export default function SettingsPage() {
             <DangerZone workspace={ws} disabled={!isOwner} />
           </>
         ) : (
-          <Card>Loading…</Card>
+          <Card>{t("common.loading")}</Card>
         )}
       </main>
     </>
@@ -73,6 +79,7 @@ function ProfileForm({
   disabled: boolean;
   onSaved: (updated: WorkspaceSummary) => void;
 }) {
+  const { t } = useLocale();
   const [name, setName] = useState(workspace.name);
   const [workspaceSlug, setWorkspaceSlug] = useState(workspace.slug);
   const [color, setColor] = useState(workspace.color_hex);
@@ -93,17 +100,17 @@ function ProfileForm({
     if (workspaceSlug.trim() !== workspace.slug) body.slug = workspaceSlug.trim();
     if (color !== workspace.color_hex) body.color_hex = color;
     if (Object.keys(body).length === 0) {
-      toast.info("Nothing to save.");
+      toast.info(t("settings.nothingToSave"));
       return;
     }
     setSubmitting(true);
     try {
       const updated = await workspacesApi.update(workspace.id, body);
-      toast.success(`Saved ${updated.name}`);
+      toast.success(t("settings.saved", { name: updated.name }));
       onSaved(updated);
     } catch (err) {
       toast.error(
-        err instanceof ApiError ? err.message : "Couldn't save workspace.",
+        err instanceof ApiError ? err.message : t("settings.saveFailed"),
       );
     } finally {
       setSubmitting(false);
@@ -113,17 +120,17 @@ function ProfileForm({
   return (
     <Card>
       <CardHeader
-        title="Workspace"
+        title={t("settings.workspace")}
         description={
           disabled
-            ? "Read-only — only Owners can rename or recolor the workspace."
-            : "Renaming changes the URL slug; existing bookmarks will redirect."
+            ? t("settings.workspaceReadOnly")
+            : t("settings.workspaceDesc")
         }
       />
       <form onSubmit={onSubmit} className="grid gap-4 sm:grid-cols-2">
         <label className="flex flex-col gap-1.5">
           <span className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
-            Name
+            {t("common.name")}
           </span>
           <Input
             value={name}
@@ -134,7 +141,7 @@ function ProfileForm({
         </label>
         <label className="flex flex-col gap-1.5">
           <span className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
-            Slug
+            {t("workspaces.slug")}
           </span>
           <Input
             value={workspaceSlug}
@@ -146,14 +153,14 @@ function ProfileForm({
         </label>
         <div className="sm:col-span-2">
           <span className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
-            Accent color
+            {t("workspaces.accent")}
           </span>
           <div className="mt-2 flex flex-wrap gap-2">
             {PRESET_COLORS.map((c) => (
               <button
                 key={c}
                 type="button"
-                aria-label={`Pick color ${c}`}
+                aria-label={t("workspaces.pickColor", { c })}
                 onClick={() => !disabled && setColor(c)}
                 disabled={disabled}
                 className="h-8 w-8 rounded-md ring-offset-2 ring-offset-elevated transition duration-150 hover:scale-105 disabled:cursor-not-allowed disabled:opacity-60"
@@ -168,16 +175,16 @@ function ProfileForm({
         </div>
         <div className="sm:col-span-2">
           <span className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
-            Your role
+            {t("settings.yourRole")}
           </span>
           <div className="mt-1 text-sm capitalize text-text">
-            {workspace.role ?? "SuperAdmin bypass"}
+            {workspace.role ?? t("workspaces.superadmin")}
           </div>
         </div>
         {!disabled ? (
           <div className="flex justify-end gap-2 pt-2 sm:col-span-2">
             <Button type="submit" loading={submitting}>
-              Save changes
+              {t("settings.saveChanges")}
             </Button>
           </div>
         ) : null}
@@ -195,6 +202,7 @@ function DangerZone({
 }) {
   const router = useRouter();
   const { refresh } = useWorkspaces();
+  const { t } = useLocale();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
@@ -204,12 +212,12 @@ function DangerZone({
     setSubmitting(true);
     try {
       await workspacesApi.delete(workspace.id);
-      toast.success(`Deleted ${workspace.name}`);
+      toast.success(t("settings.deleted", { name: workspace.name }));
       await refresh();
       router.replace("/workspaces");
     } catch (err) {
       toast.error(
-        err instanceof ApiError ? err.message : "Couldn't delete workspace.",
+        err instanceof ApiError ? err.message : t("settings.deleteFailed"),
       );
       setSubmitting(false);
     }
@@ -219,21 +227,21 @@ function DangerZone({
     <>
       <Card className="border-error/40">
         <CardHeader
-          title="Danger zone"
-          description="Deleting a workspace removes connections, pipelines, schedules, runs, and audit rows. There's no undo."
+          title={t("settings.dangerZone")}
+          description={t("settings.dangerDesc")}
         />
         <div className="flex justify-end">
           <Button variant="destructive" onClick={() => setConfirmOpen(true)}>
             <Trash2Icon size={16} />
-            Delete workspace
+            {t("settings.deleteWorkspace")}
           </Button>
         </div>
       </Card>
       <ConfirmDialog
         open={confirmOpen}
-        title={`Delete ${workspace.name}?`}
-        description="Everything in this workspace is removed (connections, pipelines, schedules, runs, audit). Confirm you have a backup if you'll need this data later."
-        confirmLabel="Delete forever"
+        title={t("settings.deleteTitle", { name: workspace.name })}
+        description={t("settings.deleteDesc")}
+        confirmLabel={t("settings.deleteForever")}
         destructive
         loading={submitting}
         onConfirm={onDelete}

@@ -17,6 +17,7 @@ import {
   findSchema,
   type ConnectorField,
 } from "@/lib/connector-schemas";
+import { useLocale } from "@/components/providers/locale-provider";
 
 type FieldValue = string | number | undefined;
 
@@ -35,6 +36,7 @@ export function ConnectionForm(props: ConnectionFormProps) {
 }
 
 function CreateForm({ workspaceId, onSaved, onCancel }: ConnectionFormProps) {
+  const { t } = useLocale();
   const [type, setType] = useState(CONNECTOR_SCHEMAS[0].type);
   const [name, setName] = useState("");
   const [values, setValues] = useState<Record<string, FieldValue>>({});
@@ -56,7 +58,7 @@ function CreateForm({ workspaceId, onSaved, onCancel }: ConnectionFormProps) {
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!name.trim()) {
-      toast.error("Connection name is required.");
+      toast.error(t("connForm.nameRequired"));
       return;
     }
 
@@ -64,11 +66,11 @@ function CreateForm({ workspaceId, onSaved, onCancel }: ConnectionFormProps) {
     try {
       const body = buildCreateBody({ name: name.trim(), schema, values });
       const created = await connectionsApi.create(workspaceId, body);
-      toast.success(`Created ${created.name}`);
+      toast.success(t("connForm.created", { name: created.name }));
       onSaved(created);
     } catch (err) {
       toast.error(
-        err instanceof ApiError ? err.message : "Couldn't create connection.",
+        err instanceof ApiError ? err.message : t("connForm.createFailed"),
       );
     } finally {
       setSubmitting(false);
@@ -78,19 +80,19 @@ function CreateForm({ workspaceId, onSaved, onCancel }: ConnectionFormProps) {
   return (
     <Card>
       <CardHeader
-        title="New connection"
-        description="Credentials marked Password are stored in the configured secret backend — the metadata DB only keeps a reference."
+        title={t("connForm.newTitle")}
+        description={t("connForm.newDesc")}
       />
       <form onSubmit={onSubmit} className="grid gap-4 md:grid-cols-2">
-        <FieldRow label="Connection name" className="md:col-span-2">
+        <FieldRow label={t("connForm.name")} className="md:col-span-2">
           <Input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="prod-orders-db"
+            placeholder={t("connForm.namePlaceholder")}
             required
           />
         </FieldRow>
-        <FieldRow label="Connector type" className="md:col-span-2">
+        <FieldRow label={t("connForm.type")} className="md:col-span-2">
           <ConnectorTypeRadio value={type} onChange={changeType} />
         </FieldRow>
         {schema.fields.map((field) => (
@@ -109,10 +111,10 @@ function CreateForm({ workspaceId, onSaved, onCancel }: ConnectionFormProps) {
         ))}
         <div className="flex justify-end gap-2 pt-2 md:col-span-2">
           <Button variant="ghost" type="button" onClick={onCancel} disabled={submitting}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button type="submit" loading={submitting}>
-            Create connection
+            {t("connForm.create")}
           </Button>
         </div>
       </form>
@@ -126,6 +128,7 @@ function EditForm({
   onSaved,
   onCancel,
 }: ConnectionFormProps & { existing: ConnectionSummary }) {
+  const { t } = useLocale();
   const [name, setName] = useState(existing.name);
   const [submitting, setSubmitting] = useState(false);
 
@@ -140,11 +143,11 @@ function EditForm({
       const updated = await connectionsApi.update(workspaceId, existing.id, {
         name: name.trim(),
       });
-      toast.success(`Renamed to ${updated.name}`);
+      toast.success(t("connForm.renamed", { name: updated.name }));
       onSaved(updated);
     } catch (err) {
       toast.error(
-        err instanceof ApiError ? err.message : "Couldn't rename connection.",
+        err instanceof ApiError ? err.message : t("connForm.renameFailed"),
       );
     } finally {
       setSubmitting(false);
@@ -154,11 +157,11 @@ function EditForm({
   return (
     <Card>
       <CardHeader
-        title={`Edit ${existing.name}`}
-        description="Rename only. Editing credentials requires deleting + recreating so the secret backend stays the source of truth."
+        title={t("connForm.editTitle", { name: existing.name })}
+        description={t("connForm.editDesc")}
       />
       <form onSubmit={onSubmit} className="flex flex-col gap-3 md:flex-row md:items-end">
-        <FieldRow label="Connection name" className="flex-1">
+        <FieldRow label={t("connForm.name")} className="flex-1">
           <Input
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -167,10 +170,10 @@ function EditForm({
         </FieldRow>
         <div className="flex gap-2">
           <Button variant="ghost" type="button" onClick={onCancel} disabled={submitting}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button type="submit" loading={submitting}>
-            Save
+            {t("common.save")}
           </Button>
         </div>
       </form>

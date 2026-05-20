@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { ConnectionForm } from "./connection-form";
 import type { ConnectionSummary } from "@/lib/api";
+import { MockLocaleProvider } from "../../.storybook/mocks/providers";
 
 /**
  * The form's "Create connection" button calls the real REST client, which
@@ -30,6 +31,13 @@ const meta: Meta<typeof ConnectionForm> = {
   component: ConnectionForm,
   tags: ["autodocs"],
   parameters: { layout: "padded" },
+  decorators: [
+    (Story) => (
+      <MockLocaleProvider>
+        <Story />
+      </MockLocaleProvider>
+    ),
+  ],
   args: {
     workspaceId: "ws-1",
     onSaved: () => undefined,

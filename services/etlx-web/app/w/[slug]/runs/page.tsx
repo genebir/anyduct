@@ -11,6 +11,10 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ApiError, runsApi, type RunSummary } from "@/lib/api";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
+import { useLocale } from "@/components/providers/locale-provider";
+import type { Messages } from "@/lib/i18n/messages";
+
+type Translate = (key: keyof Messages, vars?: Record<string, string | number>) => string;
 
 function formatTimestamp(ts: string | null): string {
   if (!ts) return "—";
@@ -25,67 +29,71 @@ function formatDuration(s: number | null): string {
   return `${Math.floor(s / 60)}m ${Math.round(s % 60)}s`;
 }
 
-const COLUMNS: Column<RunSummary>[] = [
-  {
-    key: "status",
-    header: "Status",
-    className: "w-32",
-    cell: (r) => <StatusBadge status={r.status} />,
-  },
-  {
-    key: "pipeline",
-    header: "Pipeline",
-    cell: (r) => (
-      <span className="font-mono text-xs text-text-secondary">
-        {r.pipeline_id.slice(0, 8)}…
-      </span>
-    ),
-  },
-  {
-    key: "scheduled",
-    header: "Scheduled",
-    cell: (r) => (
-      <span className="text-text-secondary">
-        {formatTimestamp(r.scheduled_at)}
-      </span>
-    ),
-  },
-  {
-    key: "duration",
-    header: "Duration",
-    cell: (r) => (
-      <span className="text-text-secondary">
-        {formatDuration(r.duration_seconds)}
-      </span>
-    ),
-  },
-  {
-    key: "rw",
-    header: "Read / Written",
-    cell: (r) => (
-      <span className="font-mono text-xs text-text-secondary">
-        {r.records_read.toLocaleString()} / {r.records_written.toLocaleString()}
-      </span>
-    ),
-  },
-  {
-    key: "error",
-    header: "Error",
-    cell: (r) =>
-      r.error_class ? (
-        <span className="rounded-sm bg-error/10 px-2 py-0.5 font-mono text-xs text-error">
-          {r.error_class}
+function buildColumns(t: Translate): Column<RunSummary>[] {
+  return [
+    {
+      key: "status",
+      header: t("common.status"),
+      className: "w-32",
+      cell: (r) => <StatusBadge status={r.status} />,
+    },
+    {
+      key: "pipeline",
+      header: t("common.pipeline"),
+      cell: (r) => (
+        <span className="font-mono text-xs text-text-secondary">
+          {r.pipeline_id.slice(0, 8)}…
         </span>
-      ) : (
-        <span className="text-text-muted">—</span>
       ),
-  },
-];
+    },
+    {
+      key: "scheduled",
+      header: t("common.scheduled"),
+      cell: (r) => (
+        <span className="text-text-secondary">
+          {formatTimestamp(r.scheduled_at)}
+        </span>
+      ),
+    },
+    {
+      key: "duration",
+      header: t("common.duration"),
+      cell: (r) => (
+        <span className="text-text-secondary">
+          {formatDuration(r.duration_seconds)}
+        </span>
+      ),
+    },
+    {
+      key: "rw",
+      header: t("runs.colReadWritten"),
+      cell: (r) => (
+        <span className="font-mono text-xs text-text-secondary">
+          {r.records_read.toLocaleString()} /{" "}
+          {r.records_written.toLocaleString()}
+        </span>
+      ),
+    },
+    {
+      key: "error",
+      header: t("common.error"),
+      cell: (r) =>
+        r.error_class ? (
+          <span className="rounded-sm bg-error/10 px-2 py-0.5 font-mono text-xs text-error">
+            {r.error_class}
+          </span>
+        ) : (
+          <span className="text-text-muted">—</span>
+        ),
+    },
+  ];
+}
 
 export default function RunsPage() {
   const router = useRouter();
   const { slug } = useParams<{ slug: string }>();
   const ws = useWorkspaceFromSlug(slug);
+  const { t } = useLocale();
   const [rows, setRows] = useState<RunSummary[] | null>(null);
 
   useEffect(() => {
@@ -99,7 +107,7 @@ export default function RunsPage() {
       } catch (err) {
         if (!cancelled) {
           toast.error(
-            err instanceof ApiError ? err.message : "Couldn't load runs.",
+            err instanceof ApiError ? err.message : t("runs.loadFailed"),
           );
           setRows([]);
         }
@@ -115,23 +123,27 @@ export default function RunsPage() {
       cancelled = true;
       window.clearInterval(id);
     };
-  }, [ws]);
+  }, [ws, t]);
 
   return (
     <>
       <Header
-        title="Runs"
-        subtitle={ws ? `Workspace ${ws.name}` : "Loading workspace…"}
+        title={t("nav.runs")}
+        subtitle={
+          ws
+            ? t("common.workspaceSubtitle", { name: ws.name })
+            : t("common.loadingWorkspace")
+        }
       />
       <main className="mx-auto w-full max-w-6xl flex-1 space-y-6 overflow-y-auto px-6 py-8">
         <Card>
           {rows === null ? (
             <div className="py-12 text-center text-sm text-text-muted">
-              Loading…
+              {t("common.loading")}
             </div>
           ) : (
             <DataTable
-              columns={COLUMNS}
+              columns={buildColumns(t)}
               rows={rows}
               onRowClick={(row) => {
                 if (ws) router.push(`/w/${ws.slug}/runs/${row.id}`);
@@ -139,8 +151,8 @@ export default function RunsPage() {
               emptyState={
                 <EmptyState
                   icon={<ActivityIcon size={36} strokeWidth={1.5} />}
-                  title="No runs yet"
-                  description="Trigger a pipeline manually or wait for a scheduled run. This view updates every five seconds."
+                  title={t("runs.emptyTitle")}
+                  description={t("runs.emptyDesc")}
                 />
               }
             />

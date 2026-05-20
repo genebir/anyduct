@@ -13,41 +13,47 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ConnectionForm } from "@/components/connections/connection-form";
 import { ApiError, connectionsApi, type ConnectionSummary } from "@/lib/api";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
+import { useLocale } from "@/components/providers/locale-provider";
+import type { Messages } from "@/lib/i18n/messages";
+
+type Translate = (key: keyof Messages, vars?: Record<string, string | number>) => string;
 
 type FormState =
   | { kind: "closed" }
   | { kind: "create" }
   | { kind: "edit"; row: ConnectionSummary };
 
-const COLUMNS: Column<ConnectionSummary>[] = [
-  { key: "name", header: "Name", cell: (r) => r.name },
-  {
-    key: "type",
-    header: "Connector",
-    cell: (r) => (
-      <span className="rounded-sm bg-overlay px-2 py-0.5 font-mono text-xs text-text-secondary">
-        {r.type}
-      </span>
-    ),
-  },
-  {
-    key: "secrets",
-    header: "Secrets",
-    cell: (r) =>
-      r.secret_refs.length === 0 ? (
-        <span className="text-text-muted">—</span>
-      ) : (
-        <span className="text-text-secondary">
-          {r.secret_refs.length} ref
-          {r.secret_refs.length === 1 ? "" : "s"}
+function buildColumns(t: Translate): Column<ConnectionSummary>[] {
+  return [
+    { key: "name", header: t("common.name"), cell: (r) => r.name },
+    {
+      key: "type",
+      header: t("connections.colConnector"),
+      cell: (r) => (
+        <span className="rounded-sm bg-overlay px-2 py-0.5 font-mono text-xs text-text-secondary">
+          {r.type}
         </span>
       ),
-  },
-];
+    },
+    {
+      key: "secrets",
+      header: t("connections.colSecrets"),
+      cell: (r) =>
+        r.secret_refs.length === 0 ? (
+          <span className="text-text-muted">—</span>
+        ) : (
+          <span className="text-text-secondary">
+            {t("connections.refs", { count: r.secret_refs.length })}
+          </span>
+        ),
+    },
+  ];
+}
 
 export default function ConnectionsPage() {
   const { slug } = useParams<{ slug: string }>();
   const ws = useWorkspaceFromSlug(slug);
+  const { t } = useLocale();
   const [rows, setRows] = useState<ConnectionSummary[] | null>(null);
   const [testing, setTesting] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>({ kind: "closed" });
@@ -62,7 +68,7 @@ export default function ConnectionsPage() {
       setRows(list);
     } catch (err) {
       toast.error(
-        err instanceof ApiError ? err.message : "Couldn't load connections.",
+        err instanceof ApiError ? err.message : t("connections.loadFailed"),
       );
       setRows([]);
     }
@@ -79,13 +85,18 @@ export default function ConnectionsPage() {
     try {
       const result = await connectionsApi.test(ws.id, row.id);
       if (result.ok) {
-        toast.success(`${row.name} connected`);
+        toast.success(t("connections.connected", { name: row.name }));
       } else {
-        toast.error(`${row.name}: ${result.error ?? "unknown error"}`);
+        toast.error(
+          t("connections.testErrorNamed", {
+            name: row.name,
+            error: result.error ?? t("connections.unknownError"),
+          }),
+        );
       }
     } catch (err) {
       toast.error(
-        err instanceof ApiError ? err.message : "Test failed unexpectedly.",
+        err instanceof ApiError ? err.message : t("connections.testFailed"),
       );
     } finally {
       setTesting(null);
@@ -97,12 +108,12 @@ export default function ConnectionsPage() {
     setDeleting(true);
     try {
       await connectionsApi.delete(ws.id, pendingDelete.id);
-      toast.success(`Deleted ${pendingDelete.name}`);
+      toast.success(t("connections.deleted", { name: pendingDelete.name }));
       setPendingDelete(null);
       await refresh(ws.id);
     } catch (err) {
       toast.error(
-        err instanceof ApiError ? err.message : "Couldn't delete connection.",
+        err instanceof ApiError ? err.message : t("connections.deleteFailed"),
       );
     } finally {
       setDeleting(false);
@@ -112,8 +123,12 @@ export default function ConnectionsPage() {
   return (
     <>
       <Header
-        title="Connections"
-        subtitle={ws ? `Workspace ${ws.name}` : "Loading workspace…"}
+        title={t("nav.connections")}
+        subtitle={
+          ws
+            ? t("common.workspaceSubtitle", { name: ws.name })
+            : t("common.loadingWorkspace")
+        }
         actions={
           <Button
             variant="primary"
@@ -125,7 +140,7 @@ export default function ConnectionsPage() {
             }
           >
             <PlusIcon size={16} />
-            New connection
+            {t("connections.new")}
           </Button>
         }
       />
@@ -157,12 +172,12 @@ export default function ConnectionsPage() {
         <Card>
           {rows === null ? (
             <div className="py-12 text-center text-sm text-text-muted">
-              Loading…
+              {t("common.loading")}
             </div>
           ) : (
             <DataTable
               columns={[
-                ...COLUMNS,
+                ...buildColumns(t),
                 {
                   key: "actions",
                   header: "",
@@ -178,7 +193,7 @@ export default function ConnectionsPage() {
                           void onTest(row);
                         }}
                       >
-                        Test
+                        {t("common.test")}
                       </Button>
                       <Button
                         size="sm"
@@ -187,7 +202,7 @@ export default function ConnectionsPage() {
                           e.stopPropagation();
                           setForm({ kind: "edit", row });
                         }}
-                        aria-label={`Edit ${row.name}`}
+                        aria-label={t("connections.editAria", { name: row.name })}
                       >
                         <PencilIcon size={14} />
                       </Button>
@@ -198,7 +213,7 @@ export default function ConnectionsPage() {
                           e.stopPropagation();
                           setPendingDelete(row);
                         }}
-                        aria-label={`Delete ${row.name}`}
+                        aria-label={t("connections.deleteAria", { name: row.name })}
                         className="hover:text-error"
                       >
                         <Trash2Icon size={14} />
@@ -211,12 +226,12 @@ export default function ConnectionsPage() {
               emptyState={
                 <EmptyState
                   icon={<CableIcon size={36} strokeWidth={1.5} />}
-                  title="No connections yet"
-                  description="Connections store the credentials and host metadata for sources and sinks."
+                  title={t("connections.emptyTitle")}
+                  description={t("connections.emptyDesc")}
                   action={
                     <Button onClick={() => setForm({ kind: "create" })}>
                       <PlusIcon size={16} />
-                      New connection
+                      {t("connections.new")}
                     </Button>
                   }
                 />
@@ -229,16 +244,18 @@ export default function ConnectionsPage() {
       <ConfirmDialog
         open={pendingDelete !== null}
         title={
-          pendingDelete ? `Delete ${pendingDelete.name}?` : "Delete connection?"
+          pendingDelete
+            ? t("connections.deleteTitle", { name: pendingDelete.name })
+            : t("connections.deleteTitleFallback")
         }
         description={
           pendingDelete
-            ? `${pendingDelete.secret_refs.length === 0 ? "No" : pendingDelete.secret_refs.length} secret${
-                pendingDelete.secret_refs.length === 1 ? "" : "s"
-              } will be removed from the backend. Pipelines that reference this connection by name will fail until you create a replacement.`
+            ? t("connections.deleteDesc", {
+                count: pendingDelete.secret_refs.length,
+              })
             : undefined
         }
-        confirmLabel="Delete"
+        confirmLabel={t("common.delete")}
         destructive
         loading={deleting}
         onConfirm={onConfirmDelete}

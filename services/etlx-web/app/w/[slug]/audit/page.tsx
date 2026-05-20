@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ApiError, auditApi, type AuditLogEntry } from "@/lib/api";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
+import { useLocale } from "@/components/providers/locale-provider";
 import { cn } from "@/lib/cn";
 
 const RESOURCE_TYPES = [
@@ -28,6 +29,7 @@ const PAGE_SIZE = 100;
 export default function AuditPage() {
   const { slug } = useParams<{ slug: string }>();
   const ws = useWorkspaceFromSlug(slug);
+  const { t } = useLocale();
   const [rows, setRows] = useState<AuditLogEntry[] | null>(null);
   const [resourceType, setResourceType] = useState("");
   const [resourceId, setResourceId] = useState("");
@@ -49,7 +51,7 @@ export default function AuditPage() {
       } catch (err) {
         if (!cancelled) {
           toast.error(
-            err instanceof ApiError ? err.message : "Couldn't load audit log.",
+            err instanceof ApiError ? err.message : t("audit.loadFailed"),
           );
           setRows([]);
         }
@@ -58,24 +60,28 @@ export default function AuditPage() {
     return () => {
       cancelled = true;
     };
-  }, [ws, resourceType, resourceId, offset]);
+  }, [ws, resourceType, resourceId, offset, t]);
 
   return (
     <>
       <Header
-        title="Audit log"
-        subtitle={ws ? `Workspace ${ws.name}` : "Loading workspace…"}
+        title={t("nav.audit")}
+        subtitle={
+          ws
+            ? t("common.workspaceSubtitle", { name: ws.name })
+            : t("common.loadingWorkspace")
+        }
       />
       <main className="mx-auto w-full max-w-6xl flex-1 space-y-6 overflow-y-auto px-6 py-8">
         <Card>
           <CardHeader
-            title="Filters"
-            description="Server returns rows newest-first; resource type narrows by the row's affected resource."
+            title={t("audit.filters")}
+            description={t("audit.filtersDesc")}
           />
           <div className="grid gap-4 md:grid-cols-[1fr_2fr_auto]">
             <label className="flex flex-col gap-1.5">
               <span className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
-                Resource type
+                {t("audit.resourceType")}
               </span>
               <select
                 value={resourceType}
@@ -85,16 +91,16 @@ export default function AuditPage() {
                 }}
                 className="h-10 rounded-md border border-border-subtle bg-elevated px-3 text-sm text-text focus-visible:border-accent focus-visible:outline-none"
               >
-                {RESOURCE_TYPES.map((t) => (
-                  <option key={t} value={t}>
-                    {t === "" ? "All resources" : t}
+                {RESOURCE_TYPES.map((rt) => (
+                  <option key={rt} value={rt}>
+                    {rt === "" ? t("audit.allResources") : rt}
                   </option>
                 ))}
               </select>
             </label>
             <label className="flex flex-col gap-1.5">
               <span className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
-                Resource ID
+                {t("audit.resourceId")}
               </span>
               <Input
                 value={resourceId}
@@ -102,7 +108,7 @@ export default function AuditPage() {
                   setResourceId(e.target.value);
                   setOffset(0);
                 }}
-                placeholder="exact match (UUID)"
+                placeholder={t("audit.resourceIdPlaceholder")}
               />
             </label>
             <div className="flex items-end justify-end gap-2">
@@ -114,7 +120,7 @@ export default function AuditPage() {
                   setOffset(0);
                 }}
               >
-                Reset
+                {t("common.reset")}
               </Button>
             </div>
           </div>
@@ -123,17 +129,13 @@ export default function AuditPage() {
         <Card>
           {rows === null ? (
             <div className="py-12 text-center text-sm text-text-muted">
-              Loading…
+              {t("common.loading")}
             </div>
           ) : rows.length === 0 ? (
             <EmptyState
               icon={<ScrollTextIcon size={36} strokeWidth={1.5} />}
-              title="No audit rows match"
-              description={
-                offset > 0
-                  ? "Try reducing the offset, or reset the filters."
-                  : "Make a change in another tab (create a connection, add a member, etc.) — it'll appear here on next load."
-              }
+              title={t("audit.noRowsTitle")}
+              description={offset > 0 ? t("audit.noRowsDesc") : t("audit.emptyDesc")}
             />
           ) : (
             <>
@@ -142,6 +144,9 @@ export default function AuditPage() {
                   <AuditRow
                     key={row.id}
                     row={row}
+                    systemLabel={t("audit.system")}
+                    beforeLabel={t("audit.before")}
+                    afterLabel={t("audit.after")}
                     open={!!expanded[row.id]}
                     onToggle={() =>
                       setExpanded((prev) => ({
@@ -155,8 +160,13 @@ export default function AuditPage() {
 
               <div className="mt-4 flex items-center justify-between border-t border-border-subtle pt-4 text-xs text-text-muted">
                 <span>
-                  Showing {offset + 1}–{offset + rows.length}
-                  {rows.length === PAGE_SIZE ? "  (more available)" : ""}
+                  {t("audit.showing", {
+                    from: offset + 1,
+                    to: offset + rows.length,
+                  })}
+                  {rows.length === PAGE_SIZE
+                    ? `  ${t("audit.moreAvailable")}`
+                    : ""}
                 </span>
                 <div className="flex gap-2">
                   <Button
@@ -167,7 +177,7 @@ export default function AuditPage() {
                       setOffset((o) => Math.max(0, o - PAGE_SIZE))
                     }
                   >
-                    Previous
+                    {t("common.previous")}
                   </Button>
                   <Button
                     size="sm"
@@ -175,7 +185,7 @@ export default function AuditPage() {
                     disabled={rows.length < PAGE_SIZE}
                     onClick={() => setOffset((o) => o + PAGE_SIZE)}
                   >
-                    Next
+                    {t("common.next")}
                   </Button>
                 </div>
               </div>
@@ -191,10 +201,16 @@ function AuditRow({
   row,
   open,
   onToggle,
+  systemLabel,
+  beforeLabel,
+  afterLabel,
 }: {
   row: AuditLogEntry;
   open: boolean;
   onToggle: () => void;
+  systemLabel: string;
+  beforeLabel: string;
+  afterLabel: string;
 }) {
   const hasDiff =
     row.before_json !== null ||
@@ -232,13 +248,13 @@ function AuditRow({
           ) : null}
         </span>
         <span className="truncate text-right font-mono text-xs text-text-muted">
-          {row.actor_user_id ? `${row.actor_user_id.slice(0, 8)}…` : "system"}
+          {row.actor_user_id ? `${row.actor_user_id.slice(0, 8)}…` : systemLabel}
         </span>
       </button>
       {open && hasDiff ? (
         <div className="grid gap-3 px-8 pb-4 sm:grid-cols-2">
-          <JsonBlock label="Before" value={row.before_json} />
-          <JsonBlock label="After" value={row.after_json} />
+          <JsonBlock label={beforeLabel} value={row.before_json} />
+          <JsonBlock label={afterLabel} value={row.after_json} />
         </div>
       ) : null}
     </li>

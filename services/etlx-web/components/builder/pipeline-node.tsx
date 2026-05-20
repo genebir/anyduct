@@ -4,6 +4,10 @@ import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { Trash2Icon } from "lucide-react";
 import { findOperator } from "@/lib/operators";
 import { cn } from "@/lib/cn";
+import { useLocale } from "@/components/providers/locale-provider";
+import type { Messages } from "@/lib/i18n/messages";
+
+type Translate = (key: keyof Messages, vars?: Record<string, string | number>) => string;
 
 export interface PipelineNodeData extends Record<string, unknown> {
   operatorId: string;
@@ -15,12 +19,13 @@ export interface PipelineNodeData extends Record<string, unknown> {
 }
 
 export function PipelineNode({ id, data }: NodeProps) {
+  const { t } = useLocale();
   const d = data as PipelineNodeData;
   const op = findOperator(d.operatorId);
   if (!op) return null;
   const Icon = op.icon;
 
-  const summary = describeNode(op, d.values);
+  const summary = describeNode(op, d.values, t);
 
   return (
     <div
@@ -74,7 +79,7 @@ export function PipelineNode({ id, data }: NodeProps) {
         {d.canRemove ? (
           <button
             type="button"
-            aria-label={`Remove ${op.label}`}
+            aria-label={t("builder.removeAria", { label: op.label })}
             onClick={(e) => {
               e.stopPropagation();
               d.onRemove(id);
@@ -93,10 +98,11 @@ export function PipelineNode({ id, data }: NodeProps) {
 function describeNode(
   op: ReturnType<typeof findOperator>,
   values: Record<string, unknown>,
+  t: Translate,
 ): string {
   if (!op) return "";
   if (op.kind === "source" || op.kind === "sink") {
-    const conn = (values.connection as string) || "no connection";
+    const conn = (values.connection as string) || t("builder.noConnection");
     const target =
       (values.table as string) ||
       (values.topic as string) ||
@@ -107,7 +113,7 @@ function describeNode(
   // transform — show first non-empty field as a hint
   const first = op.fields[0]?.key;
   const v = first ? values[first] : undefined;
-  if (v === undefined || v === null || v === "") return "Not configured";
+  if (v === undefined || v === null || v === "") return t("builder.notConfigured");
   if (typeof v === "string") return v.length > 40 ? `${v.slice(0, 40)}…` : v;
   return JSON.stringify(v);
 }

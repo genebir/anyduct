@@ -1,10 +1,18 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { StatusBadge } from "./status-badge";
+import { MockLocaleProvider } from "../../.storybook/mocks/providers";
 
 const meta: Meta<typeof StatusBadge> = {
   title: "Primitives/StatusBadge",
   component: StatusBadge,
   tags: ["autodocs"],
+  decorators: [
+    (Story) => (
+      <MockLocaleProvider>
+        <Story />
+      </MockLocaleProvider>
+    ),
+  ],
   argTypes: {
     status: {
       control: "select",

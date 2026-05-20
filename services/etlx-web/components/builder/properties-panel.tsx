@@ -6,6 +6,10 @@ import { findOperator, type FieldDef } from "@/lib/operators";
 import type { ConnectionSummary } from "@/lib/api";
 import type { BuilderNode } from "@/lib/pipeline-config";
 import { cn } from "@/lib/cn";
+import { useLocale } from "@/components/providers/locale-provider";
+import type { Messages } from "@/lib/i18n/messages";
+
+type Translate = (key: keyof Messages, vars?: Record<string, string | number>) => string;
 
 export function PropertiesPanel({
   node,
@@ -16,11 +20,11 @@ export function PropertiesPanel({
   connections: ConnectionSummary[];
   onChange: (id: string, values: Record<string, unknown>) => void;
 }) {
+  const { t } = useLocale();
   if (!node) {
     return (
       <aside className="flex w-80 shrink-0 flex-col border-l border-border-subtle bg-surface px-4 py-6 text-sm text-text-muted">
-        Select a node to configure it. Click any operator on the canvas to edit
-        its fields here.
+        {t("builder.selectNode")}
       </aside>
     );
   }
@@ -51,6 +55,7 @@ export function PropertiesPanel({
             field={field}
             value={node.data[field.key]}
             connections={matchingConnections}
+            t={t}
             onChange={(v) =>
               onChange(node.id, { ...node.data, [field.key]: v })
             }
@@ -66,11 +71,13 @@ function FieldEditor({
   value,
   connections,
   onChange,
+  t,
 }: {
   field: FieldDef;
   value: unknown;
   connections: ConnectionSummary[];
   onChange: (v: unknown) => void;
+  t: Translate;
 }) {
   return (
     <label className="flex flex-col gap-1.5">
@@ -82,6 +89,7 @@ function FieldEditor({
         value={value}
         connections={connections}
         onChange={onChange}
+        t={t}
       />
       {"help" in field && field.help ? (
         <span className="text-[11px] text-text-muted">{field.help}</span>
@@ -95,11 +103,13 @@ function FieldInput({
   value,
   connections,
   onChange,
+  t,
 }: {
   field: FieldDef;
   value: unknown;
   connections: ConnectionSummary[];
   onChange: (v: unknown) => void;
+  t: Translate;
 }) {
   if (field.kind === "connection") {
     return (
@@ -108,10 +118,10 @@ function FieldInput({
         onChange={(e) => onChange(e.target.value || undefined)}
         className="h-10 rounded-md border border-border-subtle bg-elevated px-2 text-sm text-text focus-visible:border-accent focus-visible:outline-none"
       >
-        <option value="">— Select a connection —</option>
+        <option value="">{t("builder.selectConnection")}</option>
         {connections.length === 0 ? (
           <option disabled value="">
-            No connections of this type
+            {t("builder.noConnectionsOfType")}
           </option>
         ) : null}
         {connections.map((c) => (
@@ -153,7 +163,7 @@ function FieldInput({
     );
   }
   if (field.kind === "json") {
-    return <JsonInput value={value} onChange={onChange} field={field} />;
+    return <JsonInput value={value} onChange={onChange} field={field} t={t} />;
   }
   if (field.multiline) {
     return (
@@ -182,10 +192,12 @@ function JsonInput({
   value,
   onChange,
   field,
+  t,
 }: {
   value: unknown;
   onChange: (v: unknown) => void;
   field: Extract<FieldDef, { kind: "json" }>;
+  t: Translate;
 }) {
   const [text, setText] = useState<string>(() =>
     value === undefined ? "" : JSON.stringify(value, null, 2),
@@ -203,15 +215,15 @@ function JsonInput({
         value={text}
         placeholder={field.placeholder}
         onChange={(e) => {
-          const t = e.target.value;
-          setText(t);
-          if (t.trim() === "") {
+          const txt = e.target.value;
+          setText(txt);
+          if (txt.trim() === "") {
             setError(null);
             onChange(undefined);
             return;
           }
           try {
-            onChange(JSON.parse(t));
+            onChange(JSON.parse(txt));
             setError(null);
           } catch (err) {
             setError(err instanceof Error ? err.message : String(err));
@@ -224,7 +236,9 @@ function JsonInput({
         )}
       />
       {error ? (
-        <span className="text-[11px] text-error">JSON: {error}</span>
+        <span className="text-[11px] text-error">
+          {t("builder.jsonError", { error })}
+        </span>
       ) : null}
     </div>
   );

@@ -29,7 +29,11 @@ import {
   type ScheduleSummary,
 } from "@/lib/api";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
+import { useLocale } from "@/components/providers/locale-provider";
+import type { Messages } from "@/lib/i18n/messages";
 import { cn } from "@/lib/cn";
+
+type Translate = (key: keyof Messages, vars?: Record<string, string | number>) => string;
 
 interface ScheduleRow extends ScheduleSummary {
   pipeline_name: string;
@@ -40,49 +44,54 @@ type FormState =
   | { kind: "create"; pipelineId: string | "" }
   | { kind: "edit"; row: ScheduleRow };
 
-const COLUMNS: Column<ScheduleRow>[] = [
-  { key: "name", header: "Schedule", cell: (r) => r.name },
-  {
-    key: "pipeline",
-    header: "Pipeline",
-    cell: (r) => <span className="text-text-secondary">{r.pipeline_name}</span>,
-  },
-  {
-    key: "mode",
-    header: "Mode",
-    cell: (r) => (
-      <span className="rounded-sm bg-overlay px-2 py-0.5 font-mono text-xs text-text-secondary">
-        {r.mode}
-      </span>
-    ),
-  },
-  {
-    key: "cron",
-    header: "Cron",
-    cell: (r) =>
-      r.cron_expr ? (
-        <code className="font-mono text-xs text-text-secondary">
-          {r.cron_expr}
-        </code>
-      ) : (
-        <span className="text-text-muted">—</span>
+function buildColumns(t: Translate): Column<ScheduleRow>[] {
+  return [
+    { key: "name", header: t("schedules.colSchedule"), cell: (r) => r.name },
+    {
+      key: "pipeline",
+      header: t("common.pipeline"),
+      cell: (r) => (
+        <span className="text-text-secondary">{r.pipeline_name}</span>
       ),
-  },
-  {
-    key: "active",
-    header: "Status",
-    cell: (r) =>
-      r.is_active ? (
-        <span className="text-success">Active</span>
-      ) : (
-        <span className="text-text-muted">Paused</span>
+    },
+    {
+      key: "mode",
+      header: t("common.mode"),
+      cell: (r) => (
+        <span className="rounded-sm bg-overlay px-2 py-0.5 font-mono text-xs text-text-secondary">
+          {r.mode}
+        </span>
       ),
-  },
-];
+    },
+    {
+      key: "cron",
+      header: t("common.cron"),
+      cell: (r) =>
+        r.cron_expr ? (
+          <code className="font-mono text-xs text-text-secondary">
+            {r.cron_expr}
+          </code>
+        ) : (
+          <span className="text-text-muted">—</span>
+        ),
+    },
+    {
+      key: "active",
+      header: t("common.status"),
+      cell: (r) =>
+        r.is_active ? (
+          <span className="text-success">{t("common.active")}</span>
+        ) : (
+          <span className="text-text-muted">{t("common.paused")}</span>
+        ),
+    },
+  ];
+}
 
 export default function SchedulesPage() {
   const { slug } = useParams<{ slug: string }>();
   const ws = useWorkspaceFromSlug(slug);
+  const { t } = useLocale();
   const [pipelines, setPipelines] = useState<PipelineSummary[]>([]);
   const [rows, setRows] = useState<ScheduleRow[] | null>(null);
   const [form, setForm] = useState<FormState>({ kind: "closed" });
@@ -103,7 +112,7 @@ export default function SchedulesPage() {
       setRows(groups.flat());
     } catch (err) {
       toast.error(
-        err instanceof ApiError ? err.message : "Couldn't load schedules.",
+        err instanceof ApiError ? err.message : t("schedules.loadFailed"),
       );
       setRows([]);
     }
@@ -120,12 +129,15 @@ export default function SchedulesPage() {
     try {
       const updated = await schedulesApi.toggle(ws.id, row.pipeline_id, row.id);
       toast.success(
-        `${row.name}: ${updated.is_active ? "active" : "paused"}`,
+        t("schedules.toggled", {
+          name: row.name,
+          state: updated.is_active ? t("common.active") : t("common.paused"),
+        }),
       );
       await refresh(ws.id);
     } catch (err) {
       toast.error(
-        err instanceof ApiError ? err.message : "Toggle failed.",
+        err instanceof ApiError ? err.message : t("schedules.toggleFailed"),
       );
     } finally {
       setToggling(null);
@@ -137,12 +149,12 @@ export default function SchedulesPage() {
     setDeleting(true);
     try {
       await schedulesApi.delete(ws.id, pendingDelete.pipeline_id, pendingDelete.id);
-      toast.success(`Deleted ${pendingDelete.name}`);
+      toast.success(t("schedules.deleted", { name: pendingDelete.name }));
       setPendingDelete(null);
       await refresh(ws.id);
     } catch (err) {
       toast.error(
-        err instanceof ApiError ? err.message : "Couldn't delete schedule.",
+        err instanceof ApiError ? err.message : t("schedules.deleteFailed"),
       );
     } finally {
       setDeleting(false);
@@ -152,8 +164,12 @@ export default function SchedulesPage() {
   return (
     <>
       <Header
-        title="Schedules"
-        subtitle={ws ? `Workspace ${ws.name}` : "Loading workspace…"}
+        title={t("nav.schedules")}
+        subtitle={
+          ws
+            ? t("common.workspaceSubtitle", { name: ws.name })
+            : t("common.loadingWorkspace")
+        }
         actions={
           <Button
             variant="primary"
@@ -168,7 +184,7 @@ export default function SchedulesPage() {
             disabled={pipelines.length === 0}
           >
             <PlusIcon size={16} />
-            New schedule
+            {t("schedules.new")}
           </Button>
         }
       />
@@ -176,8 +192,8 @@ export default function SchedulesPage() {
         {form.kind === "create" && ws ? (
           <Card>
             <CardHeader
-              title="Select a pipeline"
-              description="Each schedule belongs to exactly one pipeline."
+              title={t("schedules.selectPipeline")}
+              description={t("schedules.selectPipelineDesc")}
             />
             <select
               value={form.pipelineId}
@@ -222,12 +238,12 @@ export default function SchedulesPage() {
         <Card>
           {rows === null ? (
             <div className="py-12 text-center text-sm text-text-muted">
-              Loading…
+              {t("common.loading")}
             </div>
           ) : (
             <DataTable
               columns={[
-                ...COLUMNS,
+                ...buildColumns(t),
                 {
                   key: "actions",
                   header: "",
@@ -242,7 +258,9 @@ export default function SchedulesPage() {
                           e.stopPropagation();
                           void onToggle(row);
                         }}
-                        aria-label={row.is_active ? "Pause" : "Resume"}
+                        aria-label={
+                          row.is_active ? t("common.pause") : t("common.resume")
+                        }
                         className={cn(
                           row.is_active ? "" : "text-success",
                         )}
@@ -260,7 +278,7 @@ export default function SchedulesPage() {
                           e.stopPropagation();
                           setForm({ kind: "edit", row });
                         }}
-                        aria-label={`Edit ${row.name}`}
+                        aria-label={t("schedules.editAria", { name: row.name })}
                       >
                         <PencilIcon size={14} />
                       </Button>
@@ -271,7 +289,7 @@ export default function SchedulesPage() {
                           e.stopPropagation();
                           setPendingDelete(row);
                         }}
-                        aria-label={`Delete ${row.name}`}
+                        aria-label={t("schedules.deleteAria", { name: row.name })}
                         className="hover:text-error"
                       >
                         <Trash2Icon size={14} />
@@ -284,11 +302,11 @@ export default function SchedulesPage() {
               emptyState={
                 <EmptyState
                   icon={<CalendarClockIcon size={36} strokeWidth={1.5} />}
-                  title="No schedules yet"
+                  title={t("schedules.emptyTitle")}
                   description={
                     pipelines.length === 0
-                      ? "Create a pipeline first — schedules attach to pipelines."
-                      : "Attach a cron schedule to one of your pipelines to have the scheduler enqueue Run rows automatically."
+                      ? t("schedules.emptyNoPipelines")
+                      : t("schedules.emptyDesc")
                   }
                   action={
                     pipelines.length === 0 ? undefined : (
@@ -301,7 +319,7 @@ export default function SchedulesPage() {
                         }
                       >
                         <PlusIcon size={16} />
-                        New schedule
+                        {t("schedules.new")}
                       </Button>
                     )
                   }
@@ -316,11 +334,11 @@ export default function SchedulesPage() {
         open={pendingDelete !== null}
         title={
           pendingDelete
-            ? `Delete ${pendingDelete.name}?`
-            : "Delete schedule?"
+            ? t("schedules.deleteTitle", { name: pendingDelete.name })
+            : t("schedules.deleteTitleFallback")
         }
-        description="The scheduler will stop enqueuing Run rows. Existing pending and running Runs are left untouched."
-        confirmLabel="Delete"
+        description={t("schedules.deleteDesc")}
+        confirmLabel={t("common.delete")}
         destructive
         loading={deleting}
         onConfirm={onConfirmDelete}

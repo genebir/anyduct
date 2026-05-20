@@ -13,6 +13,10 @@ import {
   type PipelineMode,
   type ScheduleSummary,
 } from "@/lib/api";
+import { useLocale } from "@/components/providers/locale-provider";
+import type { Messages } from "@/lib/i18n/messages";
+
+type Translate = (key: keyof Messages, vars?: Record<string, string | number>) => string;
 
 type Mode = PipelineMode;
 
@@ -29,6 +33,7 @@ export function ScheduleCreateForm({
   onSaved,
   onCancel,
 }: CommonProps) {
+  const { t } = useLocale();
   const [name, setName] = useState("");
   const [mode, setMode] = useState<Mode>("batch");
   const [cron, setCron] = useState("0 3 * * *");
@@ -38,12 +43,12 @@ export function ScheduleCreateForm({
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!name.trim()) {
-      toast.error("Schedule name is required.");
+      toast.error(t("schedForm.nameRequired"));
       return;
     }
     const cronExpr = mode === "batch" ? cron.trim() : cron.trim() || null;
     if (mode === "batch" && !cronExpr) {
-      toast.error("Batch schedules require a cron expression.");
+      toast.error(t("schedForm.cronRequired"));
       return;
     }
     setSubmitting(true);
@@ -54,11 +59,11 @@ export function ScheduleCreateForm({
         cron_expr: cronExpr,
         is_active: active,
       });
-      toast.success(`Created ${created.name}`);
+      toast.success(t("schedForm.created", { name: created.name }));
       onSaved(created);
     } catch (err) {
       toast.error(
-        err instanceof ApiError ? err.message : "Couldn't create schedule.",
+        err instanceof ApiError ? err.message : t("schedForm.createFailed"),
       );
     } finally {
       setSubmitting(false);
@@ -68,33 +73,33 @@ export function ScheduleCreateForm({
   return (
     <Card>
       <CardHeader
-        title="New schedule"
-        description="The cron scheduler enqueues a fresh Run row whenever the next firing time elapses (no catchup)."
+        title={t("schedForm.newTitle")}
+        description={t("schedForm.newDesc")}
       />
       <form onSubmit={onSubmit} className="grid gap-4 md:grid-cols-2">
-        <FieldRow label="Name" className="md:col-span-2">
+        <FieldRow label={t("common.name")} className="md:col-span-2">
           <Input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="nightly-refresh"
+            placeholder={t("schedForm.namePlaceholder")}
             required
           />
         </FieldRow>
-        <FieldRow label="Mode" className="md:col-span-2">
-          <ModePicker value={mode} onChange={setMode} />
+        <FieldRow label={t("common.mode")} className="md:col-span-2">
+          <ModePicker value={mode} onChange={setMode} t={t} />
         </FieldRow>
         <FieldRow
-          label="Cron expression"
+          label={t("schedForm.cron")}
           help={
             mode === "stream"
-              ? "Stream pipelines run continuously — leave blank unless you want a re-arm cron."
-              : "Standard 5-field cron (min hour dom mon dow). UTC."
+              ? t("schedForm.cronHelpStream")
+              : t("schedForm.cronHelpBatch")
           }
           className="md:col-span-2"
         >
           <CronInput value={cron} onChange={setCron} allowEmpty={mode === "stream"} />
         </FieldRow>
-        <FieldRow label="Active" className="md:col-span-2">
+        <FieldRow label={t("common.active")} className="md:col-span-2">
           <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-text">
             <input
               type="checkbox"
@@ -102,15 +107,15 @@ export function ScheduleCreateForm({
               onChange={(e) => setActive(e.target.checked)}
               className="h-4 w-4 accent-[rgb(var(--accent))]"
             />
-            Schedule is active and the scheduler will enqueue Run rows for it.
+            {t("schedForm.activeDesc")}
           </label>
         </FieldRow>
         <div className="flex justify-end gap-2 pt-2 md:col-span-2">
           <Button variant="ghost" type="button" onClick={onCancel} disabled={submitting}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button type="submit" loading={submitting}>
-            Create schedule
+            {t("schedForm.create")}
           </Button>
         </div>
       </form>
@@ -125,6 +130,7 @@ export function ScheduleEditForm({
   onSaved,
   onCancel,
 }: CommonProps & { existing: ScheduleSummary }) {
+  const { t } = useLocale();
   const [name, setName] = useState(existing.name);
   const [cron, setCron] = useState(existing.cron_expr ?? "");
   const [submitting, setSubmitting] = useState(false);
@@ -148,11 +154,11 @@ export function ScheduleEditForm({
         existing.id,
         body,
       );
-      toast.success(`Updated ${updated.name}`);
+      toast.success(t("schedForm.updated", { name: updated.name }));
       onSaved(updated);
     } catch (err) {
       toast.error(
-        err instanceof ApiError ? err.message : "Couldn't update schedule.",
+        err instanceof ApiError ? err.message : t("schedForm.updateFailed"),
       );
     } finally {
       setSubmitting(false);
@@ -162,11 +168,11 @@ export function ScheduleEditForm({
   return (
     <Card>
       <CardHeader
-        title={`Edit ${existing.name}`}
-        description={`Mode is ${existing.mode} — immutable. To switch, delete + recreate.`}
+        title={t("schedForm.editTitle", { name: existing.name })}
+        description={t("schedForm.editDesc", { mode: existing.mode })}
       />
       <form onSubmit={onSubmit} className="grid gap-4 md:grid-cols-2">
-        <FieldRow label="Name" className="md:col-span-2">
+        <FieldRow label={t("common.name")} className="md:col-span-2">
           <Input
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -174,8 +180,8 @@ export function ScheduleEditForm({
           />
         </FieldRow>
         <FieldRow
-          label="Cron expression"
-          help="The next firing time is recomputed from this expression on the next scheduler tick."
+          label={t("schedForm.cron")}
+          help={t("schedForm.cronHelpEdit")}
           className="md:col-span-2"
         >
           <CronInput
@@ -186,10 +192,10 @@ export function ScheduleEditForm({
         </FieldRow>
         <div className="flex justify-end gap-2 pt-2 md:col-span-2">
           <Button variant="ghost" type="button" onClick={onCancel} disabled={submitting}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button type="submit" loading={submitting}>
-            Save
+            {t("common.save")}
           </Button>
         </div>
       </form>
@@ -222,9 +228,11 @@ function FieldRow({
 function ModePicker({
   value,
   onChange,
+  t,
 }: {
   value: Mode;
   onChange: (m: Mode) => void;
+  t: Translate;
 }) {
   return (
     <div className="flex gap-2">
@@ -243,8 +251,8 @@ function ModePicker({
           <div className="font-medium">{m}</div>
           <div className="text-[11px] text-text-muted">
             {m === "batch"
-              ? "Cron-driven discrete Runs"
-              : "Continuous worker keep-alive"}
+              ? t("schedForm.modeBatch")
+              : t("schedForm.modeStream")}
           </div>
         </button>
       ))}

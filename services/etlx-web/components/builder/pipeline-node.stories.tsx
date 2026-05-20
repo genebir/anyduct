@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { ReactFlow, type Node, type Edge } from "@xyflow/react";
 import { PipelineNode, type PipelineNodeData } from "./pipeline-node";
+import { MockLocaleProvider } from "../../.storybook/mocks/providers";
 import "@xyflow/react/dist/style.css";
 
 /**
@@ -56,6 +57,13 @@ const meta: Meta<typeof StoryCanvas> = {
   component: StoryCanvas,
   tags: ["autodocs"],
   parameters: { layout: "centered" },
+  decorators: [
+    (Story) => (
+      <MockLocaleProvider>
+        <Story />
+      </MockLocaleProvider>
+    ),
+  ],
 };
 
 export default meta;

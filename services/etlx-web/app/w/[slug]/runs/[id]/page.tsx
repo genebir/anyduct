@@ -19,7 +19,11 @@ import {
   type RunStatus,
 } from "@/lib/api";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
+import { useLocale } from "@/components/providers/locale-provider";
+import type { Messages } from "@/lib/i18n/messages";
 import { cn } from "@/lib/cn";
+
+type Translate = (key: keyof Messages, vars?: Record<string, string | number>) => string;
 
 const TERMINAL: ReadonlySet<RunStatus> = new Set([
   "succeeded",
@@ -49,6 +53,7 @@ const LEVEL_CLASSES: Record<LogLevel, string> = {
 export default function RunDetailPage() {
   const { slug, id } = useParams<{ slug: string; id: string }>();
   const ws = useWorkspaceFromSlug(slug);
+  const { t } = useLocale();
   const [run, setRun] = useState<RunDetail | null>(null);
   const [logs, setLogs] = useState<RunLogEntry[] | null>(null);
   const [metrics, setMetrics] = useState<RunMetricEntry[] | null>(null);
@@ -76,7 +81,7 @@ export default function RunDetailPage() {
       } catch (err) {
         if (!cancelled) {
           toast.error(
-            err instanceof ApiError ? err.message : "Couldn't load run.",
+            err instanceof ApiError ? err.message : t("runDetail.loadFailed"),
           );
         }
         return true;
@@ -100,7 +105,7 @@ export default function RunDetailPage() {
       cancelled = true;
       if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [ws, id]);
+  }, [ws, id, t]);
 
   // Autoscroll the log pane when new lines arrive.
   useEffect(() => {
@@ -114,9 +119,11 @@ export default function RunDetailPage() {
     setRetrying(true);
     try {
       const fresh = await runsApi.retry(ws.id, run.id);
-      toast.success(`Queued retry as ${fresh.id.slice(0, 8)}…`);
+      toast.success(t("runDetail.retryQueued", { id: fresh.id.slice(0, 8) }));
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Retry failed.");
+      toast.error(
+        err instanceof ApiError ? err.message : t("runDetail.retryFailed"),
+      );
     } finally {
       setRetrying(false);
     }
@@ -129,21 +136,23 @@ export default function RunDetailPage() {
           <span className="flex items-center gap-3">
             <Link
               href={ws ? `/w/${ws.slug}/runs` : "#"}
-              aria-label="Back to runs"
+              aria-label={t("runDetail.backAria")}
               className="inline-flex h-8 w-8 items-center justify-center rounded-md text-text-muted transition duration-150 hover:bg-overlay hover:text-text"
             >
               <ArrowLeftIcon size={16} />
             </Link>
-            Run {id.slice(0, 8)}…
+            {t("runDetail.title", { id: id.slice(0, 8) })}
             {run ? <StatusBadge status={run.status} /> : null}
           </span>
         }
         subtitle={
           run
             ? `${ws?.name ?? ""} · ${
-                TERMINAL.has(run.status) ? "Final" : "Live · refreshing every 2 s"
+                TERMINAL.has(run.status)
+                  ? t("runDetail.final")
+                  : t("runDetail.live")
               }`
-            : "Loading…"
+            : t("common.loading")
         }
         actions={
           <div className="flex gap-2">
@@ -153,16 +162,16 @@ export default function RunDetailPage() {
               onClick={() => {
                 if (ws) void runsApi.get(ws.id, id).then(setRun);
               }}
-              aria-label="Refresh"
+              aria-label={t("common.refresh")}
             >
               <RefreshCwIcon size={16} />
-              Refresh
+              {t("common.refresh")}
             </Button>
             {run &&
             (run.status === "failed" || run.status === "cancelled") ? (
               <Button onClick={onRetry} loading={retrying}>
                 <RotateCcwIcon size={16} />
-                Retry
+                {t("common.retry")}
               </Button>
             ) : null}
           </div>
@@ -172,35 +181,35 @@ export default function RunDetailPage() {
         <div className="mx-auto grid w-full max-w-6xl gap-6 lg:grid-cols-[2fr_1fr]">
           <Card>
             <CardHeader
-              title="Logs"
+              title={t("runDetail.logs")}
               description={
                 logs === null
-                  ? "Loading…"
-                  : `${logs.length} entr${logs.length === 1 ? "y" : "ies"}`
+                  ? t("common.loading")
+                  : t("runDetail.entries", { count: logs.length })
               }
             />
-            <LogView logs={logs} bottomRef={logsEndRef} />
+            <LogView logs={logs} bottomRef={logsEndRef} t={t} />
           </Card>
 
           <div className="flex flex-col gap-6">
             <Card>
-              <CardHeader title="Summary" />
-              <Summary run={run} />
+              <CardHeader title={t("runDetail.summary")} />
+              <Summary run={run} t={t} />
             </Card>
             <Card>
               <CardHeader
-                title="Metrics"
+                title={t("runDetail.metrics")}
                 description={
                   metrics === null
-                    ? "Loading…"
-                    : `${metrics.length} point${metrics.length === 1 ? "" : "s"}`
+                    ? t("common.loading")
+                    : t("runDetail.points", { count: metrics.length })
                 }
               />
-              <MetricsView grouped={grouped} />
+              <MetricsView grouped={grouped} t={t} />
             </Card>
             {run?.error_message ? (
               <Card>
-                <CardHeader title="Error" />
+                <CardHeader title={t("common.error")} />
                 <div className="space-y-2 font-mono text-xs">
                   {run.error_class ? (
                     <div className="text-error">{run.error_class}</div>
@@ -221,17 +230,23 @@ export default function RunDetailPage() {
 function LogView({
   logs,
   bottomRef,
+  t,
 }: {
   logs: RunLogEntry[] | null;
   bottomRef: React.RefObject<HTMLDivElement | null>;
+  t: Translate;
 }) {
   if (logs === null) {
-    return <div className="py-8 text-center text-sm text-text-muted">Loading…</div>;
+    return (
+      <div className="py-8 text-center text-sm text-text-muted">
+        {t("common.loading")}
+      </div>
+    );
   }
   if (logs.length === 0) {
     return (
       <div className="py-8 text-center text-sm text-text-muted">
-        No logs yet. They'll appear as the worker emits structlog events.
+        {t("runDetail.noLogs")}
       </div>
     );
   }
@@ -275,24 +290,27 @@ function LogView({
   );
 }
 
-function Summary({ run }: { run: RunDetail | null }) {
+function Summary({ run, t }: { run: RunDetail | null; t: Translate }) {
   if (!run) {
-    return <div className="text-sm text-text-muted">Loading…</div>;
+    return <div className="text-sm text-text-muted">{t("common.loading")}</div>;
   }
   return (
     <dl className="grid grid-cols-1 gap-3 text-sm">
-      <Field label="Status" value={<StatusBadge status={run.status} />} />
-      <Field label="Pipeline" value={<code>{run.pipeline_id.slice(0, 8)}…</code>} />
+      <Field label={t("common.status")} value={<StatusBadge status={run.status} />} />
       <Field
-        label="Version"
+        label={t("common.pipeline")}
+        value={<code>{run.pipeline_id.slice(0, 8)}…</code>}
+      />
+      <Field
+        label={t("common.version")}
         value={<code>{run.pipeline_version_id.slice(0, 8)}…</code>}
       />
-      <Field label="Scheduled" value={fmt(run.scheduled_at)} />
-      <Field label="Started" value={fmt(run.started_at)} />
-      <Field label="Finished" value={fmt(run.finished_at)} />
-      <Field label="Duration" value={fmtDuration(run.duration_seconds)} />
+      <Field label={t("common.scheduled")} value={fmt(run.scheduled_at)} />
+      <Field label={t("runDetail.started")} value={fmt(run.started_at)} />
+      <Field label={t("runDetail.finished")} value={fmt(run.finished_at)} />
+      <Field label={t("common.duration")} value={fmtDuration(run.duration_seconds)} />
       <Field
-        label="Records (read / written)"
+        label={t("runDetail.records")}
         value={
           <code>
             {run.records_read.toLocaleString()} /{" "}
@@ -301,10 +319,10 @@ function Summary({ run }: { run: RunDetail | null }) {
         }
       />
       {run.worker_id ? (
-        <Field label="Worker" value={<code>{run.worker_id}</code>} />
+        <Field label={t("runDetail.worker")} value={<code>{run.worker_id}</code>} />
       ) : null}
       {run.heartbeat_at ? (
-        <Field label="Last heartbeat" value={fmt(run.heartbeat_at)} />
+        <Field label={t("runDetail.heartbeat")} value={fmt(run.heartbeat_at)} />
       ) : null}
     </dl>
   );
@@ -347,13 +365,16 @@ function groupMetrics(metrics: RunMetricEntry[]): MetricGroup[] {
   return [...groups.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
-function MetricsView({ grouped }: { grouped: MetricGroup[] }) {
+function MetricsView({
+  grouped,
+  t,
+}: {
+  grouped: MetricGroup[];
+  t: Translate;
+}) {
   if (grouped.length === 0) {
     return (
-      <div className="text-sm text-text-muted">
-        No metric points yet. Records counters land here after the first task
-        finishes.
-      </div>
+      <div className="text-sm text-text-muted">{t("runDetail.noMetrics")}</div>
     );
   }
   return (

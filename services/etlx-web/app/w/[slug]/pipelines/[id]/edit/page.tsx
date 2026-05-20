@@ -26,6 +26,8 @@ import {
 } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
+import { useLocale } from "@/components/providers/locale-provider";
+import type { Messages } from "@/lib/i18n/messages";
 import {
   blankBuilder,
   deserialize,
@@ -39,9 +41,12 @@ import {
   type RetrySettings,
 } from "@/lib/pipeline-config";
 
+type Translate = (key: keyof Messages, vars?: Record<string, string | number>) => string;
+
 export default function PipelineEditorPage() {
   const { slug, id } = useParams<{ slug: string; id: string }>();
   const ws = useWorkspaceFromSlug(slug);
+  const { t } = useLocale();
 
   const [pipeline, setPipeline] = useState<PipelineSummary | null>(null);
   const [connections, setConnections] = useState<ConnectionSummary[]>([]);
@@ -71,14 +76,14 @@ export default function PipelineEditorPage() {
         loadedRef.current = true;
       } catch (err) {
         toast.error(
-          err instanceof ApiError ? err.message : "Couldn't load pipeline.",
+          err instanceof ApiError ? err.message : t("builder.loadFailed"),
         );
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [ws, id]);
+  }, [ws, id, t]);
 
   const addOperator = useCallback((operatorId: string) => {
     setState((prev) => {
@@ -151,15 +156,17 @@ export default function PipelineEditorPage() {
         config,
       });
       setPipeline(updated);
-      toast.success(`Saved pipeline v${updated.current_version ?? "?"}`);
+      toast.success(
+        t("builder.saved", { version: updated.current_version ?? "?" }),
+      );
     } catch (err) {
       toast.error(
-        err instanceof ApiError ? err.message : "Save failed.",
+        err instanceof ApiError ? err.message : t("builder.saveFailed"),
       );
     } finally {
       setSaving(false);
     }
-  }, [ws, pipeline, state]);
+  }, [ws, pipeline, state, t]);
 
   const onDryRun = useCallback(async () => {
     if (!ws || !pipeline) return;
@@ -169,39 +176,39 @@ export default function PipelineEditorPage() {
       const result = await pipelinesApi.dryRun(ws.id, pipeline.id);
       setDryRunResult(result);
       if (result.ok) {
-        toast.success("Dry run passed");
+        toast.success(t("builder.dryRunPassed"));
       } else {
-        toast.error("Dry run reported issues — see panel below");
+        toast.error(t("builder.dryRunIssues"));
       }
     } catch (err) {
       toast.error(
-        err instanceof ApiError ? err.message : "Dry run failed.",
+        err instanceof ApiError ? err.message : t("builder.dryRunFailedToast"),
       );
     } finally {
       setDryRunning(false);
     }
-  }, [ws, pipeline]);
+  }, [ws, pipeline, t]);
 
   const onTrigger = useCallback(async () => {
     if (!ws || !pipeline) return;
     try {
       await pipelinesApi.trigger(ws.id, pipeline.id);
-      toast.success(`Run queued for ${pipeline.name}`);
+      toast.success(t("pipelines.runQueued", { name: pipeline.name }));
     } catch (err) {
       toast.error(
-        err instanceof ApiError ? err.message : "Trigger failed.",
+        err instanceof ApiError ? err.message : t("pipelines.triggerFailed"),
       );
     }
-  }, [ws, pipeline]);
+  }, [ws, pipeline, t]);
 
   return (
     <>
       <Header
-        title={pipeline?.name ?? "Pipeline builder"}
+        title={pipeline?.name ?? t("builder.title")}
         subtitle={
           pipeline
-            ? `${ws?.name ?? ""} · v${pipeline.current_version ?? "draft"}`
-            : "Loading…"
+            ? `${ws?.name ?? ""} · v${pipeline.current_version ?? t("builder.draft")}`
+            : t("common.loading")
         }
         actions={
           <div className="flex gap-2">
@@ -212,7 +219,7 @@ export default function PipelineEditorPage() {
               disabled={!pipeline?.current_version}
             >
               <ZapIcon size={16} />
-              Dry run
+              {t("builder.dryRun")}
             </Button>
             <Button
               variant="ghost"
@@ -220,11 +227,11 @@ export default function PipelineEditorPage() {
               disabled={!pipeline?.current_version}
             >
               <PlayIcon size={16} />
-              Trigger
+              {t("common.trigger")}
             </Button>
             <Button onClick={onSave} loading={saving} disabled={!pipeline}>
               <SaveIcon size={16} />
-              Save
+              {t("common.save")}
             </Button>
           </div>
         }
@@ -245,6 +252,7 @@ export default function PipelineEditorPage() {
             <DryRunPanel
               result={dryRunResult}
               onDismiss={() => setDryRunResult(null)}
+              t={t}
             />
           ) : null}
         </div>
@@ -271,9 +279,11 @@ export default function PipelineEditorPage() {
 function DryRunPanel({
   result,
   onDismiss,
+  t,
 }: {
   result: DryRunResponse;
   onDismiss: () => void;
+  t: Translate;
 }) {
   return (
     <div className="max-h-72 shrink-0 overflow-y-auto border-t border-border-subtle bg-surface px-4 py-3 text-sm">
@@ -285,11 +295,14 @@ function DryRunPanel({
             <XCircleIcon size={16} className="text-error" />
           )}
           <span className="font-semibold text-text">
-            Dry run {result.ok ? "passed" : "failed"}
+            {result.ok
+              ? t("builder.dryRunPassedHeader")
+              : t("builder.dryRunFailedHeader")}
           </span>
           <span className="text-xs text-text-muted">
-            ({result.connectors.length} connector
-            {result.connectors.length === 1 ? "" : "s"} checked)
+            {t("builder.connectorsChecked", {
+              count: result.connectors.length,
+            })}
           </span>
         </div>
         <button
@@ -297,14 +310,14 @@ function DryRunPanel({
           onClick={onDismiss}
           className="text-xs text-text-muted hover:text-text"
         >
-          Dismiss
+          {t("common.dismiss")}
         </button>
       </header>
 
       {result.errors.length > 0 ? (
         <div className="mb-3 rounded-md border border-error/40 bg-error/10 p-3">
           <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-error">
-            Config errors
+            {t("builder.configErrors")}
           </div>
           <ul className="space-y-1 text-xs text-text">
             {result.errors.map((err, i) => (

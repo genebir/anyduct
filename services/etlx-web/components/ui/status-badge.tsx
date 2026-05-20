@@ -2,6 +2,8 @@
 
 import { cn } from "@/lib/cn";
 import type { RunStatus } from "@/lib/api";
+import { useLocale } from "@/components/providers/locale-provider";
+import type { Messages } from "@/lib/i18n/messages";
 
 type AnyStatus = RunStatus | "queued" | "skipped";
 
@@ -15,16 +17,6 @@ const STATUS_CLASSES: Record<AnyStatus, string> = {
   skipped: "bg-overlay text-text-muted border-border-subtle",
 };
 
-const STATUS_LABEL: Record<AnyStatus, string> = {
-  pending: "Pending",
-  queued: "Queued",
-  running: "Running",
-  succeeded: "Succeeded",
-  failed: "Failed",
-  cancelled: "Cancelled",
-  skipped: "Skipped",
-};
-
 export function StatusBadge({
   status,
   className,
@@ -32,6 +24,7 @@ export function StatusBadge({
   status: AnyStatus;
   className?: string;
 }) {
+  const { t } = useLocale();
   return (
     <span
       className={cn(
@@ -47,7 +40,7 @@ export function StatusBadge({
           status === "running" && "pulse-dot",
         )}
       />
-      {STATUS_LABEL[status]}
+      {t(`status.${status}` as keyof Messages)}
     </span>
   );
 }

@@ -4,6 +4,7 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/cn";
 import type { ConnectionSummary } from "@/lib/api";
 import type { DlqSettings, RetrySettings } from "@/lib/pipeline-config";
+import { useLocale } from "@/components/providers/locale-provider";
 
 /**
  * Pipeline-level settings — retry policy + DLQ routing.
@@ -26,25 +27,27 @@ export function PipelineSettingsPanel({
   onChangeRetry: (next: RetrySettings) => void;
   onChangeDlq: (next: DlqSettings) => void;
 }) {
+  const { t } = useLocale();
+  const enableLabel = t("builder.enable");
   return (
     <aside className="flex w-80 shrink-0 flex-col gap-5 overflow-y-auto border-l border-border-subtle bg-surface px-4 py-5">
       <header>
         <div className="text-[11px] font-semibold uppercase tracking-widest text-text-muted">
-          Pipeline settings
+          {t("builder.settingsTitle")}
         </div>
         <p className="mt-1 text-xs text-text-secondary">
-          Pipeline-wide policies. Click a node on the canvas to edit its fields
-          instead.
+          {t("builder.settingsDesc")}
         </p>
       </header>
 
       <Section
-        title="Retry policy"
+        title={t("builder.retryPolicy")}
+        enableLabel={enableLabel}
         enabled={retry.enabled}
         onToggle={(v) => onChangeRetry({ ...retry, enabled: v })}
-        description="Wraps task execution with tenacity; on failure the task is re-attempted before the run is marked failed."
+        description={t("builder.retryDesc")}
       >
-        <FieldRow label="Max attempts">
+        <FieldRow label={t("builder.maxAttempts")}>
           <Input
             type="number"
             min={1}
@@ -59,7 +62,7 @@ export function PipelineSettingsPanel({
             }
           />
         </FieldRow>
-        <FieldRow label="Backoff">
+        <FieldRow label={t("builder.backoff")}>
           <select
             value={retry.backoff}
             disabled={!retry.enabled}
@@ -71,13 +74,13 @@ export function PipelineSettingsPanel({
             }
             className="h-10 rounded-md border border-border-subtle bg-elevated px-2 text-sm text-text focus-visible:border-accent focus-visible:outline-none disabled:opacity-60"
           >
-            <option value="fixed">fixed</option>
-            <option value="exponential">exponential</option>
+            <option value="fixed">{t("builder.fixed")}</option>
+            <option value="exponential">{t("builder.exponential")}</option>
           </select>
         </FieldRow>
         <FieldRow
-          label="Initial delay (s)"
-          help="First attempt waits this long after failure; exponential doubles per attempt."
+          label={t("builder.initialDelay")}
+          help={t("builder.initialDelayHelp")}
         >
           <Input
             type="number"
@@ -96,12 +99,13 @@ export function PipelineSettingsPanel({
       </Section>
 
       <Section
-        title="Dead-letter queue"
+        title={t("builder.dlq")}
+        enableLabel={enableLabel}
         enabled={dlq.enabled}
         onToggle={(v) => onChangeDlq({ ...dlq, enabled: v })}
-        description="Records that fail transform are routed here instead of failing the whole run."
+        description={t("builder.dlqDesc")}
       >
-        <FieldRow label="Connection">
+        <FieldRow label={t("common.connection")}>
           <select
             value={dlq.connection}
             disabled={!dlq.enabled}
@@ -110,7 +114,7 @@ export function PipelineSettingsPanel({
             }
             className="h-10 rounded-md border border-border-subtle bg-elevated px-2 text-sm text-text focus-visible:border-accent focus-visible:outline-none disabled:opacity-60"
           >
-            <option value="">— Select a connection —</option>
+            <option value="">{t("builder.selectConnection")}</option>
             {connections.map((c) => (
               <option key={c.id} value={c.name}>
                 {c.name} ({c.type})
@@ -118,29 +122,23 @@ export function PipelineSettingsPanel({
             ))}
           </select>
         </FieldRow>
-        <FieldRow
-          label="Table"
-          help="Batch sink target. Leave blank if using a stream-based DLQ."
-        >
+        <FieldRow label={t("common.table")} help={t("builder.dlqTableHelp")}>
           <Input
             value={dlq.table}
             disabled={!dlq.enabled}
-            placeholder="dlq.records_failed"
+            placeholder={t("builder.dlqTablePlaceholder")}
             onChange={(e) => onChangeDlq({ ...dlq, table: e.target.value })}
           />
         </FieldRow>
-        <FieldRow
-          label="Topic"
-          help="Stream sink target. Leave blank if using a batch DLQ."
-        >
+        <FieldRow label={t("common.topic")} help={t("builder.dlqTopicHelp")}>
           <Input
             value={dlq.topic}
             disabled={!dlq.enabled}
-            placeholder="dlq.failed-records"
+            placeholder={t("builder.dlqTopicPlaceholder")}
             onChange={(e) => onChangeDlq({ ...dlq, topic: e.target.value })}
           />
         </FieldRow>
-        <FieldRow label="Mode">
+        <FieldRow label={t("common.mode")}>
           <select
             value={dlq.mode}
             disabled={!dlq.enabled}
@@ -152,9 +150,9 @@ export function PipelineSettingsPanel({
             }
             className="h-10 rounded-md border border-border-subtle bg-elevated px-2 text-sm text-text focus-visible:border-accent focus-visible:outline-none disabled:opacity-60"
           >
-            <option value="append">append</option>
-            <option value="overwrite">overwrite</option>
-            <option value="upsert">upsert</option>
+            <option value="append">{t("builder.append")}</option>
+            <option value="overwrite">{t("builder.overwrite")}</option>
+            <option value="upsert">{t("builder.upsert")}</option>
           </select>
         </FieldRow>
       </Section>
@@ -167,12 +165,14 @@ function Section({
   description,
   enabled,
   onToggle,
+  enableLabel,
   children,
 }: {
   title: string;
   description?: string;
   enabled: boolean;
   onToggle: (v: boolean) => void;
+  enableLabel: string;
   children: React.ReactNode;
 }) {
   return (
@@ -191,7 +191,7 @@ function Section({
             onChange={(e) => onToggle(e.target.checked)}
             className="h-4 w-4 accent-[rgb(var(--accent))]"
           />
-          Enable
+          {enableLabel}
         </label>
       </header>
       {description ? (

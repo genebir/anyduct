@@ -9,6 +9,7 @@ import { Card, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { useWorkspaces } from "@/components/providers/workspace-provider";
+import { useLocale } from "@/components/providers/locale-provider";
 import { ApiError, workspacesApi, type WorkspaceSummary } from "@/lib/api";
 import { Input } from "@/components/ui/input";
 
@@ -25,6 +26,7 @@ const PRESET_COLORS = [
 
 export default function WorkspacesPage() {
   const { workspaces, setCurrent, refresh } = useWorkspaces();
+  const { t } = useLocale();
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
@@ -45,7 +47,7 @@ export default function WorkspacesPage() {
         slug: slug.trim(),
         color_hex: color,
       });
-      toast.success(`Created workspace ${ws.name}`);
+      toast.success(t("workspaces.created", { name: ws.name }));
       await refresh();
       setCurrent(ws.id);
       setCreating(false);
@@ -53,7 +55,7 @@ export default function WorkspacesPage() {
       setSlug("");
     } catch (err) {
       const message =
-        err instanceof ApiError ? err.message : "Couldn't create workspace.";
+        err instanceof ApiError ? err.message : t("workspaces.createFailed");
       toast.error(message);
     } finally {
       setSubmitting(false);
@@ -63,8 +65,8 @@ export default function WorkspacesPage() {
   return (
     <>
       <Header
-        title="Workspaces"
-        subtitle="Choose a workspace to manage its connections, pipelines, and runs."
+        title={t("workspaces.title")}
+        subtitle={t("workspaces.subtitle")}
         actions={
           <Button
             type="button"
@@ -73,7 +75,7 @@ export default function WorkspacesPage() {
             onClick={() => setCreating((v) => !v)}
           >
             <PlusIcon size={16} />
-            New workspace
+            {t("workspaces.create")}
           </Button>
         }
       />
@@ -81,40 +83,40 @@ export default function WorkspacesPage() {
         {creating ? (
           <Card>
             <CardHeader
-              title="Create workspace"
-              description="Workspaces isolate connections, pipelines, and runs. You become its first owner."
+              title={t("workspaces.createTitle")}
+              description={t("workspaces.createDesc")}
             />
             <div className="grid gap-4 md:grid-cols-2">
               <label className="flex flex-col gap-1.5">
                 <span className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
-                  Name
+                  {t("common.name")}
                 </span>
                 <Input
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="Marketing"
+                  placeholder={t("workspaces.namePlaceholder")}
                 />
               </label>
               <label className="flex flex-col gap-1.5">
                 <span className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
-                  Slug
+                  {t("workspaces.slug")}
                 </span>
                 <Input
                   value={slug}
                   onChange={(e) => setSlug(e.target.value.toLowerCase())}
-                  placeholder="marketing"
+                  placeholder={t("workspaces.slugPlaceholder")}
                 />
               </label>
               <div className="md:col-span-2">
                 <span className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
-                  Accent color
+                  {t("workspaces.accent")}
                 </span>
                 <div className="mt-2 flex flex-wrap gap-2">
                   {PRESET_COLORS.map((c) => (
                     <button
                       key={c}
                       type="button"
-                      aria-label={`Pick color ${c}`}
+                      aria-label={t("workspaces.pickColor", { c })}
                       onClick={() => setColor(c)}
                       className="h-8 w-8 rounded-md ring-offset-2 ring-offset-elevated transition duration-150 hover:scale-105"
                       style={{
@@ -135,10 +137,10 @@ export default function WorkspacesPage() {
                 onClick={() => setCreating(false)}
                 disabled={submitting}
               >
-                Cancel
+                {t("common.cancel")}
               </Button>
               <Button onClick={onCreate} loading={submitting}>
-                Create workspace
+                {t("workspaces.createTitle")}
               </Button>
             </div>
           </Card>
@@ -148,12 +150,12 @@ export default function WorkspacesPage() {
           <Card>
             <EmptyState
               icon={<BoxesIcon size={40} strokeWidth={1.5} />}
-              title="No workspaces yet"
-              description="Create your first workspace to start building pipelines."
+              title={t("workspaces.emptyTitle")}
+              description={t("workspaces.emptyDesc")}
               action={
                 <Button onClick={() => setCreating(true)}>
                   <PlusIcon size={16} />
-                  New workspace
+                  {t("workspaces.create")}
                 </Button>
               }
             />
@@ -161,7 +163,12 @@ export default function WorkspacesPage() {
         ) : (
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
             {workspaces.map((w) => (
-              <WorkspaceCard key={w.id} workspace={w} onSelect={setCurrent} />
+              <WorkspaceCard
+                key={w.id}
+                workspace={w}
+                onSelect={setCurrent}
+                superadminLabel={t("workspaces.superadmin")}
+              />
             ))}
           </div>
         )}
@@ -173,9 +180,11 @@ export default function WorkspacesPage() {
 function WorkspaceCard({
   workspace,
   onSelect,
+  superadminLabel,
 }: {
   workspace: WorkspaceSummary;
   onSelect: (id: string) => void;
+  superadminLabel: string;
 }) {
   return (
     <Link
@@ -198,9 +207,7 @@ function WorkspaceCard({
             </div>
             <div className="truncate text-xs text-text-secondary">
               {workspace.slug} ·{" "}
-              {workspace.role
-                ? workspace.role
-                : "SuperAdmin bypass"}
+              {workspace.role ? workspace.role : superadminLabel}
             </div>
           </div>
         </div>

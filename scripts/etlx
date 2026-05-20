@@ -79,6 +79,8 @@ Dev infra (orchestration sugar — Postgres + DB migrate + admin seed):
   dev up [args]     docker compose up -d + db upgrade head + optional admin
                     Flags: --no-docker, --no-migrate, --no-admin,
                            --admin-email, --admin-name, --admin-password
+  dev init [args]   full clean re-bootstrap: down -v + wipe .run/ + up
+                    (-y to skip confirm; passes extra flags to `dev up`)
   dev down          docker compose down (keeps volumes)
   dev reset         docker compose down -v (drops volumes — destructive)
   dev status        Show docker, DB revision, admin count, dev URLs
@@ -166,6 +168,19 @@ dev_wait_for_pg() {
     exit 1
 }
 
+# True (exit 0) if a user row with the given email exists. Queries the dev
+# postgres container directly so we can decide whether to skip admin
+# creation BEFORE `admin create-user` fires its interactive password
+# prompt. Returns false on any error (container down, table missing) so
+# the caller falls back to the create path.
+dev_admin_exists() {
+    local email="$1"
+    docker exec etl-postgres psql \
+        -U "${LOCAL_PG_USER:-etl}" -d "${LOCAL_PG_DB:-etl_dev}" \
+        -tAc "SELECT 1 FROM users WHERE email = '${email}' LIMIT 1" 2>/dev/null \
+        | grep -q 1
+}
+
 dev_up() {
     local do_docker=1 do_migrate=1 do_admin=1
     local admin_email="admin@example.com"
@@ -223,14 +238,21 @@ EOF
     fi
 
     if [[ $do_admin -eq 1 ]]; then
-        echo "▶ admin user: $admin_email"
-        # `admin create-user` exits 1 with "already exists" — treat that as idempotent.
-        local args=(--email "$admin_email" --name "$admin_name" --superadmin)
-        if [[ -n "$admin_password" ]]; then
-            args+=(--password "$admin_password")
-        fi
-        if ! uv run --project "$REPO_ROOT" --package etlx-server etlx-server admin create-user "${args[@]}" 2>&1; then
-            : # already-exists is fine; output already explains.
+        if dev_admin_exists "$admin_email"; then
+            # Skip cleanly — without this, `admin create-user` would prompt
+            # for a password (typer's interactive prompt fires before the
+            # uniqueness check) and only THEN fail with "already exists".
+            echo "▶ admin user: $admin_email already exists — skipping"
+        else
+            echo "▶ creating admin user: $admin_email"
+            local args=(--email "$admin_email" --name "$admin_name" --superadmin)
+            if [[ -n "$admin_password" ]]; then
+                args+=(--password "$admin_password")
+            fi
+            # No --admin-password → typer prompts interactively (fine, the
+            # user is genuinely creating a new account).
+            uv run --project "$REPO_ROOT" --package etlx-server \
+                etlx-server admin create-user "${args[@]}"
         fi
     fi
 
@@ -250,6 +272,54 @@ dev_down() {
 dev_reset() {
     echo "▶ docker compose down -v  (drops volumes — all DB state gone)"
     dev_compose_down -v
+}
+
+# Full clean re-bootstrap: tear everything down (containers + volume),
+# wipe the generated dev state in .run/ (JWT keys), then run `dev up`
+# from scratch. Use this when the local stack is in a confusing state
+# and you just want a guaranteed-fresh start.
+dev_init() {
+    local assume_yes=0
+    local passthru=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -y|--yes) assume_yes=1; shift ;;
+            -h|--help)
+                cat <<'EOF'
+etlx dev init — wipe everything and bootstrap a fresh local stack
+
+Steps (destructive):
+  1. docker compose down -v   (removes the metadata DB volume)
+  2. rm -rf .run/             (deletes the generated JWT keypair)
+  3. dev up                   (recreate db + schema + admin)
+
+Flags:
+  -y, --yes               Skip the confirmation prompt.
+  ...                     Any other flags pass through to `dev up`
+                          (e.g. --admin-password, --admin-email).
+EOF
+                return 0
+                ;;
+            *) passthru+=("$1"); shift ;;
+        esac
+    done
+
+    if [[ $assume_yes -eq 0 ]]; then
+        echo "This DELETES the metadata DB volume and the .run/ JWT keypair."
+        printf "Continue? [y/N] "
+        read -r reply
+        case "$reply" in
+            y|Y|yes|YES) ;;
+            *) echo "aborted."; return 1 ;;
+        esac
+    fi
+
+    echo "▶ tearing down (containers + volume) …"
+    dev_compose_down -v || true
+    echo "▶ removing $REPO_ROOT/.run/ …"
+    rm -rf "$REPO_ROOT/.run"
+    echo "▶ bootstrapping fresh stack …"
+    dev_up "${passthru[@]}"
 }
 
 dev_status() {
@@ -278,15 +348,17 @@ etlx dev — local infra orchestration
 
 Commands:
   up [flags]    docker compose up + db upgrade + admin seed (idempotent)
+  init [flags]  full clean re-bootstrap: down -v + wipe .run/ + up
   down          docker compose down (volumes kept)
   reset         docker compose down -v (drops volumes — destructive)
   status        Show docker + DB revision + URLs
 
-Run `etlx dev up --help` for flags.
+Run `etlx dev up --help` or `etlx dev init --help` for flags.
 EOF
             return 0
             ;;
         up)        shift; dev_up "$@" ;;
+        init)      shift; dev_init "$@" ;;
         down)      shift; dev_down "$@" ;;
         reset)     shift; dev_reset "$@" ;;
         status)    shift; dev_status "$@" ;;

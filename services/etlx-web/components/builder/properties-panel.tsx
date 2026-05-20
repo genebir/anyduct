@@ -117,10 +117,17 @@ function FieldEditor({
   onChange: (v: unknown) => void;
   t: Translate;
 }) {
+  const isEmpty = value === undefined || value === null || value === "";
+  const showRequired = Boolean(field.required) && isEmpty;
   return (
     <label className="flex flex-col gap-1.5">
-      <span className="text-[11px] font-semibold uppercase tracking-wider text-text-secondary">
+      <span className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider text-text-secondary">
         {field.label}
+        {field.required ? (
+          <span className="text-accent" title={t("builder.required")} aria-hidden>
+            *
+          </span>
+        ) : null}
       </span>
       <FieldInput
         field={field}
@@ -129,7 +136,9 @@ function FieldEditor({
         onChange={onChange}
         t={t}
       />
-      {"help" in field && field.help ? (
+      {showRequired ? (
+        <span className="text-[11px] text-warning">{t("builder.fieldRequired")}</span>
+      ) : field.help ? (
         <span className="text-[11px] text-text-muted">{field.help}</span>
       ) : null}
     </label>

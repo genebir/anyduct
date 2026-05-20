@@ -31,35 +31,33 @@ import {
 
 export type OperatorKind = "source" | "transform" | "sink";
 
+interface FieldBase {
+  key: string;
+  label: string;
+  help?: string;
+  /** Marks the field with an asterisk and triggers an inline "required"
+   *  warning when left empty. Connections + a transform's core input are
+   *  the usual ones. */
+  required?: boolean;
+}
+
 export type FieldDef =
-  | {
-      key: string;
-      label: string;
+  | (FieldBase & {
       kind: "string" | "number";
       placeholder?: string;
       multiline?: boolean;
-      help?: string;
-    }
-  | {
-      key: string;
-      label: string;
+    })
+  | (FieldBase & {
       kind: "select";
       options: { label: string; value: string }[];
-      help?: string;
-    }
-  | {
-      key: string;
-      label: string;
+    })
+  | (FieldBase & {
       kind: "json";
       placeholder?: string;
-      help?: string;
-    }
-  | {
-      key: string;
-      label: string;
+    })
+  | (FieldBase & {
       kind: "connection";
-      help?: string;
-    };
+    });
 
 export interface OperatorSpec {
   /** Stable id — used as the React Flow node `type` + as the JSON config marker. */
@@ -85,7 +83,7 @@ const SOURCES: OperatorSpec[] = [
     icon: DatabaseIcon,
     accent: "#6366F1",
     fields: [
-      { key: "connection", label: "Connection", kind: "connection" },
+      { key: "connection", label: "Connection", kind: "connection", required: true },
       {
         key: "query",
         label: "SQL query",
@@ -105,7 +103,7 @@ const SOURCES: OperatorSpec[] = [
     icon: DatabaseIcon,
     accent: "#06B6D4",
     fields: [
-      { key: "connection", label: "Connection", kind: "connection" },
+      { key: "connection", label: "Connection", kind: "connection", required: true },
       { key: "query", label: "SQL query", kind: "string", multiline: true },
       { key: "chunk_size", label: "Chunk size", kind: "number" },
     ],
@@ -119,7 +117,7 @@ const SOURCES: OperatorSpec[] = [
     icon: HardDriveIcon,
     accent: "#10B981",
     fields: [
-      { key: "connection", label: "Connection", kind: "connection" },
+      { key: "connection", label: "Connection", kind: "connection", required: true },
       { key: "query", label: "SQL query", kind: "string", multiline: true },
     ],
   },
@@ -132,7 +130,7 @@ const SOURCES: OperatorSpec[] = [
     icon: LeafIcon,
     accent: "#22C55E",
     fields: [
-      { key: "connection", label: "Connection", kind: "connection" },
+      { key: "connection", label: "Connection", kind: "connection", required: true },
       {
         key: "query",
         label: "Collection",
@@ -172,7 +170,7 @@ const SOURCES: OperatorSpec[] = [
     icon: CableIcon,
     accent: "#F59E0B",
     fields: [
-      { key: "connection", label: "Connection", kind: "connection" },
+      { key: "connection", label: "Connection", kind: "connection", required: true },
       { key: "key", label: "Object key", kind: "string", placeholder: "exports/orders.parquet" },
       {
         key: "format",
@@ -195,7 +193,7 @@ const SOURCES: OperatorSpec[] = [
     icon: RadioTowerIcon,
     accent: "#EC4899",
     fields: [
-      { key: "connection", label: "Connection", kind: "connection" },
+      { key: "connection", label: "Connection", kind: "connection", required: true },
       { key: "topic", label: "Topic", kind: "string", placeholder: "events.user_signup" },
       { key: "group_id", label: "Consumer group", kind: "string" },
       {
@@ -218,7 +216,7 @@ const SOURCES: OperatorSpec[] = [
     icon: GlobeIcon,
     accent: "#8B5CF6",
     fields: [
-      { key: "connection", label: "Connection", kind: "connection" },
+      { key: "connection", label: "Connection", kind: "connection", required: true },
       {
         key: "query",
         label: "Path",
@@ -302,6 +300,7 @@ const TRANSFORMS: OperatorSpec[] = [
         label: "Expression",
         kind: "string",
         multiline: true,
+        required: true,
         placeholder: "data['amount'] > 0 and data['type'] in ('a','b')",
         help: "Available locals: data (dict), metadata. No builtins.",
       },
@@ -320,6 +319,7 @@ const TRANSFORMS: OperatorSpec[] = [
         key: "callable",
         label: "Callable",
         kind: "string",
+        required: true,
         placeholder: "my_pkg.transforms:dedupe",
         help: "module:function — must be importable in the worker environment.",
       },
@@ -337,7 +337,7 @@ const SINKS: OperatorSpec[] = [
     icon: DatabaseIcon,
     accent: "#4ADE80",
     fields: [
-      { key: "connection", label: "Connection", kind: "connection" },
+      { key: "connection", label: "Connection", kind: "connection", required: true },
       { key: "table", label: "Table", kind: "string", placeholder: "schema.table" },
       {
         key: "mode",
@@ -367,7 +367,7 @@ const SINKS: OperatorSpec[] = [
     icon: DatabaseIcon,
     accent: "#4ADE80",
     fields: [
-      { key: "connection", label: "Connection", kind: "connection" },
+      { key: "connection", label: "Connection", kind: "connection", required: true },
       { key: "table", label: "Table", kind: "string" },
       {
         key: "mode",
@@ -391,7 +391,7 @@ const SINKS: OperatorSpec[] = [
     icon: HardDriveIcon,
     accent: "#4ADE80",
     fields: [
-      { key: "connection", label: "Connection", kind: "connection" },
+      { key: "connection", label: "Connection", kind: "connection", required: true },
       { key: "table", label: "Table", kind: "string" },
       {
         key: "mode",
@@ -414,7 +414,7 @@ const SINKS: OperatorSpec[] = [
     icon: LeafIcon,
     accent: "#4ADE80",
     fields: [
-      { key: "connection", label: "Connection", kind: "connection" },
+      { key: "connection", label: "Connection", kind: "connection", required: true },
       { key: "table", label: "Collection", kind: "string", placeholder: "users" },
       {
         key: "mode",
@@ -444,7 +444,7 @@ const SINKS: OperatorSpec[] = [
     icon: CableIcon,
     accent: "#4ADE80",
     fields: [
-      { key: "connection", label: "Connection", kind: "connection" },
+      { key: "connection", label: "Connection", kind: "connection", required: true },
       { key: "key", label: "Object key", kind: "string", placeholder: "exports/out.parquet" },
       {
         key: "format",
@@ -467,7 +467,7 @@ const SINKS: OperatorSpec[] = [
     icon: RadioTowerIcon,
     accent: "#4ADE80",
     fields: [
-      { key: "connection", label: "Connection", kind: "connection" },
+      { key: "connection", label: "Connection", kind: "connection", required: true },
       { key: "topic", label: "Topic", kind: "string" },
       {
         key: "format",

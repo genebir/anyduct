@@ -399,7 +399,18 @@ export const pipelinesApi = {
     api<void>(`/workspaces/${workspaceId}/pipelines/${id}`, {
       method: "DELETE",
     }),
+  getTriggers: (workspaceId: string, id: string) =>
+    api<PipelineTriggers>(`/workspaces/${workspaceId}/pipelines/${id}/triggers`),
+  setTriggers: (workspaceId: string, id: string, targetPipelineIds: string[]) =>
+    api<PipelineTriggers>(`/workspaces/${workspaceId}/pipelines/${id}/triggers`, {
+      method: "PUT",
+      json: { target_pipeline_ids: targetPipelineIds },
+    }),
 };
+
+export interface PipelineTriggers {
+  target_pipeline_ids: string[];
+}
 
 export interface DryRunConnectorCheck {
   name: string;

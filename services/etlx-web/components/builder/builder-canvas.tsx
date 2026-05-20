@@ -21,6 +21,7 @@ import { reorderNodes } from "@/lib/pipeline-config";
 
 const NODE_WIDTH = 260;
 const NODE_GAP = 60;
+const NODE_VGAP = 150;
 const NODE_TYPES = { pipelineNode: PipelineNode };
 
 export function BuilderCanvas({
@@ -44,10 +45,23 @@ export function BuilderCanvas({
   // transform order by x and hand it back so the parent owns the state.
   const { layoutNodes, rfEdges } = useMemo(() => {
     const ordered = reorderNodes(nodes);
-    const layoutNodes: Node<PipelineNodeData>[] = ordered.map((n, i) => {
+    // The "spine" = source → transforms laid out left-to-right; terminals
+    // (sinks + call-pipeline nodes) fan out from the spine tail, stacked
+    // vertically when there's more than one (fan-out ADR-0026 / call ADR-0029).
+    const isTerminal = (n: BuilderNode) => {
+      const k = findOperator(n.operatorId)?.kind;
+      return k === "sink" || k === "call";
+    };
+    const spine = ordered.filter((n) => !isTerminal(n));
+    const sinks = ordered.filter(isTerminal);
+    const multiSink = sinks.length > 1;
+    const sinkCol = spine.length;
+
+    const layoutNodes: Node<PipelineNodeData>[] = [];
+    spine.forEach((n, i) => {
       const op = findOperator(n.operatorId);
       const isTransform = op?.kind === "transform";
-      return {
+      layoutNodes.push({
         id: n.id,
         type: "pipelineNode",
         position: { x: i * (NODE_WIDTH + NODE_GAP), y: 0 },
@@ -60,17 +74,55 @@ export function BuilderCanvas({
           onRemove,
           canRemove: isTransform,
         },
-      };
-    });
-    const rfEdges: Edge[] = [];
-    for (let i = 0; i < ordered.length - 1; i++) {
-      rfEdges.push({
-        id: `${ordered[i].id}->${ordered[i + 1].id}`,
-        source: ordered[i].id,
-        target: ordered[i + 1].id,
-        animated: true,
-        style: { stroke: "rgb(var(--accent))", strokeWidth: 1.5 },
       });
+    });
+    const sinkKindCount = sinks.filter(
+      (n) => findOperator(n.operatorId)?.kind === "sink",
+    ).length;
+    sinks.forEach((n, i) => {
+      // Center the stack vertically around the spine row.
+      const y = multiSink ? (i - (sinks.length - 1) / 2) * NODE_VGAP : 0;
+      const isCall = findOperator(n.operatorId)?.kind === "call";
+      layoutNodes.push({
+        id: n.id,
+        type: "pipelineNode",
+        position: { x: sinkCol * (NODE_WIDTH + NODE_GAP), y },
+        draggable: false,
+        data: {
+          operatorId: n.operatorId,
+          values: n.data,
+          selected: selectedId === n.id,
+          onSelect,
+          onRemove,
+          // Call nodes are always removable (optional); a sink only when there
+          // is more than one (a pipeline must keep ≥1 sink).
+          canRemove: isCall || sinkKindCount > 1,
+        },
+      });
+    });
+
+    const rfEdges: Edge[] = [];
+    const edgeStyle = { stroke: "rgb(var(--accent))", strokeWidth: 1.5 };
+    for (let i = 0; i < spine.length - 1; i++) {
+      rfEdges.push({
+        id: `${spine[i].id}->${spine[i + 1].id}`,
+        source: spine[i].id,
+        target: spine[i + 1].id,
+        animated: true,
+        style: edgeStyle,
+      });
+    }
+    const tail = spine[spine.length - 1];
+    if (tail) {
+      for (const s of sinks) {
+        rfEdges.push({
+          id: `${tail.id}->${s.id}`,
+          source: tail.id,
+          target: s.id,
+          animated: true,
+          style: edgeStyle,
+        });
+      }
     }
     return { layoutNodes, rfEdges };
   }, [nodes, selectedId, onSelect, onRemove]);

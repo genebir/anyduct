@@ -35,6 +35,7 @@ const FILTER_OP_LABEL: Record<FilterOp, keyof Messages> = {
 export function PropertiesPanel({
   node,
   connections,
+  pipelines = [],
   onChange,
   transformIndex = -1,
   transformCount = 0,
@@ -42,6 +43,8 @@ export function PropertiesPanel({
 }: {
   node: BuilderNode | null;
   connections: ConnectionSummary[];
+  /** Other pipelines in the workspace — for the call-pipeline target picker. */
+  pipelines?: { id: string; name: string }[];
   onChange: (id: string, values: Record<string, unknown>) => void;
   /** Index of this node within the transform run, or -1 if not a transform. */
   transformIndex?: number;
@@ -113,6 +116,7 @@ export function PropertiesPanel({
             field={field}
             value={node.data[field.key]}
             connections={matchingConnections}
+            pipelines={pipelines}
             t={t}
             onChange={(v) =>
               onChange(node.id, { ...node.data, [field.key]: v })
@@ -128,12 +132,14 @@ function FieldEditor({
   field,
   value,
   connections,
+  pipelines,
   onChange,
   t,
 }: {
   field: FieldDef;
   value: unknown;
   connections: ConnectionSummary[];
+  pipelines: { id: string; name: string }[];
   onChange: (v: unknown) => void;
   t: Translate;
 }) {
@@ -153,6 +159,7 @@ function FieldEditor({
         field={field}
         value={value}
         connections={connections}
+        pipelines={pipelines}
         onChange={onChange}
         t={t}
       />
@@ -169,15 +176,38 @@ function FieldInput({
   field,
   value,
   connections,
+  pipelines,
   onChange,
   t,
 }: {
   field: FieldDef;
   value: unknown;
   connections: ConnectionSummary[];
+  pipelines: { id: string; name: string }[];
   onChange: (v: unknown) => void;
   t: Translate;
 }) {
+  if (field.kind === "pipeline") {
+    return (
+      <select
+        value={(value as string) ?? ""}
+        onChange={(e) => onChange(e.target.value || undefined)}
+        className="h-10 rounded-md border border-border-subtle bg-elevated px-2 text-sm text-text focus-visible:border-accent focus-visible:outline-none"
+      >
+        <option value="">{t("builder.selectPipeline")}</option>
+        {pipelines.length === 0 ? (
+          <option disabled value="">
+            {t("builder.callPipelineEmpty")}
+          </option>
+        ) : null}
+        {pipelines.map((p) => (
+          <option key={p.id} value={p.id}>
+            {p.name}
+          </option>
+        ))}
+      </select>
+    );
+  }
   if (field.kind === "connection") {
     return (
       <select
@@ -282,7 +312,7 @@ function nextCondId(): string {
  * the user can switch back. Remounted per node (keyed by node id) so it
  * re-seeds from the stored value.
  */
-function FilterEditor({
+export function FilterEditor({
   value,
   onChange,
   t,

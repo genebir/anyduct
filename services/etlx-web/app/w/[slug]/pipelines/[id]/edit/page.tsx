@@ -17,6 +17,7 @@ import { Palette } from "@/components/builder/palette";
 import { PropertiesPanel } from "@/components/builder/properties-panel";
 import { BuilderCanvas } from "@/components/builder/builder-canvas";
 import { PipelineSettingsPanel } from "@/components/builder/pipeline-settings-panel";
+import { GraphEditor } from "@/components/builder/graph-editor";
 import {
   ApiError,
   connectionsApi,
@@ -32,13 +33,20 @@ import { useLocale } from "@/components/providers/locale-provider";
 import type { Messages } from "@/lib/i18n/messages";
 import {
   blankBuilder,
+  callTargets,
   deserialize,
+  deserializeGraph,
+  isGraphConfig,
+  linearToGraph,
+  makeCallNode,
   makeNode,
   reorderNodes,
   serialize,
+  serializeGraph,
   type BuilderNode,
   type BuilderState,
   type DlqSettings,
+  type GraphBuilderState,
   type PipelineConfigJson,
   type RetrySettings,
 } from "@/lib/pipeline-config";
@@ -52,7 +60,10 @@ export default function PipelineEditorPage() {
 
   const [pipeline, setPipeline] = useState<PipelineSummary | null>(null);
   const [connections, setConnections] = useState<ConnectionSummary[]>([]);
+  const [allPipelines, setAllPipelines] = useState<PipelineSummary[]>([]);
   const [state, setState] = useState<BuilderState>(() => blankBuilder());
+  const [mode, setMode] = useState<"linear" | "graph">("linear");
+  const [graphState, setGraphState] = useState<GraphBuilderState | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [dryRunning, setDryRunning] = useState(false);
@@ -66,25 +77,44 @@ export default function PipelineEditorPage() {
     let cancelled = false;
     (async () => {
       try {
-        const [p, conns] = await Promise.all([
+        const [p, conns, pipelines] = await Promise.all([
           pipelinesApi.get(ws.id, id),
           connectionsApi.list(ws.id),
+          pipelinesApi.list(ws.id),
         ]);
         if (cancelled) return;
         setPipeline(p);
         setConnections(conns);
-        const initial = deserialize(
-          p.current_config_json as PipelineConfigJson | null,
-          conns,
-        );
-        setState(initial);
-        setSelectedId(initial.nodes[0]?.id ?? null);
+        setAllPipelines(pipelines.filter((x) => x.id !== id));
+        const cfg = p.current_config_json as PipelineConfigJson | null;
+        // Graph pipelines (ADR-0030) open in the free-form graph editor.
+        if (isGraphConfig(cfg)) {
+          if (cancelled) return;
+          setMode("graph");
+          setGraphState(deserializeGraph(cfg, conns));
+          setDirty(false);
+          loadedRef.current = true;
+          return;
+        }
+        const initial = deserialize(cfg, conns);
+        // Downstream triggers (call-pipeline, ADR-0029) are surfaced as call
+        // nodes on the canvas. Best-effort: a pending `0003` migration must not
+        // break the editor or hide the pipeline list.
+        let callNodes: BuilderNode[] = [];
+        try {
+          const triggers = await pipelinesApi.getTriggers(ws.id, id);
+          callNodes = triggers.target_pipeline_ids.map((tid) => makeCallNode(tid));
+        } catch {
+          /* triggers table may not exist yet — ignore */
+        }
+        if (cancelled) return;
+        const withCalls = { ...initial, nodes: [...initial.nodes, ...callNodes] };
+        setState(withCalls);
+        setSelectedId(withCalls.nodes[0]?.id ?? null);
         setDirty(false);
         loadedRef.current = true;
       } catch (err) {
-        toast.error(
-          err instanceof ApiError ? err.message : t("builder.loadFailed"),
-        );
+        toast.error(err instanceof ApiError ? err.message : t("builder.loadFailed"));
       }
     })();
     return () => {
@@ -95,13 +125,11 @@ export default function PipelineEditorPage() {
   const addOperator = useCallback((operatorId: string) => {
     setState((prev) => {
       const next: BuilderNode = makeNode(operatorId);
-      // If user adds a duplicate source/sink, replace the existing one rather
-      // than allowing two — core PipelineConfig has exactly one of each.
+      // A pipeline has exactly one source, so adding a source replaces the
+      // existing one. Sinks fan out (ADR-0026): adding another sink keeps the
+      // existing ones so the source can write to multiple destinations.
       const filtered = prev.nodes.filter((n) => {
         if (next.operatorId.startsWith("source:") && n.operatorId.startsWith("source:")) {
-          return false;
-        }
-        if (next.operatorId.startsWith("sink:") && n.operatorId.startsWith("sink:")) {
           return false;
         }
         return true;
@@ -122,13 +150,11 @@ export default function PipelineEditorPage() {
     setDirty(true);
   }, []);
 
-  // Apply a drag-reorder from the canvas: rebuild the node list as
-  // sources → transforms(in dragged order) → sinks.
   const reorderTransforms = useCallback((orderedIds: string[]) => {
     setState((prev) => {
       const byId = new Map(prev.nodes.map((n) => [n.id, n]));
       const newTransforms = orderedIds
-        .map((id) => byId.get(id))
+        .map((tid) => byId.get(tid))
         .filter((n): n is BuilderNode => Boolean(n));
       const sources = prev.nodes.filter(
         (n) => findOperator(n.operatorId)?.kind === "source",
@@ -139,7 +165,6 @@ export default function PipelineEditorPage() {
       const existingTransforms = prev.nodes.filter(
         (n) => findOperator(n.operatorId)?.kind === "transform",
       );
-      // Bail if the drag order didn't cover exactly the transform set.
       if (newTransforms.length !== existingTransforms.length) return prev;
       return { ...prev, nodes: [...sources, ...newTransforms, ...sinks] };
     });
@@ -150,9 +175,6 @@ export default function PipelineEditorPage() {
     setSelectedId(nodeId);
   }, []);
 
-  // Reorder transforms — execution order matters and the canvas only
-  // auto-sorts by kind, so swap the selected transform with its neighbor
-  // within the transform run.
   const moveTransform = useCallback((nodeId: string, dir: -1 | 1) => {
     setState((prev) => {
       const nodes = [...prev.nodes];
@@ -175,9 +197,7 @@ export default function PipelineEditorPage() {
     (nodeId: string, values: Record<string, unknown>) => {
       setState((prev) => ({
         ...prev,
-        nodes: prev.nodes.map((n) =>
-          n.id === nodeId ? { ...n, data: values } : n,
-        ),
+        nodes: prev.nodes.map((n) => (n.id === nodeId ? { ...n, data: values } : n)),
       }));
       setDirty(true);
     },
@@ -199,8 +219,6 @@ export default function PipelineEditorPage() {
     [state.nodes, selectedId],
   );
 
-  // Position of the selected transform within the transform run (in canvas
-  // order), so the panel can enable/disable the move-left/right controls.
   const transformOrder = useMemo(
     () =>
       reorderNodes(state.nodes)
@@ -213,32 +231,51 @@ export default function PipelineEditorPage() {
       ? transformOrder.indexOf(selectedNode.id)
       : -1;
 
+  const updateGraph = useCallback((next: GraphBuilderState) => {
+    setGraphState(next);
+    setDirty(true);
+  }, []);
+
+  const switchToGraph = useCallback(() => {
+    if (!window.confirm(t("graph.convertConfirm"))) return;
+    setGraphState(linearToGraph(state));
+    setMode("graph");
+    setDirty(true);
+  }, [state, t]);
+
   const onSave = useCallback(async () => {
     if (!ws || !pipeline) return;
     setSaving(true);
     try {
-      const existingMode =
-        (pipeline.current_config_json as { mode?: string } | null)?.mode;
-      const config = serialize(state, {
-        name: pipeline.name,
-        mode: existingMode === "stream" ? "stream" : "batch",
-      });
-      const updated = await pipelinesApi.update(ws.id, pipeline.id, {
-        config,
-      });
+      const existingMode = (pipeline.current_config_json as { mode?: string } | null)?.mode;
+      const m = existingMode === "stream" ? "stream" : "batch";
+      if (mode === "graph" && graphState) {
+        const config = serializeGraph(graphState, { name: pipeline.name, mode: m });
+        const updated = await pipelinesApi.update(ws.id, pipeline.id, { config });
+        setPipeline(updated);
+        setDirty(false);
+        toast.success(t("builder.saved", { version: updated.current_version ?? "?" }));
+        return;
+      }
+      const config = serialize(state, { name: pipeline.name, mode: m });
+      const updated = await pipelinesApi.update(ws.id, pipeline.id, { config });
+      // Call-pipeline nodes live outside config_json (ADR-0029) — persist them
+      // as downstream triggers. Best-effort so a pending `0003` migration
+      // doesn't fail the whole save.
+      try {
+        await pipelinesApi.setTriggers(ws.id, pipeline.id, callTargets(state.nodes));
+      } catch {
+        /* triggers table may not exist yet */
+      }
       setPipeline(updated);
       setDirty(false);
-      toast.success(
-        t("builder.saved", { version: updated.current_version ?? "?" }),
-      );
+      toast.success(t("builder.saved", { version: updated.current_version ?? "?" }));
     } catch (err) {
-      toast.error(
-        err instanceof ApiError ? err.message : t("builder.saveFailed"),
-      );
+      toast.error(err instanceof ApiError ? err.message : t("builder.saveFailed"));
     } finally {
       setSaving(false);
     }
-  }, [ws, pipeline, state, t]);
+  }, [ws, pipeline, state, mode, graphState, t]);
 
   const onDryRun = useCallback(async () => {
     if (!ws || !pipeline) return;
@@ -251,15 +288,10 @@ export default function PipelineEditorPage() {
     try {
       const result = await pipelinesApi.dryRun(ws.id, pipeline.id);
       setDryRunResult(result);
-      if (result.ok) {
-        toast.success(t("builder.dryRunPassed"));
-      } else {
-        toast.error(t("builder.dryRunIssues"));
-      }
+      if (result.ok) toast.success(t("builder.dryRunPassed"));
+      else toast.error(t("builder.dryRunIssues"));
     } catch (err) {
-      toast.error(
-        err instanceof ApiError ? err.message : t("builder.dryRunFailedToast"),
-      );
+      toast.error(err instanceof ApiError ? err.message : t("builder.dryRunFailedToast"));
     } finally {
       setDryRunning(false);
     }
@@ -275,9 +307,7 @@ export default function PipelineEditorPage() {
       await pipelinesApi.trigger(ws.id, pipeline.id);
       toast.success(t("pipelines.runQueued", { name: pipeline.name }));
     } catch (err) {
-      toast.error(
-        err instanceof ApiError ? err.message : t("pipelines.triggerFailed"),
-      );
+      toast.error(err instanceof ApiError ? err.message : t("pipelines.triggerFailed"));
     }
   }, [ws, pipeline, dirty, t]);
 
@@ -301,6 +331,15 @@ export default function PipelineEditorPage() {
                 {t("builder.unsaved")}
               </span>
             ) : null}
+            {mode === "linear" ? (
+              <Button variant="ghost" onClick={switchToGraph} disabled={!pipeline}>
+                {t("graph.switchToGraph")}
+              </Button>
+            ) : (
+              <span className="rounded-sm border border-accent/40 bg-accent/10 px-2 py-1 text-xs font-medium text-accent">
+                {t("graph.modeGraph")}
+              </span>
+            )}
             <Button
               variant="ghost"
               onClick={onDryRun}
@@ -327,60 +366,57 @@ export default function PipelineEditorPage() {
           </div>
         }
       />
-      <FlowSummary
-        nodes={state.nodes}
-        selectedId={selectedId}
-        onSelect={selectNode}
-        t={t}
-      />
-      <div className="flex min-h-0 flex-1 overflow-hidden">
-        <Palette onAdd={addOperator} />
-        <div className="flex min-w-0 flex-1 flex-col">
-          <div className="min-h-0 flex-1">
-            <BuilderCanvas
-              nodes={state.nodes}
-              selectedId={selectedId}
-              onSelect={selectNode}
-              onRemove={removeOperator}
-              onDeselect={() => setSelectedId(null)}
-              onReorderTransforms={reorderTransforms}
-            />
+      {mode === "graph" && graphState ? (
+        <GraphEditor state={graphState} connections={connections} onChange={updateGraph} />
+      ) : (
+        <>
+          <FlowSummary nodes={state.nodes} selectedId={selectedId} onSelect={selectNode} t={t} />
+          <div className="flex min-h-0 flex-1 overflow-hidden">
+            <Palette onAdd={addOperator} />
+            <div className="flex min-w-0 flex-1 flex-col">
+              <div className="min-h-0 flex-1">
+                <BuilderCanvas
+                  nodes={state.nodes}
+                  selectedId={selectedId}
+                  onSelect={selectNode}
+                  onRemove={removeOperator}
+                  onDeselect={() => setSelectedId(null)}
+                  onReorderTransforms={reorderTransforms}
+                />
+              </div>
+              {dryRunResult ? (
+                <DryRunPanel result={dryRunResult} onDismiss={() => setDryRunResult(null)} t={t} />
+              ) : null}
+            </div>
+            {selectedNode ? (
+              <PropertiesPanel
+                node={selectedNode}
+                connections={connections}
+                pipelines={allPipelines}
+                onChange={updateNode}
+                transformIndex={selectedTransformIndex}
+                transformCount={transformOrder.length}
+                onMove={moveTransform}
+              />
+            ) : (
+              <PipelineSettingsPanel
+                retry={state.retry}
+                dlq={state.dlq}
+                connections={connections}
+                onChangeRetry={updateRetry}
+                onChangeDlq={updateDlq}
+              />
+            )}
           </div>
-          {dryRunResult ? (
-            <DryRunPanel
-              result={dryRunResult}
-              onDismiss={() => setDryRunResult(null)}
-              t={t}
-            />
-          ) : null}
-        </div>
-        {selectedNode ? (
-          <PropertiesPanel
-            node={selectedNode}
-            connections={connections}
-            onChange={updateNode}
-            transformIndex={selectedTransformIndex}
-            transformCount={transformOrder.length}
-            onMove={moveTransform}
-          />
-        ) : (
-          <PipelineSettingsPanel
-            retry={state.retry}
-            dlq={state.dlq}
-            connections={connections}
-            onChangeRetry={updateRetry}
-            onChangeDlq={updateDlq}
-          />
-        )}
-      </div>
+        </>
+      )}
     </>
   );
 }
 
 /**
- * Plain-language read of the pipeline: source → transforms → sink as
- * clickable chips. Gives non-developers an at-a-glance "what does this do"
- * without decoding the canvas, and surfaces missing connections inline.
+ * Plain-language read of the pipeline: source → transforms → sink(s) as
+ * clickable chips, with fan-out sinks grouped and routing conditions hinted.
  */
 function FlowSummary({
   nodes,
@@ -394,7 +430,7 @@ function FlowSummary({
   t: Translate;
 }) {
   const ordered = reorderNodes(nodes);
-  const chips = ordered.map((n) => {
+  const toChip = (n: BuilderNode) => {
     const op = findOperator(n.operatorId);
     const kind = op?.kind ?? "transform";
     const needsConnection =
@@ -405,8 +441,62 @@ function FlowSummary({
           ? t("builder.flowNeedsConnection")
           : String(n.data.connection)
         : null;
-    return { id: n.id, label: op?.label ?? n.operatorId, kind, needsConnection, sub };
-  });
+    const cond =
+      kind === "sink" && typeof n.data.when === "string" && n.data.when.trim()
+        ? n.data.when.trim()
+        : null;
+    return { id: n.id, label: op?.label ?? n.operatorId, kind, needsConnection, sub, cond };
+  };
+  const isTerminal = (n: BuilderNode) => {
+    const k = findOperator(n.operatorId)?.kind;
+    return k === "sink" || k === "call";
+  };
+  const spine = ordered.filter((n) => !isTerminal(n));
+  const sinks = ordered.filter(isTerminal);
+  const spineChips = spine.map(toChip);
+  const sinkChips = sinks.map(toChip);
+
+  const chipButton = (c: ReturnType<typeof toChip>) => (
+    <button
+      type="button"
+      onClick={() => onSelect(c.id)}
+      className={cn(
+        "flex shrink-0 items-center gap-2 rounded-md border px-2.5 py-1.5 text-left transition duration-150",
+        selectedId === c.id
+          ? "border-accent bg-overlay"
+          : c.needsConnection
+            ? "border-warning/50 hover:border-warning"
+            : "border-border-subtle hover:border-border-strong hover:bg-overlay",
+      )}
+    >
+      <span
+        aria-hidden
+        className="inline-block h-2 w-2 rounded-full"
+        style={{ background: OPERATOR_KIND_ACCENT[c.kind] }}
+      />
+      <span className="flex min-w-0 flex-col leading-tight">
+        <span className="text-sm font-medium text-text">{c.label}</span>
+        {c.sub ? (
+          <span
+            className={cn(
+              "text-[11px]",
+              c.needsConnection ? "text-warning" : "text-text-muted",
+            )}
+          >
+            {c.sub}
+          </span>
+        ) : null}
+        {c.cond ? (
+          <span
+            className="max-w-[180px] truncate font-mono text-[10px] text-accent"
+            title={c.cond}
+          >
+            {t("builder.routeIf", { cond: c.cond })}
+          </span>
+        ) : null}
+      </span>
+    </button>
+  );
 
   return (
     <div className="flex shrink-0 items-center gap-2 overflow-x-auto border-b border-border-subtle bg-surface px-4 py-2.5">
@@ -414,44 +504,26 @@ function FlowSummary({
         {t("builder.flowTitle")}
       </span>
       <div className="flex items-center gap-1.5">
-        {chips.map((c, i) => (
+        {spineChips.map((c, i) => (
           <div key={c.id} className="flex items-center gap-1.5">
             {i > 0 ? (
               <ChevronRightIcon size={14} className="shrink-0 text-text-muted" />
             ) : null}
-            <button
-              type="button"
-              onClick={() => onSelect(c.id)}
-              className={cn(
-                "flex shrink-0 items-center gap-2 rounded-md border px-2.5 py-1.5 text-left transition duration-150",
-                selectedId === c.id
-                  ? "border-accent bg-overlay"
-                  : c.needsConnection
-                    ? "border-warning/50 hover:border-warning"
-                    : "border-border-subtle hover:border-border-strong hover:bg-overlay",
-              )}
-            >
-              <span
-                aria-hidden
-                className="inline-block h-2 w-2 rounded-full"
-                style={{ background: OPERATOR_KIND_ACCENT[c.kind] }}
-              />
-              <span className="flex flex-col leading-tight">
-                <span className="text-sm font-medium text-text">{c.label}</span>
-                {c.sub ? (
-                  <span
-                    className={cn(
-                      "text-[11px]",
-                      c.needsConnection ? "text-warning" : "text-text-muted",
-                    )}
-                  >
-                    {c.sub}
-                  </span>
-                ) : null}
-              </span>
-            </button>
+            {chipButton(c)}
           </div>
         ))}
+        {sinkChips.length > 0 ? (
+          <ChevronRightIcon size={14} className="shrink-0 text-text-muted" />
+        ) : null}
+        {sinkChips.length > 1 ? (
+          <div className="flex flex-col gap-1 rounded-md border border-dashed border-border-subtle p-1">
+            {sinkChips.map((c) => (
+              <div key={c.id}>{chipButton(c)}</div>
+            ))}
+          </div>
+        ) : (
+          sinkChips.map((c) => <div key={c.id}>{chipButton(c)}</div>)
+        )}
       </div>
       <span className="ml-auto hidden shrink-0 text-[11px] text-text-muted lg:block">
         {t("builder.flowHint")}
@@ -479,14 +551,10 @@ function DryRunPanel({
             <XCircleIcon size={16} className="text-error" />
           )}
           <span className="font-semibold text-text">
-            {result.ok
-              ? t("builder.dryRunPassedHeader")
-              : t("builder.dryRunFailedHeader")}
+            {result.ok ? t("builder.dryRunPassedHeader") : t("builder.dryRunFailedHeader")}
           </span>
           <span className="text-xs text-text-muted">
-            {t("builder.connectorsChecked", {
-              count: result.connectors.length,
-            })}
+            {t("builder.connectorsChecked", { count: result.connectors.length })}
           </span>
         </div>
         <button
@@ -520,9 +588,7 @@ function DryRunPanel({
               key={c.name}
               className={cn(
                 "flex items-start gap-2 rounded-sm border px-2 py-1.5",
-                c.ok
-                  ? "border-success/30 bg-success/10"
-                  : "border-error/40 bg-error/10",
+                c.ok ? "border-success/30 bg-success/10" : "border-error/40 bg-error/10",
               )}
             >
               {c.ok ? (

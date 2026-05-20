@@ -289,6 +289,8 @@ export const en = {
   "builder.operators": "Operators",
   "builder.operatorsHint":
     "Click to add — pipelines run as source → transforms → sink.",
+  "builder.searchOperators": "Search operators…",
+  "builder.noOperatorMatch": "No operators match.",
   "builder.removeAria": "Remove {label}",
   "builder.notConfigured": "Not configured",
   "builder.noConnection": "no connection",
@@ -360,6 +362,23 @@ export const en = {
   "builder.flowNeedsConnection": "connection needed",
   "builder.flowNoTransforms": "no transforms",
   "builder.flowHint": "Click a step to configure it, or drag a transform to reorder.",
+  "builder.routeIf": "if {cond}",
+  "builder.callPipeline": "Call pipelines",
+  "builder.callPipelineDesc":
+    "On success, trigger these pipelines (fire-and-forget). Cycles are skipped automatically.",
+  "builder.callPipelineEmpty": "No other pipelines in this workspace yet.",
+  "builder.selectPipeline": "Select a pipeline…",
+  "graph.branchCondition": "Branch condition",
+  "graph.branchConditionHelp":
+    "Records take this edge only when the condition matches. Leave empty for an unconditional edge. Add a condition on each outgoing edge to branch.",
+  "graph.removeEdge": "Remove edge",
+  "graph.hint": "Drag from a node's right edge to another node to connect. Click an edge to set a branch condition.",
+  "graph.modeGraph": "Graph mode",
+  "graph.modeLinear": "Linear mode",
+  "graph.switchToGraph": "Switch to graph",
+  "graph.switchToLinear": "Switch to linear",
+  "graph.convertConfirm":
+    "Convert this pipeline to a free-form graph? You can branch at any node. (Call-pipeline nodes are dropped.)",
 
   // runs list
   "runs.colReadWritten": "Read / Written",
@@ -743,6 +762,8 @@ export const ko: Messages = {
   "builder.saved": "파이프라인 v{version} 저장됨",
   "builder.operators": "오퍼레이터",
   "builder.operatorsHint": "클릭해서 추가 — 파이프라인은 소스 → 변환 → 싱크 순으로 실행됩니다.",
+  "builder.searchOperators": "오퍼레이터 검색…",
+  "builder.noOperatorMatch": "일치하는 오퍼레이터가 없습니다.",
   "builder.removeAria": "{label} 제거",
   "builder.notConfigured": "구성되지 않음",
   "builder.noConnection": "연결 없음",
@@ -814,6 +835,23 @@ export const ko: Messages = {
   "builder.flowNeedsConnection": "연결 필요",
   "builder.flowNoTransforms": "변환 없음",
   "builder.flowHint": "단계를 클릭해 설정하거나, 변환을 드래그해 순서를 바꾸세요.",
+  "builder.routeIf": "조건: {cond}",
+  "builder.callPipeline": "파이프라인 호출",
+  "builder.callPipelineDesc":
+    "성공 시 이 파이프라인들을 트리거합니다(완료 대기 안 함). 순환은 자동으로 건너뜁니다.",
+  "builder.callPipelineEmpty": "이 워크스페이스에 다른 파이프라인이 아직 없습니다.",
+  "builder.selectPipeline": "파이프라인 선택…",
+  "graph.branchCondition": "분기 조건",
+  "graph.branchConditionHelp":
+    "조건이 맞는 레코드만 이 엣지를 따라갑니다. 비우면 무조건 통과. 노드의 각 나가는 엣지에 조건을 걸어 분기하세요.",
+  "graph.removeEdge": "엣지 제거",
+  "graph.hint": "노드 오른쪽 끝에서 다른 노드로 드래그하면 연결됩니다. 엣지를 클릭해 분기 조건을 설정하세요.",
+  "graph.modeGraph": "그래프 모드",
+  "graph.modeLinear": "선형 모드",
+  "graph.switchToGraph": "그래프로 전환",
+  "graph.switchToLinear": "선형으로 전환",
+  "graph.convertConfirm":
+    "이 파이프라인을 자유 그래프로 변환할까요? 어느 노드에서나 분기할 수 있습니다. (파이프라인 호출 노드는 제거됩니다.)",
 
   "runs.colReadWritten": "읽음 / 기록",
   "runs.emptyTitle": "아직 실행이 없습니다",

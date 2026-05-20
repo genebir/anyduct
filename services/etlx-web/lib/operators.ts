@@ -15,7 +15,11 @@
 import type { ComponentType } from "react";
 import {
   CableIcon,
+  Columns3Icon,
+  CopyMinusIcon,
+  CopyPlusIcon,
   DatabaseIcon,
+  EraserIcon,
   FileTextIcon,
   FilterIcon,
   GlobeIcon,
@@ -25,11 +29,12 @@ import {
   ReplaceIcon,
   SigmaIcon,
   TerminalIcon,
+  WorkflowIcon,
   WrenchIcon,
   type LucideProps,
 } from "lucide-react";
 
-export type OperatorKind = "source" | "transform" | "sink";
+export type OperatorKind = "source" | "transform" | "sink" | "call";
 
 interface FieldBase {
   key: string;
@@ -70,6 +75,12 @@ export type FieldDef =
       // Python expression the core's sandboxed filter expects, with a raw
       // "advanced" fallback. Stores a plain string (the expression).
       kind: "filter";
+    })
+  | (FieldBase & {
+      // Picks another pipeline in the workspace (call-pipeline operator,
+      // ADR-0029). Stores the target pipeline's id; persisted via the
+      // pipeline_triggers API, not config_json.
+      kind: "pipeline";
     });
 
 export interface OperatorSpec {
@@ -318,6 +329,88 @@ const TRANSFORMS: OperatorSpec[] = [
     ],
   },
   {
+    id: "transform:select",
+    kind: "transform",
+    connectorType: "select",
+    label: "Select columns",
+    description: "Keep only the listed columns; drop the rest.",
+    icon: Columns3Icon,
+    accent: "#FBBF24",
+    fields: [
+      {
+        key: "columns",
+        label: "Columns to keep",
+        kind: "json",
+        required: true,
+        placeholder: '["id", "name"]',
+        help: "JSON array of column names to keep.",
+      },
+    ],
+  },
+  {
+    id: "transform:drop",
+    kind: "transform",
+    connectorType: "drop",
+    label: "Drop columns",
+    description: "Remove the listed columns; keep the rest.",
+    icon: EraserIcon,
+    accent: "#FBBF24",
+    fields: [
+      {
+        key: "columns",
+        label: "Columns to drop",
+        kind: "json",
+        required: true,
+        placeholder: '["secret", "_internal"]',
+        help: "JSON array of column names to remove.",
+      },
+    ],
+  },
+  {
+    id: "transform:add_constant",
+    kind: "transform",
+    connectorType: "add_constant",
+    label: "Add constant",
+    description: "Set a column to a constant value on every record.",
+    icon: CopyPlusIcon,
+    accent: "#FBBF24",
+    fields: [
+      {
+        key: "column",
+        label: "Column",
+        kind: "string",
+        required: true,
+        placeholder: "source_system",
+      },
+      {
+        key: "value",
+        label: "Value",
+        kind: "json",
+        placeholder: '"crm"  (JSON: string, number, bool, null)',
+        help: "JSON literal — string, number, boolean, or null.",
+      },
+    ],
+  },
+  {
+    id: "transform:dedupe",
+    kind: "transform",
+    connectorType: "dedupe",
+    label: "Deduplicate",
+    description: "Drop records whose key columns were already seen in this run.",
+    icon: CopyMinusIcon,
+    accent: "#FBBF24",
+    fields: [
+      {
+        key: "key_columns",
+        label: "Key columns",
+        kind: "json",
+        required: true,
+        placeholder: '["id"]',
+        help: "JSON array — records with a repeated key tuple are dropped.",
+      },
+    ],
+  },
+  {
     id: "transform:python",
     kind: "transform",
     connectorType: "python",
@@ -493,13 +586,110 @@ const SINKS: OperatorSpec[] = [
   },
 ];
 
-export const OPERATORS: OperatorSpec[] = [...SOURCES, ...TRANSFORMS, ...SINKS];
+// Conditional routing (ADR-0027): every batch sink can carry an optional
+// `when` predicate. Records route to the first sink whose condition matches;
+// sinks with no condition catch the rest. Reuses the no-code filter builder
+// since `when` is the same sandboxed Python expression as the filter transform.
+// Excluded from Kafka — stream routing isn't supported.
+const SINK_ROUTING_FIELD: FieldDef = {
+  key: "when",
+  label: "Routing condition",
+  kind: "filter",
+  help: "Optional. Only records matching this condition are written to this sink. The first matching sink wins; sinks with no condition receive everything that matched no other sink. Leave blank to receive all records.",
+};
+for (const s of SINKS) {
+  if (s.connectorType !== "kafka") {
+    s.fields = [...s.fields, SINK_ROUTING_FIELD];
+  }
+}
+
+const CALLS: OperatorSpec[] = [
+  {
+    id: "call:pipeline",
+    kind: "call",
+    label: "Call pipeline",
+    description: "On success, trigger another pipeline (fire-and-forget).",
+    icon: WorkflowIcon,
+    accent: "#A78BFA",
+    fields: [
+      {
+        key: "pipeline_id",
+        label: "Target pipeline",
+        kind: "pipeline",
+        required: true,
+        help: "Runs after this pipeline succeeds. Cycles are skipped automatically.",
+      },
+    ],
+  },
+];
+
+export const OPERATORS: OperatorSpec[] = [...SOURCES, ...TRANSFORMS, ...SINKS, ...CALLS];
+
+/** Sub-category within a kind — used to group a long palette (Airflow-style). */
+export function operatorCategory(spec: OperatorSpec): string {
+  if (spec.kind === "call") return "Orchestration";
+  if (spec.kind === "transform") {
+    switch (spec.connectorType) {
+      case "filter":
+      case "dedupe":
+        return "Rows";
+      case "python":
+        return "Code";
+      default:
+        return "Columns";
+    }
+  }
+  // source / sink — group by connector family
+  switch (spec.connectorType) {
+    case "postgres":
+    case "mysql":
+    case "sqlite":
+      return "Databases";
+    case "mongodb":
+      return "NoSQL";
+    case "s3":
+      return "Object storage";
+    case "kafka":
+      return "Streaming";
+    case "http":
+      return "HTTP / API";
+    default:
+      return "Other";
+  }
+}
 
 export const OPERATOR_GROUPS: { kind: OperatorKind; label: string; specs: OperatorSpec[] }[] = [
   { kind: "source", label: "Sources", specs: SOURCES },
   { kind: "transform", label: "Transforms", specs: TRANSFORMS },
   { kind: "sink", label: "Sinks", specs: SINKS },
+  { kind: "call", label: "Orchestration", specs: CALLS },
 ];
+
+/** Operators grouped kind → category → specs, for a collapsible palette. */
+export interface OperatorCategoryGroup {
+  category: string;
+  specs: OperatorSpec[];
+}
+export interface OperatorKindGroup {
+  kind: OperatorKind;
+  label: string;
+  categories: OperatorCategoryGroup[];
+}
+
+export const OPERATOR_KIND_GROUPS: OperatorKindGroup[] = OPERATOR_GROUPS.map((g) => {
+  const byCategory = new Map<string, OperatorSpec[]>();
+  for (const spec of g.specs) {
+    const cat = operatorCategory(spec);
+    const list = byCategory.get(cat) ?? [];
+    list.push(spec);
+    byCategory.set(cat, list);
+  }
+  return {
+    kind: g.kind,
+    label: g.label,
+    categories: [...byCategory.entries()].map(([category, specs]) => ({ category, specs })),
+  };
+});
 
 export function findOperator(id: string): OperatorSpec | undefined {
   return OPERATORS.find((op) => op.id === id);
@@ -509,10 +699,12 @@ export const OPERATOR_KIND_ACCENT: Record<OperatorKind, string> = {
   source: "#6366F1",
   transform: "#FBBF24",
   sink: "#4ADE80",
+  call: "#A78BFA",
 };
 
 export const KIND_ICON: Record<OperatorKind, ComponentType<LucideProps>> = {
   source: DatabaseIcon,
   transform: WrenchIcon,
   sink: FileTextIcon,
+  call: WorkflowIcon,
 };

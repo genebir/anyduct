@@ -106,28 +106,32 @@
    No `bg-[#…]` arbitrary values allowed; ban enforced by code review.
    ─────────────────────────────────────────────────────────────────────── */
 @theme {
-  --color-bg: rgb(var(--bg-base) / <alpha-value>);
-  --color-surface: rgb(var(--bg-surface) / <alpha-value>);
-  --color-elevated: rgb(var(--bg-elevated) / <alpha-value>);
-  --color-overlay: rgb(var(--bg-overlay) / <alpha-value>);
+  /* Tailwind v4 (CSS-first @theme) does NOT substitute the v3 `<alpha-value>`
+     placeholder — embedding it yields an invalid color that resolves to
+     transparent. Define plain colors instead; v4 derives opacity variants
+     (bg-elevated/40, …) automatically via color-mix. */
+  --color-bg: rgb(var(--bg-base));
+  --color-surface: rgb(var(--bg-surface));
+  --color-elevated: rgb(var(--bg-elevated));
+  --color-overlay: rgb(var(--bg-overlay));
 
-  --color-border-subtle: rgb(var(--border-subtle) / <alpha-value>);
-  --color-border: rgb(var(--border-default) / <alpha-value>);
-  --color-border-strong: rgb(var(--border-strong) / <alpha-value>);
+  --color-border-subtle: rgb(var(--border-subtle));
+  --color-border: rgb(var(--border-default));
+  --color-border-strong: rgb(var(--border-strong));
 
-  --color-text: rgb(var(--text-primary) / <alpha-value>);
-  --color-text-secondary: rgb(var(--text-secondary) / <alpha-value>);
-  --color-text-muted: rgb(var(--text-muted) / <alpha-value>);
-  --color-text-disabled: rgb(var(--text-disabled) / <alpha-value>);
+  --color-text: rgb(var(--text-primary));
+  --color-text-secondary: rgb(var(--text-secondary));
+  --color-text-muted: rgb(var(--text-muted));
+  --color-text-disabled: rgb(var(--text-disabled));
 
-  --color-accent: rgb(var(--accent) / <alpha-value>);
-  --color-accent-hover: rgb(var(--accent-hover) / <alpha-value>);
-  --color-accent-active: rgb(var(--accent-active) / <alpha-value>);
+  --color-accent: rgb(var(--accent));
+  --color-accent-hover: rgb(var(--accent-hover));
+  --color-accent-active: rgb(var(--accent-active));
 
-  --color-success: rgb(var(--success) / <alpha-value>);
-  --color-warning: rgb(var(--warning) / <alpha-value>);
-  --color-error: rgb(var(--error) / <alpha-value>);
-  --color-info: rgb(var(--info) / <alpha-value>);
+  --color-success: rgb(var(--success));
+  --color-warning: rgb(var(--warning));
+  --color-error: rgb(var(--error));
+  --color-info: rgb(var(--info));
 
   --radius-sm: 6px;
   --radius-md: 10px;

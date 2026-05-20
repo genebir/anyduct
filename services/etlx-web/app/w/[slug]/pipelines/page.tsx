@@ -16,7 +16,8 @@ import { ApiError, pipelinesApi, type PipelineSummary } from "@/lib/api";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import { useLocale } from "@/components/providers/locale-provider";
 import type { Messages } from "@/lib/i18n/messages";
-import { blankBuilder, serialize } from "@/lib/pipeline-config";
+import { serialize } from "@/lib/pipeline-config";
+import { PIPELINE_TEMPLATES, findTemplate } from "@/lib/pipeline-templates";
 import { cn } from "@/lib/cn";
 
 type Translate = (key: keyof Messages, vars?: Record<string, string | number>) => string;
@@ -59,7 +60,7 @@ export default function PipelinesPage() {
   const [triggering, setTriggering] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
-  const [newMode, setNewMode] = useState<"batch" | "stream">("batch");
+  const [templateId, setTemplateId] = useState("blank");
   const [submitting, setSubmitting] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<PipelineSummary | null>(
     null,
@@ -91,9 +92,10 @@ export default function PipelinesPage() {
     if (!ws || !newName.trim()) return;
     setSubmitting(true);
     try {
-      const config = serialize(blankBuilder(), {
+      const tmpl = findTemplate(templateId) ?? findTemplate("blank")!;
+      const config = serialize(tmpl.build(), {
         name: newName.trim(),
-        mode: newMode,
+        mode: tmpl.mode,
       });
       const created = await pipelinesApi.create(ws.id, {
         name: newName.trim(),
@@ -166,53 +168,70 @@ export default function PipelinesPage() {
       <main className="mx-auto w-full max-w-6xl flex-1 space-y-6 overflow-y-auto px-6 py-8">
         {creating ? (
           <Card>
-            <div className="flex flex-wrap items-end gap-3">
-              <label className="flex flex-1 flex-col gap-1.5">
-                <span className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
-                  {t("pipelines.nameLabel")}
-                </span>
-                <Input
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  placeholder={t("pipelines.namePlaceholder")}
-                />
-              </label>
-              <div className="flex flex-col gap-1.5">
-                <span className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
-                  {t("pipelines.mode")}
-                </span>
-                <div className="flex gap-1 rounded-md border border-border-subtle bg-elevated p-1">
-                  {(["batch", "stream"] as const).map((m) => (
-                    <button
-                      key={m}
-                      type="button"
-                      onClick={() => setNewMode(m)}
-                      className={cn(
-                        "rounded-sm px-3 py-1.5 text-sm transition duration-150",
-                        newMode === m
-                          ? "bg-overlay font-medium text-text"
-                          : "text-text-secondary hover:text-text",
-                      )}
-                    >
-                      {m}
-                    </button>
-                  ))}
-                </div>
+            <label className="flex flex-col gap-1.5">
+              <span className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
+                {t("pipelines.nameLabel")}
+              </span>
+              <Input
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                placeholder={t("pipelines.namePlaceholder")}
+                autoFocus
+              />
+            </label>
+
+            <div className="mt-5">
+              <span className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
+                {t("tpl.choose")}
+              </span>
+              <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {PIPELINE_TEMPLATES.map((tmpl) => (
+                  <button
+                    key={tmpl.id}
+                    type="button"
+                    onClick={() => setTemplateId(tmpl.id)}
+                    className={cn(
+                      "flex flex-col gap-1 rounded-md border p-3 text-left transition duration-150",
+                      templateId === tmpl.id
+                        ? "border-accent bg-overlay"
+                        : "border-border-subtle hover:border-border-strong hover:bg-overlay",
+                    )}
+                  >
+                    <span className="flex items-center gap-2">
+                      <span className="text-sm font-medium text-text">
+                        {t(tmpl.labelKey)}
+                      </span>
+                      {tmpl.mode === "stream" ? (
+                        <span className="rounded-sm bg-info/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-info">
+                          stream
+                        </span>
+                      ) : null}
+                    </span>
+                    <span className="text-[11px] text-text-muted">
+                      {t(tmpl.descKey)}
+                    </span>
+                  </button>
+                ))}
               </div>
-              <Button
-                variant="ghost"
-                onClick={() => setCreating(false)}
-                disabled={submitting}
-              >
-                {t("common.cancel")}
-              </Button>
-              <Button onClick={onCreate} loading={submitting}>
-                {t("pipelines.createOpen")}
-              </Button>
             </div>
-            <p className="mt-3 text-xs text-text-muted">
-              {t("pipelines.createHelp")} {t("pipelines.modeHint")}
-            </p>
+
+            <div className="mt-5 flex items-center justify-between gap-3">
+              <p className="text-xs text-text-muted">
+                {t("pipelines.createHelp")}
+              </p>
+              <div className="flex shrink-0 gap-2">
+                <Button
+                  variant="ghost"
+                  onClick={() => setCreating(false)}
+                  disabled={submitting}
+                >
+                  {t("common.cancel")}
+                </Button>
+                <Button onClick={onCreate} loading={submitting} disabled={!newName.trim()}>
+                  {t("pipelines.createOpen")}
+                </Button>
+              </div>
+            </div>
           </Card>
         ) : null}
         <Card>

@@ -120,6 +120,53 @@ xdg-open http://localhost:3000      # or just visit it
 `docker compose ... down` stops everything. Add `-v` to also drop the
 metadata DB volume.
 
+## Bundled metadata DB image (optional)
+
+By default `docker-compose.prod.yml` uses vanilla `postgres:16-alpine`,
+and the `etlx-migrate` init-job applies the schema on first boot. For
+**demos / ephemeral environments / CI** where you want the schema
+(and optionally sample data) pre-loaded, swap in the
+`etlx-postgres` image:
+
+```bash
+# 1. Build the bundled image (schema only — production-safe)
+make bundle-db
+# 2. Tell compose to use it
+export ETLX_DB_IMAGE=etlx-postgres:dev
+docker compose -f services/docker-compose.prod.yml up -d --build
+# `etlx-migrate` still runs — but on a fresh volume the schema is
+# already at head, so it's a no-op (~200ms).
+```
+
+For a one-command demo with a known login (`demo@example.com` /
+`demopass`) and a pre-created `demo` workspace:
+
+```bash
+make bundle-db-demo
+export ETLX_DB_IMAGE=etlx-postgres:demo
+docker compose -f services/docker-compose.prod.yml up -d --build
+# Visit http://localhost:3000 and log in directly — no `admin
+# create-user` step needed.
+```
+
+The bundled image uses the upstream postgres `/docker-entrypoint-initdb.d/`
+convention. Files committed under `services/etlx-postgres/init/`:
+
+* `00-schema.sql` — DDL for all 14 tables + indexes + enums.
+* `01-alembic-head.sql` — INSERT into `alembic_version` so the schema
+  is marked as already migrated.
+
+Regenerate after a new Alembic revision lands:
+
+```bash
+make seed-schema      # spins up a throwaway postgres, runs migrate,
+                      # dumps + commits the new SQL
+```
+
+**Never use the `:demo` image in production** — the password is
+committed to the repo. Use the schema-only `:dev` (or rebuild as a
+new tag) and seed the admin via `etlx admin create-user`.
+
 ## Migrations
 
 The `etlx-migrate` service runs `alembic upgrade head` once and exits;

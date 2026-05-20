@@ -45,8 +45,13 @@ x-server-build: &server-build
   image: etlx-server:prod
 
 services:
+  # Default: vanilla postgres. `etlx-migrate` will apply the schema on
+  # first boot. Swap by setting `ETLX_DB_IMAGE=etlx-postgres:dev` (or
+  # `:demo` for sample data) — that image ships with the schema already
+  # baked in via /docker-entrypoint-initdb.d, so migrate is a no-op on
+  # a fresh volume.
   metadata-db:
-    image: postgres:16-alpine
+    image: ${ETLX_DB_IMAGE:-postgres:16-alpine}
     environment:
       POSTGRES_USER: etlx
       POSTGRES_PASSWORD: etlx        # pragma: allowlist secret

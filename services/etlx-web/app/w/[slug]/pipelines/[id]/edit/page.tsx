@@ -121,6 +121,30 @@ export default function PipelineEditorPage() {
     setDirty(true);
   }, []);
 
+  // Apply a drag-reorder from the canvas: rebuild the node list as
+  // sources → transforms(in dragged order) → sinks.
+  const reorderTransforms = useCallback((orderedIds: string[]) => {
+    setState((prev) => {
+      const byId = new Map(prev.nodes.map((n) => [n.id, n]));
+      const newTransforms = orderedIds
+        .map((id) => byId.get(id))
+        .filter((n): n is BuilderNode => Boolean(n));
+      const sources = prev.nodes.filter(
+        (n) => findOperator(n.operatorId)?.kind === "source",
+      );
+      const sinks = prev.nodes.filter(
+        (n) => findOperator(n.operatorId)?.kind === "sink",
+      );
+      const existingTransforms = prev.nodes.filter(
+        (n) => findOperator(n.operatorId)?.kind === "transform",
+      );
+      // Bail if the drag order didn't cover exactly the transform set.
+      if (newTransforms.length !== existingTransforms.length) return prev;
+      return { ...prev, nodes: [...sources, ...newTransforms, ...sinks] };
+    });
+    setDirty(true);
+  }, []);
+
   const selectNode = useCallback((nodeId: string) => {
     setSelectedId(nodeId);
   }, []);
@@ -312,6 +336,7 @@ export default function PipelineEditorPage() {
               onSelect={selectNode}
               onRemove={removeOperator}
               onDeselect={() => setSelectedId(null)}
+              onReorderTransforms={reorderTransforms}
             />
           </div>
           {dryRunResult ? (

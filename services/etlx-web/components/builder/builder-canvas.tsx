@@ -7,11 +7,13 @@ import {
   MiniMap,
   ReactFlow,
   ReactFlowProvider,
+  useNodesState,
   type Edge,
   type Node,
+  type NodeMouseHandler,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { PipelineNode, type PipelineNodeData } from "./pipeline-node";
 import { findOperator } from "@/lib/operators";
 import type { BuilderNode } from "@/lib/pipeline-config";
@@ -27,28 +29,36 @@ export function BuilderCanvas({
   onSelect,
   onRemove,
   onDeselect,
+  onReorderTransforms,
 }: {
   nodes: BuilderNode[];
   selectedId: string | null;
   onSelect: (id: string) => void;
   onRemove: (id: string) => void;
   onDeselect?: () => void;
+  /** Called with the new transform id order after a drag settles. */
+  onReorderTransforms?: (orderedTransformIds: string[]) => void;
 }) {
-  const { rfNodes, rfEdges } = useMemo(() => {
+  // Slot layout derived from the canonical (kind-sorted) order. Transforms
+  // are draggable; source/sink are pinned. After a drag we recompute the
+  // transform order by x and hand it back so the parent owns the state.
+  const { layoutNodes, rfEdges } = useMemo(() => {
     const ordered = reorderNodes(nodes);
-    const rfNodes: Node<PipelineNodeData>[] = ordered.map((n, i) => {
+    const layoutNodes: Node<PipelineNodeData>[] = ordered.map((n, i) => {
       const op = findOperator(n.operatorId);
+      const isTransform = op?.kind === "transform";
       return {
         id: n.id,
         type: "pipelineNode",
         position: { x: i * (NODE_WIDTH + NODE_GAP), y: 0 },
+        draggable: isTransform,
         data: {
           operatorId: n.operatorId,
           values: n.data,
           selected: selectedId === n.id,
           onSelect,
           onRemove,
-          canRemove: op?.kind === "transform",
+          canRemove: isTransform,
         },
       };
     });
@@ -62,8 +72,31 @@ export function BuilderCanvas({
         style: { stroke: "rgb(var(--accent))", strokeWidth: 1.5 },
       });
     }
-    return { rfNodes, rfEdges };
+    return { layoutNodes, rfEdges };
   }, [nodes, selectedId, onSelect, onRemove]);
+
+  const [rfNodes, setRfNodes, onNodesChange] = useNodesState(layoutNodes);
+
+  // Re-sync to the slot layout whenever the order/selection/data changes
+  // (incl. right after a reorder snaps the dragged node into its new slot).
+  useEffect(() => {
+    setRfNodes(layoutNodes);
+  }, [layoutNodes, setRfNodes]);
+
+  const onNodeDragStop: NodeMouseHandler = () => {
+    if (!onReorderTransforms) return;
+    const ordered = reorderNodes(nodes);
+    const transformIds = new Set(
+      ordered
+        .filter((n) => findOperator(n.operatorId)?.kind === "transform")
+        .map((n) => n.id),
+    );
+    const newOrder = [...rfNodes]
+      .filter((n) => transformIds.has(n.id))
+      .sort((a, b) => a.position.x - b.position.x)
+      .map((n) => n.id);
+    onReorderTransforms(newOrder);
+  };
 
   return (
     <ReactFlowProvider>
@@ -71,10 +104,11 @@ export function BuilderCanvas({
         <ReactFlow
           nodes={rfNodes}
           edges={rfEdges}
+          onNodesChange={onNodesChange}
+          onNodeDragStop={onNodeDragStop}
           nodeTypes={NODE_TYPES}
           fitView
           fitViewOptions={{ padding: 0.25 }}
-          nodesDraggable={false}
           nodesConnectable={false}
           edgesFocusable={false}
           proOptions={{ hideAttribution: true }}

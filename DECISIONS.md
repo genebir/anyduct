@@ -924,4 +924,202 @@
 
 ---
 
+## ADR-0026: 파이프라인 fan-out — 1 source → N sinks (batch 전용, source 재읽기 방식)
+
+- **Date**: 2026-05-20
+- **Status**: Accepted
+- **Context**:
+  사용자가 "파이프라인에서 분기처리 가능하도록 추가"를 요청했고, 범위로 **fan-out(하나의 source → 여러 sink)** 을 우선 채택했다(fan-in/멀티 source DAG는 후순위). 코어 `PipelineConfig`는 엄격히 선형이었다: `source` 1 + `transforms[]` + `sink` 1. 실행기(`Pipeline._run_task`)도 task당 정확히 sink 1개를 요구. 코어를 서비스 편의로 바꾸지 않는다는 원칙(CLAUDE.md §6) 하에, 기존 단일-sink 동작을 한 바이트도 바꾸지 않으면서 다중 sink를 추가해야 했다.
+- **Decision**:
+  1. **설정 모델**: `PipelineConfig.sink: SinkConfig | None`(기존 단수형 유지) + `sinks: list[SinkConfig]` 신설. `@model_validator`로 **정확히 하나만** 지정(`sink` XOR `sinks`)을 강제. `effective_sinks()`가 둘을 단일 리스트로 정규화.
+  2. **런타임 모델**: `SinkSpec`(name/table/mode/key_columns/options) dataclass + `Task.sinks: list[SinkSpec]` 신설. `Task.sink*` 플랫 필드는 단일-sink 레거시 경로로 그대로 유지. `Task.effective_sinks()`가 플랫 필드를 1-원소 `SinkSpec` 리스트로 승격.
+  3. **실행 방식 = sink별 source 재읽기(re-read), 버퍼링 안 함**: `_run_task`가 sink마다 `source` iterator를 새로 열어 transform 체인을 재적용 후 write. **버퍼링(메모리에 전체 적재) 대신 재읽기**를 택해 무한/대용량 스트림에서도 메모리 bound 유지. `records_read`/`new_cursor`는 **첫 패스에서만** 카운트(이중 집계 방지), `cursor_to` 상한 필터링은 **매 패스** 적용. `records_written`은 sink 합산.
+  4. **단일-sink 무변경 보장**: 빌더는 sink가 1개면 기존처럼 플랫 `Task.sink*`를 채우고, 2개 이상일 때만 `Task.sinks`를 채운다. 단일 경로 런타임은 `effective_sinks()`로 1-원소 리스트를 만들어 동일 코드로 통과 → 관측 가능한 동작 동일.
+  5. **stream fan-out은 v1 범위 외**: stream sink는 offset commit 시맨틱이 있어 1→N 다중 stream sink는 commit 정책 설계가 선행돼야 한다. `build_pipeline`이 `mode=="stream" and len(sinks)>1`이면 `ConfigError`로 조기 거부. `_arun_stream_task`도 방어적으로 다중 sink면 `TaskError`.
+- **Consequences**:
+  - (+) 동일 추출+변환 결과를 여러 목적지(예: warehouse + S3 아카이브)로 한 파이프라인에서 분기. core 변경은 가산적(additive)이라 기존 사용자/테스트 영향 0(459 unit green).
+  - (+) public API(`etl_plugins.SinkSpec`, `PipelineConfig.sinks`, `Task.sinks`)로만 노출 — 서비스(Step 7~)가 내부 손대지 않고 사용.
+  - (−) **재읽기 비용**: sink가 N개면 source를 N회 읽고 transform을 N회 실행. source가 비싸거나 비결정적이면 부담. trade-off로 메모리 안전을 택함(향후 옵션으로 buffer 모드 추가 여지).
+  - (−) 트랜잭션 원자성 없음 — sink A 성공 후 sink B 실패 시 A는 이미 write됨. at-least-once/멱등 sink(upsert+key_columns) 전제. DLQ는 transform 단계만 커버.
+  - (−) stream fan-out 미지원 — Kafka→(Kafka,Kafka) 같은 케이스는 별도 ADR 필요.
+- **References**:
+  - 사용자 요청(2026-05-20): "파이프라인에서 분기처리" + 범위 선택 "Fan-out 분기부터"
+  - CLAUDE.md §6 (코어를 서비스 편의로 바꾸지 말 것 — 신규 public API + ADR로) · ADR-0024 (코어 1급 모델 확장 방향)
+
+---
+
+## ADR-0027: 조건부 라우팅 — sink별 `when` 술어 + first-match(switch) 분기
+
+- **Date**: 2026-05-20
+- **Status**: Accepted
+- **Context**:
+  사용자가 Airflow `BranchPythonOperator`처럼 **결과값에 따라 후행 작업이 분기**되는 기능을 요청했다. ADR-0026의 fan-out은 *모든* 레코드를 *모든* sink로 보낸다(tee). 여기서 필요한 건 레코드의 값에 따라 **어느 sink로 갈지 결정**되는 content-based routing이다. 이 라이브러리는 레코드 스트리밍 모델이라 Airflow의 task-level 분기보다 **레코드 단위 라우팅**이 자연스러운 대응이다.
+- **Decision**:
+  1. **sink별 선택적 `when` 술어**: `SinkConfig.when: str | None` + `SinkSpec.when`. filter transform과 동일한 샌드박스(`compile`+`eval`, `{"__builtins__": {}}`, locals `data`/`metadata`)로 평가. transform 적용 *후*의 레코드에 대해 평가(계산된 컬럼으로도 라우팅 가능).
+  2. **first-match(switch) 시맨틱**: 각 레코드는 `when`을 가진 conditional sink들을 **선언 순서대로** 평가해 **처음 truthy인 sink 하나**로만 간다. 어디에도 매칭 안 되면 `when` 없는 **default sink(들) 전부**로 간다(else 분기). 매칭도 default도 없으면 **드롭**(라우팅의 통상 동작).
+  3. **하위 호환**: 어떤 sink에도 `when`이 없으면 = 순수 fan-out(ADR-0026, 모든 sink가 모든 레코드 수신). 즉 routing은 기존 동작의 가산적 superset.
+  4. **실행은 ADR-0026의 sink별 source 재읽기 위에 얹음**: sink i의 패스에서 각 레코드의 라우팅 타깃을 계산해(첫 매칭 conditional 또는 default 집합) i에 속할 때만 write. `records_read`는 첫 패스만, 라우팅 필터는 transform 뒤 적용.
+  5. **batch 전용**: stream sink는 offset commit 시맨틱이 있어 per-record 라우팅 commit 정책이 선결돼야 함. `build_pipeline`이 `mode=="stream"`에 `when`이 하나라도 있으면 `ConfigError`. 빌드 시점에 `when` 구문도 `compile`로 검증(dry-run에서 조기 실패).
+  6. **단일 sink + `when`**: 플랫 `Task.sink*` 경로는 `when`을 못 실으므로, sink가 1개여도 `when`이 있으면 `Task.sinks` 리스트 경로 사용(드롭-필터 효과).
+- **Consequences**:
+  - (+) "고객 등급별로 다른 테이블", "이벤트 타입별 분기" 같은 라우팅을 코드 없이 표현. fan-out과 동일한 메모리-bound 재읽기 모델 재사용.
+  - (+) first-match는 "분기=한 경로 선택"이라는 직관과 BranchPythonOperator의 mutually-exclusive 선택에 부합. default 분기로 catch-all 가능.
+  - (−) **재읽기 + 술어 재평가 비용**: sink가 N개면 각 패스마다 모든 conditional 술어를 재평가(O(records×conditional×sinks)). 술어는 싸지만 비결정적 source/술어는 부담.
+  - (−) 매칭 안 된 레코드 드롭은 **메트릭 미집계**(v1) — 관측 보강은 후속. transform 단계 DLQ만 커버.
+  - (−) all-match(multicast-with-filter) 시맨틱은 채택 안 함 — 필요하면 `when`+fan-out 조합 또는 별도 옵션으로 후속 검토. stream 라우팅도 범위 외.
+- **References**:
+  - 사용자 요청(2026-05-20): "BranchPythonOperator와 같이 결과값에 따라 후행 작업이 분기"
+  - ADR-0026 (fan-out — 본 ADR이 실행 모델/`sinks` 구조를 재사용) · filter transform(`runtime/transforms.py`, 동일 샌드박스 eval)
+
+---
+
+## ADR-0028: Task-orchestration DAG — Airflow류 의존성 그래프 (단계적, P1.1 = depends_on + 위상 실행)
+
+- **Date**: 2026-05-20
+- **Status**: Accepted (P1.1 구현, P1.2~P1.4 + Phase 2 dataflow 예정)
+- **Context**:
+  사용자가 "1:1 단순 구조 말고 정말 Airflow의 DAG처럼 정밀하게" 처리되길 요청했다. 현재 코어는 사실상 **Pipeline = Task 1개**(1 source → transforms → N sinks, fan-out/조건분기는 sink 단에서만)이고, `Pipeline.tasks`는 리스트지만 task 간 **의존성 개념이 없어** 단순 순차 실행이다. "Airflow DAG처럼"은 두 가지로 갈린다: ① **Task 오케스트레이션 DAG**(task가 단위, 엣지=의존성, 데이터는 저장소 경유 — 실제 Airflow), ② **Dataflow DAG**(노드=오퍼레이터, 레코드가 엣지로 흐름, join/split — Dagster/Beam/NiFi). 사용자가 BranchPythonOperator를 언급했고 "Airflow"를 명시 → 의미상 ①에 가깝다. 사용자 선택: **단계적 — 먼저 Task DAG(①), 이후 dataflow(②)**.
+- **Decision**:
+  **Phase 1 = Task-orchestration DAG**, 4개 슬라이스로 분할:
+  - **P1.1 (본 구현)**: `Task.depends_on: list[str]`(upstream task 이름) + `Pipeline._ordered_tasks()` 위상 정렬 실행. Kahn 알고리즘, ready 집합은 **원래 리스트 순서로 안정 tie-break**(부분 순서 DAG도 예측 가능). 검증: 미존재 의존 / 중복·공백 task 이름 / 자기 의존 / 사이클 → `PipelineError`. **하위 호환**: 어떤 task도 `depends_on`이 없으면 `self.tasks` 원본 순서 그대로 반환(기존 동작 무변경). 실행은 단일 스레드 순차(병렬은 후속). batch 전용.
+  - **P1.2**: `PipelineConfig`를 다중 task(`tasks: list[TaskConfig]` + `depends_on`)로 확장하되 기존 단일 source/transforms/sink shape 하위 호환. `build_pipeline` 다중 Task Pipeline 빌드. 서버 `referenced_connection_names`가 모든 task 순회.
+  - **P1.3**: 분기(BranchPythonOperator류 — task가 후행 task 선택, 미선택 분기 skip) + per-task **trigger rule**(all_success/all_done/one_success/none_failed) + per-task RunResult 상태(success/skipped/failed/upstream_failed).
+  - **P1.4**: 빌더 UI — React Flow 자유 연결 task 노드 + 의존성 엣지 + 분기/trigger rule 설정. 기존 선형 단일-task 전제 대체.
+  **Phase 2 = Dataflow DAG**(레코드 엣지 흐름, join 버퍼링/머티리얼라이즈, 위상 스트리밍 실행)는 Phase 1 안정화 후 별도 ADR.
+- **Consequences**:
+  - (+) "B는 A 다음", 분기, 복잡한 의존 그래프 등 Airflow의 핵심 정밀도를 코어에서 표현. 기존 `Task` 추상화 재사용이라 P1.1은 가산적·하위 호환(478 unit green).
+  - (+) task 간 데이터는 저장소(테이블/객체) 경유 — 코어에 XCom류 신규 메커니즘 불필요(필요 시 후속).
+  - (−) P1.1만으로는 사용자 가치가 제한적(다중 task를 표현할 config/UI가 P1.2~P1.4에 있음) — 슬라이스 단위로만 출시 가능.
+  - (−) 순차 실행만(병렬 task 미지원) — 독립 분기 동시 실행은 후속 슬라이스.
+  - (−) Phase 1(task DAG)과 Phase 2(dataflow)는 실행 모델이 달라, 빌더 UX가 두 패러다임을 어떻게 통합/구분할지 P1.4/Phase2 진입 시 재검토 필요.
+- **References**:
+  - 사용자 요청(2026-05-20): "1:1 구조 말고 정말 Airflow DAG처럼 정밀하게" + 방향 선택 "단계적: 먼저 Task DAG, 이후 dataflow"
+  - ADR-0026/0027 (fan-out / 조건 라우팅 — sink 단 분기. 본 ADR은 task 단 분기로 상위 레이어) · ADR-0024 (코어 1급 모델 확장 — Asset/Lineage와 DAG의 관계는 Phase 2에서 합류 가능)
+
+### Addendum (2026-05-20, P1.3 구현) — branch 결정 모델 + trigger rule + 실패 격리
+
+ADR 본문이 P1.3에 남겨둔 미해결 포인트 "record-task 시스템에서 무엇이 분기를 결정하는가"를 다음으로 확정(사용자 "추천 방향으로 진행" 승인):
+
+- **branch 결정 = task 결과(outcome)에 대한 predicate**. branch task 실행 후 `BranchRule(when, to)` 목록을 순서대로 평가 — `records_read`/`records_written`/`success`를 scope에 둔 샌드박스 `eval`(filter transform/ADR-0027 라우팅과 동일 패턴, no builtins). **first-match**: 처음 truthy인 rule의 `to`(직접 후행 task 이름들)가 선택되고, `when=None`은 default/else. Airflow의 "task 1회 실행 후 분기"와 정합. 매칭 없으면 직접 후행 전부 미선택.
+- **선택 안 된 직접 후행은 skip**, 그 후손은 **trigger rule로 skip 전파**(별도 전파 로직 없이 `all_success`가 자연히 처리). branch target은 **직접 후행이어야** 함(builder가 빌드 시점 검증).
+- **trigger rule**(per-task, 기본 `all_success`): `all_success`(upstream 실패→`upstream_failed`, skip→skip), `all_done`(무조건 실행), `one_success`(≥1 성공시 실행), `none_failed`(실패 없으면 실행). 위상 순서라 평가 시점에 upstream은 모두 terminal.
+- **실패 격리**: DAG 경로(`_run_dag`)는 한 task 실패해도 **독립 task는 계속 실행**하고 마지막에 첫 에러를 raise(전체 run은 실패로 보고). per-task 상태는 `RunResult.task_states`(success/failed/skipped/upstream_failed).
+- **게이팅**: `depends_on`/`branch`/non-default `trigger_rule`이 하나도 없으면 DAG가 아니므로 기존 순차 경로(첫 실패 즉시 raise, `task_states` 미기록) 유지 — 하위 호환.
+- 미해결(후속): 병렬 task 실행, per-task retry, branch predicate에 노출할 컨텍스트 확장(현재 read/written/success만).
+
+- **추가 References**: 코어 495 unit green(P1.3 +17 DAG/branch/trigger + builder 검증). `etl_plugins.BranchRule` public export. `TaskConfig.trigger_rule`/`branch`(BranchRuleConfig).
+
+---
+
+## ADR-0029: "call pipeline" — 파이프라인 간 호출(서비스 레벨 downstream 트리거, fire-and-forget)
+
+- **Date**: 2026-05-20
+- **Status**: Accepted (v1 fire-and-forget; wait-for-completion은 후속)
+- **Context**:
+  사용자가 빌더 UI를 "한 화면에서 구성"으로 유지하길 원하고(2단계 drill-down 폐기), 복잡한 흐름은 **"다른 파이프라인을 호출하는 operator"** 로 조합하길 원했다. 즉 각 파이프라인은 단순 단일-캔버스 흐름으로 두고, 오케스트레이션은 파이프라인끼리의 호출로 emergent하게 구성. 핵심 제약: **코어는 서비스를 모른다(단방향 의존, CLAUDE.md §6)** — 코어 커넥터/태스크가 서비스의 파이프라인을 트리거할 수 없다. 따라서 "call pipeline"은 **서비스 레벨** 기능이어야 한다.
+- **Decision**:
+  1. **저장**: 신규 테이블 `pipeline_triggers(source_pipeline_id, target_pipeline_id)` — "source가 성공하면 target을 enqueue"하는 방향성 엣지. 코어 `PipelineConfig`(extra=forbid)에 넣지 않음 — config_json은 코어 record-flow 전용이고 "call pipeline"은 오케스트레이션이라 별도 메타데이터로 분리. Alembic `0003_pipeline_triggers`.
+  2. **실행 = fire-and-forget downstream 트리거**: 워커(`RunExecutor`)가 run을 성공으로 기록한 *직후 같은 트랜잭션*에서 source의 downstream target들의 current version으로 PENDING Run을 enqueue(`triggered_by_user_id=NULL`, `schedule_id=NULL`). source는 target 완료를 기다리지 않음(Airflow TriggerDagRunOperator류). 사용자 선택(2026-05-20): 먼저 fire-and-forget, 대기 옵션은 후속.
+  3. **사이클 차단**: 각 run의 `result_json.trigger_chain`이 lineage(거쳐온 pipeline_id들)를 누적. target이 chain에 이미 있으면 skip(A→B→A 무한 트리거 방지). 추가로 `_MAX_TRIGGER_CHAIN=50` 하드 캡. current version 없는 target은 skip+log.
+  4. **API**: `GET/PUT /workspaces/{ws}/pipelines/{pid}/triggers`(Viewer+/Editor+) + audit(`pipeline.triggers_set`). PUT은 전체 교체(idempotent), self-트리거 400 / workspace 밖 target 404.
+  5. **UI**: 빌더는 단일-캔버스 유지(drill-down 폐기). "downstream pipelines" 선택 패널로 노출(별도 API 저장 — config_json과 분리).
+- **Consequences**:
+  - (+) 단순 파이프라인 + 호출 조합으로 복잡한 워크플로우 구성. 코어/서비스 경계 보존(코어 무변경). 기존 runs/trigger 인프라(ADR-0021) 재사용.
+  - (+) 사이클 안전(visited-set + depth cap). fire-and-forget이라 워커 로직 단순.
+  - (−) 완료 대기/조건부 트리거(성공 외 상태) 미지원 — v1 범위 외. 실패 시 downstream 안 돎(성공 트리거만).
+  - (−) 트리거는 source 성공 트랜잭션에 묶임 — target enqueue 실패 시 source 커밋도 롤백(현재는 같은 세션). target이 많거나 DB 이슈 시 영향 가능(후속에 분리 검토).
+  - (−) 코어 task-DAG(ADR-0028)와 "call pipeline"이 둘 다 분기/조합 수단 — 역할 중복. 사용자 방향은 후자(파이프라인 간 호출)이며 task-DAG는 코어에 유지(가산적·무해)하되 UI 1차 노출은 안 함.
+- **References**:
+  - 사용자 요청(2026-05-20): "한 화면에서 구성 + Operator에서 다른 pipeline 호출" + 시맨틱 "먼저 fire-and-forget, 나중에 대기 옵션"
+  - ADR-0021(자체 PG worker queue — runs 테이블이 큐) · ADR-0028(task-DAG — 같은 분기 목적의 코어 레이어) · CLAUDE.md §6(코어→서비스 import 금지)
+
+---
+
+## ADR-0030: Dataflow DAG — 레코드 단위 그래프 실행 + 어느 노드에서나 분기 (Phase 2, tree v1)
+
+- **Date**: 2026-05-20
+- **Status**: Accepted (P2.1 코어 + P2.2 서버 구현; P2.3 빌더 UI 예정)
+- **Context**:
+  사용자가 "끝이 sink로 고정된 선형이 아니라, 자유롭게 순서를 정하고 **모든 작업에서 분기**되게" 요청했다. 기존 코어는 `source → transforms → sink(들)` 선형이고 분기는 sink 단 라우팅(ADR-0027)만 가능했다. 사용자 선택(2026-05-20): **레코드 단위 dataflow DAG** — 오퍼레이터 노드를 자유 연결하고 임의 노드에서 조건으로 레코드를 분기. (ADR-0028의 task-DAG와 달리 task가 아니라 레코드 흐름 그래프; ADR-0028 Phase 2에 해당.)
+- **Decision**:
+  1. **설정 = `graph`(nodes + edges)**, `PipelineConfig`의 세 번째 상호배타 shape(single-task / tasks / graph). `GraphNodeConfig`(id, type=source/transform/sink, 커넥터 필드 또는 nested `TransformConfig`), `GraphEdgeConfig`(from_node, to_node, 선택적 `when` predicate). edge의 `when`(filter/라우팅과 동일 샌드박스)으로 **분기**: 노드에 outgoing edge 여러 개 → 각 edge의 `when`이 통과한 레코드만 그 경로로.
+  2. **v1 = source-rooted tree**: 단일 source, 분기(fan-out)만, fan-in/join 미지원. 검증으로 강제(비-source 노드는 incoming edge 정확히 1개). → 각 sink(leaf)는 source까지 **유일 경로**.
+  3. **실행 = sink별 source 재읽기 + 경로 재생**(ADR-0026 fan-out 모델 일반화): 각 sink에 대해 source→sink 유일 경로의 transform·edge predicate를 순서대로 적용하며 source를 재읽기. records_read는 첫 sink pass에서만, records_written은 합산. `_run_graph_task`가 `_run_task`에서 `task.graph_nodes`가 있으면 디스패치.
+  4. **배치 전용**: stream graph는 거부(`ConfigError`). cursor 백필도 graph v1 미지원(`TaskError`).
+  5. **서버**: `referenced_connection_names`가 graph shape면 graph 노드의 source/sink connection 순회. config_json은 `PipelineConfig` validate/dump로 자동 round-trip. 워커는 `Pipeline.run`이 graph task를 그대로 실행.
+- **Consequences**:
+  - (+) "어느 노드에서나 조건 분기 + 자유 순서"를 레코드 단위로 표현. 기존 fan-out 재읽기 실행 모델 재사용이라 메모리 bound 유지·구현 추가가 가산적(코어 510 unit / 서버 265 db green).
+  - (+) public API(`GraphConfig`/`GraphNode`/`GraphEdge`)로만 노출. 단일-task/task-DAG 무변경(하위 호환).
+  - (−) **재읽기 비용**: sink가 N개면 source를 N회 읽고 공유 prefix transform도 N회 재실행. 비싸거나 비결정적 source엔 부담(fan-out과 동일 trade-off).
+  - (−) **fan-in/join 미지원**(tree 강제) — 두 경로 합류, 멀티 source는 후속. edge `when`은 multicast(매칭 경로 모두) 시맨틱이며 first-match 스위치는 별도.
+  - (−) cursor 백필·stream·DLQ(graph) 미지원 v1. 빌더 UI(P2.3, 자유 연결 캔버스)는 미구현 — config/API/실행만 우선.
+- **References**:
+  - 사용자 요청(2026-05-20): "자유 순서 + 모든 작업에서 분기" + 선택 "레코드 단위 dataflow DAG"
+  - ADR-0026(fan-out 재읽기 — 실행 모델 일반화의 기반) · ADR-0027(sink 라우팅 — edge `when`과 동일 샌드박스) · ADR-0028(task-DAG — 같은 분기 목적의 task 레이어; 본 ADR은 Phase 2 레코드 레이어)
+
+---
+
+## ADR-0031: TB급/분산 실행 — ExecutionBackend 추상화 + Spark/Databricks pushdown (단계적)
+
+- **Date**: 2026-05-20
+- **Status**: Accepted (P3.1 코어 abstraction 구현; P3.2~P3.5 예정)
+- **Context**:
+  사용자가 TB급/분산을 진짜 목표로 잡았다. 현재 실행 모델은 row-by-row Python `Record` 스트리밍이라 근본적으로 단일 프로세스·행 단위 — TB급에선 불가. 게다가 dataflow graph(ADR-0030)의 "sink별 source 재읽기"는 분기 시 source를 N번 읽고 공유 prefix를 N번 재계산해 대용량에 부적합. 핵심 인식: **TB급에선 바이트를 Python으로 끌어오지 않는다** — 라이브러리 역할이 "행 이동"에서 **"파이프라인 정의 → 타깃 엔진 연산으로 컴파일 → 실행 위임(pushdown/ELT)"** 으로 이동. 타깃 환경: **Spark/Databricks**(사용자 선택).
+- **Decision**:
+  1. **`ExecutionBackend` 추상화 신설** — 파이프라인(config; linear/graph)이 백엔드로 컴파일·실행된다. 백엔드 레지스트리 + `PipelineConfig.engine`(기본 `local`).
+     - **`local`**: 현재 row-streaming 실행기를 감싼다(개발·소규모). 동작 무변경.
+     - **`spark`**: DAG → Spark DataFrame 연산으로 컴파일. source→`spark.read.jdbc/parquet/...`, transform→`withColumnRenamed`/`cast`/`filter`/`select`/`drop`/`dropDuplicates`/`withColumn(lit)`, 분기(edge `when`)→`df.filter` (+공유 노드 `cache()`), sink→`df.write...`. **Spark Catalyst가 source 스캔 공유·분기 최적화·분산을 처리 → ADR-0030의 재읽기/스케일 문제 해소.**
+  2. **transform·predicate는 백엔드 중립 + 선언적**이어야 pushdown 가능. no-code 빌더의 구조화 조건(field/op/value)을 정식 표현으로 삼아 local=Python, spark=Spark SQL로 렌더. **임의 `python` transform과 raw-Python 고급식은 Spark 백엔드에서 거부(v1)** — local에서만 실행. (후속에 Spark UDF opt-in 가능, 느림.)
+  3. **connection → Spark IO 매핑** 레이어: postgres→JDBC, s3→parquet/csv 등. connection 메타데이터를 Spark read/write 옵션으로 변환.
+  4. **Spark 실행 위치**: dev=로컬 `SparkSession(local[*])`, prod=클러스터/Databricks를 config(`spark.master`/Databricks Connect)로. 워커가 in-process run 대신 Spark 잡 submit하는 통합은 후반(P3.4).
+  - **단계**: **P3.1**(본 구현) ExecutionBackend ABC + LocalBackend + `engine` 필드 + `run_config` 디스패치(동작 무변경). **P3.2** Spark 백엔드(선형, 선언적 transform, JDBC/parquet, 로컬 SparkSession, `pyspark` optional extra). **P3.3** Spark 분기/graph(터미널별 filter + cache). **P3.4** 클러스터/Databricks 잡 submit + 서비스/워커 통합. **P3.5** UI(엔진 선택 + pushdown 불가 노드 표시).
+- **Consequences**:
+  - (+) 라이브러리가 "정의·컴파일·오케스트레이션"으로 포지셔닝(ELT). 대용량은 Spark가, 소규모·개발은 local이. 같은 파이프라인 정의가 백엔드만 바꿔 양쪽에서.
+  - (+) Spark 백엔드는 재읽기·분기·분산을 엔진이 해결 → ADR-0026/0030의 trade-off 소멸(대용량 경로).
+  - (−) **대형 다단계 작업**(몇 주). pyspark 의존(optional extra) + Spark 환경 테스트 필요(dev는 `local[*]`).
+  - (−) **임의 Python transform은 pushdown 불가** — 선언적 transform만 Spark. 표현력 제약(또는 느린 UDF).
+  - (−) connection→Spark IO 매핑을 커넥터 종류별로 새로 작성. 모든 커넥터가 Spark 네이티브 IO를 갖진 않음(우선 JDBC/parquet/csv).
+  - (−) `local`/`spark` 두 실행 경로 유지 부담 — 중립 표현으로 동작 일치를 보장해야 함(contract test 대상).
+- **References**:
+  - 사용자 요청(2026-05-20): "TB급/분산이 진짜 목표 — 다시 잡자" + 타깃 "Spark/Databricks"
+  - ADR-0026(fan-out 재읽기)·ADR-0030(dataflow graph — 재읽기 한계가 본 ADR의 동기) · CLAUDE.md §2(orchestrator/backend-agnostic 원칙과 정합 — 실행 백엔드 다변화)
+
+---
+
+## ADR-0032: Spark 백엔드 — 운영·배포·분산 실행 설계 (thin worker + 외부 클러스터 잡 제출)
+
+- **Date**: 2026-05-20
+- **Status**: Accepted (설계 확정; 구현은 Spark 환경 필요 — P3.2~P3.4)
+- **Context**:
+  ADR-0031에서 Spark/Databricks 백엔드 방향을 잡았다. 사용자가 "항상 운영·배포를 고려, 분산작업 시 어떻게 해야 할지도 설계"를 명시했다. Spark 백엔드는 "DataFrame 컴파일"만이 아니라 **프로덕션에서 어떻게 제출·실행·스케일·실패·관측·배포되는지**가 본질이다. (현 개발 환경엔 Java/pyspark가 없어 실행 검증 불가 — 설계를 먼저 못박는다.)
+- **Decision**:
+  1. **토폴로지 = thin worker + 외부 클러스터 잡 제출(권장)**. etlx 워커는 Spark를 in-process로 돌리지 않는다(프로덕션). 워커는 run을 claim → **Spark 잡을 외부 클러스터/Databricks에 제출 → 상태 폴링(heartbeat 유지) → 종료 상태/카운터/로그를 run에 기록**. 워커는 가볍게 유지되고 Spark 리소스는 독립 스케일. 기존 PG worker-queue 모델(ADR-0021)과 정합 — run terminal writer는 워커 단일.
+     - 대안(거부): fat worker가 SparkSession을 들고 클러스터 driver 노릇 → 워커 수명이 잡에 묶이고 무거움. **dev/소규모만 in-process `local[*]` 허용.**
+  2. **제출 모드(submission mode)** — config로 선택:
+     - `local` (in-process `SparkSession(local[*])`): dev/CI.
+     - `spark-submit` (`--master yarn|k8s://…|spark://…`): 표준 클러스터, 잡당 driver.
+     - `databricks` (Databricks Jobs API / SDK): 매니지드. 로컬 Spark 불필요.
+     - (k8s) `spark-submit --master k8s://`: driver/executor 파드.
+  3. **제출 단위 = Spark entrypoint + 직렬화된 파이프라인**. 워커가 파이프라인 config(graph/linear) + connection config를 스테이징(객체 스토리지/컨피그)하고, 공용 entrypoint 모듈(`etlx_spark_job`)을 제출. driver가 그 안에서 DAG→DataFrame 컴파일·실행. 코드/엔진 분리.
+  4. **분산 시크릿** — 평문 인자/Spark conf로 절대 안 보냄. **driver가 런타임에 SecretBackend(Vault/AWS SM/GCP SM)에서 재해석**(ADR-0023/Step 7.4 재사용). 클러스터엔 시크릿 backend 접근 권한(IAM/role)만 부여. Databricks는 Databricks Secrets 연동.
+  5. **분산 병렬성 = 파티셔닝**. JDBC source는 `partitionColumn`/`numPartitions`/`lowerBound`/`upperBound` 없이는 단일 파티션(병렬성 0) — source/connection config에 파티셔닝 옵션 노출. object storage(parquet)는 자연 병렬. 셔플/조인은 Spark가 처리.
+  6. **멱등성·재시도(분산 실패)**. Spark 잡은 부분 write 후 실패 가능 → sink는 멱등이어야 함: `overwrite`=스테이징 테이블/경로 write 후 **atomic swap(rename/`INSERT OVERWRITE`)**, `upsert`=MERGE, `append`=at-least-once(dedupe key 권장). 기존 retry(ADR-0021 `add_retry`)가 잡 재제출로 매핑.
+  7. **관측** — driver가 구조화 로그 + 최종 카운터(records read/written via DataFrame count/accumulator)를 run_logs/run_metrics로 전송, Spark UI/잡 링크를 `result_json`에 보관. 폴링 중 heartbeat 갱신(ZombieReaper와 정합, ADR 9.3b).
+  8. **배포·이미지·드라이버 JAR**:
+     - Databricks 모드: 워커 이미지에 **Databricks SDK만**(로컬 Spark 불필요).
+     - spark-submit/k8s 모드: 잡 이미지(driver/executor)에 Spark + 우리 라이브러리 + **커넥터별 JDBC 드라이버 JAR**(postgres/mysql 등 — Spark classpath에 필수, 운영 문서화 대상). 워커 이미지엔 spark-submit 클라이언트.
+     - 우선 지원 IO: JDBC(rdbms) + parquet/csv(object storage). Kafka/Mongo 등은 후속.
+  9. **config 표면** — workspace/pipeline 단위 "Spark 실행 프로파일": master/submission mode, 리소스(executors/메모리/cores), JDBC 파티셔닝 기본값, 스테이징 위치. 클러스터 접근 시크릿은 SecretBackend ref.
+- **Consequences**:
+  - (+) 워커는 가볍고, 컴퓨트는 클러스터가 스케일 — TB급 분산을 엔진에 위임. 기존 worker-queue/secret/retry/관측 인프라 재사용.
+  - (+) 제출 모드 추상화로 dev(`local[*]`)→prod(Databricks/k8s) 같은 코드.
+  - (−) **운영 표면 증가**: 클러스터/Databricks 프로비저닝, JDBC JAR 관리, 스테이징 스토리지, IAM/시크릿 접근. 문서·런북 필요.
+  - (−) **현 dev 환경(Java/pyspark 없음)에서 구현 검증 불가** — `local[*]` 테스트조차 JVM 필요. 구현은 Spark 환경(또는 CI에 Java+pyspark)에서 진행/검증해야 함.
+  - (−) at-least-once append·스테이징 swap 등 sink별 멱등 전략을 커넥터마다 정의해야 함.
+- **References**:
+  - 사용자 요청(2026-05-20): "항상 운영·배포 고려 / 분산작업 시 어떻게 해야 할지 고려"
+  - ADR-0031(ExecutionBackend + Spark 방향) · ADR-0021(PG worker queue — 잡 제출/추적 모델의 베이스) · ADR-0023/Step 7.4(SecretBackend — driver 런타임 재해석) · 9.3b(heartbeat/ZombieReaper — 폴링 정합)
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

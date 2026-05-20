@@ -132,6 +132,315 @@ def test_build_pipeline_missing_sink_raises() -> None:
         build_pipeline(pc, {"s": InMemoryBatchSource()})
 
 
+# ---------- fan-out (ADR-0026) ----------
+
+
+def test_pipeline_config_rejects_both_sink_and_sinks() -> None:
+    with pytest.raises(ValueError, match="not both"):
+        PipelineConfig.model_validate(
+            {
+                "name": "p",
+                "source": {"connection": "s"},
+                "sink": {"connection": "k"},
+                "sinks": [{"connection": "k2"}],
+            }
+        )
+
+
+def test_pipeline_config_rejects_no_sink() -> None:
+    with pytest.raises(ValueError, match="needs a 'sink'"):
+        PipelineConfig.model_validate({"name": "p", "source": {"connection": "s"}})
+
+
+def test_build_pipeline_fanout_populates_sinks() -> None:
+    pc = PipelineConfig.model_validate(
+        {
+            "name": "p",
+            "source": {"connection": "s"},
+            "sinks": [
+                {"connection": "k1", "table": "T1"},
+                {"connection": "k2", "table": "T2", "mode": "upsert", "key_columns": ["id"]},
+            ],
+        }
+    )
+    pipeline, _ = build_pipeline(
+        pc, {"s": InMemoryBatchSource(), "k1": InMemoryBatchSink(), "k2": InMemoryBatchSink()}
+    )
+    task = pipeline.tasks[0]
+    assert task.sink is None
+    assert [s.name for s in task.sinks] == ["k1", "k2"]
+    assert task.sinks[1].mode == "upsert"
+    assert task.sinks[1].key_columns == ["id"]
+
+
+def test_build_pipeline_fanout_missing_one_sink_raises() -> None:
+    pc = PipelineConfig.model_validate(
+        {
+            "name": "p",
+            "source": {"connection": "s"},
+            "sinks": [{"connection": "k1"}, {"connection": "k2"}],
+        }
+    )
+    with pytest.raises(ConfigError, match="k2"):
+        build_pipeline(pc, {"s": InMemoryBatchSource(), "k1": InMemoryBatchSink()})
+
+
+def test_build_pipeline_stream_fanout_rejected() -> None:
+    pc = PipelineConfig.model_validate(
+        {
+            "name": "p",
+            "mode": "stream",
+            "source": {"connection": "s"},
+            "sinks": [{"connection": "k1"}, {"connection": "k2"}],
+        }
+    )
+    with pytest.raises(ConfigError, match="not supported in stream mode"):
+        build_pipeline(
+            pc, {"s": InMemoryBatchSource(), "k1": InMemoryBatchSink(), "k2": InMemoryBatchSink()}
+        )
+
+
+# ---------- conditional routing (ADR-0027) ----------
+
+
+def test_build_pipeline_routing_when_uses_sinks_list() -> None:
+    pc = PipelineConfig.model_validate(
+        {
+            "name": "p",
+            "source": {"connection": "s"},
+            "sinks": [
+                {"connection": "k1", "when": "data['x'] > 0"},
+                {"connection": "k2"},
+            ],
+        }
+    )
+    pipeline, _ = build_pipeline(
+        pc, {"s": InMemoryBatchSource(), "k1": InMemoryBatchSink(), "k2": InMemoryBatchSink()}
+    )
+    task = pipeline.tasks[0]
+    assert [s.when for s in task.sinks] == ["data['x'] > 0", None]
+    # `when` is not forwarded to the connector write() options.
+    assert "when" not in task.sinks[0].options
+
+
+def test_build_pipeline_single_conditional_sink_uses_sinks_list() -> None:
+    """A lone sink with a `when` can't use the flat path (it has no `when`)."""
+    pc = PipelineConfig.model_validate(
+        {
+            "name": "p",
+            "source": {"connection": "s"},
+            "sink": {"connection": "k", "when": "data['ok']"},
+        }
+    )
+    pipeline, _ = build_pipeline(pc, {"s": InMemoryBatchSource(), "k": InMemoryBatchSink()})
+    task = pipeline.tasks[0]
+    assert task.sink is None
+    assert [s.when for s in task.sinks] == ["data['ok']"]
+
+
+def test_build_pipeline_invalid_when_raises() -> None:
+    pc = PipelineConfig.model_validate(
+        {
+            "name": "p",
+            "source": {"connection": "s"},
+            "sink": {"connection": "k", "when": "data["},
+        }
+    )
+    with pytest.raises(ConfigError, match="invalid routing 'when'"):
+        build_pipeline(pc, {"s": InMemoryBatchSource(), "k": InMemoryBatchSink()})
+
+
+def test_build_pipeline_stream_when_rejected() -> None:
+    pc = PipelineConfig.model_validate(
+        {
+            "name": "p",
+            "mode": "stream",
+            "source": {"connection": "s"},
+            "sink": {"connection": "k", "when": "data['x']"},
+        }
+    )
+    with pytest.raises(ConfigError, match="conditional sink routing"):
+        build_pipeline(pc, {"s": InMemoryBatchSource(), "k": InMemoryBatchSink()})
+
+
+# ---------- Task-orchestration DAG (ADR-0028) ----------
+
+
+def _dag_config() -> PipelineConfig:
+    return PipelineConfig.model_validate(
+        {
+            "name": "dag",
+            "tasks": [
+                {
+                    "name": "load",
+                    "source": {"connection": "s"},
+                    "sink": {"connection": "k", "table": "t"},
+                    "depends_on": ["extract"],
+                },
+                {
+                    "name": "extract",
+                    "source": {"connection": "s"},
+                    "sink": {"connection": "k", "table": "raw"},
+                },
+            ],
+        }
+    )
+
+
+def test_build_pipeline_dag_orders_tasks() -> None:
+    pc = _dag_config()
+    pipeline, _ = build_pipeline(pc, {"s": InMemoryBatchSource(), "k": InMemoryBatchSink()})
+    assert len(pipeline.tasks) == 2
+    # _ordered_tasks resolves the dependency: extract before load.
+    assert [t.name for t in pipeline._ordered_tasks()] == ["extract", "load"]
+
+
+def test_build_pipeline_dag_missing_dependency_raises() -> None:
+    pc = PipelineConfig.model_validate(
+        {
+            "name": "dag",
+            "tasks": [
+                {
+                    "name": "a",
+                    "source": {"connection": "s"},
+                    "sink": {"connection": "k"},
+                    "depends_on": ["ghost"],
+                }
+            ],
+        }
+    )
+    with pytest.raises(ConfigError, match="unknown task 'ghost'"):
+        build_pipeline(pc, {"s": InMemoryBatchSource(), "k": InMemoryBatchSink()})
+
+
+def test_build_pipeline_dag_cycle_raises() -> None:
+    pc = PipelineConfig.model_validate(
+        {
+            "name": "dag",
+            "tasks": [
+                {
+                    "name": "a",
+                    "source": {"connection": "s"},
+                    "sink": {"connection": "k"},
+                    "depends_on": ["b"],
+                },
+                {
+                    "name": "b",
+                    "source": {"connection": "s"},
+                    "sink": {"connection": "k"},
+                    "depends_on": ["a"],
+                },
+            ],
+        }
+    )
+    with pytest.raises(Exception, match="cycle"):
+        build_pipeline(pc, {"s": InMemoryBatchSource(), "k": InMemoryBatchSink()})
+
+
+def test_pipeline_config_rejects_both_single_and_tasks() -> None:
+    with pytest.raises(ValueError, match="exactly one of"):
+        PipelineConfig.model_validate(
+            {
+                "name": "x",
+                "source": {"connection": "s"},
+                "sink": {"connection": "k"},
+                "tasks": [
+                    {"name": "t", "source": {"connection": "s"}, "sink": {"connection": "k"}}
+                ],
+            }
+        )
+
+
+def test_pipeline_config_rejects_neither_source_nor_tasks() -> None:
+    with pytest.raises(ValueError, match="needs a 'source'"):
+        PipelineConfig.model_validate({"name": "x"})
+
+
+def test_build_pipeline_stream_multitask_rejected() -> None:
+    pc = PipelineConfig.model_validate(
+        {
+            "name": "dag",
+            "mode": "stream",
+            "tasks": [
+                {"name": "a", "source": {"connection": "s"}, "sink": {"connection": "k"}},
+                {"name": "b", "source": {"connection": "s"}, "sink": {"connection": "k"}},
+            ],
+        }
+    )
+    with pytest.raises(ConfigError, match="multi-task DAGs are not supported in stream"):
+        build_pipeline(pc, {"s": InMemoryBatchSource(), "k": InMemoryBatchSink()})
+
+
+def test_build_pipeline_branch_maps_rules() -> None:
+    pc = PipelineConfig.model_validate(
+        {
+            "name": "dag",
+            "tasks": [
+                {
+                    "name": "branch",
+                    "source": {"connection": "s"},
+                    "sink": {"connection": "k"},
+                    "branch": [
+                        {"when": "records_written > 0", "to": ["big"]},
+                        {"when": None, "to": ["small"]},
+                    ],
+                },
+                {
+                    "name": "big",
+                    "source": {"connection": "s"},
+                    "sink": {"connection": "k"},
+                    "depends_on": ["branch"],
+                },
+                {
+                    "name": "small",
+                    "source": {"connection": "s"},
+                    "sink": {"connection": "k"},
+                    "depends_on": ["branch"],
+                },
+            ],
+        }
+    )
+    pipeline, _ = build_pipeline(pc, {"s": InMemoryBatchSource(), "k": InMemoryBatchSink()})
+    branch_task = next(t for t in pipeline.tasks if t.name == "branch")
+    assert [b.to for b in branch_task.branch] == [["big"], ["small"]]
+
+
+def test_build_pipeline_branch_target_not_downstream_raises() -> None:
+    pc = PipelineConfig.model_validate(
+        {
+            "name": "dag",
+            "tasks": [
+                {
+                    "name": "branch",
+                    "source": {"connection": "s"},
+                    "sink": {"connection": "k"},
+                    "branch": [{"when": None, "to": ["orphan"]}],
+                },
+                {"name": "orphan", "source": {"connection": "s"}, "sink": {"connection": "k"}},
+            ],
+        }
+    )
+    with pytest.raises(ConfigError, match="not a direct downstream"):
+        build_pipeline(pc, {"s": InMemoryBatchSource(), "k": InMemoryBatchSink()})
+
+
+def test_task_config_rejects_unknown_trigger_rule() -> None:
+    with pytest.raises(ValueError, match="unknown trigger_rule"):
+        PipelineConfig.model_validate(
+            {
+                "name": "dag",
+                "tasks": [
+                    {
+                        "name": "a",
+                        "source": {"connection": "s"},
+                        "sink": {"connection": "k"},
+                        "trigger_rule": "bogus",
+                    }
+                ],
+            }
+        )
+
+
 # ---------- build_pipeline_from_yaml ----------
 
 

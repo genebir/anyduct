@@ -11,6 +11,7 @@ import contextlib
 import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
+from types import CodeType
 from typing import Any
 
 from etl_plugins.config.models import DlqConfig, RetryConfig
@@ -38,8 +39,77 @@ from etl_plugins.utils.retry import retryable
 TransformFn = Callable[[Record], Record | None]
 """Transform: takes a Record, returns the (possibly modified) Record, or None to drop it."""
 
+# Task-orchestration DAG task states (ADR-0028).
+TASK_SUCCESS = "success"
+TASK_FAILED = "failed"
+TASK_SKIPPED = "skipped"
+TASK_UPSTREAM_FAILED = "upstream_failed"
+
+# Per-task trigger rules — when a task runs given its upstream states.
+TRIGGER_RULES = frozenset({"all_success", "all_done", "one_success", "none_failed"})
+DEFAULT_TRIGGER_RULE = "all_success"
+
 Hook = Callable[..., None]
 """Pipeline hook — receives positional args specific to the event."""
+
+
+@dataclass
+class SinkSpec:
+    """One fan-out sink target (ADR-0026).
+
+    ``Task.sinks`` holds these for one-source → many-sink pipelines. The legacy
+    flat ``Task.sink*`` fields model the single-sink case and stay the default.
+    """
+
+    name: str
+    table: str | None = None
+    mode: str = "append"
+    key_columns: list[str] | None = None
+    options: dict[str, Any] = field(default_factory=dict)
+    # Conditional routing predicate (ADR-0027). Sandboxed Python expression
+    # evaluated per (transformed) record; ``None`` means this is a default sink.
+    when: str | None = None
+
+
+@dataclass
+class GraphNode:
+    """One node in a dataflow graph (ADR-0030)."""
+
+    id: str
+    kind: str  # source | transform | sink
+    # source
+    source_name: str | None = None
+    query: str | None = None
+    source_options: dict[str, Any] = field(default_factory=dict)
+    # transform
+    transform_fn: TransformFn | None = None
+    # sink
+    sink: SinkSpec | None = None
+
+
+@dataclass
+class GraphEdge:
+    """A directed edge ``from_id → to_id`` with an optional ``when`` predicate."""
+
+    from_id: str
+    to_id: str
+    when: str | None = None
+
+
+@dataclass
+class BranchRule:
+    """One branch rule (ADR-0028, BranchPythonOperator analog).
+
+    After a branch task runs, rules are evaluated in order against the task's
+    outcome (``records_read`` / ``records_written`` / ``success`` in scope, no
+    builtins). The first rule whose ``when`` is truthy selects ``to`` (direct
+    downstream task names); a ``when`` of ``None`` is the default/else. Direct
+    downstream tasks not selected are skipped, and the skip propagates via
+    trigger rules.
+    """
+
+    when: str | None
+    to: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -60,6 +130,39 @@ class Task:
     sink_mode: str = "append"
     sink_key_columns: list[str] | None = None
     sink_options: dict[str, Any] = field(default_factory=dict)
+    # Fan-out targets (ADR-0026). When non-empty these take precedence over the
+    # flat ``sink*`` fields and the source is re-read once per sink.
+    sinks: list[SinkSpec] = field(default_factory=list)
+    # Task-orchestration DAG (ADR-0028). Names of tasks that must complete
+    # before this one runs. Empty ⇒ a root task (no upstream). When any task in
+    # a pipeline declares ``depends_on``, every task must have a unique ``name``.
+    depends_on: list[str] = field(default_factory=list)
+    # When this task runs given its upstream states. See ``TRIGGER_RULES``.
+    trigger_rule: str = DEFAULT_TRIGGER_RULE
+    # Branch selection rules (ADR-0028). Non-empty ⇒ this is a branch task that
+    # chooses which direct downstream tasks run; the rest are skipped.
+    branch: list[BranchRule] = field(default_factory=list)
+    # Dataflow graph (ADR-0030). When ``graph_nodes`` is non-empty the task runs
+    # as an operator graph (records flow along edges, branching per-edge ``when``)
+    # instead of the flat source→transforms→sinks path.
+    graph_nodes: list[GraphNode] = field(default_factory=list)
+    graph_edges: list[GraphEdge] = field(default_factory=list)
+
+    def effective_sinks(self) -> list[SinkSpec]:
+        """Normalised sink list — the flat ``sink`` becomes a one-element list."""
+        if self.sinks:
+            return self.sinks
+        if self.sink is None:
+            return []
+        return [
+            SinkSpec(
+                name=self.sink,
+                table=self.sink_table,
+                mode=self.sink_mode,
+                key_columns=self.sink_key_columns,
+                options=self.sink_options,
+            )
+        ]
 
     @classmethod
     def extract(
@@ -116,6 +219,9 @@ class RunResult:
     # emitted. Callers persist this back into their CursorState for the next
     # resume.
     new_cursor: CursorValue = None
+    # Per-task terminal state (ADR-0028). Empty for non-DAG runs; otherwise maps
+    # task name → success / failed / skipped / upstream_failed.
+    task_states: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -142,6 +248,60 @@ class Pipeline:
         """Register a hook. Events: pre_run, post_run, on_error, on_task_start, on_task_end."""
         self._hooks.setdefault(event, []).append(hook)
         return self
+
+    def _ordered_tasks(self) -> list[Task]:
+        """Tasks in dependency (topological) order — Task-orchestration DAG (ADR-0028).
+
+        Backward compatible: when no task declares ``depends_on``, the original
+        list order is returned unchanged. Otherwise a stable Kahn's-algorithm
+        sort runs (ties broken by original list position, so a partially-ordered
+        DAG still reads predictably). Raises :class:`PipelineError` on a missing
+        dependency reference, a duplicate/blank task name, or a cycle.
+        """
+        if not any(t.depends_on for t in self.tasks):
+            return self.tasks
+
+        by_name: dict[str, Task] = {}
+        order: dict[str, int] = {}  # original index, for stable tie-breaking
+        for i, t in enumerate(self.tasks):
+            if not t.name:
+                raise PipelineError(
+                    "every task needs a non-empty 'name' when 'depends_on' is used "
+                    f"(offending task: {t!r})"
+                )
+            if t.name in by_name:
+                raise PipelineError(f"duplicate task name in DAG: {t.name!r}")
+            by_name[t.name] = t
+            order[t.name] = i
+
+        indegree: dict[str, int] = dict.fromkeys(by_name, 0)
+        dependents: dict[str, list[str]] = {name: [] for name in by_name}
+        for name, t in by_name.items():
+            for dep in t.depends_on:
+                if dep not in by_name:
+                    raise PipelineError(f"task {name!r} depends on unknown task {dep!r}")
+                if dep == name:
+                    raise PipelineError(f"task {name!r} depends on itself")
+                indegree[name] += 1
+                dependents[dep].append(name)
+
+        ready = sorted((n for n, d in indegree.items() if d == 0), key=lambda n: order[n])
+        ordered_names: list[str] = []
+        while ready:
+            name = ready.pop(0)
+            ordered_names.append(name)
+            newly_ready: list[str] = []
+            for child in dependents[name]:
+                indegree[child] -= 1
+                if indegree[child] == 0:
+                    newly_ready.append(child)
+            if newly_ready:
+                ready = sorted([*ready, *newly_ready], key=lambda n: order[n])
+
+        if len(ordered_names) != len(by_name):
+            remaining = sorted(set(by_name) - set(ordered_names))
+            raise PipelineError(f"dependency cycle detected among tasks: {remaining}")
+        return [by_name[n] for n in ordered_names]
 
     def run(
         self,
@@ -201,42 +361,36 @@ class Pipeline:
         )
         self._fire("pre_run", ctx)
         try:
-            for task in self.tasks:
-                if cursored and not task.cursor_column:
-                    raise TaskError(
-                        f"Task {task.name or task.source!r}: cursor_column is required "
-                        "when Pipeline.run is called with cursor_from/cursor_to."
-                    )
-                self._fire("on_task_start", ctx, task)
-                task_span = tracer.start_span(
-                    "pipeline.task",
-                    attributes={
-                        "pipeline": self.name,
-                        "task": task.name or task.source or "unknown",
-                        "source": task.source or "",
-                        "sink": task.sink or "",
-                    },
+            ordered = self._ordered_tasks()
+            if self._is_dag():
+                self._run_dag(
+                    ordered,
+                    conns,
+                    cursor_from,
+                    cursor_to,
+                    cursored=cursored,
+                    ctx=ctx,
+                    result=result,
+                    metrics=metrics,
+                    tracer=tracer,
+                    attrs=attrs,
+                    task_runner=task_runner,
                 )
-                try:
-                    read_count, write_count, task_max = task_runner(
-                        task, conns, cursor_from, cursor_to
+            else:
+                for task in ordered:
+                    self._execute_task(
+                        task,
+                        conns,
+                        cursor_from,
+                        cursor_to,
+                        cursored=cursored,
+                        ctx=ctx,
+                        result=result,
+                        metrics=metrics,
+                        tracer=tracer,
+                        attrs=attrs,
+                        task_runner=task_runner,
                     )
-                    task_span.set_attribute("records_read", read_count)
-                    task_span.set_attribute("records_written", write_count)
-                except Exception as exc:
-                    task_span.record_exception(exc)
-                    raise
-                finally:
-                    task_span.end()
-                result.records_read += read_count
-                result.records_written += write_count
-                if task_max is not None and (
-                    result.new_cursor is None or task_max > result.new_cursor  # type: ignore[operator]
-                ):
-                    result.new_cursor = task_max
-                metrics.counter(RECORDS_READ_TOTAL).add(read_count, attrs)
-                metrics.counter(RECORDS_WRITTEN_TOTAL).add(write_count, attrs)
-                self._fire("on_task_end", ctx, task, write_count)
             result.success = True
             run_span.set_attribute("success", True)
             run_span.set_attribute("records_read_total", result.records_read)
@@ -257,6 +411,310 @@ class Pipeline:
 
         return result
 
+    def _is_dag(self) -> bool:
+        """True if this pipeline uses any Task-DAG feature (ADR-0028).
+
+        Plain multi-task pipelines with no dependencies / branches / custom
+        trigger rules keep the simple sequential semantics (raise on first
+        failure) for backward compatibility.
+        """
+        return any(
+            t.depends_on or t.branch or t.trigger_rule != DEFAULT_TRIGGER_RULE for t in self.tasks
+        )
+
+    def _execute_task(
+        self,
+        task: Task,
+        conns: dict[str, Connector],
+        cursor_from: CursorValue,
+        cursor_to: CursorValue,
+        *,
+        cursored: bool,
+        ctx: Context,
+        result: RunResult,
+        metrics: Any,
+        tracer: Any,
+        attrs: dict[str, Any],
+        task_runner: Callable[..., tuple[int, int, CursorValue]],
+    ) -> tuple[int, int]:
+        """Run one task fully: span + runner + metric/result accumulation + hooks."""
+        if cursored and not task.cursor_column:
+            raise TaskError(
+                f"Task {task.name or task.source!r}: cursor_column is required "
+                "when Pipeline.run is called with cursor_from/cursor_to."
+            )
+        self._fire("on_task_start", ctx, task)
+        task_span = tracer.start_span(
+            "pipeline.task",
+            attributes={
+                "pipeline": self.name,
+                "task": task.name or task.source or "unknown",
+                "source": task.source or "",
+                "sink": ",".join(s.name for s in task.effective_sinks()),
+            },
+        )
+        try:
+            read_count, write_count, task_max = task_runner(task, conns, cursor_from, cursor_to)
+            task_span.set_attribute("records_read", read_count)
+            task_span.set_attribute("records_written", write_count)
+        except Exception as exc:
+            task_span.record_exception(exc)
+            raise
+        finally:
+            task_span.end()
+        result.records_read += read_count
+        result.records_written += write_count
+        if task_max is not None and (
+            result.new_cursor is None or task_max > result.new_cursor  # type: ignore[operator]
+        ):
+            result.new_cursor = task_max
+        metrics.counter(RECORDS_READ_TOTAL).add(read_count, attrs)
+        metrics.counter(RECORDS_WRITTEN_TOTAL).add(write_count, attrs)
+        self._fire("on_task_end", ctx, task, write_count)
+        return read_count, write_count
+
+    def _run_dag(
+        self,
+        ordered: list[Task],
+        conns: dict[str, Connector],
+        cursor_from: CursorValue,
+        cursor_to: CursorValue,
+        *,
+        cursored: bool,
+        ctx: Context,
+        result: RunResult,
+        metrics: Any,
+        tracer: Any,
+        attrs: dict[str, Any],
+        task_runner: Callable[..., tuple[int, int, CursorValue]],
+    ) -> None:
+        """Execute a Task-orchestration DAG (ADR-0028).
+
+        Sequential, in topological order. Tracks per-task state, applies trigger
+        rules + branch selection (with skip propagation), and — unlike the plain
+        path — keeps running independent tasks after one fails, raising the first
+        error at the end so the whole run is reported failed.
+        """
+        states: dict[str, str] = {}
+        deselected: set[str] = set()  # direct downstreams a branch did not pick
+        first_error: BaseException | None = None
+        # name → tasks that depend on it (direct downstreams), for branch skip.
+        downstream: dict[str, set[str]] = {t.name: set() for t in ordered if t.name}
+        for t in ordered:
+            for dep in t.depends_on:
+                if t.name:
+                    downstream.setdefault(dep, set()).add(t.name)
+
+        for task in ordered:
+            name = task.name or ""
+            if name in deselected:
+                states[name] = TASK_SKIPPED
+                continue
+            decision = self._eval_trigger_rule(task, states)
+            if decision == TASK_SKIPPED:
+                states[name] = TASK_SKIPPED
+                continue
+            if decision == TASK_UPSTREAM_FAILED:
+                states[name] = TASK_UPSTREAM_FAILED
+                continue
+            try:
+                read, written = self._execute_task(
+                    task,
+                    conns,
+                    cursor_from,
+                    cursor_to,
+                    cursored=cursored,
+                    ctx=ctx,
+                    result=result,
+                    metrics=metrics,
+                    tracer=tracer,
+                    attrs=attrs,
+                    task_runner=task_runner,
+                )
+                states[name] = TASK_SUCCESS
+                if task.branch:
+                    selected = set(self._branch_select(task, read=read, written=written))
+                    for child in downstream.get(name, set()) - selected:
+                        deselected.add(child)
+            except Exception as exc:
+                states[name] = TASK_FAILED
+                metrics.counter(ERRORS_TOTAL).add(1, {**attrs, "phase": "run"})
+                if first_error is None:
+                    first_error = exc
+
+        result.task_states = states
+        if first_error is not None:
+            raise first_error
+
+    @staticmethod
+    def _eval_trigger_rule(task: Task, states: dict[str, str]) -> str:
+        """Decide whether ``task`` runs given its upstream states.
+
+        Returns one of ``TASK_SUCCESS`` (= run it), ``TASK_SKIPPED``, or
+        ``TASK_UPSTREAM_FAILED``. All upstream tasks are already terminal because
+        execution is in topological order.
+        """
+        ups = task.depends_on
+        if not ups:
+            return TASK_SUCCESS  # root task — always eligible
+        up_states = [states.get(u, TASK_SKIPPED) for u in ups]
+        failed = any(s in (TASK_FAILED, TASK_UPSTREAM_FAILED) for s in up_states)
+        skipped = any(s == TASK_SKIPPED for s in up_states)
+        any_success = any(s == TASK_SUCCESS for s in up_states)
+        rule = task.trigger_rule
+        if rule == "all_done":
+            return TASK_SUCCESS
+        if rule == "one_success":
+            return TASK_SUCCESS if any_success else TASK_SKIPPED
+        if rule == "none_failed":
+            return TASK_UPSTREAM_FAILED if failed else TASK_SUCCESS
+        # default: all_success
+        if failed:
+            return TASK_UPSTREAM_FAILED
+        if skipped:
+            return TASK_SKIPPED
+        return TASK_SUCCESS
+
+    @staticmethod
+    def _branch_select(task: Task, *, read: int, written: int) -> list[str]:
+        """First-match branch selection — returns the chosen downstream names."""
+        env = {"records_read": read, "records_written": written, "success": True}
+        for rule in task.branch:
+            if rule.when is None:
+                return rule.to
+            try:
+                # Sandboxed (no builtins), same pattern as the filter transform.
+                ok = eval(compile(rule.when, "<branch:when>", "eval"), {"__builtins__": {}}, env)
+            except Exception as exc:
+                raise TaskError(f"task {task.name!r}: branch 'when' failed: {exc}") from exc
+            if ok:
+                return rule.to
+        return []
+
+    def _run_graph_task(
+        self,
+        task: Task,
+        connectors: dict[str, Connector],
+        cursor_from: CursorValue,
+        cursor_to: CursorValue,
+    ) -> tuple[int, int, CursorValue]:
+        """Execute a dataflow graph (ADR-0030).
+
+        v1 is a source-rooted tree: one source, branching/fan-out via per-edge
+        ``when`` predicates, sinks as leaves. For each sink we re-read the source
+        and replay the unique path source→sink (transforms + edge predicates),
+        mirroring the fan-out re-read model. records_read is counted on the first
+        sink's pass; records_written sums across sinks.
+        """
+        if cursor_from is not None or cursor_to is not None:
+            raise TaskError("graph pipelines do not support cursor backfill yet")
+
+        by_id = {n.id: n for n in task.graph_nodes}
+        sources = [n for n in task.graph_nodes if n.kind == "source"]
+        sinks = [n for n in task.graph_nodes if n.kind == "sink"]
+        if len(sources) != 1:
+            raise TaskError("graph must have exactly one source node")
+        src_node = sources[0]
+        if not src_node.source_name:
+            raise TaskError(f"graph source node {src_node.id!r} has no connection")
+        source = connectors.get(src_node.source_name)
+        if source is None:
+            raise TaskError(f"No connector for graph source '{src_node.source_name}'")
+        if not isinstance(source, BatchSource):
+            raise TaskError(f"Graph source '{src_node.source_name}' is not a BatchSource")
+
+        # Each non-source node has exactly one incoming edge (tree invariant).
+        incoming: dict[str, GraphEdge] = {}
+        for e in task.graph_edges:
+            incoming[e.to_id] = e
+        # Precompile edge predicates once.
+        compiled: dict[int, CodeType] = {}
+        for i, e in enumerate(task.graph_edges):
+            if e.when is not None:
+                try:
+                    compiled[i] = compile(e.when, "<edge:when>", "eval")
+                except SyntaxError as exc:
+                    raise TaskError(f"edge {e.from_id}→{e.to_id}: invalid 'when': {exc}") from exc
+        edge_index = {id(e): i for i, e in enumerate(task.graph_edges)}
+
+        def _path_to(sink_id: str) -> list[GraphNode]:
+            # Walk parents up to the source, then reverse → [n1, …, sink].
+            chain: list[GraphNode] = []
+            cur = sink_id
+            seen: set[str] = set()
+            while cur != src_node.id:
+                if cur in seen:
+                    raise TaskError(f"cycle detected reaching sink {sink_id!r}")
+                seen.add(cur)
+                edge = incoming.get(cur)
+                if edge is None:
+                    raise TaskError(f"node {cur!r} is not reachable from the source")
+                chain.append(by_id[cur])
+                cur = edge.from_id
+            chain.reverse()
+            return chain
+
+        def _edge_ok(node_id: str, record: Record) -> bool:
+            edge = incoming.get(node_id)
+            if edge is None:
+                return True
+            code = compiled.get(edge_index[id(edge)])
+            if code is None:
+                return True
+            try:
+                return bool(
+                    eval(
+                        code,
+                        {"__builtins__": {}},
+                        {"data": record.data, "metadata": record.metadata},
+                    )
+                )
+            except Exception as exc:
+                raise TransformError(
+                    f"edge {edge.from_id}→{edge.to_id}: 'when' failed: {exc}"
+                ) from exc
+
+        records_read = 0
+        new_cursor: CursorValue = None  # cursoring unsupported in graph v1
+
+        def _stream_for(sink_node: GraphNode, count: bool) -> Iterator[Record]:
+            nonlocal records_read
+            path = _path_to(sink_node.id)
+            for raw in source.read(query=src_node.query, **src_node.source_options):
+                if count:
+                    records_read += 1
+                rec: Record | None = raw
+                for node in path:
+                    if rec is None:
+                        break
+                    if not _edge_ok(node.id, rec):
+                        rec = None
+                        break
+                    if node.kind == "transform" and node.transform_fn is not None:
+                        rec = node.transform_fn(rec)
+                    # sink node = terminal; nothing to apply
+                if rec is not None:
+                    yield rec
+
+        written = 0
+        for i, sink_node in enumerate(sinks):
+            if sink_node.sink is None:
+                raise TaskError(f"graph sink node {sink_node.id!r} has no sink spec")
+            spec = sink_node.sink
+            sink = connectors.get(spec.name)
+            if sink is None:
+                raise TaskError(f"No connector for graph sink '{spec.name}'")
+            if not isinstance(sink, BatchSink):
+                raise TaskError(f"Graph sink '{spec.name}' is not a BatchSink")
+            written += sink.write(
+                _stream_for(sink_node, count=(i == 0)),
+                mode=spec.mode,
+                key_columns=spec.key_columns,
+                table=spec.table,
+                **spec.options,
+            )
+        return records_read, written, new_cursor
+
     def _run_task(
         self,
         task: Task,
@@ -264,21 +722,28 @@ class Pipeline:
         cursor_from: CursorValue = None,
         cursor_to: CursorValue = None,
     ) -> tuple[int, int, CursorValue]:
+        if task.graph_nodes:
+            return self._run_graph_task(task, connectors, cursor_from, cursor_to)
         if not task.source:
             raise TaskError(f"Task missing source: {task!r}")
-        if not task.sink:
+        sink_specs = task.effective_sinks()
+        if not sink_specs:
             raise TaskError(f"Task missing sink: {task!r}")
 
         source = connectors.get(task.source)
-        sink = connectors.get(task.sink)
         if source is None:
             raise TaskError(f"No connector instance provided for source '{task.source}'")
-        if sink is None:
-            raise TaskError(f"No connector instance provided for sink '{task.sink}'")
         if not isinstance(source, BatchSource):
             raise TaskError(f"Source '{task.source}' is not a BatchSource")
-        if not isinstance(sink, BatchSink):
-            raise TaskError(f"Sink '{task.sink}' is not a BatchSink")
+
+        sinks: list[tuple[SinkSpec, BatchSink]] = []
+        for spec in sink_specs:
+            sink = connectors.get(spec.name)
+            if sink is None:
+                raise TaskError(f"No connector instance provided for sink '{spec.name}'")
+            if not isinstance(sink, BatchSink):
+                raise TaskError(f"Sink '{spec.name}' is not a BatchSink")
+            sinks.append((spec, sink))
 
         records_read = 0
         new_cursor: CursorValue = None
@@ -299,7 +764,10 @@ class Pipeline:
             else:
                 yield from source.read(query=task.query, **task.source_options)
 
-        def _read_and_transform() -> Iterator[Record]:
+        def _read_and_transform(
+            count: bool = True,
+            accept: Callable[[Record], bool] | None = None,
+        ) -> Iterator[Record]:
             nonlocal records_read, new_cursor
             for raw in _source_iter():
                 # Inclusive upper bound — skip rows beyond cursor_to. We still
@@ -317,9 +785,10 @@ class Pipeline:
                     if cursor_to is not None and cv is not None and cv > cursor_to:
                         # Ordering is ascending — anything after this is also > cursor_to.
                         return
-                    if cv is not None and (new_cursor is None or cv > new_cursor):
+                    if count and cv is not None and (new_cursor is None or cv > new_cursor):
                         new_cursor = cv
-                records_read += 1
+                if count:
+                    records_read += 1
                 record: Record | None = raw
                 try:
                     for fn in task.transforms:
@@ -335,7 +804,56 @@ class Pipeline:
                         continue
                     raise TransformError(f"transform {fn!r} failed on record {raw!r}") from exc
                 if record is not None:
+                    # Conditional routing (ADR-0027): a per-sink ``accept``
+                    # decides whether this transformed record belongs to the
+                    # sink currently being written.
+                    if accept is not None and not accept(record):
+                        continue
                     yield record
+
+        # Conditional routing setup (ADR-0027). Compile each sink's ``when``
+        # predicate once; a record routes to the FIRST conditional sink whose
+        # predicate is truthy, otherwise to every default (``when``-less) sink.
+        # No ``when`` anywhere ⇒ pure fan-out (every sink gets every record).
+        compiled_when: dict[int, CodeType] = {}
+        for i, (spec, _sink) in enumerate(sinks):
+            if spec.when is not None:
+                try:
+                    compiled_when[i] = compile(spec.when, "<sink:when>", "eval")
+                except SyntaxError as exc:
+                    raise TaskError(
+                        f"sink '{spec.name}': cannot compile routing 'when': {exc}"
+                    ) from exc
+        conditional_indices = sorted(compiled_when)
+        has_routing = bool(conditional_indices)
+
+        def _match(record: Record) -> int | None:
+            for idx in conditional_indices:
+                try:
+                    # Sandboxed (no builtins), same pattern as the filter transform.
+                    ok = eval(
+                        compiled_when[idx],
+                        {"__builtins__": {}},
+                        {"data": record.data, "metadata": record.metadata},
+                    )
+                except Exception as exc:
+                    raise TransformError(
+                        f"sink '{sinks[idx][0].name}': routing 'when' failed: {exc}"
+                    ) from exc
+                if ok:
+                    return idx
+            return None
+
+        def _accept_for(index: int) -> Callable[[Record], bool]:
+            is_default = sinks[index][0].when is None
+
+            def accept(record: Record) -> bool:
+                matched = _match(record)
+                if matched is None:
+                    return is_default
+                return matched == index
+
+            return accept
 
         # RDBMS sinks (sqlite/postgres/mysql) require ``table`` as a
         # keyword; without it ``write`` raises ``WriteError``. The YAML
@@ -343,13 +861,21 @@ class Pipeline:
         # on ``task.sink_table``, so we re-thread it here. (Stream sinks
         # like Kafka pull it from ``sink_options['topic']`` directly —
         # see ``_run_task_stream`` below.)
-        written = sink.write(
-            _read_and_transform(),
-            mode=task.sink_mode,
-            key_columns=task.sink_key_columns,
-            table=task.sink_table,
-            **task.sink_options,
-        )
+        #
+        # Fan-out (ADR-0026): with multiple sinks we re-read the source once
+        # per sink rather than buffering, preserving streaming/bounded memory.
+        # records_read / new_cursor are counted on the first pass only; cursor_to
+        # filtering still applies on every pass.
+        written = 0
+        for i, (spec, sink) in enumerate(sinks):
+            accept = _accept_for(i) if has_routing else None
+            written += sink.write(
+                _read_and_transform(count=(i == 0), accept=accept),
+                mode=spec.mode,
+                key_columns=spec.key_columns,
+                table=spec.table,
+                **spec.options,
+            )
         return records_read, written, new_cursor
 
     def _fire(self, event: str, *args: Any) -> None:
@@ -468,19 +994,23 @@ class Pipeline:
     ) -> tuple[int, int]:
         if not task.source:
             raise TaskError(f"Stream task missing source: {task!r}")
-        if not task.sink:
+        sink_specs = task.effective_sinks()
+        if not sink_specs:
             raise TaskError(f"Stream task missing sink: {task!r}")
+        if len(sink_specs) > 1:
+            raise TaskError(f"Stream fan-out to multiple sinks is not supported: {task!r}")
+        sink_spec = sink_specs[0]
 
         source = connectors.get(task.source)
-        sink = connectors.get(task.sink)
+        sink = connectors.get(sink_spec.name)
         if source is None:
             raise TaskError(f"No connector instance provided for source '{task.source}'")
         if sink is None:
-            raise TaskError(f"No connector instance provided for sink '{task.sink}'")
+            raise TaskError(f"No connector instance provided for sink '{sink_spec.name}'")
         if not isinstance(source, StreamSource):
             raise TaskError(f"Source '{task.source}' is not a StreamSource")
         if not isinstance(sink, StreamSink):
-            raise TaskError(f"Sink '{task.sink}' is not a StreamSink")
+            raise TaskError(f"Sink '{sink_spec.name}' is not a StreamSink")
 
         topic_in = task.source_options.get("topic") or task.query
         if not topic_in:
@@ -488,13 +1018,13 @@ class Pipeline:
                 f"stream source '{task.source}' requires 'topic' (in source.topic or source.query)"
             )
         group_id = task.source_options.get("group_id")
-        topic_out = task.sink_options.get("topic") or task.sink_table
+        topic_out = sink_spec.options.get("topic") or sink_spec.table
         if not topic_out:
             raise TaskError(
-                f"stream sink '{task.sink}' requires 'topic' (in sink.topic or sink.table)"
+                f"stream sink '{sink_spec.name}' requires 'topic' (in sink.topic or sink.table)"
             )
 
-        buffer = task.sink_options.get("buffer") or {}
+        buffer = sink_spec.options.get("buffer") or {}
         max_records = int(buffer.get("max_records", 1) or 1)
         max_seconds = float(buffer.get("max_seconds", 0.0) or 0.0)
 

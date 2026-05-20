@@ -458,7 +458,29 @@
 - [x] **Dry Run** — editor header에 `Dry run` 버튼. `POST /pipelines/{id}/dry-run`(server-side build + 병렬 `connector.health_check()`) 호출 후 canvas 아래 패널에 결과 표시. top-level config errors + per-connector check(ok/error 메시지 trace). Trigger 전에 안전하게 검증 가능.
 - [x] **Pipeline-level retry + DLQ 설정** — `PipelineSettingsPanel` (canvas 빈 영역 클릭 시 우측 panel). 코어 `RetryConfig`(max_attempts/backoff/initial_delay) + `DlqConfig`(connection picker/table/topic/mode) 노출. Enable 토글로 비활성화 시 PipelineConfig JSON에서 키 자체 생략 — 빈 객체 오염 방지. Step 9.5의 일부 (retry/DLQ 정책 UI 노출).
 - [ ] DLQ 노드 — 아직 (core PipelineConfig는 단일 dlq optional, builder UI에서 노출 안 함).
-- [ ] Multi-branch / fan-out — core가 linear pipeline이라 의도적으로 미지원. 향후 graph 지원은 core 확장 필요.
+- [x] **Fan-out (1 source → N sinks)** ✅ (2026-05-20, ADR-0026) — core `PipelineConfig.sinks` + `Task.sinks`/`SinkSpec`, sink별 source 재읽기(메모리 bound 유지), 단일-sink 무변경 보장. 빌더: 같은 sink 여러 개 추가 가능(source만 dedup), canvas는 spine→sinks 수직 fan 레이아웃 + branch edge, FlowSummary 분기 그룹. stream fan-out은 `ConfigError`로 거부(v1 범위 외).
+- [x] **조건부 라우팅 (BranchPythonOperator류)** ✅ (2026-05-20, ADR-0027) — sink별 선택적 `when` Python 술어, **first-match(switch)** 분기 + `when` 없는 default sink가 else. `when` 없으면 순수 fan-out(하위 호환). 빌더: batch sink에 `when` 필드(no-code filter builder 재사용), FlowSummary "if <조건>" 힌트. batch 전용(stream + `when` → `ConfigError`).
+- [ ] 일반 multi-branch DAG(fan-in / 멀티 source) — core가 task당 source 1개라 미지원. 향후 graph 지원은 core 확장 필요.
+
+#### 10.4-DAG Task-orchestration DAG (Airflow류, ADR-0028) — 단계적
+- [x] **P1.1 코어 의존성 + 위상 실행** ✅ (2026-05-20) — `Task.depends_on` + `Pipeline._ordered_tasks()`(Kahn, 원래 순서 안정 tie-break) + 사이클/미존재 의존/중복·공백 이름/자기 의존 검증. `depends_on` 없으면 기존 순차 순서 무변경(하위 호환). batch 전용·순차(병렬 후속).
+- [x] **P1.2 다중 task PipelineConfig + builder** ✅ (2026-05-20) — `TaskConfig`(name/source/transforms/sink·sinks/depends_on) + `PipelineConfig.tasks`(단일-task shape와 상호배타, `effective_tasks()`로 정규화). `build_pipeline`이 task별 빌드+의존성 검증+dry-run 시점 사이클 검출. 서버 `referenced_connection_names`가 모든 task 순회. config_json 자동 round-trip. **DAG가 API/YAML로 표현·실행 가능**(워커가 위상 순서로 실행). stream 다중-task는 `ConfigError`.
+- [x] **P1.3 분기(skip) + trigger rule** ✅ (2026-05-20, ADR-0028 addendum) — `BranchRule`(task 결과 `records_read`/`records_written`/`success` predicate, first-match, `when=None`=default)로 후행 task 선택, 미선택 직접 후행 skip + trigger rule로 후손 전파. per-task `trigger_rule`(all_success/all_done/one_success/none_failed). `RunResult.task_states`(success/failed/skipped/upstream_failed). DAG 경로는 실패 격리(독립 task 계속 실행 후 첫 에러 raise). 게이팅: dep/branch/non-default trigger 없으면 기존 순차 경로 유지.
+- ⏭ **P1.4 빌더 UI**: 2단계 drill-down 프로토타입을 만들었으나 사용자 피드백으로 **폐기**(2026-05-20). 방향 전환: 파이프라인은 **단일-캔버스**로 유지하고, 복잡한 흐름은 **"call pipeline" operator**(다른 파이프라인 호출)로 조합. drill-down 컴포넌트(dag-canvas/dag-task-node/task-builder/task-properties-panel) + web DAG 데이터 레이어 제거, fan-out/routing 단일-캔버스 빌더 복원. 코어 task-DAG(P1.1~P1.3)는 유지.
+  - [x] **call pipeline operator** ✅ (2026-05-20, ADR-0029, fire-and-forget) — 서비스 레벨 downstream 트리거. `pipeline_triggers` 테이블(`0003` 마이그레이션) + `PipelineTriggerRepository` + 워커가 성공 시 대상 파이프라인 current version으로 PENDING run enqueue(`result_json.trigger_chain`로 사이클 차단 + depth cap). API `GET/PUT /pipelines/{id}/triggers`(self 400 / 워크스페이스 밖 404 / audit). UI: 빌더 `PipelineSettingsPanel`에 "Call pipelines" 멀티선택(저장 시 config와 함께 PUT). 서버 263 db green, 웹 typecheck OK. ⚠️ 대기 옵션(wait_for_completion)은 후속.
+- 🔄 **Phase 2 dataflow DAG**(레코드 엣지 흐름 + 어느 노드에서나 분기, ADR-0030):
+  - [x] **P2.1 코어 graph 실행 엔진** ✅ (2026-05-20) — `PipelineConfig.graph`(nodes+edges, edge `when` 분기) + `Task.graph_*` + `_run_graph_task`(sink별 재읽기·유일 경로 재생). v1 source-rooted tree(단일 source, fan-in 미지원), batch 전용. 코어 510 unit green.
+  - [x] **P2.2 서버 round-trip** ✅ (2026-05-20) — `referenced_connection_names` graph 순회, config_json 자동 round-trip, 워커 graph 실행(sqlite 분기 e2e). 서버 265 db green.
+  - [x] **P2.3 자유 연결 빌더 캔버스** ✅ 구현 (2026-05-20, ⚠️ 브라우저 QA 대기) — `GraphCanvas`(연결 가능 React Flow, 사용자가 엣지 draw, tree 불변식 강제: source로의 incoming 금지·노드당 incoming 1개·사이클 방지) + `GraphEditor`(Palette + 캔버스 + 노드 PropertiesPanel + 엣지 `when` 에디터(FilterEditor 재사용)) + `pipeline-config` graph serialize/deserialize/`linearToGraph` 변환 + 레이어 레이아웃. 편집기에 linear↔graph 모드(헤더 "그래프로 전환"), graph config 자동 로드. 웹 typecheck OK.
+  - [ ] fan-in/join, 멀티 source, graph cursor/stream — 후속.
+
+#### Phase 3 — TB급/분산 실행: ExecutionBackend + Spark/Databricks pushdown (ADR-0031)
+- [x] **P3.1 ExecutionBackend 추상화 + local 백엔드** ✅ (2026-05-20) — `runtime/backends.py`(`ExecutionBackend` ABC + `LocalBackend` + 레지스트리 + `run_config` 디스패치) + `PipelineConfig.engine`(기본 `local`, 런타임 검증). 동작 무변경. 코어 516 unit green.
+- [x] **P3.2a Spark 백엔드(선형, file IO) — 실제 검증됨** ✅ (2026-05-20) — `runtime/spark/`(`predicate.py` 필터→Spark SQL + `SparkBackend` pyspark lazy). 단일-task: parquet/csv/json IO, 선언적 transform, fan-out sink은 `cache()`로 source 1회 읽고 `when`→`filter` 분기(재읽기 문제 해소). 포터블 JRE(Temurin17)+`[spark]` extra만으로 `local[*]` 실행 확인. 임의 python transform·graph·JDBC·upsert 거부. 코어 525 unit, Spark 실행 테스트는 JVM 있을 때만(없으면 skip).
+- [x] **P3.2b dispatch 통합 + JDBC IO** ✅ (2026-05-20) — `ExecutionBackend.run(*, connectors=, connections=)` 통일, `engine:"spark"` lazy 등록. postgres/mysql JDBC read/write + 파티셔닝 + **`spark.jars.packages` 드라이버 자동 fetch**(무설정). JDBC 실행 e2e는 integration-gated(DB+maven), 헬퍼는 unit 검증.
+- [x] **P3.3 Spark graph 분기** ✅ (2026-05-20) — `_run_graph`: source `cache()` 1회 + sink별 유일 경로(transform + edge `when` filter) 컴파일. parquet e2e로 어느 노드에서나 분기 검증.
+- [ ] **P3.4 클러스터/Databricks 잡 submit + 워커 통합** ← 작업 중 — 워커가 in-process run 대신 Spark 잡 제출(thin worker, ADR-0032). connection config + 시크릿을 driver로 전달, 상태 폴링→run 기록.
+- [ ] **P3.5 UI** — 엔진 선택 + pushdown 불가 노드 표시.
 
 ### 10.5 Schedule + Run 모니터링 (← 작업 중, 2026-05-18 Schedule CRUD + Run 상세까지 완료)
 - [x] Run 목록 (Data Table, StatusBadge, 5s polling) — `/w/[slug]/runs`. Row 클릭 시 상세 페이지로 이동.

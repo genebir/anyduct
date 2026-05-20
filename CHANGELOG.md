@@ -9,7 +9,59 @@
 
 ## [Unreleased]
 
-(no unreleased changes)
+### Added
+- **ExecutionBackend 추상화 + local 백엔드 (P3.1)** [ADR-0031] — TB급/분산(Spark/Databricks pushdown)을 향한 첫 단계.
+  - `etl_plugins/runtime/backends.py`: `ExecutionBackend` ABC + `LocalBackend`(기존 `build_pipeline`+`Pipeline.run` 래핑) + 레지스트리(`register_backend`/`get_backend`) + `run_config` 디스패치. `PipelineConfig.engine`(기본 `"local"`, 런타임에 백엔드 레지스트리로 검증 — config 레이어는 백엔드 목록을 모름). 동작 무변경(기존 실행 경로 그대로). public export.
+  - 테스트: 코어 +6 unit. 코어 516 unit green, mypy strict 46 OK, 서버 pipelines round-trip green(`engine` 필드 포함).
+- **Spark 백엔드 운영·배포·분산 실행 설계** [ADR-0032] — thin worker가 외부 클러스터/Databricks에 Spark 잡 제출+상태 폴링하는 토폴로지 확정. 제출 모드(local/spark-submit/databricks/k8s), 분산 시크릿(driver 런타임 SecretBackend 재해석), JDBC 파티셔닝, 멱등 sink(스테이징 swap/MERGE), 관측(driver→run_logs/metrics + Spark UI 링크), 이미지/JDBC JAR 운영. `pyproject.toml`에 `[spark]` extra(`pyspark>=3.5`, lazy) 선언.
+- **Spark 실행 백엔드 v1 (P3.2a, 실제 검증됨)** [ADR-0031/0032] — DAG를 Spark DataFrame 연산으로 컴파일·실행.
+  - `etl_plugins/runtime/spark/`: `predicate.py`(no-code 필터 문법 → Spark SQL 변환, 미지원식은 ValueError) + `backend.py` `SparkBackend`(pyspark lazy import). 단일-task 파이프라인: file IO(parquet/csv/json), 선언적 transform(rename/cast/select/drop/add_constant/dedupe/filter), **fan-out sink은 transformed DF를 `cache()`해서 source를 한 번만 읽고 sink별 `when`→`filter`로 분기** — 로컬 엔진의 재읽기 문제(ADR-0026/0030)가 Spark에선 사라짐. 임의 `python` transform·graph/multi-task·JDBC·upsert·cursor는 거부(후속 슬라이스).
+  - **"최소 세팅" 검증**: 시스템 설치 없이 **포터블 JRE(Temurin 17) + `[spark]` extra(pyspark)** 만으로 `local[*]` 실행 확인 — Java/pyspark 없는 환경에선 Spark 실행 테스트가 자동 skip(예측 문법 테스트는 항상 실행).
+  - 테스트: predicate 9 + Spark 실행(JVM 환경에서 통과 확인, 무-JVM skip). mypy strict OK, ruff OK.
+- **Spark 백엔드 P3.2b(dispatch 통합 + JDBC) + P3.3(graph 분기), 실제 검증됨** [ADR-0031/0032] —
+  - **인터페이스 통합**: `ExecutionBackend.run(config, *, connectors=None, connections=None, ...)` — local은 `connectors`, spark는 `connections` 사용. `run_config`/레지스트리도 통일. `engine:"spark"`는 **lazy 등록**(get_backend 첫 호출 시, pyspark import 회피·순환 회피).
+  - **JDBC IO + 무설정 드라이버**: postgres/mysql JDBC read/write 구현 + 파티셔닝 옵션. **`spark.jars.packages`로 드라이버 JAR 자동 fetch**(connection 종류 → Maven 좌표 자동 해석) — 사용자가 JAR 수동 배치 안 함(ADR-0032 "최소 설정"). `jdbc_url`/`jdbc_packages` 순수 함수 unit 검증.
+  - **P3.3 graph 분기**: `SparkBackend._run_graph` — source를 `cache()`로 1회 읽고, 각 sink는 source→sink 유일 경로(transform 노드 + edge `when` filter)를 Spark로 컴파일. **어느 노드에서나 분기**가 Spark에서 동작(parquet e2e: source→transform→2-way 분기 검증).
+  - 검증: Spark 실행 테스트 14개 JVM 환경 전부 통과(linear/필터/fan-out/transform/**graph 분기**/jdbc 헬퍼). 코어 528 unit pass/7 skip, mypy 49 OK, ruff OK. **JDBC 실행 e2e는 DB+maven 필요 — integration-gated(CI에서 검증)**, parquet·graph 경로는 로컬 검증 완료.
+- **Dataflow DAG — 레코드 단위 그래프 실행 + 어느 노드에서나 분기 (P2.1+P2.2)** [ADR-0030] — "자유 순서 + 모든 작업에서 분기".
+  - 코어: `PipelineConfig.graph`(세 번째 상호배타 shape) = `GraphNodeConfig`(source/transform/sink) + `GraphEdgeConfig`(from_node/to_node/`when`). 검증: 단일 source, 비-source 노드 incoming edge 1개(tree, fan-in 미지원), sink≥1, id 유일. `Task.graph_nodes/graph_edges` + `_run_graph_task`(sink별 source 재읽기 + source→sink 유일 경로 재생, edge `when`으로 분기). batch 전용, cursor/stream 미지원. public export `GraphConfig`/`GraphNode`/`GraphEdge`.
+  - 서버: `referenced_connection_names`가 graph 노드 순회. config_json 자동 round-trip. 워커가 graph task 그대로 실행(sqlite 분기 e2e 검증).
+  - 테스트: 코어 +9 unit(graph 실행/분기/검증), 서버 +2 it(graph round-trip + worker 분기 실행). 코어 510 unit green, mypy strict(코어 45 + 서버 76) OK, 서버 265 db green.
+  - 빌더 UI(P2.3, 자유 연결 캔버스) ✅ 구현(⚠️ 브라우저 QA 대기) — `GraphCanvas`(연결 가능 캔버스, 사용자가 엣지 draw, tree 불변식 UI 강제) + `GraphEditor`(Palette + 캔버스 + 노드 속성 + 엣지 `when` 에디터, FilterEditor 재사용) + `pipeline-config`의 graph serialize/deserialize/`linearToGraph`/레이아웃. 에디터 헤더에 "그래프로 전환" 토글(linear→graph 변환), graph config는 자동으로 그래프 모드로 로드. 웹 typecheck OK.
+- **파이프라인 fan-out — 1 source → N sinks** [Step 10.4 / ADR-0026] — 동일 추출+변환 결과를 여러 sink로 분기.
+  - 코어: `PipelineConfig.sink: SinkConfig | None` + `sinks: list[SinkConfig]` (정확히 하나만 지정하도록 `@model_validator`) + `effective_sinks()`. 런타임 `SinkSpec` dataclass + `Task.sinks` + `Task.effective_sinks()`. `etl_plugins.SinkSpec` public export.
+  - 실행 방식: `_run_task`가 **sink별로 source를 재읽기**(버퍼링 안 함 → 무한/대용량 스트림에서도 메모리 bound). `records_read`/`new_cursor`는 첫 패스만 카운트, `cursor_to` 상한 필터는 매 패스 적용, `records_written`은 합산. 단일-sink는 기존 플랫 `Task.sink*` 경로 그대로 — 관측 동작 무변경.
+  - stream fan-out은 범위 외: `build_pipeline`이 `mode=="stream" and len(sinks)>1`이면 `ConfigError`, `_arun_stream_task`도 다중 sink면 `TaskError`.
+  - 서버: `referenced_connection_names`가 모든 sink를 포함(dry-run/worker 공통). config는 `PipelineConfig.model_validate`/`model_dump`로 자동 round-trip.
+  - etlx-web 빌더: sink를 여러 개 추가 가능(source만 dedup·replace), canvas는 spine(source→transforms)에서 sinks가 수직으로 fan-out되는 레이아웃 + branch edge, sink는 ≥2일 때만 삭제 가능, FlowSummary가 분기 그룹 표시. `serialize`/`deserialize`가 `sink`(단수)↔`sinks`(복수) 양방향.
+  - 테스트: 코어 +12 unit(fan-out 7 + builder/config 5), 서버 +2 it(fan-out round-trip + sink/sinks 동시 지정 422). 코어 459 unit / 서버 258 db 전부 green, mypy strict(코어 45 + 서버 75) OK, etlx-web typecheck OK.
+- **조건부 라우팅 — sink별 `when` 술어 (BranchPythonOperator류)** [Step 10.4 / ADR-0027] — 레코드 값에 따라 후행 sink가 분기.
+  - 코어: `SinkConfig.when` + `SinkSpec.when`. filter transform과 동일한 샌드박스 `eval`(`{"__builtins__": {}}`, `data`/`metadata`)로 transform *후* 레코드 평가. `_run_task`에 **first-match(switch)** 라우팅 — 처음 truthy인 conditional sink로만 가고, 매칭 없으면 `when` 없는 default sink(들)로. `when`이 하나도 없으면 순수 fan-out(ADR-0026)으로 동작(하위 호환).
+  - `build_pipeline`: `when` 구문을 빌드 시점에 `compile` 검증(dry-run 조기 실패), 단일 sink라도 `when`이 있으면 `sinks[]` 경로 사용, `when`은 connector write 옵션에서 제외. stream + `when`은 `ConfigError`(batch 전용).
+  - 서버: 코드 변경 없음 — `when`은 `PipelineConfig` validate/dump로 자동 round-trip, 라우팅은 연결을 추가하지 않음.
+  - etlx-web: batch sink(postgres/mysql/sqlite/mongodb/s3)에 "Routing condition" 필드 추가(no-code filter 빌더 `kind:"filter"` 재사용 → 빈 값은 omit). FlowSummary가 조건 있는 sink에 "if <조건>" 힌트. Kafka(stream)는 제외.
+  - 테스트: 코어 +10 unit(routing 6 + builder 4). 코어 469 unit green, mypy strict 45 OK, 서버 pipelines/yaml/scenario 39 it green, etlx-web typecheck OK.
+- **Task-orchestration DAG — 의존성 + 위상 실행 (Airflow류, P1.1+P1.2)** [Step 10.4-DAG / ADR-0028] — "1:1 선형 말고 Airflow DAG처럼"의 1단계.
+  - 코어 P1.1: `Task.depends_on` + `Pipeline._ordered_tasks()` 위상 정렬(Kahn, ready 집합은 원래 리스트 순서로 안정 tie-break) + 사이클/미존재 의존/자기 의존/중복·공백 task 이름 검증(`PipelineError`). `depends_on`이 하나도 없으면 기존 순차 순서 그대로(하위 호환). batch 전용·단일 스레드 순차.
+  - 코어 P1.2: `TaskConfig`(name/source/transforms/sink·sinks/depends_on) 신설 + `PipelineConfig.tasks` — 단일-task shape(top-level source/sink)와 상호배타, `effective_tasks()`로 정규화(단일 shape는 1-원소 TaskConfig로 승격). `build_pipeline`이 task별 `_build_task` + 의존성 참조 검증 + 빌드 시점 `_ordered_tasks()`로 사이클 조기 검출. stream 다중-task DAG는 `ConfigError`.
+  - 서버: `referenced_connection_names`가 `effective_tasks()`로 모든 task의 source+sink 순회(dry-run/worker 공통). config_json은 `PipelineConfig` validate/dump로 자동 round-trip(`tasks` 포함). 워커는 `Pipeline.run`이 위상 순서로 실행하므로 코드 변경 없이 DAG 실행됨.
+  - **DAG가 API/YAML로 표현·실행 가능**(빌더 UI는 P1.4 예정). 분기(skip)/trigger rule은 P1.3 예정.
+  - 테스트: 코어 +15 unit(DAG 9 + builder 6), 서버 +1 it(DAG round-trip). 코어 478 unit green, mypy strict(코어 45 + 서버 75) OK, 서버 259 db green.
+- **Task-DAG — 분기(skip) + trigger rule + per-task 상태 (P1.3)** [Step 10.4-DAG / ADR-0028 addendum] — BranchPythonOperator류 분기.
+  - 코어: `BranchRule(when, to)` + `Task.branch`/`Task.trigger_rule` + `RunResult.task_states`. branch는 task 결과(`records_read`/`records_written`/`success`)에 대한 샌드박스 predicate로 **first-match** 후행 선택(`when=None`=default), 미선택 직접 후행 skip → trigger rule로 후손 전파. `trigger_rule`: all_success/all_done/one_success/none_failed. DAG 실행(`_run_dag`)은 **실패 격리**(독립 task 계속 실행 후 첫 에러 raise) + per-task 상태(success/failed/skipped/upstream_failed) 기록. dep/branch/non-default trigger 없으면 기존 순차 경로 유지(하위 호환). `etl_plugins.BranchRule` export.
+  - config: `TaskConfig.trigger_rule`(검증) + `branch: list[BranchRuleConfig]`. builder가 branch predicate 빌드시점 compile 검증 + branch target이 직접 후행인지 검증.
+  - 테스트: 코어 +17 unit(branch/trigger/skip 전파/실패 격리 13 + builder 4). 코어 495 unit green, mypy strict(45+75) OK, 서버 pipelines/scenario/worker 31 it green.
+  - P1.4 빌더 UI는 drill-down(2단계) 프로토타입을 만들었으나 사용자 피드백으로 폐기 — **단일-캔버스 빌더 유지** + 별도 "call pipeline" operator 방향으로 전환. 코어 task-DAG(depends_on/branch/trigger)는 그대로 유지(가산적·하위 호환).
+- **"call pipeline" — 파이프라인 간 호출(fire-and-forget downstream 트리거)** [ADR-0029] — 한 화면 단순 파이프라인 + 파이프라인 호출로 오케스트레이션 조합.
+  - 서비스 레벨(코어/서비스 경계 유지 — 코어는 서비스 파이프라인을 모름). 신규 `pipeline_triggers(source_pipeline_id, target_pipeline_id)` 테이블 + Alembic `0003_pipeline_triggers` + `PipelineTriggerRepository`(list/set targets, idempotent 교체).
+  - 워커(`RunExecutor`): run 성공 직후 같은 트랜잭션에서 downstream 파이프라인들의 current version으로 PENDING run enqueue(`triggered_by_user_id`/`schedule_id` NULL). `result_json.trigger_chain` lineage로 사이클 차단(target이 chain에 있으면 skip) + `_MAX_TRIGGER_CHAIN=50` 캡 + current version 없으면 skip.
+  - API: `GET/PUT /workspaces/{ws}/pipelines/{pid}/triggers`(Viewer+/Editor+, audit `pipeline.triggers_set`). PUT 전체 교체, self-트리거 400 / 워크스페이스 밖 target 404.
+  - UI: **캔버스 operator** `call:pipeline`(palette "Orchestration" 카테고리, 보라 accent). 노드가 target 파이프라인을 picker로 참조 → 캔버스에서 spine tail의 terminal로 배치(sink와 함께 fan-out). 로드 시 triggers→call 노드 복원, 저장 시 call 노드의 target들을 `PUT /triggers`로 영속(config_json과 분리). `pipeline` 필드 kind + PropertiesPanel pipeline picker. (이전 `PipelineSettingsPanel` 멀티선택 방식은 operator로 대체.)
+  - 테스트: 서버 +4 it(worker downstream enqueue + 사이클 차단 / API set·get + self·missing 거부). 서버 263 db green, mypy strict 76 OK, 웹 typecheck OK. ⚠️ dev DB에 `0003` 마이그레이션 적용 필요(`alembic upgrade head`).
+  - **버그 수정**: 빌더 로드 시 `getTriggers`가 `Promise.all`에 묶여 있어, `0003` 미적용 등으로 실패하면 파이프라인 목록까지 비어 "다른 파이프라인 없음"으로 보이던 문제 — triggers 로드를 best-effort로 분리(실패해도 목록/캔버스는 정상 로드).
+- **신규 transform operator 4종 + 카테고리 팔레트** [Step 10.x] — Airflow류 빌딩블록 확장.
+  - 코어 `runtime/transforms.py`에 `select`(컬럼 유지)/`drop`(컬럼 제거)/`add_constant`(상수 컬럼)/`dedupe`(key_columns 중복 제거, run 내 stateful) 등록. 모두 `build_transform` 디스패치로 워커에서 실행됨. +7 unit(코어 502 green).
+  - etlx-web `operators.ts`에 4종 operator 추가 + `operatorCategory()`/`OPERATOR_KIND_GROUPS`(kind→category 그룹). 팔레트(`Palette`)를 **검색창 + kind별 → 카테고리별 접기/펼치기** 로 재작성(Databases/NoSQL/Object storage/Streaming/HTTP·API/Columns/Rows/Code). 검색 시 자동 펼침. i18n `builder.searchOperators`/`builder.noOperatorMatch`.
 
 ## [0.1.0] - 2026-05-19
 

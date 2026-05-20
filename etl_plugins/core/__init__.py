@@ -30,7 +30,17 @@ from etl_plugins.core.exceptions import (
     TransformError,
     WriteError,
 )
-from etl_plugins.core.pipeline import Hook, Pipeline, RunResult, Task, TransformFn
+from etl_plugins.core.pipeline import (
+    BranchRule,
+    GraphEdge,
+    GraphNode,
+    Hook,
+    Pipeline,
+    RunResult,
+    SinkSpec,
+    Task,
+    TransformFn,
+)
 from etl_plugins.core.record import Record
 from etl_plugins.core.registry import ConnectorRegistry
 from etl_plugins.core.schema import Field, Schema
@@ -38,6 +48,7 @@ from etl_plugins.core.schema import Field, Schema
 __all__ = [
     "BatchSink",
     "BatchSource",
+    "BranchRule",
     "ConfigError",
     "ConnectError",
     "Connector",
@@ -50,6 +61,8 @@ __all__ = [
     "ETLError",
     "Field",
     "FileCursorState",
+    "GraphEdge",
+    "GraphNode",
     "Hook",
     "InMemoryCursorState",
     "Pipeline",
@@ -61,6 +74,7 @@ __all__ = [
     "RunResult",
     "Schema",
     "SecretError",
+    "SinkSpec",
     "StreamSink",
     "StreamSource",
     "Task",

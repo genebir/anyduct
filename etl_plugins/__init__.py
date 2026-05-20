@@ -23,6 +23,7 @@ from etl_plugins.config import (
 from etl_plugins.core import (
     BatchSink,
     BatchSource,
+    BranchRule,
     ConfigError,
     ConnectError,
     Connector,
@@ -46,6 +47,7 @@ from etl_plugins.core import (
     RunResult,
     Schema,
     SecretError,
+    SinkSpec,
     StreamSink,
     StreamSource,
     Task,
@@ -80,6 +82,7 @@ __version__ = "0.1.0"
 __all__ = [
     "BatchSink",
     "BatchSource",
+    "BranchRule",
     "ConfigError",
     "ConnectError",
     "ConnectionConfig",
@@ -112,6 +115,7 @@ __all__ = [
     "SecretBackend",
     "SecretError",
     "SecretRef",
+    "SinkSpec",
     "Span",
     "StaticSecretBackend",
     "StreamSink",

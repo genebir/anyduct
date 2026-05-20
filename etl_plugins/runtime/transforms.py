@@ -153,6 +153,82 @@ def _build_filter(config: TransformConfig) -> TransformFn:
     return _filter
 
 
+@register_transform("select")
+def _build_select(config: TransformConfig) -> TransformFn:
+    """Keep only the listed columns (``columns: [a, b, ...]``)."""
+    columns = _config_field(config, "columns") or []
+    if not isinstance(columns, list) or not all(isinstance(c, str) for c in columns):
+        raise ConfigError("select: 'columns' must be a list[str]")
+    keep = set(columns)
+
+    def _select(record: Record) -> Record:
+        return Record(
+            data={k: v for k, v in record.data.items() if k in keep},
+            metadata=record.metadata,
+            schema_version=record.schema_version,
+        )
+
+    return _select
+
+
+@register_transform("drop")
+def _build_drop(config: TransformConfig) -> TransformFn:
+    """Remove the listed columns (``columns: [a, b, ...]``)."""
+    columns = _config_field(config, "columns") or []
+    if not isinstance(columns, list) or not all(isinstance(c, str) for c in columns):
+        raise ConfigError("drop: 'columns' must be a list[str]")
+    drop = set(columns)
+
+    def _drop(record: Record) -> Record:
+        return Record(
+            data={k: v for k, v in record.data.items() if k not in drop},
+            metadata=record.metadata,
+            schema_version=record.schema_version,
+        )
+
+    return _drop
+
+
+@register_transform("add_constant")
+def _build_add_constant(config: TransformConfig) -> TransformFn:
+    """Set a column to a constant value (``column: name, value: <any>``)."""
+    column = _config_field(config, "column")
+    if not isinstance(column, str) or not column:
+        raise ConfigError("add_constant: 'column' must be a non-empty string")
+    value = _config_field(config, "value", required=False)
+
+    def _add(record: Record) -> Record:
+        return Record(
+            data={**record.data, column: value},
+            metadata=record.metadata,
+            schema_version=record.schema_version,
+        )
+
+    return _add
+
+
+@register_transform("dedupe")
+def _build_dedupe(config: TransformConfig) -> TransformFn:
+    """Drop records whose ``key_columns`` tuple was already seen in this run.
+
+    Stateful within a single pipeline run (keeps a set of seen keys in memory);
+    intended for moderate cardinality. ``key_columns: [a, b, ...]``.
+    """
+    key_columns = _config_field(config, "key_columns") or []
+    if not isinstance(key_columns, list) or not key_columns:
+        raise ConfigError("dedupe: 'key_columns' must be a non-empty list[str]")
+    seen: set[tuple[Any, ...]] = set()
+
+    def _dedupe(record: Record) -> Record | None:
+        key = tuple(record.data.get(k) for k in key_columns)
+        if key in seen:
+            return None
+        seen.add(key)
+        return record
+
+    return _dedupe
+
+
 @register_transform("python")
 def _build_python(config: TransformConfig) -> TransformFn:
     """Apply a user-supplied callable referenced as ``module:function``.

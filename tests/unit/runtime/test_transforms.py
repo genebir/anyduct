@@ -227,3 +227,54 @@ def test_python_invalid_callable_spec_raises() -> None:
 def _records_for(data_list: list[dict]) -> Iterator[Record]:
     for d in data_list:
         yield Record(data=d)
+
+
+# ---------- select / drop / add_constant / dedupe (Step 10.x) ----------
+
+
+def test_select_keeps_only_listed_columns() -> None:
+    fn = build_transform(TransformConfig.model_validate({"type": "select", "columns": ["a", "c"]}))
+    out = fn(Record(data={"a": 1, "b": 2, "c": 3}))
+    assert out is not None and out.data == {"a": 1, "c": 3}
+
+
+def test_select_invalid_columns_raises() -> None:
+    with pytest.raises(ConfigError, match="list\\[str\\]"):
+        build_transform(TransformConfig.model_validate({"type": "select", "columns": "a"}))
+
+
+def test_drop_removes_listed_columns() -> None:
+    fn = build_transform(TransformConfig.model_validate({"type": "drop", "columns": ["b"]}))
+    out = fn(Record(data={"a": 1, "b": 2, "c": 3}))
+    assert out is not None and out.data == {"a": 1, "c": 3}
+
+
+def test_add_constant_sets_column() -> None:
+    fn = build_transform(
+        TransformConfig.model_validate({"type": "add_constant", "column": "source", "value": "etl"})
+    )
+    out = fn(Record(data={"a": 1}))
+    assert out is not None and out.data == {"a": 1, "source": "etl"}
+
+
+def test_add_constant_empty_column_raises() -> None:
+    with pytest.raises(ConfigError, match="non-empty string"):
+        build_transform(
+            TransformConfig.model_validate({"type": "add_constant", "column": "", "value": 1})
+        )
+
+
+def test_dedupe_drops_repeat_keys() -> None:
+    fn = build_transform(TransformConfig.model_validate({"type": "dedupe", "key_columns": ["id"]}))
+    rows = [
+        Record(data={"id": 1, "v": "a"}),
+        Record(data={"id": 2, "v": "b"}),
+        Record(data={"id": 1, "v": "c"}),
+    ]
+    kept = [fn(r) for r in rows]
+    assert [r.data["v"] for r in kept if r is not None] == ["a", "b"]
+
+
+def test_dedupe_empty_key_columns_raises() -> None:
+    with pytest.raises(ConfigError, match="non-empty list"):
+        build_transform(TransformConfig.model_validate({"type": "dedupe", "key_columns": []}))

@@ -131,3 +131,17 @@ export const NotConfigured: Story = {
     nodes: [nodeFromOperator("transform:python", {})],
   },
 };
+
+export const IncompleteSource: Story = {
+  args: {
+    nodes: [nodeFromOperator("source:postgres", {})],
+  },
+  parameters: {
+    docs: {
+      description: {
+        story:
+          "A source/sink with no connection shows an amber warning state so the unfinished node is visible on the canvas.",
+      },
+    },
+  },
+};

@@ -1,7 +1,7 @@
 "use client";
 
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { Trash2Icon } from "lucide-react";
+import { AlertTriangleIcon, Trash2Icon } from "lucide-react";
 import { findOperator } from "@/lib/operators";
 import { cn } from "@/lib/cn";
 import { useLocale } from "@/components/providers/locale-provider";
@@ -26,6 +26,10 @@ export function PipelineNode({ id, data }: NodeProps) {
   const Icon = op.icon;
 
   const summary = describeNode(op, d.values, t);
+  // A source/sink with no connection can't run — flag it on the canvas so the
+  // gap is visible without opening the node.
+  const incomplete =
+    (op.kind === "source" || op.kind === "sink") && !d.values.connection;
 
   return (
     <div
@@ -42,7 +46,9 @@ export function PipelineNode({ id, data }: NodeProps) {
         "group relative w-60 cursor-pointer rounded-lg border bg-elevated text-left text-sm shadow-md transition duration-200",
         d.selected
           ? "border-accent ring-accent"
-          : "border-border-subtle hover:border-border-strong",
+          : incomplete
+            ? "border-warning/60 hover:border-warning"
+            : "border-border-subtle hover:border-border-strong",
       )}
     >
       {op.kind !== "source" ? (
@@ -76,6 +82,13 @@ export function PipelineNode({ id, data }: NodeProps) {
             {op.label}
           </div>
         </div>
+        {incomplete ? (
+          <AlertTriangleIcon
+            size={14}
+            className="shrink-0 text-warning"
+            aria-label={t("builder.noConnection")}
+          />
+        ) : null}
         {d.canRemove ? (
           <button
             type="button"
@@ -90,7 +103,14 @@ export function PipelineNode({ id, data }: NodeProps) {
           </button>
         ) : null}
       </div>
-      <div className="px-3 py-2 text-xs text-text-secondary">{summary}</div>
+      <div
+        className={cn(
+          "px-3 py-2 text-xs",
+          incomplete ? "text-warning" : "text-text-secondary",
+        )}
+      >
+        {summary}
+      </div>
     </div>
   );
 }

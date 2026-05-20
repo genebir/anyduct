@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { ArrowLeftIcon, ArrowRightIcon } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { findOperator, type FieldDef } from "@/lib/operators";
 import type { ConnectionSummary } from "@/lib/api";
@@ -15,10 +16,17 @@ export function PropertiesPanel({
   node,
   connections,
   onChange,
+  transformIndex = -1,
+  transformCount = 0,
+  onMove,
 }: {
   node: BuilderNode | null;
   connections: ConnectionSummary[];
   onChange: (id: string, values: Record<string, unknown>) => void;
+  /** Index of this node within the transform run, or -1 if not a transform. */
+  transformIndex?: number;
+  transformCount?: number;
+  onMove?: (id: string, dir: -1 | 1) => void;
 }) {
   const { t } = useLocale();
   if (!node) {
@@ -46,6 +54,36 @@ export function PropertiesPanel({
           {op.label}
         </div>
         <p className="mt-1 text-xs text-text-secondary">{op.description}</p>
+        {op.kind === "transform" && onMove && transformCount > 1 ? (
+          <div className="mt-3 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => onMove(node.id, -1)}
+              disabled={transformIndex <= 0}
+              aria-label={t("builder.moveLeft")}
+              title={t("builder.moveLeft")}
+              className="inline-flex h-7 w-7 items-center justify-center rounded-sm border border-border-subtle text-text-secondary transition duration-150 hover:bg-overlay hover:text-text disabled:opacity-40"
+            >
+              <ArrowLeftIcon size={14} />
+            </button>
+            <button
+              type="button"
+              onClick={() => onMove(node.id, 1)}
+              disabled={transformIndex >= transformCount - 1}
+              aria-label={t("builder.moveRight")}
+              title={t("builder.moveRight")}
+              className="inline-flex h-7 w-7 items-center justify-center rounded-sm border border-border-subtle text-text-secondary transition duration-150 hover:bg-overlay hover:text-text disabled:opacity-40"
+            >
+              <ArrowRightIcon size={14} />
+            </button>
+            <span className="text-[11px] text-text-muted">
+              {t("builder.stepLabel", {
+                n: transformIndex + 1,
+                total: transformCount,
+              })}
+            </span>
+          </div>
+        ) : null}
       </header>
 
       <div className="flex flex-col gap-4">

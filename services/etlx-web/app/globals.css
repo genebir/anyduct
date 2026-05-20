@@ -84,6 +84,19 @@
     border-radius: 6px;
   }
 
+  /* Affordance: interactive controls show the pointer cursor; disabled ones
+     show not-allowed. Covers both the <Button> component and raw <button>s
+     (palette pills, toggles, picker, etc.) without per-element classes. */
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  label:has(> input[type="checkbox"]:not(:disabled)) {
+    cursor: pointer;
+  }
+  button:disabled,
+  [role="button"][aria-disabled="true"] {
+    cursor: not-allowed;
+  }
+
   /* Scrollbar — keep subtle in both themes */
   ::-webkit-scrollbar {
     width: 10px;

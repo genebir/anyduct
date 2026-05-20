@@ -25,6 +25,7 @@ import {
   type PipelineSummary,
 } from "@/lib/api";
 import { cn } from "@/lib/cn";
+import { findOperator } from "@/lib/operators";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import { useLocale } from "@/components/providers/locale-provider";
 import type { Messages } from "@/lib/i18n/messages";
@@ -124,6 +125,27 @@ export default function PipelineEditorPage() {
     setSelectedId(nodeId);
   }, []);
 
+  // Reorder transforms — execution order matters and the canvas only
+  // auto-sorts by kind, so swap the selected transform with its neighbor
+  // within the transform run.
+  const moveTransform = useCallback((nodeId: string, dir: -1 | 1) => {
+    setState((prev) => {
+      const nodes = [...prev.nodes];
+      const transformPositions = nodes
+        .map((n, i) => ({ i, kind: findOperator(n.operatorId)?.kind }))
+        .filter((x) => x.kind === "transform")
+        .map((x) => x.i);
+      const pos = transformPositions.findIndex((i) => nodes[i].id === nodeId);
+      const swap = pos + dir;
+      if (pos < 0 || swap < 0 || swap >= transformPositions.length) return prev;
+      const a = transformPositions[pos];
+      const b = transformPositions[swap];
+      [nodes[a], nodes[b]] = [nodes[b], nodes[a]];
+      return { ...prev, nodes };
+    });
+    setDirty(true);
+  }, []);
+
   const updateNode = useCallback(
     (nodeId: string, values: Record<string, unknown>) => {
       setState((prev) => ({
@@ -151,6 +173,20 @@ export default function PipelineEditorPage() {
     () => state.nodes.find((n) => n.id === selectedId) ?? null,
     [state.nodes, selectedId],
   );
+
+  // Position of the selected transform within the transform run (in canvas
+  // order), so the panel can enable/disable the move-left/right controls.
+  const transformOrder = useMemo(
+    () =>
+      reorderNodes(state.nodes)
+        .filter((n) => findOperator(n.operatorId)?.kind === "transform")
+        .map((n) => n.id),
+    [state.nodes],
+  );
+  const selectedTransformIndex =
+    selectedNode && findOperator(selectedNode.operatorId)?.kind === "transform"
+      ? transformOrder.indexOf(selectedNode.id)
+      : -1;
 
   const onSave = useCallback(async () => {
     if (!ws || !pipeline) return;
@@ -291,6 +327,9 @@ export default function PipelineEditorPage() {
             node={selectedNode}
             connections={connections}
             onChange={updateNode}
+            transformIndex={selectedTransformIndex}
+            transformCount={transformOrder.length}
+            onMove={moveTransform}
           />
         ) : (
           <PipelineSettingsPanel

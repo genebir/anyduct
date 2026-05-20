@@ -312,6 +312,9 @@ export const en = {
   "builder.unsaved": "Unsaved changes",
   "builder.unsavedRun": "Save your changes first — run uses the last saved version.",
   "builder.saveFirst": "Save the pipeline first to enable this.",
+  "builder.moveLeft": "Move earlier",
+  "builder.moveRight": "Move later",
+  "builder.stepLabel": "Step {n} of {total}",
 
   // runs list
   "runs.colReadWritten": "Read / Written",
@@ -719,6 +722,9 @@ export const ko: Messages = {
   "builder.unsaved": "저장되지 않은 변경사항",
   "builder.unsavedRun": "먼저 변경사항을 저장하세요 — 실행은 마지막 저장 버전을 사용합니다.",
   "builder.saveFirst": "먼저 파이프라인을 저장해야 사용할 수 있습니다.",
+  "builder.moveLeft": "앞으로 이동",
+  "builder.moveRight": "뒤로 이동",
+  "builder.stepLabel": "{total}단계 중 {n}번째",
 
   "runs.colReadWritten": "읽음 / 기록",
   "runs.emptyTitle": "아직 실행이 없습니다",

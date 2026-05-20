@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ArrowLeftIcon, ArrowRightIcon } from "lucide-react";
+import { ArrowLeftIcon, ArrowRightIcon, PlusIcon, XIcon } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { findOperator, type FieldDef } from "@/lib/operators";
 import type { ConnectionSummary } from "@/lib/api";
@@ -89,7 +89,7 @@ export function PropertiesPanel({
       <div className="flex flex-col gap-4">
         {op.fields.map((field) => (
           <FieldEditor
-            key={field.key}
+            key={`${node.id}:${field.key}`}
             field={field}
             value={node.data[field.key]}
             connections={matchingConnections}
@@ -212,6 +212,16 @@ function FieldInput({
   if (field.kind === "json") {
     return <JsonInput value={value} onChange={onChange} field={field} t={t} />;
   }
+  if (field.kind === "mapping") {
+    return (
+      <MappingEditor
+        value={value}
+        onChange={onChange}
+        mappingKind={field.mappingKind}
+        t={t}
+      />
+    );
+  }
   if (field.multiline) {
     return (
       <textarea
@@ -232,6 +242,129 @@ function FieldInput({
       placeholder={field.placeholder}
       onChange={(e) => onChange(e.target.value || undefined)}
     />
+  );
+}
+
+const CAST_TYPES = ["int", "float", "str", "bool", "timestamp"];
+
+let _rowSeq = 0;
+function nextRowId(): string {
+  _rowSeq += 1;
+  return `row-${_rowSeq}`;
+}
+
+/**
+ * No-code key→value table for the rename/cast transforms. Builds a flat
+ * `{ column: value }` object — identical wire shape to the old raw-JSON
+ * field — so non-developers never touch JSON. Local row state owns the
+ * in-progress edit (incl. blank keys); the parent remounts this per node
+ * (keyed by node id) so switching nodes re-seeds from the stored value.
+ */
+function MappingEditor({
+  value,
+  onChange,
+  mappingKind,
+  t,
+}: {
+  value: unknown;
+  onChange: (v: unknown) => void;
+  mappingKind: "rename" | "cast";
+  t: Translate;
+}) {
+  type Row = { id: string; k: string; v: string };
+  const [rows, setRows] = useState<Row[]>(() => {
+    const obj = (value as Record<string, unknown>) ?? {};
+    return Object.entries(obj).map(([k, v]) => ({
+      id: nextRowId(),
+      k,
+      v: String(v),
+    }));
+  });
+
+  function commit(next: Row[]) {
+    setRows(next);
+    const obj: Record<string, string> = {};
+    for (const r of next) {
+      const key = r.k.trim();
+      if (key && r.v !== "") obj[key] = r.v;
+    }
+    onChange(Object.keys(obj).length ? obj : undefined);
+  }
+
+  const defaultValue = mappingKind === "cast" ? "str" : "";
+
+  return (
+    <div className="flex flex-col gap-2">
+      {rows.length === 0 ? (
+        <p className="text-[11px] text-text-muted">{t("builder.mapEmpty")}</p>
+      ) : (
+        <div className="flex flex-col gap-1.5">
+          <div className="flex gap-2 text-[10px] font-semibold uppercase tracking-wider text-text-muted">
+            <span className="flex-1">
+              {mappingKind === "cast" ? t("builder.castColumn") : t("builder.mapFrom")}
+            </span>
+            <span className="flex-1">
+              {mappingKind === "cast" ? t("builder.castType") : t("builder.mapTo")}
+            </span>
+            <span className="w-7" />
+          </div>
+          {rows.map((row, i) => (
+            <div key={row.id} className="flex items-center gap-2">
+              <Input
+                value={row.k}
+                placeholder="column"
+                className="flex-1"
+                onChange={(e) =>
+                  commit(rows.map((r, j) => (j === i ? { ...r, k: e.target.value } : r)))
+                }
+              />
+              {mappingKind === "cast" ? (
+                <select
+                  value={row.v || "str"}
+                  onChange={(e) =>
+                    commit(rows.map((r, j) => (j === i ? { ...r, v: e.target.value } : r)))
+                  }
+                  className="h-10 flex-1 rounded-md border border-border-subtle bg-elevated px-2 text-sm text-text focus-visible:border-accent focus-visible:outline-none"
+                >
+                  {CAST_TYPES.map((ty) => (
+                    <option key={ty} value={ty}>
+                      {ty}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <Input
+                  value={row.v}
+                  placeholder="new_name"
+                  className="flex-1"
+                  onChange={(e) =>
+                    commit(rows.map((r, j) => (j === i ? { ...r, v: e.target.value } : r)))
+                  }
+                />
+              )}
+              <button
+                type="button"
+                aria-label={t("builder.removeRow")}
+                onClick={() => commit(rows.filter((_, j) => j !== i))}
+                className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-sm text-text-muted transition duration-150 hover:bg-overlay hover:text-error"
+              >
+                <XIcon size={14} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      <button
+        type="button"
+        onClick={() =>
+          commit([...rows, { id: nextRowId(), k: "", v: defaultValue }])
+        }
+        className="inline-flex items-center gap-1.5 self-start rounded-sm border border-border-subtle px-2 py-1 text-xs text-text-secondary transition duration-150 hover:border-border-strong hover:bg-overlay hover:text-text"
+      >
+        <PlusIcon size={13} />
+        {t("builder.addRow")}
+      </button>
+    </div>
   );
 }
 

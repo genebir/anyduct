@@ -57,6 +57,13 @@ export type FieldDef =
     })
   | (FieldBase & {
       kind: "connection";
+    })
+  | (FieldBase & {
+      // No-code key→value table. "rename": free-text new name; "cast": the
+      // value is a type chosen from a dropdown. Serializes to a flat JSON
+      // object, identical to what the old raw-JSON field produced.
+      kind: "mapping";
+      mappingKind: "rename" | "cast";
     });
 
 export interface OperatorSpec {
@@ -262,9 +269,9 @@ const TRANSFORMS: OperatorSpec[] = [
       {
         key: "mapping",
         label: "Mapping",
-        kind: "json",
-        placeholder: '{"old_name": "new_name"}',
-        help: "JSON object of column → new name.",
+        kind: "mapping",
+        mappingKind: "rename",
+        help: "Rename a column to a new name. Add a row per column.",
       },
     ],
   },
@@ -280,9 +287,9 @@ const TRANSFORMS: OperatorSpec[] = [
       {
         key: "columns",
         label: "Column → type",
-        kind: "json",
-        placeholder: '{"amount": "float", "user_id": "int"}',
-        help: "JSON object of column → target type.",
+        kind: "mapping",
+        mappingKind: "cast",
+        help: "Convert a column to a target type. Add a row per column.",
       },
     ],
   },

@@ -64,6 +64,12 @@ export type FieldDef =
       // object, identical to what the old raw-JSON field produced.
       kind: "mapping";
       mappingKind: "rename" | "cast";
+    })
+  | (FieldBase & {
+      // No-code condition builder for the filter transform. Generates the
+      // Python expression the core's sandboxed filter expects, with a raw
+      // "advanced" fallback. Stores a plain string (the expression).
+      kind: "filter";
     });
 
 export interface OperatorSpec {
@@ -304,12 +310,10 @@ const TRANSFORMS: OperatorSpec[] = [
     fields: [
       {
         key: "expr",
-        label: "Expression",
-        kind: "string",
-        multiline: true,
+        label: "Conditions",
+        kind: "filter",
         required: true,
-        placeholder: "data['amount'] > 0 and data['type'] in ('a','b')",
-        help: "Available locals: data (dict), metadata. No builtins.",
+        help: "Keep only rows matching every condition. Switch to Advanced for a raw Python expression (locals: data, metadata; no builtins).",
       },
     ],
   },

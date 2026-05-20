@@ -6,11 +6,31 @@ import { Input } from "@/components/ui/input";
 import { findOperator, type FieldDef } from "@/lib/operators";
 import type { ConnectionSummary } from "@/lib/api";
 import type { BuilderNode } from "@/lib/pipeline-config";
+import {
+  buildExpr,
+  parseExpr,
+  opNeedsValue,
+  FILTER_OPS,
+  type Condition,
+  type FilterOp,
+} from "@/lib/filter-expr";
 import { cn } from "@/lib/cn";
 import { useLocale } from "@/components/providers/locale-provider";
 import type { Messages } from "@/lib/i18n/messages";
 
 type Translate = (key: keyof Messages, vars?: Record<string, string | number>) => string;
+
+const FILTER_OP_LABEL: Record<FilterOp, keyof Messages> = {
+  eq: "builder.opEq",
+  ne: "builder.opNe",
+  gt: "builder.opGt",
+  gte: "builder.opGte",
+  lt: "builder.opLt",
+  lte: "builder.opLte",
+  contains: "builder.opContains",
+  empty: "builder.opEmpty",
+  notEmpty: "builder.opNotEmpty",
+};
 
 export function PropertiesPanel({
   node,
@@ -222,6 +242,9 @@ function FieldInput({
       />
     );
   }
+  if (field.kind === "filter") {
+    return <FilterEditor value={value} onChange={onChange} t={t} />;
+  }
   if (field.multiline) {
     return (
       <textarea
@@ -242,6 +265,180 @@ function FieldInput({
       placeholder={field.placeholder}
       onChange={(e) => onChange(e.target.value || undefined)}
     />
+  );
+}
+
+let _condSeq = 0;
+function nextCondId(): string {
+  _condSeq += 1;
+  return `cond-${_condSeq}`;
+}
+
+/**
+ * No-code filter builder: AND-joined (field / operator / value) rows that
+ * generate the Python expression the core filter expects. An "advanced"
+ * toggle reveals the raw expression for OR / functions / anything the simple
+ * builder can't express; if the raw text parses back to simple conditions
+ * the user can switch back. Remounted per node (keyed by node id) so it
+ * re-seeds from the stored value.
+ */
+function FilterEditor({
+  value,
+  onChange,
+  t,
+}: {
+  value: unknown;
+  onChange: (v: unknown) => void;
+  t: Translate;
+}) {
+  const initialExpr = typeof value === "string" ? value : "";
+  const initialParsed = parseExpr(initialExpr);
+  type Row = Condition & { id: string };
+  const [advanced, setAdvanced] = useState(initialParsed === null);
+  const [raw, setRaw] = useState(initialExpr);
+  const [rows, setRows] = useState<Row[]>(
+    (initialParsed ?? []).map((c) => ({ ...c, id: nextCondId() })),
+  );
+
+  function commitRows(next: Row[]) {
+    setRows(next);
+    const expr = buildExpr(next);
+    setRaw(expr);
+    onChange(expr || undefined);
+  }
+
+  function commitRaw(text: string) {
+    setRaw(text);
+    onChange(text.trim() || undefined);
+  }
+
+  if (advanced) {
+    const canSimplify = parseExpr(raw) !== null;
+    return (
+      <div className="flex flex-col gap-2">
+        <textarea
+          rows={4}
+          value={raw}
+          placeholder="data['amount'] > 0 and data['type'] in ('a','b')"
+          onChange={(e) => commitRaw(e.target.value)}
+          className={cn(
+            "min-h-20 w-full rounded-md border border-border-subtle bg-elevated px-3 py-2 font-mono text-xs text-text",
+            "transition duration-200 focus-visible:border-accent focus-visible:outline-none",
+          )}
+        />
+        <span className="text-[11px] text-text-muted">
+          {t("builder.filterAdvancedNote")}
+        </span>
+        <button
+          type="button"
+          disabled={!canSimplify}
+          onClick={() => {
+            const parsed = parseExpr(raw) ?? [];
+            setRows(parsed.map((c) => ({ ...c, id: nextCondId() })));
+            setAdvanced(false);
+          }}
+          className="self-start rounded-sm border border-border-subtle px-2 py-1 text-xs text-text-secondary transition duration-150 hover:border-border-strong hover:bg-overlay hover:text-text disabled:opacity-40"
+        >
+          {t("builder.toSimple")}
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      {rows.length === 0 ? (
+        <p className="text-[11px] text-text-muted">{t("builder.filterEmpty")}</p>
+      ) : (
+        <>
+          <p className="text-[11px] text-text-muted">{t("builder.filterAll")}</p>
+          <div className="flex flex-col gap-1.5">
+            {rows.map((row, i) => (
+              <div key={row.id} className="flex items-center gap-1.5">
+                <Input
+                  value={row.field}
+                  placeholder={t("builder.filterField")}
+                  className="min-w-0 flex-1"
+                  onChange={(e) =>
+                    commitRows(
+                      rows.map((r, j) =>
+                        j === i ? { ...r, field: e.target.value } : r,
+                      ),
+                    )
+                  }
+                />
+                <select
+                  value={row.op}
+                  onChange={(e) =>
+                    commitRows(
+                      rows.map((r, j) =>
+                        j === i ? { ...r, op: e.target.value as FilterOp } : r,
+                      ),
+                    )
+                  }
+                  className="h-10 shrink-0 rounded-md border border-border-subtle bg-elevated px-1.5 text-xs text-text focus-visible:border-accent focus-visible:outline-none"
+                >
+                  {FILTER_OPS.map((op) => (
+                    <option key={op} value={op}>
+                      {t(FILTER_OP_LABEL[op])}
+                    </option>
+                  ))}
+                </select>
+                {opNeedsValue(row.op) ? (
+                  <Input
+                    value={row.value}
+                    placeholder={t("builder.filterValue")}
+                    className="min-w-0 flex-1"
+                    onChange={(e) =>
+                      commitRows(
+                        rows.map((r, j) =>
+                          j === i ? { ...r, value: e.target.value } : r,
+                        ),
+                      )
+                    }
+                  />
+                ) : (
+                  <span className="flex-1" />
+                )}
+                <button
+                  type="button"
+                  aria-label={t("builder.removeRow")}
+                  onClick={() => commitRows(rows.filter((_, j) => j !== i))}
+                  className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-sm text-text-muted transition duration-150 hover:bg-overlay hover:text-error"
+                >
+                  <XIcon size={14} />
+                </button>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+      <div className="flex items-center justify-between">
+        <button
+          type="button"
+          onClick={() =>
+            commitRows([
+              ...rows,
+              { id: nextCondId(), field: "", op: "eq", value: "" },
+            ])
+          }
+          className="inline-flex items-center gap-1.5 rounded-sm border border-border-subtle px-2 py-1 text-xs text-text-secondary transition duration-150 hover:border-border-strong hover:bg-overlay hover:text-text"
+        >
+          <PlusIcon size={13} />
+          {t("builder.addCondition")}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setRaw(buildExpr(rows));
+            setAdvanced(true);
+          }}
+          className="text-[11px] text-text-muted transition duration-150 hover:text-text"
+        >
+          {t("builder.toAdvanced")}
+        </button>
+      </div>
+    </div>
   );
 }
 

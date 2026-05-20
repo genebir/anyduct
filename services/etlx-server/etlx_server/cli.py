@@ -22,15 +22,26 @@ import signal
 import sys
 import uuid
 from pathlib import Path
+from typing import Any
+from uuid import UUID
 
 import typer
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from etl_plugins.config.secrets import get_secret_backend
 from etl_plugins.observability.logging import configure_logging
 from etlx_server.auth.password_service import PasswordService
+from etlx_server.connections import (
+    ConnectionNameTakenError,
+    ConnectionRepository,
+    ConnectionTester,
+    SecretBackendReadOnlyError,
+    SecretMarkerError,
+    SecretWalker,
+)
 from etlx_server.db.enums import AuthMethod
-from etlx_server.db.models import Workspace
+from etlx_server.db.models import Connection, Workspace
 from etlx_server.db.models.workspace import User
 from etlx_server.db.session import make_engine, make_session_factory
 from etlx_server.io.yaml_sync import export_workspace, import_yaml_dir
@@ -46,6 +57,7 @@ stream_worker_app = typer.Typer(help="Stream worker process commands.")
 admin_app = typer.Typer(help="One-shot admin / bootstrap commands.")
 server_app = typer.Typer(help="Run the FastAPI server (uvicorn wrapper).")
 db_app = typer.Typer(help="Metadata DB migrations (Alembic wrapper).")
+connection_app = typer.Typer(help="Manage workspace connections (CRUD + test).")
 app.add_typer(worker_app, name="worker")
 app.add_typer(reaper_app, name="reaper")
 app.add_typer(scheduler_app, name="scheduler")
@@ -53,6 +65,7 @@ app.add_typer(stream_worker_app, name="stream-worker")
 app.add_typer(admin_app, name="admin")
 app.add_typer(server_app, name="server")
 app.add_typer(db_app, name="db")
+app.add_typer(connection_app, name="connection")
 
 
 def _database_url() -> str:
@@ -317,6 +330,394 @@ def db_history_cmd() -> None:
     from alembic import command
 
     command.history(_alembic_cfg())  # type: ignore[arg-type]
+
+
+# ---------- connection (CRUD + test) ---------------------------------------
+
+
+def _load_connection_doc(path: Path) -> dict[str, Any]:
+    """Load a connection spec from JSON or YAML. Auto-detect by suffix."""
+    import json
+
+    import yaml
+
+    raw = path.read_text(encoding="utf-8")
+    if path.suffix.lower() in {".yaml", ".yml"}:
+        data = yaml.safe_load(raw)
+    elif path.suffix.lower() == ".json":
+        data = json.loads(raw)
+    else:
+        # Best effort: try YAML first (superset of JSON).
+        try:
+            data = yaml.safe_load(raw)
+        except yaml.YAMLError:
+            data = json.loads(raw)
+    if not isinstance(data, dict):
+        raise ValueError(f"{path}: top-level must be a mapping")
+    return data
+
+
+def _parse_secret_flags(secret_flags: list[str]) -> dict[str, str]:
+    """Parse repeated ``--secret KEY=VALUE`` into a dict."""
+    out: dict[str, str] = {}
+    for entry in secret_flags:
+        if "=" not in entry:
+            raise typer.BadParameter(f"--secret expects KEY=VALUE, got {entry!r}")
+        key, _, value = entry.partition("=")
+        if not key:
+            raise typer.BadParameter(f"--secret key cannot be empty in {entry!r}")
+        out[key] = value
+    return out
+
+
+async def _resolve_connection_by_name(
+    session: AsyncSession,
+    *,
+    workspace_id: UUID,
+    name: str,
+) -> Connection:
+    row = (
+        await session.execute(
+            select(Connection).where(
+                Connection.workspace_id == workspace_id,
+                Connection.name == name,
+            )
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        typer.echo(
+            f"error: no connection named {name!r} in this workspace",
+            err=True,
+        )
+        raise typer.Exit(1)
+    return row
+
+
+def _print_summary(connection: Connection) -> None:
+    import json
+
+    typer.echo(f"id           : {connection.id}")
+    typer.echo(f"name         : {connection.name}")
+    typer.echo(f"type         : {connection.type}")
+    typer.echo(f"secret refs  : {len(connection.secret_refs)}")
+    for ref in connection.secret_refs:
+        typer.echo(f"  - {ref}")
+    typer.echo("config (sanitized — secrets shown as ${SECRET:…} placeholders):")
+    typer.echo(json.dumps(connection.config_json, indent=2, ensure_ascii=False))
+
+
+@connection_app.command("list")
+def connection_list_cmd(
+    workspace: str = typer.Option(..., "--workspace", "-w", help="Workspace slug."),
+) -> None:
+    """List every connection in a workspace (name, type, secret-ref count)."""
+
+    async def _run() -> None:
+        engine = make_engine(_database_url())
+        factory = make_session_factory(engine)
+        try:
+            ws_id = UUID(await _resolve_workspace_id(factory, workspace))
+            async with factory() as session:
+                rows = await ConnectionRepository(session).list_for_workspace(workspace_id=ws_id)
+            if not rows:
+                typer.echo("(no connections)")
+                return
+            typer.echo(f"{'NAME':<32} {'TYPE':<12} {'SECRETS':>7}  CREATED")
+            for r in rows:
+                typer.echo(
+                    f"{r.name:<32} {r.type:<12} {len(r.secret_refs):>7}  {r.created_at.isoformat()}"
+                )
+        finally:
+            await engine.dispose()
+
+    asyncio.run(_run())
+
+
+@connection_app.command("get")
+def connection_get_cmd(
+    name: str = typer.Argument(..., help="Connection name."),
+    workspace: str = typer.Option(..., "--workspace", "-w", help="Workspace slug."),
+) -> None:
+    """Show one connection's sanitized config + secret refs."""
+
+    async def _run() -> None:
+        engine = make_engine(_database_url())
+        factory = make_session_factory(engine)
+        try:
+            ws_id = UUID(await _resolve_workspace_id(factory, workspace))
+            async with factory() as session:
+                row = await _resolve_connection_by_name(session, workspace_id=ws_id, name=name)
+                _print_summary(row)
+        finally:
+            await engine.dispose()
+
+    asyncio.run(_run())
+
+
+@connection_app.command("add")
+def connection_add_cmd(
+    workspace: str = typer.Option(..., "--workspace", "-w", help="Workspace slug."),
+    name: str = typer.Option(..., "--name", help="Connection name (unique per workspace)."),
+    type_: str = typer.Option(
+        ..., "--type", help="Connector type (e.g. postgres / mysql / sqlite / s3)."
+    ),
+    config_file: Path | None = typer.Option(  # noqa: B008
+        None,
+        "--config-file",
+        help="JSON or YAML file with {name?, type?, config, secrets?}. "
+        "`config` may contain {$secret: KEY} markers. "
+        "`secrets` may include the values; --secret CLI flags merge in.",
+        exists=True,
+        dir_okay=False,
+        readable=True,
+    ),
+    secret_flags: list[str] = typer.Option(  # noqa: B008
+        [],
+        "--secret",
+        help="KEY=VALUE secret pair; repeatable. Merged into --config-file secrets.",
+    ),
+) -> None:
+    """Create a new connection. Secrets go to the active SecretBackend; the
+    metadata DB only stores `${SECRET:…}` placeholders + the ref list."""
+
+    async def _run() -> None:
+        if config_file is None:
+            typer.echo("error: --config-file is required for `connection add`", err=True)
+            raise typer.Exit(2)
+
+        doc = _load_connection_doc(config_file)
+        config = doc.get("config")
+        if not isinstance(config, dict):
+            typer.echo(
+                "error: --config-file must define a `config:` mapping at the top level",
+                err=True,
+            )
+            raise typer.Exit(2)
+        secrets: dict[str, str] = {**doc.get("secrets", {}), **_parse_secret_flags(secret_flags)}
+
+        backend = get_secret_backend()
+        engine = make_engine(_database_url())
+        factory = make_session_factory(engine)
+        try:
+            ws_id = UUID(await _resolve_workspace_id(factory, workspace))
+            connection_id = uuid.uuid4()
+            walker = SecretWalker()
+            try:
+                sanitized, refs = walker.sanitize(
+                    config=config,
+                    secrets=secrets,
+                    workspace_id=ws_id,
+                    connection_id=connection_id,
+                )
+            except SecretMarkerError as e:
+                typer.echo(f"error: {e}", err=True)
+                raise typer.Exit(1) from e
+
+            try:
+                SecretWalker.write_secrets(
+                    backend,
+                    secrets=secrets,
+                    workspace_id=ws_id,
+                    connection_id=connection_id,
+                )
+            except SecretBackendReadOnlyError as e:
+                typer.echo(
+                    f"error: secret backend is read-only ({e}); "
+                    "configure ETLX_SECRET_BACKEND to a writable backend.",
+                    err=True,
+                )
+                raise typer.Exit(1) from e
+
+            async with factory() as session:
+                try:
+                    connection = await ConnectionRepository(session).add(
+                        connection_id=connection_id,
+                        workspace_id=ws_id,
+                        name=name,
+                        type=type_,
+                        config_json=sanitized,
+                        secret_refs=refs,
+                        created_by_user_id=None,
+                    )
+                    await session.commit()
+                except ConnectionNameTakenError as e:
+                    # Roll back the backend writes we just did.
+                    SecretWalker.delete_paths(backend, refs)
+                    typer.echo(f"error: {e}", err=True)
+                    raise typer.Exit(1) from e
+                typer.echo(f"created: connection id={connection.id} name={connection.name}")
+        finally:
+            await engine.dispose()
+
+    asyncio.run(_run())
+
+
+@connection_app.command("update")
+def connection_update_cmd(
+    name: str = typer.Argument(..., help="Existing connection name."),
+    workspace: str = typer.Option(..., "--workspace", "-w", help="Workspace slug."),
+    new_name: str | None = typer.Option(None, "--rename", help="Change the connection name."),
+    type_: str | None = typer.Option(None, "--type", help="Change the connector type."),
+    config_file: Path | None = typer.Option(  # noqa: B008
+        None,
+        "--config-file",
+        help="Replace config from JSON/YAML (same schema as `add`).",
+        exists=True,
+        dir_okay=False,
+        readable=True,
+    ),
+    secret_flags: list[str] = typer.Option(  # noqa: B008
+        [],
+        "--secret",
+        help="KEY=VALUE secret pair (merged into --config-file secrets if any).",
+    ),
+) -> None:
+    """Update fields of an existing connection. Omit a flag to leave it
+    unchanged. When --config-file is supplied, secrets in the backend are
+    fully re-written: paths not used by the new config are deleted."""
+
+    async def _run() -> None:
+        backend = get_secret_backend()
+        engine = make_engine(_database_url())
+        factory = make_session_factory(engine)
+        try:
+            ws_id = UUID(await _resolve_workspace_id(factory, workspace))
+            async with factory() as session:
+                row = await _resolve_connection_by_name(session, workspace_id=ws_id, name=name)
+
+                updates: dict[str, Any] = {}
+                if new_name is not None:
+                    updates["name"] = new_name
+                if type_ is not None:
+                    updates["type"] = type_
+
+                if config_file is not None:
+                    doc = _load_connection_doc(config_file)
+                    config = doc.get("config")
+                    if not isinstance(config, dict):
+                        typer.echo(
+                            "error: --config-file must define a top-level `config:` mapping",
+                            err=True,
+                        )
+                        raise typer.Exit(2)
+                    secrets: dict[str, str] = {
+                        **doc.get("secrets", {}),
+                        **_parse_secret_flags(secret_flags),
+                    }
+                    walker = SecretWalker()
+                    try:
+                        sanitized, new_refs = walker.sanitize(
+                            config=config,
+                            secrets=secrets,
+                            workspace_id=ws_id,
+                            connection_id=row.id,
+                        )
+                    except SecretMarkerError as e:
+                        typer.echo(f"error: {e}", err=True)
+                        raise typer.Exit(1) from e
+
+                    try:
+                        SecretWalker.write_secrets(
+                            backend,
+                            secrets=secrets,
+                            workspace_id=ws_id,
+                            connection_id=row.id,
+                        )
+                    except SecretBackendReadOnlyError as e:
+                        typer.echo(f"error: secret backend is read-only ({e})", err=True)
+                        raise typer.Exit(1) from e
+
+                    # Paths removed by the new config — best-effort delete.
+                    removed = [p for p in row.secret_refs if p not in new_refs]
+                    SecretWalker.delete_paths(backend, removed)
+
+                    updates["config_json"] = sanitized
+                    updates["secret_refs"] = new_refs
+
+                elif secret_flags:
+                    typer.echo(
+                        "warning: --secret has no effect without --config-file (config "
+                        "shape isn't being changed). skipping.",
+                        err=True,
+                    )
+
+                if not updates:
+                    typer.echo("no changes — supply --rename / --type / --config-file")
+                    raise typer.Exit(2)
+
+                try:
+                    connection = await ConnectionRepository(session).update(row, **updates)
+                except ConnectionNameTakenError as e:
+                    typer.echo(f"error: {e}", err=True)
+                    raise typer.Exit(1) from e
+                await session.commit()
+                typer.echo(f"updated: connection id={connection.id} name={connection.name}")
+        finally:
+            await engine.dispose()
+
+    asyncio.run(_run())
+
+
+@connection_app.command("delete")
+def connection_delete_cmd(
+    name: str = typer.Argument(..., help="Connection name to delete."),
+    workspace: str = typer.Option(..., "--workspace", "-w", help="Workspace slug."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
+) -> None:
+    """Delete a connection row + best-effort wipe of its backend secrets."""
+
+    async def _run() -> None:
+        backend = get_secret_backend()
+        engine = make_engine(_database_url())
+        factory = make_session_factory(engine)
+        try:
+            ws_id = UUID(await _resolve_workspace_id(factory, workspace))
+            async with factory() as session:
+                row = await _resolve_connection_by_name(session, workspace_id=ws_id, name=name)
+                if not yes:
+                    typer.confirm(
+                        f"delete connection {row.name!r} (id={row.id})? "
+                        "secrets will also be removed from the backend.",
+                        abort=True,
+                    )
+                refs = list(row.secret_refs)
+                await ConnectionRepository(session).delete(row)
+                await session.commit()
+                SecretWalker.delete_paths(backend, refs)
+                typer.echo(f"deleted: {name}")
+        finally:
+            await engine.dispose()
+
+    asyncio.run(_run())
+
+
+@connection_app.command("test")
+def connection_test_cmd(
+    name: str = typer.Argument(..., help="Connection name to test."),
+    workspace: str = typer.Option(..., "--workspace", "-w", help="Workspace slug."),
+) -> None:
+    """Resolve secrets through the backend, build the connector via
+    `ConnectorRegistry`, and run its health check. Exits 0 on success,
+    1 with the error message on failure."""
+
+    async def _run() -> None:
+        backend = get_secret_backend()
+        engine = make_engine(_database_url())
+        factory = make_session_factory(engine)
+        try:
+            ws_id = UUID(await _resolve_workspace_id(factory, workspace))
+            async with factory() as session:
+                row = await _resolve_connection_by_name(session, workspace_id=ws_id, name=name)
+            outcome = await ConnectionTester(backend).run(row)
+            if outcome.ok:
+                typer.echo(f"OK   {name} ({row.type})")
+            else:
+                typer.echo(f"FAIL {name} ({row.type}): {outcome.error}", err=True)
+                raise typer.Exit(1)
+        finally:
+            await engine.dispose()
+
+    asyncio.run(_run())
 
 
 @worker_app.command("run")

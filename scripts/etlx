@@ -47,7 +47,7 @@ _load_dev_jwt_env() {
 _load_dev_jwt_env
 
 CORE_CMDS=(run run-stream test-connection list-connectors validate)
-SERVER_CMDS=(import-yaml export-yaml admin worker reaper scheduler stream-worker server db)
+SERVER_CMDS=(import-yaml export-yaml admin worker reaper scheduler stream-worker server db connection)
 
 usage() {
     cat <<'EOF'
@@ -64,6 +64,7 @@ Service (etlx-server, requires metadata DB):
   server run        Run the FastAPI app (uvicorn wrapper)
   db upgrade|...    Metadata DB migrations (Alembic wrapper)
   admin             Admin bootstrap (e.g. `admin create-user`)
+  connection        Manage workspace connections (list/add/get/update/delete/test)
   worker            Run the batch worker (consumes runs queue)
   scheduler         Run the cron scheduler
   reaper            Run the zombie-run reaper

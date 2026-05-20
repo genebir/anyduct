@@ -26,7 +26,11 @@ services:
     volumes:
       - pg_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${LOCAL_PG_USER:-etl}"]
+      # Probe the real database, not the default (which libpq derives from the
+      # username). Without -d, pg_isready connects to a db named "etl", which
+      # doesn't exist, spamming the server log with FATAL every interval — the
+      # check still "passes" but the noise is misleading.
+      test: ["CMD-SHELL", "pg_isready -U ${LOCAL_PG_USER:-etl} -d ${LOCAL_PG_DB:-etl_dev}"]
       interval: 5s
       timeout: 3s
       retries: 10

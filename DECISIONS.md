@@ -901,4 +901,27 @@
 
 ---
 
+## ADR-0025: etlx-web 기본 폰트 = Pretendard Variable (self-host) + 무의존 i18n(ko/en)
+
+- **Date**: 2026-05-20
+- **Status**: Accepted
+- **Context**:
+  사용자가 UI 전체 개편을 요청하며 두 가지를 명시했다: ① "한글, 영어 선택해서 볼 수 있도록", ② "디자인을 Arc Browser 느낌으로, 특히 폰트는 Apple 산돌고딕(SD Gothic Neo) 느낌의 폰트로". 기존 DESIGN.md(ADR-0018)는 Sans를 `Inter Variable`(Latin) + `Pretendard Variable`(Korean)로 정의했으나, 실제 코드(`globals.css`)는 Inter를 선두로 두고 있어 한국어 화면에서 시스템 폰트로 떨어졌다. 또한 i18n 메커니즘은 전무했다.
+- **Decision**:
+  1. **Sans 1순위를 `Pretendard Variable`로 확정** — 한국어 우선 가변 폰트로 Apple SD Gothic Neo의 느낌을 웹에서 재현하고, Latin/Hangul을 한 폰트로 일관 처리. Inter는 폴백으로만 유지. `globals.css` `@font-face`(woff2-variations, weight 45 920) + `body`/`@theme --font-sans` 체인 선두 교체.
+  2. **폰트 self-host** — `services/etlx-web/public/fonts/PretendardVariable.woff2`. CDN 의존 금지(프로덕션 컨테이너 런타임 외부 의존 0). 빌드시 jsdelivr `npm/pretendard@1.3.9`에서 1회 받아 리포에 포함.
+  3. **i18n는 라이브러리 없이 자체 구현** — `lib/i18n/messages.ts`(typed flat dictionary, `en`이 SSOT이고 `ko: Messages`가 미러 → 키 누락은 TS 컴파일 에러) + `LocaleProvider`/`useLocale()` Context + `t(key, vars?)` `{name}` 보간. 2개 언어 UI에 next-intl 등 풀 i18n 라이브러리는 과함 — 번들 가볍게 유지.
+  4. **언어 설정은 localStorage(`etlx.locale`) 영속 + 초기값은 `navigator.language` 추정(en→en, 그 외 ko), 기본 ko**. Header에 토글 버튼.
+- **Consequences**:
+  - (+) 한·영 혼용 화면이 일관된 자형/자간으로 Arc-like 차분함. 사용자 요청 직접 충족.
+  - (+) 키 누락이 빌드 타임 타입 에러 → 번역 누락 방지.
+  - (+) 런타임 CDN/외부 i18n 서비스 의존 0 — 컨테이너 단독 배포에 적합.
+  - (−) woff2 ~2MB를 리포에 커밋(LFS 미사용). subsetting 안 함 — 한글 전체 글리프 필요해 trade-off.
+  - (−) 자체 `t()`는 복수형/성별/날짜 현지화 미지원. 2개 언어·단순 문자열 범위에서만 유효 — 확장 시 라이브러리 재검토.
+- **References**:
+  - ADR-0018 (etlx-web 디자인 시스템 — 본 ADR이 §4.1 폰트 결정을 갱신) · DESIGN.md §4.1
+  - 사용자 요청(2026-05-19): "한글/영어 선택 + Apple 산돌고딕 느낌 폰트 + Arc 느낌"
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

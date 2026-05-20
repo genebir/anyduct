@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { Sidebar } from "./sidebar";
 import {
   MockWorkspaceProvider,
+  MockLocaleProvider,
   DEFAULT_WORKSPACES,
 } from "../../.storybook/mocks/providers";
 
@@ -19,9 +20,11 @@ const meta: Meta<typeof Sidebar> = {
   decorators: [
     (Story) => (
       <div className="flex h-screen">
-        <MockWorkspaceProvider>
-          <Story />
-        </MockWorkspaceProvider>
+        <MockLocaleProvider>
+          <MockWorkspaceProvider>
+            <Story />
+          </MockWorkspaceProvider>
+        </MockLocaleProvider>
       </div>
     ),
   ],
@@ -51,9 +54,11 @@ export const BlueWorkspace: Story = {
   decorators: [
     (Story) => (
       <div className="flex h-screen">
-        <MockWorkspaceProvider currentIndex={1}>
-          <Story />
-        </MockWorkspaceProvider>
+        <MockLocaleProvider>
+          <MockWorkspaceProvider currentIndex={1}>
+            <Story />
+          </MockWorkspaceProvider>
+        </MockLocaleProvider>
       </div>
     ),
   ],
@@ -69,9 +74,11 @@ export const NoWorkspaces: Story = {
   decorators: [
     (Story) => (
       <div className="flex h-screen">
-        <MockWorkspaceProvider workspaces={[]}>
-          <Story />
-        </MockWorkspaceProvider>
+        <MockLocaleProvider>
+          <MockWorkspaceProvider workspaces={[]}>
+            <Story />
+          </MockWorkspaceProvider>
+        </MockLocaleProvider>
       </div>
     ),
   ],
@@ -84,9 +91,11 @@ export const SoloWorkspace: Story = {
   decorators: [
     (Story) => (
       <div className="flex h-screen">
-        <MockWorkspaceProvider workspaces={[DEFAULT_WORKSPACES[0]]}>
-          <Story />
-        </MockWorkspaceProvider>
+        <MockLocaleProvider>
+          <MockWorkspaceProvider workspaces={[DEFAULT_WORKSPACES[0]]}>
+            <Story />
+          </MockWorkspaceProvider>
+        </MockLocaleProvider>
       </div>
     ),
   ],
@@ -94,6 +103,26 @@ export const SoloWorkspace: Story = {
     nextjs: {
       appDirectory: true,
       navigation: { pathname: "/w/acme-data/connections" },
+    },
+  },
+};
+
+export const KoreanLocale: Story = {
+  decorators: [
+    (Story) => (
+      <div className="flex h-screen">
+        <MockLocaleProvider initial="ko">
+          <MockWorkspaceProvider>
+            <Story />
+          </MockWorkspaceProvider>
+        </MockLocaleProvider>
+      </div>
+    ),
+  ],
+  parameters: {
+    nextjs: {
+      appDirectory: true,
+      navigation: { pathname: "/w/acme-data/pipelines" },
     },
   },
 };

@@ -17,53 +17,64 @@ import {
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { cn } from "@/lib/cn";
+import { useLocale } from "@/components/providers/locale-provider";
 import { useWorkspaces } from "@/components/providers/workspace-provider";
+import type { Messages } from "@/lib/i18n/messages";
 
 interface NavLink {
+  id: string;
   href: (slug: string) => string;
-  label: string;
+  labelKey: keyof Messages;
   icon: ReactNode;
 }
 
 const NAV: NavLink[] = [
   {
+    id: "overview",
     href: (s) => `/w/${s}`,
-    label: "Overview",
+    labelKey: "nav.overview",
     icon: <HomeIcon size={18} />,
   },
   {
+    id: "connections",
     href: (s) => `/w/${s}/connections`,
-    label: "Connections",
+    labelKey: "nav.connections",
     icon: <CableIcon size={18} />,
   },
   {
+    id: "pipelines",
     href: (s) => `/w/${s}/pipelines`,
-    label: "Pipelines",
+    labelKey: "nav.pipelines",
     icon: <WorkflowIcon size={18} />,
   },
   {
+    id: "schedules",
     href: (s) => `/w/${s}/schedules`,
-    label: "Schedules",
+    labelKey: "nav.schedules",
     icon: <CalendarClockIcon size={18} />,
   },
   {
+    id: "runs",
     href: (s) => `/w/${s}/runs`,
-    label: "Runs",
+    labelKey: "nav.runs",
     icon: <ActivityIcon size={18} />,
   },
   {
+    id: "members",
     href: (s) => `/w/${s}/members`,
-    label: "Members",
+    labelKey: "nav.members",
     icon: <UsersIcon size={18} />,
   },
   {
+    id: "audit",
     href: (s) => `/w/${s}/audit`,
-    label: "Audit",
+    labelKey: "nav.audit",
     icon: <ScrollTextIcon size={18} />,
   },
   {
+    id: "settings",
     href: (s) => `/w/${s}/settings`,
-    label: "Settings",
+    labelKey: "nav.settings",
     icon: <SettingsIcon size={18} />,
   },
 ];
@@ -71,6 +82,7 @@ const NAV: NavLink[] = [
 export function Sidebar() {
   const pathname = usePathname();
   const { workspaces, current, setCurrent } = useWorkspaces();
+  const { t } = useLocale();
   const [pickerOpen, setPickerOpen] = useState(false);
 
   const slug = current?.slug ?? "";
@@ -109,7 +121,7 @@ export function Sidebar() {
           <span className="flex items-center gap-2 truncate">
             <BoxesIcon size={16} className="text-text-muted" />
             <span className="truncate text-text">
-              {current?.name ?? "Select workspace"}
+              {current?.name ?? t("nav.selectWorkspace")}
             </span>
           </span>
           <ChevronsUpDownIcon size={14} className="text-text-muted" />
@@ -122,7 +134,7 @@ export function Sidebar() {
           >
             {workspaces.length === 0 ? (
               <li className="px-2 py-1.5 text-sm text-text-muted">
-                No workspaces yet.
+                {t("nav.noWorkspaces")}
               </li>
             ) : (
               workspaces.map((w) => (
@@ -154,9 +166,6 @@ export function Sidebar() {
       </div>
 
       <nav className="flex flex-1 flex-col gap-0.5">
-        <div className="px-2 pb-1 text-[11px] font-semibold uppercase tracking-wider text-text-muted">
-          Navigate
-        </div>
         {NAV.map((link) => {
           const href = slug ? link.href(slug) : "/workspaces";
           // Overview href is exactly /w/<slug> — every other workspace route
@@ -164,12 +173,12 @@ export function Sidebar() {
           // also match every nested page. Match exactly for the overview
           // entry, prefix-match for the rest.
           const active =
-            link.label === "Overview"
+            link.id === "overview"
               ? pathname === href
               : pathname.startsWith(href);
           return (
             <Link
-              key={link.label}
+              key={link.id}
               href={href}
               className={cn(
                 "flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm transition duration-200",
@@ -186,15 +195,14 @@ export function Sidebar() {
               >
                 {link.icon}
               </span>
-              {link.label}
+              {t(link.labelKey)}
             </Link>
           );
         })}
       </nav>
 
       <div className="px-2 pt-2 text-[11px] text-text-muted">
-        v0.1.0 · {workspaces.length} workspace
-        {workspaces.length === 1 ? "" : "s"}
+        v0.1.0 · {workspaces.length}
       </div>
     </aside>
   );

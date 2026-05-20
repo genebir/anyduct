@@ -1,6 +1,20 @@
 @import "tailwindcss";
 
 /* ─────────────────────────────────────────────────────────────────────────
+   Pretendard — Apple SD Gothic Neo-style variable font (self-hosted under
+   /public/fonts so the production container has no runtime CDN dependency).
+   ADR-0018 / DESIGN.md §11.1: primary UI typeface. Latin fallbacks keep
+   text crisp before the woff2 finishes loading.
+   ─────────────────────────────────────────────────────────────────────── */
+@font-face {
+  font-family: "Pretendard Variable";
+  font-weight: 45 920;
+  font-style: normal;
+  font-display: swap;
+  src: url("/fonts/PretendardVariable.woff2") format("woff2-variations");
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
    DESIGN.md §11.1 — semantic token CSS variables.
    Defined twice: dark (default) and light (data-theme="light" on <html>).
    Tailwind reads them through the @theme block below using `rgb(var(--…) / <a>)`.
@@ -57,8 +71,8 @@
     background-color: rgb(var(--bg-base));
     color: rgb(var(--text-primary));
     font-family:
-      "Inter", "Inter Variable", "Pretendard Variable", -apple-system,
-      BlinkMacSystemFont, system-ui, sans-serif;
+      "Pretendard Variable", "Inter", "Inter Variable", -apple-system,
+      BlinkMacSystemFont, "Apple SD Gothic Neo", system-ui, sans-serif;
     font-feature-settings: "cv11", "ss01", "ss03";
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
@@ -122,8 +136,8 @@
   --radius-2xl: 28px;
 
   --font-sans:
-    "Inter", "Pretendard Variable", -apple-system, BlinkMacSystemFont,
-    system-ui, sans-serif;
+    "Pretendard Variable", "Inter", -apple-system, BlinkMacSystemFont,
+    "Apple SD Gothic Neo", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
 
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);

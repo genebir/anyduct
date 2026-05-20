@@ -2,7 +2,11 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { PlusIcon } from "lucide-react";
 import { Header } from "./header";
 import { Button } from "@/components/ui/button";
-import { MockAuthProvider, MockThemeProvider } from "../../.storybook/mocks/providers";
+import {
+  MockAuthProvider,
+  MockThemeProvider,
+  MockLocaleProvider,
+} from "../../.storybook/mocks/providers";
 
 const meta: Meta<typeof Header> = {
   title: "Shell/Header",
@@ -11,11 +15,13 @@ const meta: Meta<typeof Header> = {
   parameters: { layout: "fullscreen" },
   decorators: [
     (Story) => (
-      <MockThemeProvider>
-        <MockAuthProvider>
-          <Story />
-        </MockAuthProvider>
-      </MockThemeProvider>
+      <MockLocaleProvider>
+        <MockThemeProvider>
+          <MockAuthProvider>
+            <Story />
+          </MockAuthProvider>
+        </MockThemeProvider>
+      </MockLocaleProvider>
     ),
   ],
 };
@@ -51,11 +57,13 @@ export const Anonymous: Story = {
   args: { title: "Sign in" },
   decorators: [
     (Story) => (
-      <MockThemeProvider>
-        <MockAuthProvider state={{ kind: "anonymous" }}>
-          <Story />
-        </MockAuthProvider>
-      </MockThemeProvider>
+      <MockLocaleProvider>
+        <MockThemeProvider>
+          <MockAuthProvider state={{ kind: "anonymous" }}>
+            <Story />
+          </MockAuthProvider>
+        </MockThemeProvider>
+      </MockLocaleProvider>
     ),
   ],
 };
@@ -64,11 +72,28 @@ export const LightTheme: Story = {
   args: { title: "Settings", subtitle: "Workspace defaults" },
   decorators: [
     (Story) => (
-      <MockThemeProvider initial="light">
-        <MockAuthProvider>
-          <Story />
-        </MockAuthProvider>
-      </MockThemeProvider>
+      <MockLocaleProvider>
+        <MockThemeProvider initial="light">
+          <MockAuthProvider>
+            <Story />
+          </MockAuthProvider>
+        </MockThemeProvider>
+      </MockLocaleProvider>
+    ),
+  ],
+};
+
+export const Korean: Story = {
+  args: { title: "파이프라인", subtitle: "배치 · 마지막 실행 성공 · v3" },
+  decorators: [
+    (Story) => (
+      <MockLocaleProvider initial="ko">
+        <MockThemeProvider>
+          <MockAuthProvider>
+            <Story />
+          </MockAuthProvider>
+        </MockThemeProvider>
+      </MockLocaleProvider>
     ),
   ],
 };

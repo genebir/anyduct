@@ -19,6 +19,9 @@ repos:
       - id: check-json
       - id: check-added-large-files
         args: [--maxkb=500]
+        # Self-hosted variable web fonts are intentionally committed (no CDN
+        # at runtime); a full-Hangul woff2 is ~2MB and cannot be subset.
+        exclude: ^services/etlx-web/public/fonts/
       - id: check-merge-conflict
       - id: end-of-file-fixer
       - id: trailing-whitespace

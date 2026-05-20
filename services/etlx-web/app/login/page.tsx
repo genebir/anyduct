@@ -6,12 +6,14 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/components/providers/auth-provider";
+import { useLocale } from "@/components/providers/locale-provider";
 import { ApiError } from "@/lib/api";
 
 function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
   const { signIn } = useAuth();
+  const { t } = useLocale();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -23,11 +25,11 @@ function LoginForm() {
     setSubmitting(true);
     try {
       await signIn(email, password);
-      toast.success("Signed in");
+      toast.success(t("login.success"));
       router.replace(next);
     } catch (err) {
       const message =
-        err instanceof ApiError ? err.message : "Sign-in failed.";
+        err instanceof ApiError ? err.message : t("login.error");
       toast.error(message);
     } finally {
       setSubmitting(false);
@@ -40,15 +42,17 @@ function LoginForm() {
         <div className="text-xs font-semibold uppercase tracking-widest text-accent">
           etlx
         </div>
-        <h1 className="mt-2 text-2xl font-semibold text-text">Welcome back</h1>
+        <h1 className="mt-2 text-2xl font-semibold text-text">
+          {t("login.title")}
+        </h1>
         <p className="mt-1 text-sm text-text-secondary">
-          Sign in to manage pipelines, schedules, and runs.
+          {t("login.subtitle")}
         </p>
       </div>
       <form onSubmit={onSubmit} className="flex flex-col gap-4">
         <label className="flex flex-col gap-1.5">
           <span className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
-            Email
+            {t("login.email")}
           </span>
           <Input
             type="email"
@@ -60,7 +64,7 @@ function LoginForm() {
         </label>
         <label className="flex flex-col gap-1.5">
           <span className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
-            Password
+            {t("login.password")}
           </span>
           <Input
             type="password"
@@ -71,15 +75,15 @@ function LoginForm() {
           />
         </label>
         <Button type="submit" loading={submitting} className="mt-2 h-11">
-          Sign in
+          {submitting ? t("login.submitting") : t("login.submit")}
         </Button>
       </form>
       <p className="text-xs text-text-muted">
-        Trouble signing in? Ask your workspace owner or visit
+        {t("login.ssoHintPrefix")}
         <code className="ml-1 rounded-sm bg-overlay px-1 py-0.5 font-mono text-[11px] text-text-secondary">
           /auth/oidc/providers
         </code>{" "}
-        for SSO options.
+        {t("login.ssoHintSuffix")}
       </p>
     </main>
   );

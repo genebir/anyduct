@@ -13,6 +13,12 @@ import {
   WorkspaceContext,
   type WorkspaceContextValue,
 } from "@/components/providers/workspace-provider";
+import {
+  LocaleContext,
+  type LocaleContextValue,
+  type Locale,
+} from "@/components/providers/locale-provider";
+import { dictionaries, type Messages } from "@/lib/i18n/messages";
 import type { CurrentUser, WorkspaceSummary } from "@/lib/api";
 
 /**
@@ -108,30 +114,61 @@ export function MockWorkspaceProvider({
   );
 }
 
-/** Convenience: all three providers in their happy-path defaults. */
+export function MockLocaleProvider({
+  children,
+  initial = "en",
+}: {
+  children: ReactNode;
+  initial?: Locale;
+}) {
+  const [locale, setLocale] = useState<Locale>(initial);
+  const t = useCallback<LocaleContextValue["t"]>(
+    (key, vars) => {
+      const table = dictionaries[locale] as Messages;
+      let str = table[key] ?? key;
+      if (vars) {
+        for (const [name, val] of Object.entries(vars)) {
+          str = str.replace(new RegExp(`\\{${name}\\}`, "g"), String(val));
+        }
+      }
+      return str;
+    },
+    [locale],
+  );
+  const value: LocaleContextValue = { locale, setLocale, t };
+  return (
+    <LocaleContext.Provider value={value}>{children}</LocaleContext.Provider>
+  );
+}
+
+/** Convenience: all providers in their happy-path defaults. */
 export function MockAppShell({
   children,
   authState,
   workspaces,
   currentWorkspaceIndex,
   initialTheme,
+  initialLocale,
 }: {
   children: ReactNode;
   authState?: AuthState;
   workspaces?: WorkspaceSummary[];
   currentWorkspaceIndex?: number;
   initialTheme?: Theme;
+  initialLocale?: Locale;
 }) {
   return (
-    <MockThemeProvider initial={initialTheme}>
-      <MockAuthProvider state={authState}>
-        <MockWorkspaceProvider
-          workspaces={workspaces}
-          currentIndex={currentWorkspaceIndex}
-        >
-          {children}
-        </MockWorkspaceProvider>
-      </MockAuthProvider>
-    </MockThemeProvider>
+    <MockLocaleProvider initial={initialLocale}>
+      <MockThemeProvider initial={initialTheme}>
+        <MockAuthProvider state={authState}>
+          <MockWorkspaceProvider
+            workspaces={workspaces}
+            currentIndex={currentWorkspaceIndex}
+          >
+            {children}
+          </MockWorkspaceProvider>
+        </MockAuthProvider>
+      </MockThemeProvider>
+    </MockLocaleProvider>
   );
 }

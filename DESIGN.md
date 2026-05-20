@@ -136,11 +136,12 @@ WCAG AA(4.5:1 본문, 3:1 큰 텍스트) 기준으로 다음이 통과해야 함
 
 ### 4.1 폰트
 
-- **Sans**: `Inter Variable` (Latin) + `Pretendard Variable` (Korean). 둘 다 가변 폰트, 가중치 300~800.
+- **Sans**: `Pretendard Variable` (primary) → `Inter` 폴백 → system stack. 가변 폰트, 가중치 45~920.
+  Pretendard는 Apple SD Gothic Neo의 느낌을 웹에서 재현하는 한국어 우선 가변 폰트로, 한·영 혼용 화면에서 굵기·자간이 일관돼 Arc Browser 같은 차분한 느낌을 준다. 별도의 Latin 전용 폰트를 두지 않고 Pretendard 하나로 한·영을 모두 처리한다 (ADR-0025).
 - **Mono**: `JetBrains Mono` — SQL/YAML/로그 표시용.
-- **Display(선택)**: 큰 헤딩은 그냥 Inter Bold로 충분. 별도 디스플레이 폰트 없음 (Arc도 그러함).
+- **Display(선택)**: 큰 헤딩은 Pretendard Bold로 충분. 별도 디스플레이 폰트 없음 (Arc도 그러함).
 
-폰트 파일은 `services/etlx-web/public/fonts/`에 self-host. CDN 의존 금지.
+폰트 파일은 `services/etlx-web/public/fonts/`에 self-host (`PretendardVariable.woff2`, woff2-variations). CDN 의존 금지 — 프로덕션 컨테이너가 런타임 외부 의존 없이 동작해야 함.
 
 ### 4.2 스케일
 

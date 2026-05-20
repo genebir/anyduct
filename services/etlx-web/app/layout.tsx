@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 import { Toaster } from "sonner";
 import { AuthProvider } from "@/components/providers/auth-provider";
+import { LocaleProvider } from "@/components/providers/locale-provider";
 import { ThemeProvider } from "@/components/providers/theme-provider";
 import { WorkspaceProvider } from "@/components/providers/workspace-provider";
 import { AppShell } from "@/components/shell/app-shell";
@@ -23,13 +24,15 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning>
       <body className="font-sans antialiased">
-        <ThemeProvider>
-          <AuthProvider>
-            <WorkspaceProvider>
-              <AppShell>{children}</AppShell>
-            </WorkspaceProvider>
-          </AuthProvider>
-        </ThemeProvider>
+        <LocaleProvider>
+          <ThemeProvider>
+            <AuthProvider>
+              <WorkspaceProvider>
+                <AppShell>{children}</AppShell>
+              </WorkspaceProvider>
+            </AuthProvider>
+          </ThemeProvider>
+        </LocaleProvider>
         <Toaster
           theme="dark"
           position="top-right"

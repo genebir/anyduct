@@ -23,6 +23,12 @@
   - **JDBC IO + 무설정 드라이버**: postgres/mysql JDBC read/write 구현 + 파티셔닝 옵션. **`spark.jars.packages`로 드라이버 JAR 자동 fetch**(connection 종류 → Maven 좌표 자동 해석) — 사용자가 JAR 수동 배치 안 함(ADR-0032 "최소 설정"). `jdbc_url`/`jdbc_packages` 순수 함수 unit 검증.
   - **P3.3 graph 분기**: `SparkBackend._run_graph` — source를 `cache()`로 1회 읽고, 각 sink는 source→sink 유일 경로(transform 노드 + edge `when` filter)를 Spark로 컴파일. **어느 노드에서나 분기**가 Spark에서 동작(parquet e2e: source→transform→2-way 분기 검증).
   - 검증: Spark 실행 테스트 14개 JVM 환경 전부 통과(linear/필터/fan-out/transform/**graph 분기**/jdbc 헬퍼). 코어 528 unit pass/7 skip, mypy 49 OK, ruff OK. **JDBC 실행 e2e는 DB+maven 필요 — integration-gated(CI에서 검증)**, parquet·graph 경로는 로컬 검증 완료.
+- **워커 엔진 라우팅 + Spark 실행(P3.4, 번들/최소설정, 검증됨)** [ADR-0031/0032] —
+  - `RunExecutor`가 `PipelineConfig.engine`으로 분기: local=커넥터 빌드+in-process `Pipeline.run`, spark=connection config(시크릿 해석)→`SparkBackend` 실행. `_resolve_connection_configs`로 시크릿 해석 공유, `_prepare`가 엔진별 thread-runner 생성.
+  - **번들/최소설정**: `spark_master`(기본 `local[*]`=워커 이미지에 Spark+JRE+드라이버 번들한 단일노드) → `RunExecutor`/`RunWorker`/CLI `--spark-master`로 클러스터 URL 전환. JDBC 드라이버는 `spark.jars.packages` 자동 fetch.
+  - **워커 e2e 검증**(JVM gated): pending run → claim → connection 해석 → Spark 실행(filter) → SUCCEEDED(records_read=3/written=2, parquet 출력 검증). 무-JVM에선 skip.
+  - 서버 14 worker + spark gated 통과, mypy strict 76 OK, ruff OK.
+  - 남은 것: P3.4b 외부 클러스터 잡 submit(thin worker, spark-submit/Databricks) — 실 클러스터 필요. P3.5 UI 엔진 선택.
 - **Dataflow DAG — 레코드 단위 그래프 실행 + 어느 노드에서나 분기 (P2.1+P2.2)** [ADR-0030] — "자유 순서 + 모든 작업에서 분기".
   - 코어: `PipelineConfig.graph`(세 번째 상호배타 shape) = `GraphNodeConfig`(source/transform/sink) + `GraphEdgeConfig`(from_node/to_node/`when`). 검증: 단일 source, 비-source 노드 incoming edge 1개(tree, fan-in 미지원), sink≥1, id 유일. `Task.graph_nodes/graph_edges` + `_run_graph_task`(sink별 source 재읽기 + source→sink 유일 경로 재생, edge `when`으로 분기). batch 전용, cursor/stream 미지원. public export `GraphConfig`/`GraphNode`/`GraphEdge`.
   - 서버: `referenced_connection_names`가 graph 노드 순회. config_json 자동 round-trip. 워커가 graph task 그대로 실행(sqlite 분기 e2e 검증).

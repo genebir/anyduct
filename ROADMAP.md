@@ -479,7 +479,8 @@
 - [x] **P3.2a Spark 백엔드(선형, file IO) — 실제 검증됨** ✅ (2026-05-20) — `runtime/spark/`(`predicate.py` 필터→Spark SQL + `SparkBackend` pyspark lazy). 단일-task: parquet/csv/json IO, 선언적 transform, fan-out sink은 `cache()`로 source 1회 읽고 `when`→`filter` 분기(재읽기 문제 해소). 포터블 JRE(Temurin17)+`[spark]` extra만으로 `local[*]` 실행 확인. 임의 python transform·graph·JDBC·upsert 거부. 코어 525 unit, Spark 실행 테스트는 JVM 있을 때만(없으면 skip).
 - [x] **P3.2b dispatch 통합 + JDBC IO** ✅ (2026-05-20) — `ExecutionBackend.run(*, connectors=, connections=)` 통일, `engine:"spark"` lazy 등록. postgres/mysql JDBC read/write + 파티셔닝 + **`spark.jars.packages` 드라이버 자동 fetch**(무설정). JDBC 실행 e2e는 integration-gated(DB+maven), 헬퍼는 unit 검증.
 - [x] **P3.3 Spark graph 분기** ✅ (2026-05-20) — `_run_graph`: source `cache()` 1회 + sink별 유일 경로(transform + edge `when` filter) 컴파일. parquet e2e로 어느 노드에서나 분기 검증.
-- [ ] **P3.4 클러스터/Databricks 잡 submit + 워커 통합** ← 작업 중 — 워커가 in-process run 대신 Spark 잡 제출(thin worker, ADR-0032). connection config + 시크릿을 driver로 전달, 상태 폴링→run 기록.
+- [x] **P3.4 워커 엔진 라우팅 + Spark 실행(번들/최소설정), 검증됨** ✅ (2026-05-20) — RunExecutor가 `engine`으로 분기: local=커넥터 빌드+in-process, spark=connection config 해석(시크릿 포함)→SparkBackend 실행. `_resolve_connection_configs` 공유. `spark_master`(RunExecutor→RunWorker→CLI `--spark-master`, 기본 `local[*]`=번들 단일노드, 클러스터 URL로 전환). **워커 e2e 검증**(gated): pending run→claim→connection 해석→Spark 실행(filter)→SUCCEEDED(records 3/2, parquet 출력). 서버 14 worker + spark gated 통과, mypy/ruff OK.
+  - [ ] **P3.4b 외부 클러스터 잡 submit(thin worker)** — 워커가 in-process 대신 spark-submit/Databricks Jobs로 제출+폴링(ADR-0032). 실 클러스터 필요. 현재는 번들 in-process(worker-as-driver) 모델.
 - [ ] **P3.5 UI** — 엔진 선택 + pushdown 불가 노드 표시.
 
 ### 10.5 Schedule + Run 모니터링 (← 작업 중, 2026-05-18 Schedule CRUD + Run 상세까지 완료)

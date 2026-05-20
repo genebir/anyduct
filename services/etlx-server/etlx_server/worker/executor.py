@@ -25,7 +25,9 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import logging
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
@@ -93,6 +95,7 @@ class RunExecutor:
         *,
         worker_id: str,
         log_flush_interval_seconds: float | None = None,
+        spark_master: str = "local[*]",
     ) -> None:
         """
         Parameters
@@ -117,6 +120,9 @@ class RunExecutor:
         self._backend = backend
         self._worker_id = worker_id
         self._log_flush_interval = log_flush_interval_seconds
+        # Spark master for engine="spark" pipelines (ADR-0032). Default local[*]
+        # = the bundled single-node mode; set to a cluster URL in deployment.
+        self._spark_master = spark_master
 
     async def execute(self, run_id: UUID) -> Run:
         """Execute the run identified by ``run_id``; persist the result.
@@ -153,8 +159,12 @@ class RunExecutor:
                         pipeline_id=str(pipeline.id),
                         version=version.version,
                     )
+                    # Route by execution engine (ADR-0031): "local" builds Python
+                    # connectors + runs in-process; "spark" resolves connection
+                    # configs and runs the Spark backend (bundled JVM, ADR-0032).
+                    engine = (version.config_json or {}).get("engine", "local")
                     try:
-                        pipeline_obj, connectors = await self._build(pipeline, version, session)
+                        runner, run_name = await self._prepare(pipeline, version, session, run.id)
                     except _PipelineBuildError as e:
                         log.error(
                             "run.build_failed",
@@ -165,14 +175,10 @@ class RunExecutor:
                         await session.commit()
                         return run
 
-                    # Connect + run + close must happen in a *single* worker
-                    # thread so connector drivers (notably sqlite3) that bind
-                    # to a specific thread don't trip on cross-thread reuse.
-                    ctx = Context(pipeline_name=pipeline_obj.name, run_id=str(run.id))
                     # Heartbeat task runs on the asyncio main loop with its own
-                    # session; while pipeline.run blocks the thread-pool worker,
-                    # this keeps ``heartbeat_at`` fresh so the reaper doesn't
-                    # mistake an honest long-running run for a zombie.
+                    # session; while the run blocks the thread-pool worker, this
+                    # keeps ``heartbeat_at`` fresh so the reaper doesn't mistake
+                    # an honest long-running run for a zombie.
                     heartbeat_stop = asyncio.Event()
                     heartbeat_task = asyncio.create_task(
                         heartbeat_loop(
@@ -183,10 +189,8 @@ class RunExecutor:
                         )
                     )
                     try:
-                        log.info("run.pipeline_started", pipeline=pipeline_obj.name)
-                        result = await asyncio.to_thread(
-                            _run_pipeline_in_thread, pipeline_obj, ctx, connectors
-                        )
+                        log.info("run.pipeline_started", pipeline=run_name, engine=engine)
+                        result = await asyncio.to_thread(runner)
                         _record_success(run, result)
                         log.info(
                             "run.pipeline_succeeded",
@@ -273,31 +277,57 @@ class RunExecutor:
             )
             log.info("run.triggered_downstream", target_pipeline_id=str(target_id))
 
-    async def _build(
+    async def _prepare(
         self,
         pipeline: Pipeline,
         version: PipelineVersion,
         session: AsyncSession,
-    ) -> tuple[CorePipeline, dict[str, Connector]]:
-        """Materialize the stored pipeline into a runnable core ``Pipeline``.
+        run_id: UUID,
+    ) -> tuple[Callable[[], RunResult], str]:
+        """Build a thread-callable that runs the pipeline on its engine.
 
-        Raises :class:`_PipelineBuildError` if any step is unrecoverable.
-        Successful return guarantees every connection name in the config
-        resolves to a constructed :class:`Connector` instance.
+        Returns ``(runner, name)``. Raises :class:`_PipelineBuildError` for any
+        unrecoverable build/resolution problem (recorded as a failed run).
         """
         try:
             cfg = PipelineConfig.model_validate(version.config_json)
         except ValidationError as e:
             raise _PipelineBuildError(f"invalid pipeline config: {e.errors()}") from e
-
-        # Step 9.3a is batch-only. ``Pipeline.run`` itself rejects
-        # non-batch, but failing here gives a clearer error message and
-        # avoids spinning up connectors that won't be used.
         if cfg.mode != PipelineMode.BATCH.value:
             raise _PipelineBuildError(
                 f"worker only supports batch pipelines; got mode={cfg.mode!r}"
             )
 
+        conn_cfgs = await self._resolve_connection_configs(pipeline, cfg, session)
+
+        if cfg.engine == "spark":
+            # Spark reads/writes natively from connection configs (ADR-0031/0032).
+            return functools.partial(
+                _run_spark, cfg, conn_cfgs, str(run_id), self._spark_master
+            ), cfg.name
+
+        # local engine: build connector instances + a core Pipeline.
+        connectors: dict[str, Connector] = {}
+        for name, conn_cfg in conn_cfgs.items():
+            try:
+                connectors[name] = build_connector(name, conn_cfg)
+            except (ConfigError, RegistryError) as e:
+                raise _PipelineBuildError(f"connection {name!r}: {type(e).__name__}: {e}") from e
+        try:
+            core_pipeline, _ = build_pipeline(cfg, connectors=connectors)
+        except ConfigError as e:
+            raise _PipelineBuildError(f"pipeline build failed: {e}") from e
+        ctx = Context(pipeline_name=core_pipeline.name, run_id=str(run_id))
+        # Connect + run + close happen in a single worker thread so drivers
+        # (notably sqlite3) bound to a thread don't trip on cross-thread reuse.
+        return functools.partial(
+            _run_pipeline_in_thread, core_pipeline, ctx, connectors
+        ), core_pipeline.name
+
+    async def _resolve_connection_configs(
+        self, pipeline: Pipeline, cfg: PipelineConfig, session: AsyncSession
+    ) -> dict[str, ConnectionConfig]:
+        """Resolve every referenced connection to a secret-resolved ConnectionConfig."""
         names = referenced_connection_names(cfg)
         rows = await load_connections_by_name(
             session, workspace_id=pipeline.workspace_id, names=names
@@ -305,8 +335,7 @@ class RunExecutor:
         missing = [n for n in names if n not in rows]
         if missing:
             raise _PipelineBuildError(f"connection(s) not found in workspace: {sorted(missing)}")
-
-        connectors: dict[str, Connector] = {}
+        out: dict[str, ConnectionConfig] = {}
         for name in names:
             row = rows[name]
             try:
@@ -320,21 +349,12 @@ class RunExecutor:
                     f"connection {name!r}: resolved config is not a JSON object"
                 )
             try:
-                conn_cfg = ConnectionConfig.model_validate({"type": row.type, **resolved})
+                out[name] = ConnectionConfig.model_validate({"type": row.type, **resolved})
             except ValidationError as e:
                 raise _PipelineBuildError(
                     f"connection {name!r}: invalid config: {e.errors()}"
                 ) from e
-            try:
-                connectors[name] = build_connector(name, conn_cfg)
-            except (ConfigError, RegistryError) as e:
-                raise _PipelineBuildError(f"connection {name!r}: {type(e).__name__}: {e}") from e
-
-        try:
-            core_pipeline, _ = build_pipeline(cfg, connectors=connectors)
-        except ConfigError as e:
-            raise _PipelineBuildError(f"pipeline build failed: {e}") from e
-        return core_pipeline, connectors
+        return out
 
 
 def _record_success(run: Run, result: RunResult) -> None:
@@ -381,6 +401,22 @@ def _run_pipeline_in_thread(
         for c in connectors.values():
             with contextlib.suppress(Exception):
                 c.close()
+
+
+def _run_spark(
+    cfg: PipelineConfig,
+    conn_cfgs: dict[str, ConnectionConfig],
+    run_id: str,
+    master: str,
+) -> RunResult:
+    """Run a pipeline on the Spark backend (ADR-0031/0032). pyspark imported lazily."""
+    from etl_plugins.runtime.spark.backend import SparkBackend
+
+    return SparkBackend(master=master).run(
+        cfg,
+        connections=conn_cfgs,
+        context=Context(pipeline_name=cfg.name, run_id=run_id),
+    )
 
 
 __all__ = ["RunExecutor"]

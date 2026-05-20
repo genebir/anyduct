@@ -32,6 +32,19 @@ export LOCAL_PG_PORT
 : "${DATABASE_URL:=postgresql+asyncpg://etl:etl@localhost:${LOCAL_PG_PORT}/etl_dev}"  # pragma: allowlist secret
 export DATABASE_URL
 
+# Default CORS for local dev. The FastAPI app disables CORS entirely when
+# CORS_ORIGINS is empty (the Settings default), so a browser at :3000
+# can't call the API at :8000 — login fails with a CORS preflight error
+# even though curl works. Allow the dev web origin out of the box. Value
+# is a JSON array (pydantic-settings v2 parses list[str] as JSON).
+: "${CORS_ORIGINS:=[\"http://localhost:3000\",\"http://127.0.0.1:3000\"]}"
+export CORS_ORIGINS
+
+# Web → API base URL (inlined by Next at dev-server start). Defaults to the
+# local API. Override to point the UI at a remote API.
+: "${NEXT_PUBLIC_ETLX_API_URL:=http://localhost:8000}"
+export NEXT_PUBLIC_ETLX_API_URL
+
 # Auto-load dev JWT keypair from ``$REPO_ROOT/.run/`` if it exists. The
 # `etlx admin gen-jwt-keys` command writes the pair here. Without this the
 # FastAPI app boots without a JwtService and `/auth/login` returns 500.
@@ -150,6 +163,66 @@ dev_compose_down() {
     docker compose -f "$COMPOSE_FILE" down "$@"
 }
 
+# --- background app servers (API + web) ------------------------------------
+# `dev up --with-servers` launches the FastAPI app + Next.js dev server as
+# background processes, writing PIDs + logs under .run/. `dev down` / `dev
+# stop` reap them. This is dev-convenience only — production runs each
+# process under a real supervisor (see docker-compose.prod.yml).
+
+_pid_file() { echo "$REPO_ROOT/.run/$1.pid"; }
+_log_file() { echo "$REPO_ROOT/.run/$1.log"; }
+
+_is_running() {
+    local pid_file
+    pid_file="$(_pid_file "$1")"
+    [[ -r "$pid_file" ]] || return 1
+    local pid
+    pid="$(cat "$pid_file")"
+    [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null
+}
+
+dev_start_servers() {
+    mkdir -p "$REPO_ROOT/.run"
+
+    if _is_running server; then
+        echo "  • API server already running (pid $(cat "$(_pid_file server)"))"
+    else
+        echo "▶ starting API server → http://localhost:8000  (log: .run/server.log)"
+        nohup uv run --project "$REPO_ROOT" --package etlx-server \
+            etlx-server server run --host 0.0.0.0 --port 8000 \
+            >"$(_log_file server)" 2>&1 &
+        echo $! >"$(_pid_file server)"
+    fi
+
+    if _is_running web; then
+        echo "  • Web server already running (pid $(cat "$(_pid_file web)"))"
+    else
+        echo "▶ starting web server → http://localhost:3000  (log: .run/web.log)"
+        nohup bash -c "cd '$REPO_ROOT' && pnpm --filter @etlx/web dev --port 3000" \
+            >"$(_log_file web)" 2>&1 &
+        echo $! >"$(_pid_file web)"
+    fi
+}
+
+dev_stop_servers() {
+    local name pid pid_file
+    for name in server web; do
+        pid_file="$(_pid_file "$name")"
+        [[ -r "$pid_file" ]] || continue
+        pid="$(cat "$pid_file")"
+        if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+            echo "▶ stopping $name (pid $pid)"
+            # Kill the whole process group — uv/pnpm spawn children.
+            kill "$pid" 2>/dev/null || true
+            pkill -P "$pid" 2>/dev/null || true
+        fi
+        rm -f "$pid_file"
+    done
+    # Belt-and-suspenders: catch orphaned uvicorn / next processes.
+    pkill -f "etlx_server.main:app" 2>/dev/null || true
+    pkill -f "next dev" 2>/dev/null || true
+}
+
 dev_wait_for_pg() {
     # Poll the container's healthcheck up to ~30s. Postgres logs "ready to
     # accept connections" twice (startup + post-bootstrap); the healthcheck
@@ -182,7 +255,7 @@ dev_admin_exists() {
 }
 
 dev_up() {
-    local do_docker=1 do_migrate=1 do_admin=1
+    local do_docker=1 do_migrate=1 do_admin=1 do_servers=0
     local admin_email="admin@example.com"
     local admin_name="Admin"
     local admin_password=""
@@ -192,6 +265,7 @@ dev_up() {
             --no-docker)   do_docker=0; shift ;;
             --no-migrate)  do_migrate=0; shift ;;
             --no-admin)    do_admin=0; shift ;;
+            --with-servers|--serve) do_servers=1; shift ;;
             --admin-email)    admin_email="$2"; shift 2 ;;
             --admin-name)     admin_name="$2"; shift 2 ;;
             --admin-password) admin_password="$2"; shift 2 ;;
@@ -204,8 +278,13 @@ Steps (each can be skipped):
   2. wait for healthcheck
   3. alembic upgrade head            (--no-migrate to skip)
   4. seed admin user                 (--no-admin to skip)
+  5. start API + web servers         (only with --with-servers)
 
 Flags:
+  --with-servers, --serve  Also launch the FastAPI + Next.js servers in
+                           the background (logs → .run/{server,web}.log,
+                           PIDs → .run/{server,web}.pid). `etlx dev down`
+                           stops them.
   --admin-email EMAIL      Default: admin@example.com
   --admin-name NAME        Default: Admin
   --admin-password PASS    Default: prompted if missing and stdin is a TTY
@@ -256,20 +335,35 @@ EOF
         fi
     fi
 
-    cat <<EOF
+    if [[ $do_servers -eq 1 ]]; then
+        dev_start_servers
+        cat <<EOF
 
-✓ Local stack is up. Next:
+✓ Local stack is up (DB + API + web).
+    UI    : http://localhost:3000
+    API   : http://localhost:8000/docs
+    logs  : tail -f .run/server.log  /  tail -f .run/web.log
+    stop  : etlx dev down
+EOF
+    else
+        cat <<EOF
+
+✓ Local stack is up (DB only). Start the servers with:
+    etlx dev up --with-servers     # API + web in the background, OR:
     etlx server run --reload       # FastAPI on http://localhost:8000
     etlx web run                   # Next.js on http://localhost:3000
     etlx worker run                # batch worker (optional)
 EOF
+    fi
 }
 
 dev_down() {
+    dev_stop_servers
     dev_compose_down
 }
 
 dev_reset() {
+    dev_stop_servers
     echo "▶ docker compose down -v  (drops volumes — all DB state gone)"
     dev_compose_down -v
 }
@@ -334,9 +428,17 @@ dev_status() {
     echo "─── Metadata DB revision"
     if uv run --project "$REPO_ROOT" --package etlx-server etlx-server db current 2>&1 | tail -3; then :; fi
 
-    echo '─── Dev URLs (once "etlx server run" / "etlx web run" are running)'
-    echo "  http://localhost:8000/docs   (FastAPI Swagger)"
-    echo "  http://localhost:3000        (Next.js UI)"
+    echo "─── App servers"
+    if _is_running server; then
+        echo "  API : running (pid $(cat "$(_pid_file server)"))  http://localhost:8000"
+    else
+        echo "  API : stopped"
+    fi
+    if _is_running web; then
+        echo "  Web : running (pid $(cat "$(_pid_file web)"))  http://localhost:3000"
+    else
+        echo "  Web : stopped"
+    fi
 }
 
 dispatch_dev() {

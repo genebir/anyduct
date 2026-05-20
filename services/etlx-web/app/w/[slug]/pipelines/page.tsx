@@ -17,6 +17,7 @@ import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import { useLocale } from "@/components/providers/locale-provider";
 import type { Messages } from "@/lib/i18n/messages";
 import { blankBuilder, serialize } from "@/lib/pipeline-config";
+import { cn } from "@/lib/cn";
 
 type Translate = (key: keyof Messages, vars?: Record<string, string | number>) => string;
 
@@ -58,6 +59,7 @@ export default function PipelinesPage() {
   const [triggering, setTriggering] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
+  const [newMode, setNewMode] = useState<"batch" | "stream">("batch");
   const [submitting, setSubmitting] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<PipelineSummary | null>(
     null,
@@ -91,7 +93,7 @@ export default function PipelinesPage() {
     try {
       const config = serialize(blankBuilder(), {
         name: newName.trim(),
-        mode: "batch",
+        mode: newMode,
       });
       const created = await pipelinesApi.create(ws.id, {
         name: newName.trim(),
@@ -164,7 +166,7 @@ export default function PipelinesPage() {
       <main className="mx-auto w-full max-w-6xl flex-1 space-y-6 overflow-y-auto px-6 py-8">
         {creating ? (
           <Card>
-            <div className="flex items-end gap-3">
+            <div className="flex flex-wrap items-end gap-3">
               <label className="flex flex-1 flex-col gap-1.5">
                 <span className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
                   {t("pipelines.nameLabel")}
@@ -175,6 +177,28 @@ export default function PipelinesPage() {
                   placeholder={t("pipelines.namePlaceholder")}
                 />
               </label>
+              <div className="flex flex-col gap-1.5">
+                <span className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
+                  {t("pipelines.mode")}
+                </span>
+                <div className="flex gap-1 rounded-md border border-border-subtle bg-elevated p-1">
+                  {(["batch", "stream"] as const).map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => setNewMode(m)}
+                      className={cn(
+                        "rounded-sm px-3 py-1.5 text-sm transition duration-150",
+                        newMode === m
+                          ? "bg-overlay font-medium text-text"
+                          : "text-text-secondary hover:text-text",
+                      )}
+                    >
+                      {m}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <Button
                 variant="ghost"
                 onClick={() => setCreating(false)}
@@ -187,7 +211,7 @@ export default function PipelinesPage() {
               </Button>
             </div>
             <p className="mt-3 text-xs text-text-muted">
-              {t("pipelines.createHelp")}
+              {t("pipelines.createHelp")} {t("pipelines.modeHint")}
             </p>
           </Card>
         ) : null}

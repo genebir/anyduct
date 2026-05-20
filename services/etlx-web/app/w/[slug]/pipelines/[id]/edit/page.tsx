@@ -55,6 +55,7 @@ export default function PipelineEditorPage() {
   const [saving, setSaving] = useState(false);
   const [dryRunning, setDryRunning] = useState(false);
   const [dryRunResult, setDryRunResult] = useState<DryRunResponse | null>(null);
+  const [dirty, setDirty] = useState(false);
   const loadedRef = useRef(false);
 
   // Load pipeline + connections.
@@ -70,9 +71,13 @@ export default function PipelineEditorPage() {
         if (cancelled) return;
         setPipeline(p);
         setConnections(conns);
-        const initial = deserialize(p.current_config_json as PipelineConfigJson | null);
+        const initial = deserialize(
+          p.current_config_json as PipelineConfigJson | null,
+          conns,
+        );
         setState(initial);
         setSelectedId(initial.nodes[0]?.id ?? null);
+        setDirty(false);
         loadedRef.current = true;
       } catch (err) {
         toast.error(
@@ -103,6 +108,7 @@ export default function PipelineEditorPage() {
       return { ...prev, nodes: ordered };
     });
     setSelectedId(null);
+    setDirty(true);
   }, []);
 
   const removeOperator = useCallback((nodeId: string) => {
@@ -111,6 +117,7 @@ export default function PipelineEditorPage() {
       nodes: prev.nodes.filter((n) => n.id !== nodeId),
     }));
     setSelectedId((cur) => (cur === nodeId ? null : cur));
+    setDirty(true);
   }, []);
 
   const selectNode = useCallback((nodeId: string) => {
@@ -125,16 +132,19 @@ export default function PipelineEditorPage() {
           n.id === nodeId ? { ...n, data: values } : n,
         ),
       }));
+      setDirty(true);
     },
     [],
   );
 
   const updateRetry = useCallback((next: RetrySettings) => {
     setState((prev) => ({ ...prev, retry: next }));
+    setDirty(true);
   }, []);
 
   const updateDlq = useCallback((next: DlqSettings) => {
     setState((prev) => ({ ...prev, dlq: next }));
+    setDirty(true);
   }, []);
 
   const selectedNode = useMemo(
@@ -156,6 +166,7 @@ export default function PipelineEditorPage() {
         config,
       });
       setPipeline(updated);
+      setDirty(false);
       toast.success(
         t("builder.saved", { version: updated.current_version ?? "?" }),
       );
@@ -170,6 +181,10 @@ export default function PipelineEditorPage() {
 
   const onDryRun = useCallback(async () => {
     if (!ws || !pipeline) return;
+    if (dirty) {
+      toast.warning(t("builder.unsavedRun"));
+      return;
+    }
     setDryRunning(true);
     setDryRunResult(null);
     try {
@@ -187,10 +202,14 @@ export default function PipelineEditorPage() {
     } finally {
       setDryRunning(false);
     }
-  }, [ws, pipeline, t]);
+  }, [ws, pipeline, dirty, t]);
 
   const onTrigger = useCallback(async () => {
     if (!ws || !pipeline) return;
+    if (dirty) {
+      toast.warning(t("builder.unsavedRun"));
+      return;
+    }
     try {
       await pipelinesApi.trigger(ws.id, pipeline.id);
       toast.success(t("pipelines.runQueued", { name: pipeline.name }));
@@ -199,7 +218,7 @@ export default function PipelineEditorPage() {
         err instanceof ApiError ? err.message : t("pipelines.triggerFailed"),
       );
     }
-  }, [ws, pipeline, t]);
+  }, [ws, pipeline, dirty, t]);
 
   return (
     <>
@@ -211,12 +230,22 @@ export default function PipelineEditorPage() {
             : t("common.loading")
         }
         actions={
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
+            {dirty ? (
+              <span
+                className="inline-flex items-center gap-1.5 rounded-sm border border-warning/40 bg-warning/10 px-2 py-1 text-xs font-medium text-warning"
+                title={t("builder.unsavedRun")}
+              >
+                <span className="h-1.5 w-1.5 rounded-full bg-warning" aria-hidden />
+                {t("builder.unsaved")}
+              </span>
+            ) : null}
             <Button
               variant="ghost"
               onClick={onDryRun}
               loading={dryRunning}
               disabled={!pipeline?.current_version}
+              title={!pipeline?.current_version ? t("builder.saveFirst") : undefined}
             >
               <ZapIcon size={16} />
               {t("builder.dryRun")}
@@ -225,6 +254,7 @@ export default function PipelineEditorPage() {
               variant="ghost"
               onClick={onTrigger}
               disabled={!pipeline?.current_version}
+              title={!pipeline?.current_version ? t("builder.saveFirst") : undefined}
             >
               <PlayIcon size={16} />
               {t("common.trigger")}

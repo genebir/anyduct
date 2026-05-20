@@ -165,21 +165,34 @@ export function serialize(
   return config;
 }
 
-/** Rebuild a BuilderState from a stored PipelineConfig JSON. */
-export function deserialize(config: PipelineConfigJson | null): BuilderState {
+/**
+ * Rebuild a BuilderState from a stored PipelineConfig JSON.
+ *
+ * `connections` lets us recover the source/sink connector type: the config
+ * only stores the connection *name* (the worker derives the type from the
+ * Connection row), so without this lookup every reloaded source/sink would
+ * fall back to Postgres — showing the wrong node + fields for an S3 or Mongo
+ * pipeline.
+ */
+export function deserialize(
+  config: PipelineConfigJson | null,
+  connections: { name: string; type: string }[] = [],
+): BuilderState {
   if (!config || !config.source || !config.sink) return blankBuilder();
+
+  const typeByName = new Map(connections.map((c) => [c.name, c.type]));
 
   const source = OPERATORS.find(
     (op) =>
       op.kind === "source" &&
       op.connectorType ===
-        guessConnectorType(config.source.connection, config.source),
+        guessConnectorType(config.source.connection, config.source, typeByName),
   );
   const sink = OPERATORS.find(
     (op) =>
       op.kind === "sink" &&
       op.connectorType ===
-        guessConnectorType(config.sink.connection, config.sink),
+        guessConnectorType(config.sink.connection, config.sink, typeByName),
   );
 
   const nodes: BuilderNode[] = [];
@@ -239,11 +252,15 @@ export function deserialize(config: PipelineConfigJson | null): BuilderState {
 function guessConnectorType(
   connection: string | undefined,
   raw: Record<string, unknown>,
+  typeByName: Map<string, string>,
 ): string {
   if (typeof raw.type === "string") return raw.type;
   // Use a `kind`/`__type` annotation if the UI stored one before saving.
   if (typeof raw.__connector === "string") return raw.__connector;
-  if (!connection) return "postgres";
+  // Recover the connector type from the referenced Connection.
+  if (connection && typeByName.has(connection)) {
+    return typeByName.get(connection)!;
+  }
   return "postgres";
 }
 

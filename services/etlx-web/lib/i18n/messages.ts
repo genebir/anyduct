@@ -240,6 +240,9 @@ export const en = {
   "pipelines.createOpen": "Create & open builder",
   "pipelines.createHelp":
     "Starts a blank pipeline with default Postgres source and sink — configure both in the visual builder.",
+  "pipelines.mode": "Mode",
+  "pipelines.modeHint":
+    "Batch runs on a trigger or cron schedule; stream runs continuously (e.g. Kafka). Mode is fixed after creation.",
   "pipelines.openBuilder": "Open builder",
   "pipelines.deleteAria": "Delete {name}",
   "pipelines.emptyTitle": "No pipelines yet",
@@ -306,6 +309,9 @@ export const en = {
   "builder.loadFailed": "Couldn't load pipeline.",
   "builder.saveFailed": "Save failed.",
   "builder.dryRunFailedToast": "Dry run failed.",
+  "builder.unsaved": "Unsaved changes",
+  "builder.unsavedRun": "Save your changes first — run uses the last saved version.",
+  "builder.saveFirst": "Save the pipeline first to enable this.",
 
   // runs list
   "runs.colReadWritten": "Read / Written",
@@ -643,6 +649,9 @@ export const ko: Messages = {
   "pipelines.createOpen": "생성 후 빌더 열기",
   "pipelines.createHelp":
     "기본 Postgres 소스와 싱크로 빈 파이프라인을 시작합니다 — 둘 다 비주얼 빌더에서 구성하세요.",
+  "pipelines.mode": "모드",
+  "pipelines.modeHint":
+    "배치는 트리거나 크론 스케줄로 실행되고, 스트림은 연속 실행됩니다(예: Kafka). 모드는 생성 후 변경할 수 없습니다.",
   "pipelines.openBuilder": "빌더 열기",
   "pipelines.deleteAria": "{name} 삭제",
   "pipelines.emptyTitle": "아직 파이프라인이 없습니다",
@@ -707,6 +716,9 @@ export const ko: Messages = {
   "builder.loadFailed": "파이프라인을 불러올 수 없습니다.",
   "builder.saveFailed": "저장에 실패했습니다.",
   "builder.dryRunFailedToast": "드라이런에 실패했습니다.",
+  "builder.unsaved": "저장되지 않은 변경사항",
+  "builder.unsavedRun": "먼저 변경사항을 저장하세요 — 실행은 마지막 저장 버전을 사용합니다.",
+  "builder.saveFirst": "먼저 파이프라인을 저장해야 사용할 수 있습니다.",
 
   "runs.colReadWritten": "읽음 / 기록",
   "runs.emptyTitle": "아직 실행이 없습니다",

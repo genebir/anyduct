@@ -45,6 +45,16 @@ export CORS_ORIGINS
 : "${NEXT_PUBLIC_ETLX_API_URL:=http://localhost:8000}"
 export NEXT_PUBLIC_ETLX_API_URL
 
+# Secret backend. The Settings default is ``env`` (read-only), so creating a
+# connection that carries a password fails with 503 ("deployment
+# misconfigured"). For local dev use the file backend, which writes secret
+# values to a JSON store under .run/ and keeps only refs in the metadata DB.
+# Override SECRET_BACKEND=vault|aws_sm|gcp_sm (+ its opts) for real backends.
+: "${SECRET_BACKEND:=file}"
+export SECRET_BACKEND
+: "${SECRET_BACKEND_FILE_PATH:=$REPO_ROOT/.run/secrets.json}"
+export SECRET_BACKEND_FILE_PATH
+
 # Auto-load dev JWT keypair from ``$REPO_ROOT/.run/`` if it exists. The
 # `etlx admin gen-jwt-keys` command writes the pair here. Without this the
 # FastAPI app boots without a JwtService and `/auth/login` returns 500.

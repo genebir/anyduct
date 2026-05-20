@@ -121,11 +121,11 @@ EOF
                     *) echo "etlx web run: unknown flag '$1'" >&2; exit 2 ;;
                 esac
             done
-            exec pnpm --filter @etlx/web dev --port "$port"
+            cd "$REPO_ROOT" && exec pnpm --filter @etlx/web dev --port "$port"
             ;;
         build)
             shift
-            exec pnpm --filter @etlx/web build "$@"
+            cd "$REPO_ROOT" && exec pnpm --filter @etlx/web build "$@"
             ;;
         *)
             echo "etlx web: unknown subcommand '$sub'. Try 'etlx web --help'." >&2
@@ -213,13 +213,13 @@ EOF
     # files already exist. Refreshes wrapper-side env vars after generation.
     if [[ ! -r "$REPO_ROOT/.run/jwt_private.pem" || ! -r "$REPO_ROOT/.run/jwt_public.pem" ]]; then
         echo "▶ generating dev JWT keypair → $REPO_ROOT/.run/"
-        uv run --package etlx-server etlx-server admin gen-jwt-keys --out-dir "$REPO_ROOT/.run"
+        uv run --project "$REPO_ROOT" --package etlx-server etlx-server admin gen-jwt-keys --out-dir "$REPO_ROOT/.run"
         _load_dev_jwt_env
     fi
 
     if [[ $do_migrate -eq 1 ]]; then
         echo "▶ alembic upgrade head  (DATABASE_URL=$DATABASE_URL)"
-        uv run --package etlx-server etlx-server db upgrade head
+        uv run --project "$REPO_ROOT" --package etlx-server etlx-server db upgrade head
     fi
 
     if [[ $do_admin -eq 1 ]]; then
@@ -229,7 +229,7 @@ EOF
         if [[ -n "$admin_password" ]]; then
             args+=(--password "$admin_password")
         fi
-        if ! uv run --package etlx-server etlx-server admin create-user "${args[@]}" 2>&1; then
+        if ! uv run --project "$REPO_ROOT" --package etlx-server etlx-server admin create-user "${args[@]}" 2>&1; then
             : # already-exists is fine; output already explains.
         fi
     fi
@@ -262,7 +262,7 @@ dev_status() {
     echo "  $DATABASE_URL"
 
     echo "─── Metadata DB revision"
-    if uv run --package etlx-server etlx-server db current 2>&1 | tail -3; then :; fi
+    if uv run --project "$REPO_ROOT" --package etlx-server etlx-server db current 2>&1 | tail -3; then :; fi
 
     echo '─── Dev URLs (once "etlx server run" / "etlx web run" are running)'
     echo "  http://localhost:8000/docs   (FastAPI Swagger)"
@@ -314,13 +314,13 @@ esac
 
 for c in "${CORE_CMDS[@]}"; do
     if [[ "$cmd" == "$c" ]]; then
-        exec uv run etlx "$cmd" "$@"
+        exec uv run --project "$REPO_ROOT" etlx "$cmd" "$@"
     fi
 done
 
 for c in "${SERVER_CMDS[@]}"; do
     if [[ "$cmd" == "$c" ]]; then
-        exec uv run --package etlx-server etlx-server "$cmd" "$@"
+        exec uv run --project "$REPO_ROOT" --package etlx-server etlx-server "$cmd" "$@"
     fi
 done
 

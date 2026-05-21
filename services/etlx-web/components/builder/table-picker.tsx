@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { DatabaseIcon } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { connectionsApi } from "@/lib/api";
 import type { Messages } from "@/lib/i18n/messages";
@@ -90,62 +89,6 @@ export function TableField({
         <span className="text-[11px] text-text-muted">{t("builder.tableLoading")}</span>
       ) : error ? (
         <span className="text-[11px] text-warning">{t("builder.tableLoadError")}</span>
-      ) : null}
-    </div>
-  );
-}
-
-/** "Browse tables" disclosure for DB-source SQL fields: lists the connection's
- *  tables and, on click, inserts a `SELECT * FROM <table>` starter query. */
-export function TableBrowser({
-  workspaceId,
-  connectionId,
-  onPick,
-  t,
-}: {
-  workspaceId?: string;
-  connectionId?: string;
-  onPick: (table: string) => void;
-  t: Translate;
-}) {
-  const [open, setOpen] = useState(false);
-  const { tables, loading, error } = useTables(workspaceId, connectionId, open);
-
-  return (
-    <div className="flex flex-col gap-1.5">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        disabled={!connectionId}
-        className="inline-flex items-center gap-1.5 self-start rounded-sm border border-border-subtle px-2 py-1 text-xs text-text-secondary transition duration-150 hover:border-border-strong hover:bg-overlay hover:text-text disabled:opacity-40"
-      >
-        <DatabaseIcon size={13} />
-        {open ? t("builder.tableBrowseHide") : t("builder.tableBrowse")}
-      </button>
-      {open ? (
-        !connectionId ? (
-          <span className="text-[11px] text-text-muted">{t("builder.tableSelectConnFirst")}</span>
-        ) : loading ? (
-          <span className="text-[11px] text-text-muted">{t("builder.tableLoading")}</span>
-        ) : error ? (
-          <span className="text-[11px] text-warning">{t("builder.tableLoadError")}</span>
-        ) : tables.length === 0 ? (
-          <span className="text-[11px] text-text-muted">{t("builder.tableNone")}</span>
-        ) : (
-          <ul className="flex max-h-40 flex-col gap-0.5 overflow-y-auto rounded-md border border-border-subtle bg-elevated p-1">
-            {tables.map((tbl) => (
-              <li key={tbl}>
-                <button
-                  type="button"
-                  onClick={() => onPick(tbl)}
-                  className="w-full truncate rounded-sm px-2 py-1 text-left font-mono text-xs text-text-secondary transition duration-150 hover:bg-overlay hover:text-text"
-                >
-                  {tbl}
-                </button>
-              </li>
-            ))}
-          </ul>
-        )
       ) : null}
     </div>
   );

@@ -5,8 +5,9 @@ import { ArrowLeftIcon, ArrowRightIcon, PlusIcon, XIcon } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { findOperator, type FieldDef, type OperatorSpec } from "@/lib/operators";
 import type { ConnectionSummary } from "@/lib/api";
-import { TableBrowser, TableField } from "./table-picker";
+import { TableField } from "./table-picker";
 import { ColumnsField } from "./columns-field";
+import { SourceQueryField } from "./source-query-field";
 import type { BuilderNode } from "@/lib/pipeline-config";
 import {
   buildExpr,
@@ -235,7 +236,7 @@ function FieldEditor({
     field.kind === "filter" ||
     field.kind === "mapping" ||
     field.kind === "columns" ||
-    (field.kind === "string" && field.multiline === true && field.tableHelper === true);
+    field.kind === "sourceQuery";
   const Wrapper = composite ? "div" : "label";
   return (
     <Wrapper className="flex flex-col gap-1.5">
@@ -345,6 +346,18 @@ function FieldInput({
       />
     );
   }
+  if (field.kind === "sourceQuery") {
+    return (
+      <SourceQueryField
+        value={value}
+        placeholder={field.placeholder}
+        workspaceId={workspaceId}
+        connectionId={connectionId}
+        onChange={onChange}
+        t={t}
+      />
+    );
+  }
   if (field.kind === "select") {
     return (
       <select
@@ -405,26 +418,16 @@ function FieldInput({
   }
   if (field.kind === "string" && field.multiline) {
     return (
-      <div className="flex flex-col gap-2">
-        {field.tableHelper ? (
-          <TableBrowser
-            workspaceId={workspaceId}
-            connectionId={connectionId}
-            onPick={(table) => onChange(`SELECT * FROM ${table}`)}
-            t={t}
-          />
-        ) : null}
-        <textarea
-          rows={4}
-          value={(value as string) ?? ""}
-          placeholder={field.placeholder}
-          onChange={(e) => onChange(e.target.value || undefined)}
-          className={cn(
-            "min-h-20 w-full rounded-md border border-border-subtle bg-elevated px-3 py-2 font-mono text-xs text-text",
-            "transition duration-200 focus-visible:border-accent focus-visible:outline-none",
-          )}
-        />
-      </div>
+      <textarea
+        rows={4}
+        value={(value as string) ?? ""}
+        placeholder={field.placeholder}
+        onChange={(e) => onChange(e.target.value || undefined)}
+        className={cn(
+          "min-h-20 w-full rounded-md border border-border-subtle bg-elevated px-3 py-2 font-mono text-xs text-text",
+          "transition duration-200 focus-visible:border-accent focus-visible:outline-none",
+        )}
+      />
     );
   }
   return (

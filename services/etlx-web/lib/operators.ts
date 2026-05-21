@@ -51,10 +51,6 @@ export type FieldDef =
       kind: "string" | "number";
       placeholder?: string;
       multiline?: boolean;
-      /** For DB-source SQL fields: render a "browse tables" helper above the
-       *  textarea that introspects the selected connection and inserts a
-       *  `SELECT * FROM <table>` starter query. */
-      tableHelper?: boolean;
     })
   | (FieldBase & {
       // A table / collection name with introspected suggestions. Renders a
@@ -62,6 +58,13 @@ export type FieldDef =
       // (ADR-0033); free text is still allowed for tables the introspection
       // can't reach (permissions, other schemas).
       kind: "table";
+      placeholder?: string;
+    })
+  | (FieldBase & {
+      // DB-source read spec. Stores a SQL string (the connector's `query`) but
+      // offers two ways to build it: raw SQL, or a point-and-click schema →
+      // table → columns picker (ADR-0033) that compiles to `SELECT ... FROM`.
+      kind: "sourceQuery";
       placeholder?: string;
     })
   | (FieldBase & {
@@ -144,10 +147,8 @@ const SOURCES: OperatorSpec[] = [
       { key: "connection", label: "Connection", kind: "connection", required: true },
       {
         key: "query",
-        label: "SQL query",
-        kind: "string",
-        multiline: true,
-        tableHelper: true,
+        label: "Read",
+        kind: "sourceQuery",
         placeholder: "SELECT id, name, created_at FROM users",
       },
       { key: "chunk_size", label: "Chunk size", kind: "number", placeholder: "10000" },
@@ -163,7 +164,7 @@ const SOURCES: OperatorSpec[] = [
     accent: "#06B6D4",
     fields: [
       { key: "connection", label: "Connection", kind: "connection", required: true },
-      { key: "query", label: "SQL query", kind: "string", multiline: true, tableHelper: true },
+      { key: "query", label: "Read", kind: "sourceQuery" },
       { key: "chunk_size", label: "Chunk size", kind: "number" },
     ],
   },
@@ -177,7 +178,7 @@ const SOURCES: OperatorSpec[] = [
     accent: "#10B981",
     fields: [
       { key: "connection", label: "Connection", kind: "connection", required: true },
-      { key: "query", label: "SQL query", kind: "string", multiline: true, tableHelper: true },
+      { key: "query", label: "Read", kind: "sourceQuery" },
     ],
   },
   {

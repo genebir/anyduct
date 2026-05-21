@@ -264,6 +264,22 @@ def test_pre_sql_delete_makes_pipeline_idempotent(tmp_path: Path) -> None:
     assert rows == [1, 2, 3]  # 99 deleted, 1/2/3 present once (not duplicated)
 
 
+def test_build_pipeline_wires_cursor_column() -> None:
+    """source.cursor_column flows to Task.cursor_column (backfill, ADR-0039)
+    and isn't leaked into source_options."""
+    pc = PipelineConfig.model_validate(
+        {
+            "name": "p",
+            "source": {"connection": "s", "query": "SELECT 1", "cursor_column": "updated_at"},
+            "sink": {"connection": "k", "table": "T", "mode": "append"},
+        }
+    )
+    pipeline, _ = build_pipeline(pc, {"s": InMemoryBatchSource(), "k": InMemoryBatchSink()})
+    task = pipeline.tasks[0]
+    assert task.cursor_column == "updated_at"
+    assert "cursor_column" not in task.source_options
+
+
 def test_build_pipeline_with_transforms() -> None:
     pc = PipelineConfig.model_validate(
         {

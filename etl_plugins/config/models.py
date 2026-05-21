@@ -40,6 +40,11 @@ class SourceConfig(BaseModel):
     connection: str
     query: str | None = None
     chunk_size: int = 10_000
+    # Incremental / backfill cursor (Step 6.1). When set, ``Pipeline.run`` with
+    # ``cursor_from`` / ``cursor_to`` reads via ``BatchSource.read_since`` on this
+    # column. Required for the backfill action (ADR-0039); the source connector
+    # must implement ``read_since``.
+    cursor_column: str | None = None
     # topic, group_id, format 등은 extra=allow로 통과
 
 

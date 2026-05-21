@@ -260,10 +260,10 @@ function VisualBuilder({
               </div>
               <div className="flex max-h-48 flex-col gap-0.5 overflow-y-auto rounded-md border border-border-subtle bg-elevated p-1.5">
                 {cols.columns.map((col) => {
-                  const checked = columns.includes(col);
+                  const checked = columns.includes(col.name);
                   return (
                     <label
-                      key={col}
+                      key={col.name}
                       className="flex cursor-pointer items-center gap-2 rounded-sm px-1.5 py-1 text-xs text-text-secondary transition duration-150 hover:bg-overlay"
                     >
                       <input
@@ -272,13 +272,18 @@ function VisualBuilder({
                         onChange={() =>
                           onColumns(
                             checked
-                              ? columns.filter((c) => c !== col)
-                              : [...columns, col],
+                              ? columns.filter((c) => c !== col.name)
+                              : [...columns, col.name],
                           )
                         }
                         className="accent-[rgb(var(--accent))]"
                       />
-                      <span className="font-mono">{col}</span>
+                      <span className="font-mono">{col.name}</span>
+                      {col.type ? (
+                        <span className="ml-auto font-mono text-[10px] text-text-muted">
+                          {col.type}
+                        </span>
+                      ) : null}
                     </label>
                   );
                 })}

@@ -8,17 +8,24 @@ import type { Messages } from "@/lib/i18n/messages";
 
 type Translate = (key: keyof Messages, vars?: Record<string, string | number>) => string;
 
+/** One introspected column: name + connector-native type label. */
+export interface ColumnMeta {
+  name: string;
+  type: string;
+}
+
 /**
  * Lazily introspect a table's columns (ADR-0033). Used to power the column
  * checklist so downstream transforms can "click" upstream result columns.
+ * Carries the column's native type so pickers can show it.
  */
 export function useColumns(
   workspaceId: string | undefined,
   connectionId: string | undefined,
   table: string | undefined,
   enabled: boolean,
-): { columns: string[]; loading: boolean; error: string | null } {
-  const [columns, setColumns] = useState<string[]>([]);
+): { columns: ColumnMeta[]; loading: boolean; error: string | null } {
+  const [columns, setColumns] = useState<ColumnMeta[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -30,7 +37,7 @@ export function useColumns(
     connectionsApi
       .columns(workspaceId, connectionId, table)
       .then((res) => {
-        if (!cancelled) setColumns(res.columns.map((c) => c.name));
+        if (!cancelled) setColumns(res.columns);
       })
       .catch((e: unknown) => {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
@@ -90,7 +97,7 @@ export function ColumnsField({
 
   // Columns chosen but not in the introspected set (manual / stale) — shown so
   // nothing the user picked silently disappears.
-  const extra = selected.filter((c) => !columns.includes(c));
+  const extra = selected.filter((c) => !columns.some((cc) => cc.name === c));
 
   return (
     <div className="flex flex-col gap-2">
@@ -106,16 +113,19 @@ export function ColumnsField({
         <div className="flex flex-col gap-1 rounded-md border border-border-subtle bg-elevated p-1.5">
           {columns.map((col) => (
             <label
-              key={col}
+              key={col.name}
               className="flex cursor-pointer items-center gap-2 rounded-sm px-1.5 py-1 text-xs text-text-secondary transition duration-150 hover:bg-overlay"
             >
               <input
                 type="checkbox"
-                checked={selected.includes(col)}
-                onChange={() => toggle(col)}
+                checked={selected.includes(col.name)}
+                onChange={() => toggle(col.name)}
                 className="accent-[rgb(var(--accent))]"
               />
-              <span className="font-mono">{col}</span>
+              <span className="font-mono">{col.name}</span>
+              {col.type ? (
+                <span className="ml-auto font-mono text-[10px] text-text-muted">{col.type}</span>
+              ) : null}
             </label>
           ))}
         </div>

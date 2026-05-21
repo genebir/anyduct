@@ -39,6 +39,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from etl_plugins.config.models import ConnectionConfig, PipelineConfig
 from etl_plugins.config.secrets import SecretBackend
+from etl_plugins.config.variables import resolve_config_variables
 from etl_plugins.core.asset import AssetLineage
 from etl_plugins.core.connector import Connector
 from etl_plugins.core.context import Context
@@ -53,6 +54,7 @@ from etlx_server.pipelines.runtime import (
     referenced_connection_names,
     resolve_placeholders,
 )
+from etlx_server.variables.repository import WorkspaceVariableRepository
 from etlx_server.worker.heartbeat import heartbeat_loop
 from etlx_server.worker.recorder import RunRecorder, current_run_id
 
@@ -419,8 +421,16 @@ class RunExecutor:
         ``cursor_from`` / ``cursor_to`` drive a backfill over the source's
         ``cursor_column`` (ADR-0039).
         """
+        # Resolve ${var.name}: workspace globals merged under the pipeline's local
+        # variables block (locals win), then the config validates (ADR-0041, V2).
+        global_vars = await WorkspaceVariableRepository(session).as_dict(
+            workspace_id=pipeline.workspace_id
+        )
         try:
-            cfg = PipelineConfig.model_validate(version.config_json)
+            cfg_dict = resolve_config_variables(version.config_json, extra=global_vars)
+            cfg = PipelineConfig.model_validate(cfg_dict)
+        except ConfigError as e:
+            raise _PipelineBuildError(f"variable resolution failed: {e}") from e
         except ValidationError as e:
             raise _PipelineBuildError(f"invalid pipeline config: {e.errors()}") from e
         if cfg.mode != PipelineMode.BATCH.value:

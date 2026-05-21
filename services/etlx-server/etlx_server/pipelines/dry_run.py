@@ -32,6 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from etl_plugins.config.models import ConnectionConfig, PipelineConfig
 from etl_plugins.config.secrets import SecretBackend
+from etl_plugins.config.variables import resolve_config_variables
 from etl_plugins.core.exceptions import ConfigError, RegistryError, SecretError
 from etl_plugins.runtime.builder import build_connector, build_pipeline
 from etlx_server.db.models import Pipeline, PipelineVersion
@@ -40,6 +41,7 @@ from etlx_server.pipelines.runtime import (
     referenced_connection_names,
     resolve_placeholders,
 )
+from etlx_server.variables.repository import WorkspaceVariableRepository
 
 
 @dataclass(frozen=True)
@@ -94,11 +96,16 @@ class DryRunService:
         *,
         check_health: bool = True,
     ) -> DryRunResult:
-        # 1) Re-validate the stored config against the core schema. This
-        # would only fail if a row was edited around the API (or via an
-        # older client), but it's cheap insurance.
+        # 1) Resolve ${var.name} (workspace globals under pipeline locals, locals
+        # win — ADR-0041 V2), then re-validate the config against the core schema.
+        global_vars = await WorkspaceVariableRepository(self._session).as_dict(
+            workspace_id=pipeline.workspace_id
+        )
         try:
-            pipeline_cfg = PipelineConfig.model_validate(version.config_json)
+            cfg_dict = resolve_config_variables(version.config_json, extra=global_vars)
+            pipeline_cfg = PipelineConfig.model_validate(cfg_dict)
+        except ConfigError as e:
+            return DryRunResult(ok=False, errors=[f"variable resolution failed: {e}"])
         except ValidationError as e:
             return DryRunResult(ok=False, errors=[f"invalid pipeline config: {e.errors()}"])
 

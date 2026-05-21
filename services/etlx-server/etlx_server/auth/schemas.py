@@ -129,6 +129,21 @@ class ConnectionSummary(BaseModel):
     secret_refs: list[str]
 
 
+class WorkspaceVariableEntry(BaseModel):
+    """One workspace-global variable (ADR-0041, V2). Non-secret config value."""
+
+    name: str
+    value: Any
+    description: str | None = None
+
+
+class WorkspaceVariableSetRequest(BaseModel):
+    """Body of ``PUT /workspaces/{id}/variables/{name}`` — upsert a global variable."""
+
+    value: Any = None
+    description: str | None = Field(default=None, max_length=2000)
+
+
 class ConnectionCreateRequest(BaseModel):
     """Body of ``POST /workspaces/{id}/connections``.
 

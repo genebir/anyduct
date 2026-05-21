@@ -37,6 +37,7 @@ from etlx_server.db.models import (
     PipelineVersion,
     Run,
     Workspace,
+    WorkspaceVariable,
 )
 from etlx_server.worker.claim import claim_pending_run
 from etlx_server.worker.executor import RunExecutor
@@ -297,6 +298,74 @@ async def test_executor_happy_path_sqlite(session: AsyncSession, tmp_path: Path)
     finally:
         conn.close()
     assert rows == [(1, "alice"), (2, "bob"), (3, "carol")]
+
+
+async def test_executor_resolves_global_and_local_variables(
+    session: AsyncSession, tmp_path: Path
+) -> None:
+    """${var.name} resolves at build time: workspace global + pipeline local (ADR-0041 V2).
+
+    Global ``tbl`` fills the FROM clause; local ``threshold`` (which wins over a
+    global of the same name) drives a filter — so the run reflects both.
+    """
+    db_path = _prepare_sqlite_fixture(tmp_path)
+    ws = await _seed_workspace(session, slug="we-vars")
+    await _seed_connection(session, workspace_id=ws.id, name="src", config={"database": db_path})
+    await _seed_connection(session, workspace_id=ws.id, name="dst", config={"database": db_path})
+    # Global var supplies the table; another global is shadowed by a local.
+    session.add(WorkspaceVariable(workspace_id=ws.id, name="tbl", value_json="seed"))
+    session.add(WorkspaceVariable(workspace_id=ws.id, name="threshold", value_json=99))
+    await session.flush()
+    cfg = {
+        "name": "p",
+        "variables": {"threshold": 1},  # local wins over the global 99
+        "source": {"connection": "src", "query": "SELECT id, name FROM ${var.tbl}"},
+        "transforms": [{"type": "filter", "expr": "data['id'] > ${var.threshold}"}],
+        "sink": {"connection": "dst", "table": "out", "mode": "append"},
+    }
+    p, pv = await _seed_pipeline(session, workspace_id=ws.id, name="p", config=cfg)
+    run = await _seed_pending_run(
+        session, workspace_id=ws.id, pipeline_id=p.id, pipeline_version_id=pv.id
+    )
+    claimed = await claim_pending_run(session, worker_id="worker-A")
+    assert claimed is not None
+    await session.commit()
+
+    await RunExecutor(
+        _SessionFactoryAdapter(session), StaticSecretBackend(), worker_id="worker-A"
+    ).execute(run.id)
+
+    refreshed = (await session.execute(select(Run).where(Run.id == run.id))).scalar_one()
+    assert refreshed.status == RunStatus.SUCCEEDED, (refreshed.error_class, refreshed.error_message)
+    assert refreshed.records_read == 3
+    assert refreshed.records_written == 2  # id > 1 (local threshold), table from global
+
+
+async def test_executor_fails_on_undefined_variable(session: AsyncSession, tmp_path: Path) -> None:
+    db_path = _prepare_sqlite_fixture(tmp_path)
+    ws = await _seed_workspace(session, slug="we-badvar")
+    await _seed_connection(session, workspace_id=ws.id, name="src", config={"database": db_path})
+    await _seed_connection(session, workspace_id=ws.id, name="dst", config={"database": db_path})
+    cfg = {
+        "name": "p",
+        "source": {"connection": "src", "query": "SELECT id FROM ${var.missing}"},
+        "sink": {"connection": "dst", "table": "out", "mode": "append"},
+    }
+    p, pv = await _seed_pipeline(session, workspace_id=ws.id, name="p", config=cfg)
+    run = await _seed_pending_run(
+        session, workspace_id=ws.id, pipeline_id=p.id, pipeline_version_id=pv.id
+    )
+    claimed = await claim_pending_run(session, worker_id="worker-A")
+    assert claimed is not None
+    await session.commit()
+
+    await RunExecutor(
+        _SessionFactoryAdapter(session), StaticSecretBackend(), worker_id="worker-A"
+    ).execute(run.id)
+
+    refreshed = (await session.execute(select(Run).where(Run.id == run.id))).scalar_one()
+    assert refreshed.status == RunStatus.FAILED
+    assert "variable" in (refreshed.error_message or "").lower()
 
 
 async def test_executor_persists_lineage(session: AsyncSession, tmp_path: Path) -> None:

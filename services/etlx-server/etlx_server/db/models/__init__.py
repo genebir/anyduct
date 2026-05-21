@@ -22,6 +22,7 @@ from etlx_server.db.models.workspace import (
     User,
     Workspace,
 )
+from etlx_server.db.models.workspace_variable import WorkspaceVariable
 
 __all__ = [
     "Asset",
@@ -42,4 +43,5 @@ __all__ = [
     "Schedule",
     "User",
     "Workspace",
+    "WorkspaceVariable",
 ]

@@ -37,6 +37,7 @@ from etlx_server.routers import oidc as oidc_router
 from etlx_server.routers import pipelines as pipelines_router
 from etlx_server.routers import runs as runs_router
 from etlx_server.routers import schedules as schedules_router
+from etlx_server.routers import variables as variables_router
 from etlx_server.routers import workspaces as workspaces_router
 from etlx_server.settings import Settings, get_settings
 
@@ -171,6 +172,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(runs_router.router)
     app.include_router(audit_router.router)
     app.include_router(assets_router.router)
+    app.include_router(variables_router.router)
     return app
 
 

@@ -10,6 +10,7 @@ import {
   ChevronsUpDownIcon,
   GitBranchIcon,
   HomeIcon,
+  LayersIcon,
   ScrollTextIcon,
   SettingsIcon,
   UsersIcon,
@@ -58,6 +59,12 @@ const NAV: NavLink[] = [
     href: (s) => `/w/${s}/runs`,
     labelKey: "nav.runs",
     icon: <ActivityIcon size={18} />,
+  },
+  {
+    id: "assets",
+    href: (s) => `/w/${s}/assets`,
+    labelKey: "nav.assets",
+    icon: <LayersIcon size={18} />,
   },
   {
     id: "members",

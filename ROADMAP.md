@@ -209,7 +209,7 @@
 - [ ] Asset/Lineage 사용 가이드 문서
 - [ ] v0.2.0 bump + 릴리스
 
-> **서비스 레벨 후속(Step 8~11):** **B** 메타DB(assets/materializations/asset_edges) + 워커 hook으로 run마다 리니지 영속화 → **C** 웹 Asset 카탈로그 + 리니지 그래프(`@xyflow/react` 재사용) + Run↔Asset 연결 → **D** asset-aware 오케스트레이션(upstream materialize 시 downstream 자동 트리거 = call-pipeline ADR-0029의 asset 의존 일반화, freshness/센서) → **E** 백필 UI(cursor 활용)·컬럼 레벨 리니지·OpenLineage export.
+> **서비스 레벨 후속(Step 8~11):** ✅ **B** 메타DB(assets/asset_edges/asset_materializations, Alembic 0004) + 워커 hook으로 run마다 리니지 영속화 + 카탈로그 REST → ✅ **C** 웹 카탈로그(`/w/[slug]/assets`) + 리니지 그래프(`LineageGraph`, `@xyflow/react`) + materialization→run 링크 → **D**(다음) asset-aware 오케스트레이션(upstream materialize 시 downstream 자동 트리거 = call-pipeline ADR-0029의 asset 의존 일반화, freshness/센서) → **E** 백필 UI(cursor 활용)·컬럼 레벨 리니지·OpenLineage export.
 
 ---
 

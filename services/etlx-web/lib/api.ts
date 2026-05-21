@@ -503,3 +503,42 @@ export const runsApi = {
   logsStreamUrl: (workspaceId: string, runId: string) =>
     `${apiBaseUrl()}/workspaces/${workspaceId}/runs/${runId}/logs/stream`,
 };
+
+// --- Assets / lineage (catalog, ADR-0036) ----------------------------------
+
+export interface AssetSummary {
+  id: string;
+  asset_key: string;
+  kind: string | null;
+  last_materialized_at: string | null;
+}
+
+export interface AssetRef {
+  id: string;
+  asset_key: string;
+  kind: string | null;
+}
+
+export interface AssetLineageResponse {
+  id: string;
+  asset_key: string;
+  upstream: AssetRef[];
+  downstream: AssetRef[];
+}
+
+export interface AssetMaterializationEntry {
+  run_id: string | null;
+  records_written: number;
+  materialized_at: string;
+}
+
+export const assetsApi = {
+  list: (workspaceId: string) =>
+    api<AssetSummary[]>(`/workspaces/${workspaceId}/assets`),
+  lineage: (workspaceId: string, assetId: string) =>
+    api<AssetLineageResponse>(`/workspaces/${workspaceId}/assets/${assetId}/lineage`),
+  materializations: (workspaceId: string, assetId: string) =>
+    api<AssetMaterializationEntry[]>(
+      `/workspaces/${workspaceId}/assets/${assetId}/materializations`,
+    ),
+};

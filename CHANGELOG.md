@@ -24,7 +24,8 @@
   - **B — 서비스 메타DB 영속화 + 카탈로그 REST**:
     - **B1**: `assets`/`asset_edges`/`asset_materializations` 테이블(Alembic 0004) + ORM + `AssetRepository.persist_run_lineage`(멱등 upsert, output당 materialization, 워크스페이스 스코프, 키 공유로 크로스-파이프라인 자동 연결). +4 it.
     - **B2**: `RunExecutor`가 성공 run 후 `derive_lineage(cfg)`로 assets/edges/materialization 기록(같은 트랜잭션, best-effort — 실패해도 run은 succeeded). +1 it.
-    - **B3**: 카탈로그 REST(Viewer+) — `GET /workspaces/{ws}/assets` · `/{id}/lineage`(upstream/downstream) · `/{id}/materializations`. asset은 uuid id로 주소(키의 `/` 회피). +3 it. 다음: C 웹 카탈로그+리니지 그래프 → D asset-aware 오케스트레이션.
+    - **B3**: 카탈로그 REST(Viewer+) — `GET /workspaces/{ws}/assets` · `/{id}/lineage`(upstream/downstream) · `/{id}/materializations`. asset은 uuid id로 주소(키의 `/` 회피). +3 it.
+  - **C — 웹 카탈로그 + 리니지 그래프**: 사이드바 "카탈로그"(Catalog) 네비 + `/w/[slug]/assets` 목록(키·종류·마지막 생성, 행 클릭→상세) + `/w/[slug]/assets/[id]` 상세(리니지 그래프 + 생성 기록 테이블, run 링크). `LineageGraph`(`@xyflow/react` 재사용 — upstream→current→downstream, 이웃 클릭 시 이동) + Storybook 스토리. `assetsApi` 클라이언트 + i18n(en/ko). 웹 typecheck OK. **(브라우저 수동 QA 미실시 — typecheck/스토리까지만 검증.)** 다음: D asset-aware 오케스트레이션.
 - **멱등성 — "Run SQL (before load)" transform** [ADR-0035] — 적재 전에 SQL 한 줄(예: `DELETE`)을 실행해 delete-then-insert로 재실행 시 중복을 없앰.
   - **코어**: 옵셔널 capability `SqlExecutor`(`execute_statement`) — RDBMS 3종 구현. `Task.pre_sql: list[SqlAction]` + `Pipeline._run_pre_sql`이 **읽기 전 1회씩** 실행(레코드 0건이어도 보장). `build_pipeline`이 `type:"sql_exec"` transform을 per-record 체인에서 분리해 `pre_sql`로 적재. `referenced_connection_names`에 sql_exec 연결 포함.
   - **웹**: transform 팔레트에 "Run SQL (before load)"(connection + SQL textarea, `anyConnection`으로 전체 연결 노출). "Database" 카테고리.

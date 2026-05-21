@@ -78,6 +78,8 @@ export const en = {
   "nav.members": "Members",
   "nav.audit": "Audit log",
   "nav.settings": "Settings",
+  "nav.settingsGeneral": "General",
+  "nav.variables": "Variables",
   "nav.selectWorkspace": "Select workspace",
   "nav.noWorkspaces": "No workspaces yet.",
 
@@ -657,6 +659,8 @@ export const ko: Messages = {
   "nav.members": "멤버",
   "nav.audit": "감사 로그",
   "nav.settings": "설정",
+  "nav.settingsGeneral": "일반",
+  "nav.variables": "변수",
   "nav.selectWorkspace": "워크스페이스 선택",
   "nav.noWorkspaces": "아직 워크스페이스가 없습니다.",
 

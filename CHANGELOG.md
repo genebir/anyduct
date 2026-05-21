@@ -9,6 +9,9 @@
 
 ## [Unreleased]
 
+### Changed
+- **변수 UI 개편(사용자 피드백)** [ADR-0041] — ① 전역 변수를 **전용 `Variables` 탭**(`/w/[slug]/variables`)으로 분리(설정 페이지에서 이동). ② 사이드바 **설정(Settings)을 펼침형 그룹**으로 — 클릭 시 하위 메뉴 전개, 그 아래 `일반(General)`·`연결(Connections)`·`멤버(Members)`·`변수(Variables)` 정리(현재 하위 경로면 자동 펼침). ③ 빌더 지역 변수 "추가" 버튼이 좁아 텍스트가 세로로 깨지던 레이아웃 수정(grid + `whitespace-nowrap`, 풀폭 버튼). 웹 tsc 통과. (전역 변수 추가가 안 되면 `./start.sh`로 재시작 — Alembic 0006 적용 + 새 라우터 로드 필요.)
+
 ### Added
 - **빌더 지역 변수 UI — V2c** [ADR-0041] — 파이프라인 빌더의 PipelineSettingsPanel(노드 미선택 시 우측 패널)에 `VariablesEditor`: 파이프라인 지역 `variables`(name/value 추가·삭제, value JSON 파싱, 실패 시 평문). `PipelineConfigJson.variables` 타입 + `serialize`/`serializeGraph` meta가 비어있지 않을 때 emit + 빌더 load/save/deps 배선(round-trip). 기존 primitive 재사용, i18n en/ko, 웹 tsc 통과. **이로써 변수 기능(V1 코어 + V2a 서버 전역 + V2b 전역 UI + V2c 지역 UI) 완료 — 전역·지역 변수 모두 UI에서 설정 가능.**
 - **전역 변수 웹 UI — V2b** [ADR-0041] — 워크스페이스 설정에 변수 관리 UI(`VariablesSection`): 목록 + 추가/편집(upsert)/삭제, name=식별자 검증, value는 JSON 파싱(실패 시 평문), Editor+만 편집(Viewer는 읽기), 삭제는 ConfirmDialog. `variablesApi`(list/set/delete) + `WorkspaceVariableEntry` DTO. 기존 primitive(Card/Input/Button/ConfirmDialog) 재사용으로 신규 시각 컴포넌트 0(Storybook 불요). i18n en/ko. 웹 tsc 통과.

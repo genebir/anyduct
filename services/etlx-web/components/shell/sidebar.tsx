@@ -5,14 +5,18 @@ import { usePathname } from "next/navigation";
 import {
   ActivityIcon,
   BoxesIcon,
+  BracesIcon,
   CableIcon,
   CalendarClockIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
   ChevronsUpDownIcon,
   GitBranchIcon,
   HomeIcon,
   LayersIcon,
   ScrollTextIcon,
   SettingsIcon,
+  SlidersHorizontalIcon,
   UsersIcon,
   WorkflowIcon,
 } from "lucide-react";
@@ -29,18 +33,25 @@ interface NavLink {
   icon: ReactNode;
 }
 
-const NAV: NavLink[] = [
+interface NavGroup {
+  id: string;
+  labelKey: keyof Messages;
+  icon: ReactNode;
+  children: NavLink[];
+}
+
+type NavEntry = NavLink | NavGroup;
+
+function isGroup(entry: NavEntry): entry is NavGroup {
+  return "children" in entry;
+}
+
+const NAV: NavEntry[] = [
   {
     id: "overview",
     href: (s) => `/w/${s}`,
     labelKey: "nav.overview",
     icon: <HomeIcon size={18} />,
-  },
-  {
-    id: "connections",
-    href: (s) => `/w/${s}/connections`,
-    labelKey: "nav.connections",
-    icon: <CableIcon size={18} />,
   },
   {
     id: "pipelines",
@@ -67,12 +78,6 @@ const NAV: NavLink[] = [
     icon: <LayersIcon size={18} />,
   },
   {
-    id: "members",
-    href: (s) => `/w/${s}/members`,
-    labelKey: "nav.members",
-    icon: <UsersIcon size={18} />,
-  },
-  {
     id: "audit",
     href: (s) => `/w/${s}/audit`,
     labelKey: "nav.audit",
@@ -80,9 +85,34 @@ const NAV: NavLink[] = [
   },
   {
     id: "settings",
-    href: (s) => `/w/${s}/settings`,
     labelKey: "nav.settings",
     icon: <SettingsIcon size={18} />,
+    children: [
+      {
+        id: "settings-general",
+        href: (s) => `/w/${s}/settings`,
+        labelKey: "nav.settingsGeneral",
+        icon: <SlidersHorizontalIcon size={16} />,
+      },
+      {
+        id: "connections",
+        href: (s) => `/w/${s}/connections`,
+        labelKey: "nav.connections",
+        icon: <CableIcon size={16} />,
+      },
+      {
+        id: "members",
+        href: (s) => `/w/${s}/members`,
+        labelKey: "nav.members",
+        icon: <UsersIcon size={16} />,
+      },
+      {
+        id: "variables",
+        href: (s) => `/w/${s}/variables`,
+        labelKey: "nav.variables",
+        icon: <BracesIcon size={16} />,
+      },
+    ],
   },
 ];
 
@@ -91,6 +121,7 @@ export function Sidebar() {
   const { workspaces, current, setCurrent } = useWorkspaces();
   const { t } = useLocale();
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
 
   const slug = current?.slug ?? "";
   const accent = current?.color_hex ?? "#FF3D8B";
@@ -173,37 +204,56 @@ export function Sidebar() {
       </div>
 
       <nav className="flex flex-1 flex-col gap-0.5">
-        {NAV.map((link) => {
-          const href = slug ? link.href(slug) : "/workspaces";
-          // Overview href is exactly /w/<slug> — every other workspace route
-          // is /w/<slug>/<segment>, so "starts with overview's href" would
-          // also match every nested page. Match exactly for the overview
-          // entry, prefix-match for the rest.
-          const active =
-            link.id === "overview"
-              ? pathname === href
-              : pathname.startsWith(href);
+        {NAV.map((entry) => {
+          if (!isGroup(entry)) {
+            // Overview href is exactly /w/<slug>; every other route is nested,
+            // so prefix-match everything except overview (which matches exactly).
+            const href = slug ? entry.href(slug) : "/workspaces";
+            const active =
+              entry.id === "overview" ? pathname === href : pathname.startsWith(href);
+            return <NavRow key={entry.id} href={href} active={active} icon={entry.icon} label={t(entry.labelKey)} />;
+          }
+          const childActive = entry.children.some(
+            (c) => slug && pathname.startsWith(c.href(slug)),
+          );
+          const open = openGroups[entry.id] ?? childActive;
           return (
-            <Link
-              key={link.id}
-              href={href}
-              className={cn(
-                "flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm transition duration-200",
-                active
-                  ? "bg-overlay font-semibold text-accent"
-                  : "text-text-secondary hover:bg-overlay hover:text-text",
-              )}
-            >
-              <span
+            <div key={entry.id} className="flex flex-col gap-0.5">
+              <button
+                type="button"
+                onClick={() => setOpenGroups((g) => ({ ...g, [entry.id]: !open }))}
+                aria-expanded={open}
                 className={cn(
-                  active ? "text-accent" : "text-text-muted",
-                  "shrink-0",
+                  "flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm transition duration-200",
+                  childActive
+                    ? "font-semibold text-text"
+                    : "text-text-secondary hover:bg-overlay hover:text-text",
                 )}
               >
-                {link.icon}
-              </span>
-              {t(link.labelKey)}
-            </Link>
+                <span className="shrink-0 text-text-muted">{entry.icon}</span>
+                <span className="flex-1 text-left">{t(entry.labelKey)}</span>
+                {open ? (
+                  <ChevronDownIcon size={14} className="shrink-0 text-text-muted" />
+                ) : (
+                  <ChevronRightIcon size={14} className="shrink-0 text-text-muted" />
+                )}
+              </button>
+              {open
+                ? entry.children.map((c) => {
+                    const href = slug ? c.href(slug) : "/workspaces";
+                    return (
+                      <NavRow
+                        key={c.id}
+                        href={href}
+                        active={pathname.startsWith(href)}
+                        icon={c.icon}
+                        label={t(c.labelKey)}
+                        nested
+                      />
+                    );
+                  })
+                : null}
+            </div>
           );
         })}
       </nav>
@@ -212,5 +262,35 @@ export function Sidebar() {
         v0.1.0 · {workspaces.length}
       </div>
     </aside>
+  );
+}
+
+function NavRow({
+  href,
+  active,
+  icon,
+  label,
+  nested = false,
+}: {
+  href: string;
+  active: boolean;
+  icon: ReactNode;
+  label: string;
+  nested?: boolean;
+}) {
+  return (
+    <Link
+      href={href}
+      className={cn(
+        "flex items-center gap-2.5 rounded-md py-2 text-sm transition duration-200",
+        nested ? "pl-9 pr-2.5" : "px-2.5",
+        active
+          ? "bg-overlay font-semibold text-accent"
+          : "text-text-secondary hover:bg-overlay hover:text-text",
+      )}
+    >
+      <span className={cn(active ? "text-accent" : "text-text-muted", "shrink-0")}>{icon}</span>
+      {label}
+    </Link>
   );
 }

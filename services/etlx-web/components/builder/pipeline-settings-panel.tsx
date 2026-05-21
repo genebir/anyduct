@@ -227,18 +227,26 @@ function VariablesEditor({
           ))}
         </ul>
       ) : null}
-      <div className="flex items-end gap-2">
-        <FieldRow label={t("variables.name")}>
-          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="min_id" />
-        </FieldRow>
-        <FieldRow label={t("variables.value")}>
-          <Input
-            value={valueText}
-            onChange={(e) => setValueText(e.target.value)}
-            placeholder="100"
-          />
-        </FieldRow>
-        <Button type="button" variant="secondary" size="sm" onClick={add}>
+      <div className="flex flex-col gap-2">
+        <div className="grid grid-cols-2 gap-2">
+          <FieldRow label={t("variables.name")}>
+            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="min_id" />
+          </FieldRow>
+          <FieldRow label={t("variables.value")}>
+            <Input
+              value={valueText}
+              onChange={(e) => setValueText(e.target.value)}
+              placeholder="100"
+            />
+          </FieldRow>
+        </div>
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          onClick={add}
+          className="w-full whitespace-nowrap"
+        >
           {t("common.add")}
         </Button>
       </div>

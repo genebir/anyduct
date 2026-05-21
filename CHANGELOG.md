@@ -13,6 +13,10 @@
 - **worker/stream-worker CLI가 `SECRET_BACKEND`/`SECRET_BACKEND_FILE_PATH` 환경변수 fallback** — `--secret-backend`/`--secret-file-path` typer 옵션에 `envvar=` 추가. 이전엔 플래그 미지정 시 무조건 `env` 백엔드로 떨어져, API 서버(file 백엔드)와 불일치 → 워커가 시크릿을 "env var not set"으로 못 찾는 문제. 이제 env-only(`SECRET_BACKEND=file`)로 띄워도 서버와 동일 백엔드 사용. (검증: env-only 워커로 run 실행 시 시크릿 정상 해석 확인.)
 
 ### Added
+- **커넥터 스키마 인트로스펙션 + 빌더 테이블/컬럼 "딸깍" 피커** [ADR-0033] — 소스/타깃 DB 작업에서 스키마·테이블·컬럼을 타이핑 대신 선택.
+  - **코어**: `etl_plugins.core.inspect`의 옵셔널 capability `SchemaInspector`(`@runtime_checkable` Protocol) + `ColumnInfo`. RDBMS 3종(postgres `information_schema`·"schema.table" / mysql `information_schema`+`DATABASE()` / sqlite `sqlite_master`+`PRAGMA`, 식별자 가드)에 `list_tables`/`list_columns` 구현. 인트로스펙션 불가 커넥터(http/kafka/s3/mongo)는 미구현 → `isinstance` 가드로 fallback. 코어 +5 unit, top-level export.
+  - **서버**: `GET /workspaces/{ws}/connections/{id}/tables` + `/columns?table=`(Runner+). `ConnectionInspector`가 tester의 시크릿 해석+커넥터 빌드 경로 재사용. unsupported→422 / secret 실패→400 / connect·read 오류→502. +3 it.
+  - **웹(빌더)**: sink table/collection 필드 → 선택한 연결의 테이블 datalist 콤보박스(`TableField`). DB 소스 SQL 필드 → "테이블 찾아보기" 디스클로저(`TableBrowser`)로 `SELECT * FROM <table>` 스타터 쿼리 삽입. select/drop/dedupe + Postgres/MySQL upsert key 필드 → 컬럼 체크리스트(`ColumnsField`): transform은 상류 소스 테이블(SELECT…FROM 파싱) 컬럼, sink은 자기 대상 테이블 컬럼을 인트로스펙트. 못 불러오는 컬럼은 chip+free-add fallback. 새 컴포넌트 Storybook 스토리 + i18n(en/ko). 웹 typecheck OK. **(UI는 브라우저 수동 QA 미실시 — 자동 typecheck/스토리까지만 검증.)**
 - **빌더: 모드(batch/stream) 시각 구분 + 모드별 커넥터 제한 + 그래프 저장 검증** —
   - 파이프라인 목록에 **Batch/Stream 배지**(+ engine=spark면 Spark 태그). `current_config_json.mode`/`engine` 기반.
   - **모드별 source/sink 제한**: `OperatorSpec.streaming`(Kafka=true) + `operatorAllowedForMode` → stream 파이프라인은 스트리밍 커넥터만, batch는 배치 커넥터만 팔레트에 노출(Palette `mode` prop, 빌더/그래프 에디터 양쪽). transform/orchestration은 양쪽 공통.

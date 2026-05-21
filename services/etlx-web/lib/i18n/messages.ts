@@ -237,6 +237,8 @@ export const en = {
   "pipelines.new": "New pipeline",
   "pipelines.nameLabel": "Pipeline name",
   "pipelines.namePlaceholder": "orders-sync",
+  "pipelines.modeBatch": "Batch",
+  "pipelines.modeStream": "Stream",
   "pipelines.createOpen": "Create & open builder",
   "pipelines.createHelp":
     "Starts a blank pipeline with default Postgres source and sink — configure both in the visual builder.",
@@ -386,6 +388,8 @@ export const en = {
   "engine.spark": "Spark",
   "engine.sparkUnsupported":
     "These operators can't run on Spark: {ops}. Remove them or switch the engine to Local.",
+  "graph.streamNoGraph": "Graph mode is batch-only; stream pipelines stay linear.",
+  "graph.invalid": "Graph can't be saved yet: {issue}",
 
   // runs list
   "runs.colReadWritten": "Read / Written",
@@ -720,6 +724,8 @@ export const ko: Messages = {
   "pipelines.new": "새 파이프라인",
   "pipelines.nameLabel": "파이프라인 이름",
   "pipelines.namePlaceholder": "orders-sync",
+  "pipelines.modeBatch": "배치",
+  "pipelines.modeStream": "스트림",
   "pipelines.createOpen": "생성 후 빌더 열기",
   "pipelines.createHelp":
     "기본 Postgres 소스와 싱크로 빈 파이프라인을 시작합니다 — 둘 다 비주얼 빌더에서 구성하세요.",
@@ -866,6 +872,8 @@ export const ko: Messages = {
   "engine.spark": "Spark",
   "engine.sparkUnsupported":
     "이 오퍼레이터는 Spark에서 실행할 수 없습니다: {ops}. 제거하거나 엔진을 로컬로 바꾸세요.",
+  "graph.streamNoGraph": "그래프 모드는 배치 전용입니다. 스트림 파이프라인은 선형으로 유지됩니다.",
+  "graph.invalid": "아직 저장할 수 없습니다: {issue}",
 
   "runs.colReadWritten": "읽음 / 기록",
   "runs.emptyTitle": "아직 실행이 없습니다",

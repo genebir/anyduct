@@ -5,6 +5,7 @@ import { ChevronDownIcon, PlusIcon, SearchIcon } from "lucide-react";
 import { cn } from "@/lib/cn";
 import {
   OPERATOR_KIND_GROUPS,
+  operatorAllowedForMode,
   type OperatorKind,
   type OperatorSpec,
 } from "@/lib/operators";
@@ -12,8 +13,11 @@ import { useLocale } from "@/components/providers/locale-provider";
 
 export function Palette({
   onAdd,
+  mode = "batch",
 }: {
   onAdd: (operatorId: string) => void;
+  /** Pipeline data mode — restricts which source/sink connectors are offered. */
+  mode?: "batch" | "stream";
 }) {
   const { t } = useLocale();
   const [query, setQuery] = useState("");
@@ -21,12 +25,13 @@ export function Palette({
 
   const q = query.trim().toLowerCase();
   const matches = (spec: OperatorSpec) =>
-    !q ||
-    spec.label.toLowerCase().includes(q) ||
-    spec.description.toLowerCase().includes(q) ||
-    (spec.connectorType ?? "").toLowerCase().includes(q);
+    operatorAllowedForMode(spec, mode) &&
+    (!q ||
+      spec.label.toLowerCase().includes(q) ||
+      spec.description.toLowerCase().includes(q) ||
+      (spec.connectorType ?? "").toLowerCase().includes(q));
 
-  // Filter the kind→category tree by the search query, dropping empties.
+  // Filter the kind→category tree by the search query + pipeline mode, dropping empties.
   const groups = useMemo(
     () =>
       OPERATOR_KIND_GROUPS.map((g) => ({
@@ -35,7 +40,8 @@ export function Palette({
           .map((c) => ({ ...c, specs: c.specs.filter(matches) }))
           .filter((c) => c.specs.length > 0),
       })).filter((g) => g.categories.length > 0),
-    [q],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [q, mode],
   );
 
   const toggle = (key: string) =>

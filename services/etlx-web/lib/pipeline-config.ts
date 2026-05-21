@@ -388,6 +388,32 @@ export function nextEdgeId(): string {
   return nextId("edge");
 }
 
+/** Client-side graph validation mirroring the server's GraphConfig rules
+ *  (ADR-0030 v1 tree). Returns human-readable problems; empty = valid to save. */
+export function validateGraph(state: GraphBuilderState): string[] {
+  const issues: string[] = [];
+  const sources = state.nodes.filter((n) => findOperator(n.operatorId)?.kind === "source");
+  const sinks = state.nodes.filter((n) => findOperator(n.operatorId)?.kind === "sink");
+  if (sources.length === 0) issues.push("graph needs exactly one source (it has none)");
+  if (sources.length > 1) issues.push("graph must have exactly one source");
+  if (sinks.length === 0) issues.push("graph needs at least one sink");
+  const indeg = new Map<string, number>();
+  for (const e of state.edges) indeg.set(e.target, (indeg.get(e.target) ?? 0) + 1);
+  for (const n of state.nodes) {
+    if (findOperator(n.operatorId)?.kind === "source") continue;
+    const d = indeg.get(n.id) ?? 0;
+    if (d !== 1) {
+      const label = findOperator(n.operatorId)?.label ?? n.operatorId;
+      issues.push(
+        d === 0
+          ? `"${label}" isn't connected — every node needs one incoming edge`
+          : `"${label}" has ${d} incoming edges (fan-in isn't supported yet)`,
+      );
+    }
+  }
+  return issues;
+}
+
 export function serializeGraph(
   state: GraphBuilderState,
   meta: { name: string; mode?: "batch" | "stream"; engine?: Engine },

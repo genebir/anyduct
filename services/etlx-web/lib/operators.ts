@@ -94,7 +94,22 @@ export interface OperatorSpec {
   icon: ComponentType<LucideProps>;
   /** Hex accent used in nodes + palette pills. Token-aligned values only. */
   accent: string;
+  /** Source/sink connectors that operate on unbounded streams (Kafka). A
+   *  stream-mode pipeline only allows streaming source/sink; a batch-mode
+   *  pipeline only allows non-streaming ones. Transforms/orchestration apply
+   *  to both, so they leave this undefined. */
+  streaming?: boolean;
   fields: FieldDef[];
+}
+
+/** Whether an operator may be added to a pipeline of the given mode.
+ *  Only source/sink are mode-restricted; transforms + orchestration apply to both. */
+export function operatorAllowedForMode(
+  spec: OperatorSpec,
+  mode: "batch" | "stream",
+): boolean {
+  if (spec.kind !== "source" && spec.kind !== "sink") return true;
+  return mode === "stream" ? spec.streaming === true : spec.streaming !== true;
 }
 
 const SOURCES: OperatorSpec[] = [
@@ -216,6 +231,7 @@ const SOURCES: OperatorSpec[] = [
     description: "Stream-source records from a Kafka topic (use a stream-mode pipeline).",
     icon: RadioTowerIcon,
     accent: "#EC4899",
+    streaming: true,
     fields: [
       { key: "connection", label: "Connection", kind: "connection", required: true },
       { key: "topic", label: "Topic", kind: "string", placeholder: "events.user_signup" },
@@ -570,6 +586,7 @@ const SINKS: OperatorSpec[] = [
     description: "Stream-sink records to a Kafka topic.",
     icon: RadioTowerIcon,
     accent: "#4ADE80",
+    streaming: true,
     fields: [
       { key: "connection", label: "Connection", kind: "connection", required: true },
       { key: "topic", label: "Topic", kind: "string" },

@@ -44,6 +44,7 @@ import {
   reorderNodes,
   serialize,
   serializeGraph,
+  validateGraph,
   type Engine,
   type BuilderNode,
   type BuilderState,
@@ -254,6 +255,11 @@ export default function PipelineEditorPage() {
       const existingMode = (pipeline.current_config_json as { mode?: string } | null)?.mode;
       const m = existingMode === "stream" ? "stream" : "batch";
       if (mode === "graph" && graphState) {
+        const issues = validateGraph(graphState);
+        if (issues.length > 0) {
+          toast.error(issues[0]);
+          return;
+        }
         const config = serializeGraph(graphState, { name: pipeline.name, mode: m, engine });
         const updated = await pipelinesApi.update(ws.id, pipeline.id, { config });
         setPipeline(updated);
@@ -285,6 +291,20 @@ export default function PipelineEditorPage() {
     setEngine(next);
     setDirty(true);
   }, []);
+
+  // Pipeline data mode (batch | stream) — drives palette connector filtering
+  // and gates graph mode (graphs are batch-only, ADR-0030).
+  const dataMode: "batch" | "stream" =
+    (pipeline?.current_config_json as { mode?: string } | null)?.mode === "stream"
+      ? "stream"
+      : "batch";
+
+  // Structural problems that would make a graph save fail server validation
+  // (ADR-0030 tree rules) — surfaced before save so the user gets a clear reason.
+  const graphIssues = useMemo(
+    () => (mode === "graph" && graphState ? validateGraph(graphState) : []),
+    [mode, graphState],
+  );
 
   // Operators that can't run on Spark (ADR-0031) — surfaced as a warning when
   // the Spark engine is selected so the user fixes it before saving/running.
@@ -364,7 +384,12 @@ export default function PipelineEditorPage() {
               </select>
             </label>
             {mode === "linear" ? (
-              <Button variant="ghost" onClick={switchToGraph} disabled={!pipeline}>
+              <Button
+                variant="ghost"
+                onClick={switchToGraph}
+                disabled={!pipeline || dataMode === "stream"}
+                title={dataMode === "stream" ? t("graph.streamNoGraph") : undefined}
+              >
                 {t("graph.switchToGraph")}
               </Button>
             ) : (
@@ -404,13 +429,24 @@ export default function PipelineEditorPage() {
           <span>{t("engine.sparkUnsupported", { ops: sparkBlockers.join(", ") })}</span>
         </div>
       ) : null}
+      {graphIssues.length > 0 ? (
+        <div className="flex shrink-0 items-center gap-2 border-b border-warning/40 bg-warning/10 px-4 py-2 text-sm text-warning">
+          <XCircleIcon size={16} className="shrink-0" />
+          <span>{t("graph.invalid", { issue: graphIssues[0] })}</span>
+        </div>
+      ) : null}
       {mode === "graph" && graphState ? (
-        <GraphEditor state={graphState} connections={connections} onChange={updateGraph} />
+        <GraphEditor
+          state={graphState}
+          connections={connections}
+          mode={dataMode}
+          onChange={updateGraph}
+        />
       ) : (
         <>
           <FlowSummary nodes={state.nodes} selectedId={selectedId} onSelect={selectNode} t={t} />
           <div className="flex min-h-0 flex-1 overflow-hidden">
-            <Palette onAdd={addOperator} />
+            <Palette onAdd={addOperator} mode={dataMode} />
             <div className="flex min-w-0 flex-1 flex-col">
               <div className="min-h-0 flex-1">
                 <BuilderCanvas

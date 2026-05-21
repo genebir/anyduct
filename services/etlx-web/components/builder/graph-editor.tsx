@@ -22,10 +22,12 @@ import {
 export function GraphEditor({
   state,
   connections,
+  mode = "batch",
   onChange,
 }: {
   state: GraphBuilderState;
   connections: ConnectionSummary[];
+  mode?: "batch" | "stream";
   onChange: (next: GraphBuilderState) => void;
 }) {
   const { t } = useLocale();
@@ -118,7 +120,7 @@ export function GraphEditor({
 
   return (
     <div className="flex min-h-0 flex-1 overflow-hidden">
-      <Palette onAdd={addOperator} />
+      <Palette onAdd={addOperator} mode={mode} />
       <div className="min-h-0 min-w-0 flex-1">
         <GraphCanvas
           nodes={state.nodes}

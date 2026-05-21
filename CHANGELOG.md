@@ -10,6 +10,11 @@
 ## [Unreleased]
 
 ### Added
+- **빌더: 모드(batch/stream) 시각 구분 + 모드별 커넥터 제한 + 그래프 저장 검증** —
+  - 파이프라인 목록에 **Batch/Stream 배지**(+ engine=spark면 Spark 태그). `current_config_json.mode`/`engine` 기반.
+  - **모드별 source/sink 제한**: `OperatorSpec.streaming`(Kafka=true) + `operatorAllowedForMode` → stream 파이프라인은 스트리밍 커넥터만, batch는 배치 커넥터만 팔레트에 노출(Palette `mode` prop, 빌더/그래프 에디터 양쪽). transform/orchestration은 양쪽 공통.
+  - **그래프 저장 버그 수정**: 저장 422의 실제 원인은 트리/단일-source 제약 위반(orphan 노드·fan-in·다중 source)인데 UI가 사전에 막지 않아 불투명했음. `validateGraph`(서버 GraphConfig 규칙 미러)로 **저장 전 클라이언트 검증** → 명확한 사유 배너 + 저장 차단(422 방지). 그래프는 batch 전용이라 stream 파이프라인은 "그래프로 전환" 비활성.
+  - i18n `pipelines.modeBatch/Stream`, `graph.invalid/streamNoGraph`(en/ko). 웹 typecheck OK.
 - **ExecutionBackend 추상화 + local 백엔드 (P3.1)** [ADR-0031] — TB급/분산(Spark/Databricks pushdown)을 향한 첫 단계.
   - `etl_plugins/runtime/backends.py`: `ExecutionBackend` ABC + `LocalBackend`(기존 `build_pipeline`+`Pipeline.run` 래핑) + 레지스트리(`register_backend`/`get_backend`) + `run_config` 디스패치. `PipelineConfig.engine`(기본 `"local"`, 런타임에 백엔드 레지스트리로 검증 — config 레이어는 백엔드 목록을 모름). 동작 무변경(기존 실행 경로 그대로). public export.
   - 테스트: 코어 +6 unit. 코어 516 unit green, mypy strict 46 OK, 서버 pipelines round-trip green(`engine` 필드 포함).

@@ -37,6 +37,38 @@ function buildColumns(t: Translate): Column<PipelineSummary>[] {
       ),
     },
     {
+      key: "mode",
+      header: t("common.mode"),
+      cell: (r) => {
+        const cfg = r.current_config_json as { mode?: string; engine?: string } | null;
+        const stream = cfg?.mode === "stream";
+        const spark = cfg?.engine === "spark";
+        return (
+          <span className="inline-flex items-center gap-1">
+            <span
+              className={cn(
+                "inline-flex items-center gap-1 rounded-sm border px-1.5 py-0.5 text-[11px] font-medium",
+                stream
+                  ? "border-info/40 bg-info/10 text-info"
+                  : "border-border-subtle bg-overlay text-text-secondary",
+              )}
+            >
+              <span
+                aria-hidden
+                className={cn("h-1.5 w-1.5 rounded-full", stream ? "bg-info" : "bg-text-muted")}
+              />
+              {stream ? t("pipelines.modeStream") : t("pipelines.modeBatch")}
+            </span>
+            {spark ? (
+              <span className="rounded-sm border border-accent/40 bg-accent/10 px-1.5 py-0.5 text-[11px] font-medium text-accent">
+                Spark
+              </span>
+            ) : null}
+          </span>
+        );
+      },
+    },
+    {
       key: "version",
       header: t("common.version"),
       cell: (r) =>

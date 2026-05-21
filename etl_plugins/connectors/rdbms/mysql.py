@@ -123,6 +123,21 @@ class MySQLConnector(BatchSource, BatchSink):
             )
             return [ColumnInfo(name=col, type=dtype) for col, dtype in cur.fetchall()]
 
+    # ---------- SqlExecutor (ADR-0035) -------------------------------------
+
+    def execute_statement(self, statement: str) -> int:
+        """Run a standalone statement (e.g. DELETE) and commit. Returns rowcount."""
+        if self._conn is None or not self._conn.open:
+            raise ConnectError("MySQLConnector is not connected")
+        try:
+            with self._conn.cursor() as cur:
+                n = cur.execute(statement)
+            self._conn.commit()
+            return int(n)
+        except pymysql.MySQLError as exc:
+            self._conn.rollback()
+            raise WriteError(f"mysql execute_statement failed: {exc}") from exc
+
     # ---------- BatchSource ------------------------------------------------
 
     def read(

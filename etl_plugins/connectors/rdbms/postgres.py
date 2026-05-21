@@ -128,6 +128,22 @@ class PostgresConnector(BatchSource, BatchSink):
             )
             return [ColumnInfo(name=col, type=dtype) for col, dtype in cur.fetchall()]
 
+    # ---------- SqlExecutor (ADR-0035) -------------------------------------
+
+    def execute_statement(self, statement: str) -> int:
+        """Run a standalone statement (e.g. DELETE) and commit. Returns rowcount."""
+        if self._conn is None:
+            raise ConnectError("PostgresConnector is not connected")
+        try:
+            with self._conn.cursor() as cur:
+                cur.execute(statement)
+                n = cur.rowcount
+            self._conn.commit()
+            return int(n)
+        except psycopg.Error as exc:
+            self._conn.rollback()
+            raise WriteError(f"postgres execute_statement failed: {exc}") from exc
+
     # ---------- BatchSource ------------------------------------------------
 
     def read(

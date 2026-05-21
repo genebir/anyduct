@@ -117,7 +117,9 @@ export function PropertiesPanel({
   const matchingConnections =
     op.kind === "source" || op.kind === "sink"
       ? connections.filter((c) => c.type === op.connectorType)
-      : [];
+      : op.anyConnection
+        ? connections
+        : [];
 
   // Resolve the node's selected connection (stored by name) to its id so
   // table-picker fields can introspect it (ADR-0033).

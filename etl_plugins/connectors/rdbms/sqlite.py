@@ -109,6 +109,20 @@ class SQLiteConnector(BatchSource, BatchSink):
         rows = self.connection.execute(f'PRAGMA table_info("{table}")').fetchall()
         return [ColumnInfo(name=r["name"], type=r["type"] or "") for r in rows]
 
+    # ---------- SqlExecutor (ADR-0035) -------------------------------------
+
+    def execute_statement(self, statement: str) -> int:
+        """Run a standalone statement (e.g. DELETE) and commit. Returns rowcount."""
+        try:
+            cur = self.connection.execute(statement)
+            n = cur.rowcount
+            cur.close()
+            self.connection.commit()
+            return n
+        except sqlite3.Error as exc:
+            self.connection.rollback()
+            raise WriteError(f"sqlite execute_statement failed: {exc}") from exc
+
     # ---------- BatchSource ------------------------------------------------
 
     def read(

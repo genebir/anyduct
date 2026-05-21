@@ -14,6 +14,10 @@
 - **worker/stream-worker CLI가 `SECRET_BACKEND`/`SECRET_BACKEND_FILE_PATH` 환경변수 fallback** — `--secret-backend`/`--secret-file-path` typer 옵션에 `envvar=` 추가. 이전엔 플래그 미지정 시 무조건 `env` 백엔드로 떨어져, API 서버(file 백엔드)와 불일치 → 워커가 시크릿을 "env var not set"으로 못 찾는 문제. 이제 env-only(`SECRET_BACKEND=file`)로 띄워도 서버와 동일 백엔드 사용. (검증: env-only 워커로 run 실행 시 시크릿 정상 해석 확인.)
 
 ### Added
+- **멱등성 — "Run SQL (before load)" transform** [ADR-0035] — 적재 전에 SQL 한 줄(예: `DELETE`)을 실행해 delete-then-insert로 재실행 시 중복을 없앰.
+  - **코어**: 옵셔널 capability `SqlExecutor`(`execute_statement`) — RDBMS 3종 구현. `Task.pre_sql: list[SqlAction]` + `Pipeline._run_pre_sql`이 **읽기 전 1회씩** 실행(레코드 0건이어도 보장). `build_pipeline`이 `type:"sql_exec"` transform을 per-record 체인에서 분리해 `pre_sql`로 적재. `referenced_connection_names`에 sql_exec 연결 포함.
+  - **웹**: transform 팔레트에 "Run SQL (before load)"(connection + SQL textarea, `anyConnection`으로 전체 연결 노출). "Database" 카테고리.
+  - 검증: sqlite e2e — 같은 파이프라인 2회 실행 후 대상 테이블 중복 없음. 코어 +4 unit(540 green), mypy/typecheck OK. **비원자적**(DELETE는 별도 트랜잭션 commit) — 진짜 원자성/staging-swap은 후속.
 - **커넥터 스키마 인트로스펙션 + 빌더 테이블/컬럼 "딸깍" 피커** [ADR-0033] — 소스/타깃 DB 작업에서 스키마·테이블·컬럼을 타이핑 대신 선택.
   - **코어**: `etl_plugins.core.inspect`의 옵셔널 capability `SchemaInspector`(`@runtime_checkable` Protocol) + `ColumnInfo`. RDBMS 3종(postgres `information_schema`·"schema.table" / mysql `information_schema`+`DATABASE()` / sqlite `sqlite_master`+`PRAGMA`, 식별자 가드)에 `list_tables`/`list_columns` 구현. 인트로스펙션 불가 커넥터(http/kafka/s3/mongo)는 미구현 → `isinstance` 가드로 fallback. 코어 +5 unit, top-level export.
   - **서버**: `GET /workspaces/{ws}/connections/{id}/tables` + `/columns?table=`(Runner+). `ConnectionInspector`가 tester의 시크릿 해석+커넥터 빌드 경로 재사용. unsupported→422 / secret 실패→400 / connect·read 오류→502. +3 it.

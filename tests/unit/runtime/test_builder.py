@@ -13,7 +13,9 @@ from etl_plugins.config.models import (
     ConnectionsConfig,
     PipelineConfig,
 )
+from etl_plugins.core.context import Context
 from etl_plugins.core.exceptions import ConfigError
+from etl_plugins.core.pipeline import SqlAction
 from etl_plugins.core.record import Record
 from etl_plugins.core.registry import ConnectorRegistry
 from etl_plugins.runtime.builder import (
@@ -169,6 +171,97 @@ def test_build_pipeline_fanout_splits_only_shared_sink() -> None:
     sink_names = [s.name for s in pipeline.tasks[0].sinks]
     assert sink_names == ["db::sink", "other"]
     assert "db::sink" in connectors
+
+
+# ---------- sql_exec pre-load action (ADR-0035) ----------
+
+
+def test_sql_exec_becomes_pre_sql_not_a_transform() -> None:
+    pc = PipelineConfig.model_validate(
+        {
+            "name": "p",
+            "source": {"connection": "src", "query": "SELECT 1"},
+            "transforms": [
+                {"type": "sql_exec", "connection": "dst", "statement": "DELETE FROM dst"},
+            ],
+            "sink": {"connection": "dst", "table": "dst", "mode": "append"},
+        }
+    )
+    pipeline, _ = build_pipeline(pc, {"src": InMemoryBatchSource(), "dst": InMemoryBatchSink()})
+    task = pipeline.tasks[0]
+    assert task.pre_sql == [SqlAction(connection="dst", statement="DELETE FROM dst")]
+    assert task.transforms == []  # not run per-record
+
+
+def test_sql_exec_requires_statement() -> None:
+    pc = PipelineConfig.model_validate(
+        {
+            "name": "p",
+            "source": {"connection": "src", "query": "SELECT 1"},
+            "transforms": [{"type": "sql_exec", "connection": "dst"}],
+            "sink": {"connection": "dst", "table": "dst", "mode": "append"},
+        }
+    )
+    with pytest.raises(ConfigError, match="sql_exec"):
+        build_pipeline(pc, {"src": InMemoryBatchSource(), "dst": InMemoryBatchSink()})
+
+
+def test_sql_exec_unknown_connection_raises() -> None:
+    pc = PipelineConfig.model_validate(
+        {
+            "name": "p",
+            "source": {"connection": "src", "query": "SELECT 1"},
+            "transforms": [{"type": "sql_exec", "connection": "nope", "statement": "DELETE"}],
+            "sink": {"connection": "dst", "table": "dst", "mode": "append"},
+        }
+    )
+    with pytest.raises(ConfigError):
+        build_pipeline(pc, {"src": InMemoryBatchSource(), "dst": InMemoryBatchSink()})
+
+
+def test_pre_sql_delete_makes_pipeline_idempotent(tmp_path: Path) -> None:
+    """Run a delete-then-insert pipeline twice; the target must not accumulate
+    duplicates — the DELETE pre-action clears the prior load each run."""
+    import sqlite3
+
+    from etl_plugins.connectors.rdbms.sqlite import SQLiteConnector
+
+    db = tmp_path / "idem.db"
+    with sqlite3.connect(db) as raw:
+        raw.execute("CREATE TABLE src (id INTEGER)")
+        raw.executemany("INSERT INTO src VALUES (?)", [(1,), (2,), (3,)])
+        raw.execute("CREATE TABLE dst (id INTEGER)")
+        raw.execute("INSERT INTO dst VALUES (99)")  # stale row from a prior run
+        raw.commit()
+
+    pc = PipelineConfig.model_validate(
+        {
+            "name": "idem",
+            "source": {"connection": "src", "query": "SELECT id FROM src"},
+            "transforms": [
+                {"type": "sql_exec", "connection": "dst", "statement": "DELETE FROM dst"},
+            ],
+            "sink": {"connection": "dst", "table": "dst", "mode": "append"},
+        }
+    )
+
+    for _ in range(2):
+        connectors = {
+            "src": SQLiteConnector(database=str(db)),
+            "dst": SQLiteConnector(database=str(db)),
+        }
+        pipeline, connectors = build_pipeline(pc, connectors)
+        for c in connectors.values():
+            c.connect()
+        try:
+            pipeline.run(Context(pipeline_name="idem", run_id="r"), connectors=connectors)
+        finally:
+            for c in connectors.values():
+                c.close()
+
+    with sqlite3.connect(db) as raw:
+        rows = sorted(r[0] for r in raw.execute("SELECT id FROM dst"))
+    assert rows == [1, 2, 3]  # 99 deleted, 1/2/3 present once (not duplicated)
 
 
 def test_build_pipeline_with_transforms() -> None:

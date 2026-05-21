@@ -26,6 +26,7 @@ from etl_plugins.core.context import Context
 from etl_plugins.core.cursor import CursorValue
 from etl_plugins.core.exceptions import PipelineError, TaskError, TransformError
 from etl_plugins.core.record import Record
+from etl_plugins.core.sql_exec import SqlExecutor
 from etl_plugins.observability.metrics import (
     DURATION_SECONDS,
     ERRORS_TOTAL,
@@ -69,6 +70,17 @@ class SinkSpec:
     # Conditional routing predicate (ADR-0027). Sandboxed Python expression
     # evaluated per (transformed) record; ``None`` means this is a default sink.
     when: str | None = None
+
+
+@dataclass(frozen=True)
+class SqlAction:
+    """A SQL statement run once, before the load, against ``connection``
+    (ADR-0035). Used for delete-then-insert idempotency — e.g. clearing the
+    target rows this run will re-insert. The connection must resolve to a
+    connector implementing :class:`~etl_plugins.core.sql_exec.SqlExecutor`."""
+
+    connection: str
+    statement: str
 
 
 @dataclass
@@ -125,6 +137,9 @@ class Task:
     # the field must exist on every emitted record's ``data``.
     cursor_column: str | None = None
     transforms: list[TransformFn] = field(default_factory=list)
+    # SQL statements run once before the load (ADR-0035) — e.g. a DELETE to make
+    # an append re-runnable (delete-then-insert). Run in order, before reading.
+    pre_sql: list[SqlAction] = field(default_factory=list)
     sink: str | None = None
     sink_table: str | None = None
     sink_mode: str = "append"
@@ -715,6 +730,22 @@ class Pipeline:
             )
         return records_read, written, new_cursor
 
+    def _run_pre_sql(self, task: Task, connectors: dict[str, Connector]) -> None:
+        """Execute the task's pre-load SQL actions once, in order (ADR-0035)."""
+        for action in task.pre_sql:
+            conn = connectors.get(action.connection)
+            if conn is None:
+                raise TaskError(
+                    f"No connector instance provided for pre-SQL connection "
+                    f"'{action.connection}'"
+                )
+            if not isinstance(conn, SqlExecutor):
+                raise TaskError(
+                    f"Connection '{action.connection}' does not support SQL execution "
+                    f"(no execute_statement); cannot run pre-load SQL"
+                )
+            conn.execute_statement(action.statement)
+
     def _run_task(
         self,
         task: Task,
@@ -744,6 +775,10 @@ class Pipeline:
             if not isinstance(sink, BatchSink):
                 raise TaskError(f"Sink '{spec.name}' is not a BatchSink")
             sinks.append((spec, sink))
+
+        # Pre-load SQL (ADR-0035): run once, before reading, so a DELETE clears
+        # the target rows this run re-inserts → delete-then-insert idempotency.
+        self._run_pre_sql(task, connectors)
 
         records_read = 0
         new_cursor: CursorValue = None

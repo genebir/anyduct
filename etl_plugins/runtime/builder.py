@@ -34,6 +34,7 @@ from etl_plugins.core.pipeline import (
     GraphNode,
     Pipeline,
     SinkSpec,
+    SqlAction,
     Task,
 )
 from etl_plugins.core.registry import ConnectorRegistry
@@ -185,7 +186,23 @@ def _build_task(
             for snk in sink_cfgs
         ]
     for tc in task_cfg.transforms:
-        task.transform(build_transform(tc))
+        # "sql_exec" is not a per-record transform — it's a pre-load action
+        # (ADR-0035) that runs a statement once before reading (delete-then-
+        # insert idempotency). Pull it out of the transform chain.
+        if tc.type == "sql_exec":
+            data = tc.model_dump()
+            conn_name = data.get("connection")
+            statement = data.get("statement")
+            if not conn_name or not statement:
+                raise ConfigError(f"{label}: sql_exec step requires 'connection' and 'statement'")
+            if conn_name not in connectors:
+                raise ConfigError(
+                    f"{label}: sql_exec connection {conn_name!r} "
+                    f"not in available connectors {sorted(connectors)}"
+                )
+            task.pre_sql.append(SqlAction(connection=conn_name, statement=statement))
+        else:
+            task.transform(build_transform(tc))
     return task
 
 

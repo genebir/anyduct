@@ -39,12 +39,14 @@ from etl_plugins.core.pipeline import (
     Pipeline,
     RunResult,
     SinkSpec,
+    SqlAction,
     Task,
     TransformFn,
 )
 from etl_plugins.core.record import Record
 from etl_plugins.core.registry import ConnectorRegistry
 from etl_plugins.core.schema import Field, Schema
+from etl_plugins.core.sql_exec import SqlExecutor
 
 __all__ = [
     "BatchSink",
@@ -77,6 +79,8 @@ __all__ = [
     "Schema",
     "SchemaInspector",
     "SecretError",
+    "SqlAction",
+    "SqlExecutor",
     "SinkSpec",
     "StreamSink",
     "StreamSource",

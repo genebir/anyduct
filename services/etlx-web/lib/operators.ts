@@ -19,6 +19,7 @@ import {
   CopyMinusIcon,
   CopyPlusIcon,
   DatabaseIcon,
+  DatabaseZapIcon,
   EraserIcon,
   FileTextIcon,
   FilterIcon,
@@ -116,6 +117,9 @@ export interface OperatorSpec {
   icon: ComponentType<LucideProps>;
   /** Hex accent used in nodes + palette pills. Token-aligned values only. */
   accent: string;
+  /** Connection field shows ALL connections, not just ``connectorType`` matches.
+   *  Used by the "Run SQL" step, which targets an arbitrary DB connection. */
+  anyConnection?: boolean;
   /** Source/sink connectors that operate on unbounded streams (Kafka). A
    *  stream-mode pipeline only allows streaming source/sink; a batch-mode
    *  pipeline only allows non-streaming ones. Transforms/orchestration apply
@@ -463,6 +467,29 @@ const TRANSFORMS: OperatorSpec[] = [
       },
     ],
   },
+  {
+    id: "transform:sql_exec",
+    kind: "transform",
+    connectorType: "sql_exec",
+    label: "Run SQL (before load)",
+    description:
+      "Execute a SQL statement (e.g. DELETE) once before the load — for idempotent re-runs (delete-then-insert).",
+    icon: DatabaseZapIcon,
+    accent: "#FBBF24",
+    anyConnection: true,
+    fields: [
+      { key: "connection", label: "Connection", kind: "connection", required: true },
+      {
+        key: "statement",
+        label: "SQL statement",
+        kind: "string",
+        multiline: true,
+        required: true,
+        placeholder: "DELETE FROM public.orders WHERE batch_date = '2026-05-21'",
+        help: "Runs once before reading, against the chosen connection. Clears the rows this run re-inserts so re-running doesn't duplicate data.",
+      },
+    ],
+  },
 ];
 
 const SINKS: OperatorSpec[] = [
@@ -669,6 +696,8 @@ export function operatorCategory(spec: OperatorSpec): string {
         return "Rows";
       case "python":
         return "Code";
+      case "sql_exec":
+        return "Database";
       default:
         return "Columns";
     }

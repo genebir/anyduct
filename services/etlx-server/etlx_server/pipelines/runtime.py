@@ -78,6 +78,10 @@ def referenced_connection_names(cfg: PipelineConfig) -> list[str]:
             _add(task.source.connection)
             for s in task.effective_sinks():
                 _add(s.connection)
+            # Pre-load SQL steps (ADR-0035) reference their own connection.
+            for tc in task.transforms:
+                if tc.type == "sql_exec":
+                    _add(tc.model_dump().get("connection"))
     if cfg.dlq is not None:
         _add(cfg.dlq.connection)
     return names

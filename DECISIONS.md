@@ -1164,4 +1164,25 @@ ADR 본문이 P1.3에 남겨둔 미해결 포인트 "record-task 시스템에서
 
 ---
 
+## ADR-0035: 멱등성 — pre-load SQL 액션("Run SQL" transform)으로 delete-then-insert
+
+- **Date**: 2026-05-21
+- **Status**: Accepted
+- **Context**:
+  현재 `append` sink는 재실행 시 중복 적재(비멱등), `overwrite`는 멱등이나 비원자적(TRUNCATE 후 COPY 중간 실패 시 데이터 손실), `upsert`는 키+유니크 제약 필요. 사용자가 "파이프라인에서 멱등성이 보장 안 된다 → **transform 영역에서 DELETE 같은 SQL을 날릴 수 있게** 해달라"고 요청. 즉 적재 전에 대상 행을 지우는 delete-then-insert를 빌더에서 표현할 수단이 필요.
+- **Decision**:
+  1. **옵셔널 커넥터 capability `SqlExecutor`**(`etl_plugins.core.sql_exec`, `@runtime_checkable`) — `execute_statement(sql) -> int`. RDBMS 3종(postgres/mysql/sqlite)에 구현(문 실행 + commit, 실패 시 rollback + WriteError). 비-SQL 커넥터(S3/Kafka/HTTP)는 미구현 → `isinstance` 가드.
+  2. **`Task.pre_sql: list[SqlAction]`**(`SqlAction(connection, statement)`). `Pipeline._run_task`가 **읽기 시작 전 1회씩 순서대로** 실행(`_run_pre_sql`). 레코드 수와 무관하게 항상 실행 → 0건이어도 DELETE 보장. 대상 커넥션이 `SqlExecutor` 미구현이면 `TaskError`.
+  3. **빌더 표현 = transform 팔레트의 "Run SQL (before load)" 오퍼레이터**(`type: "sql_exec"`, 필드 connection+statement). `extra=allow`인 `TransformConfig`로 그대로 직렬화. `build_pipeline._build_task`가 `type=="sql_exec"`를 per-record transform에서 분리해 `task.pre_sql`로 적재(나머지는 평소대로 `build_transform`). 노드 위치와 무관하게 항상 load 전 실행("before load" 라벨로 의미 전달).
+  4. **연결 해석** — `referenced_connection_names`에 sql_exec 연결 포함 → 워커가 해당 커넥터를 빌드. 빌더 connection 드롭다운은 `anyConnection` 플래그로 전체 연결 노출(타입 제한 없음).
+  5. **스코프** — 선형 파이프라인 batch 경로만(graph/stream은 후속). ADR-0034(연결 분리)와 정합: pre_sql이 sink와 같은 연결명을 써도 sink는 `::sink` 별도 인스턴스라 무관, DELETE는 단일 문 commit 후 즉시 해제.
+- **Consequences**:
+  - (+) 재실행 멱등성 확보(검증: sqlite e2e — 같은 파이프라인 2회 실행 후에도 대상 테이블 중복 없음, stale 행 삭제됨).
+  - (+) 코어 capability 패턴 재사용(ADR-0033 SchemaInspector와 동일 구조), 빌더는 transform 노드 1개 추가로 노출.
+  - (−) **비원자적** — pre_sql DELETE는 sink INSERT와 다른 트랜잭션에서 commit. 중간 실패 시 "삭제됐지만 미적재" 상태 가능(중복은 없지만 데이터 공백). 진짜 원자성(같은 트랜잭션 delete+insert, 또는 스테이징+swap)은 후속 과제. 사용자 요구(중복 제거)는 충족.
+  - (−) statement는 검증 없이 그대로 실행(소스 query와 동일한 신뢰 모델). graph/stream 미지원.
+- **관련**: ADR-0033(capability 패턴) · ADR-0034(연결 분리) · ADR-0026(fan-out) · 향후: 원자적 full-refresh(staging+swap), upsert 키 빌더 강제
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

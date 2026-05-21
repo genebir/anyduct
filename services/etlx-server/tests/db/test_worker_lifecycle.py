@@ -382,6 +382,47 @@ async def test_executor_triggers_downstream_on_success(
     assert triggered[0].triggered_by_user_id is None
 
 
+async def test_executor_backfill_cursor_range(session: AsyncSession, tmp_path: Path) -> None:
+    """A run carrying a backfill cursor range reads only the windowed rows
+    (id > cursor_from and id <= cursor_to) — ADR-0039."""
+    db_path = _prepare_sqlite_fixture(tmp_path)  # seed has id 1,2,3
+    ws = await _seed_workspace(session, slug="we-backfill")
+    await _seed_connection(session, workspace_id=ws.id, name="src", config={"database": db_path})
+    await _seed_connection(session, workspace_id=ws.id, name="dst", config={"database": db_path})
+    cfg = {
+        "name": "p",
+        "source": {
+            "connection": "src",
+            "query": "SELECT id, name FROM seed",
+            "cursor_column": "id",
+        },
+        "sink": {"connection": "dst", "table": "out", "mode": "append"},
+    }
+    p, pv = await _seed_pipeline(session, workspace_id=ws.id, name="p", config=cfg)
+    run = await _seed_pending_run(
+        session, workspace_id=ws.id, pipeline_id=p.id, pipeline_version_id=pv.id
+    )
+    run.result_json = {"backfill": {"cursor_from": 1, "cursor_to": 2}}
+    claimed = await claim_pending_run(session, worker_id="worker-B")
+    assert claimed is not None
+    await session.commit()
+
+    await RunExecutor(
+        _SessionFactoryAdapter(session), StaticSecretBackend(), worker_id="worker-B"
+    ).execute(run.id)
+
+    refreshed = (await session.execute(select(Run).where(Run.id == run.id))).scalar_one()
+    assert refreshed.status == RunStatus.SUCCEEDED, (refreshed.error_class, refreshed.error_message)
+    assert refreshed.records_written == 1  # only id=2 is in (1, 2]
+
+    conn = sqlite3.connect(db_path)
+    try:
+        rows = conn.execute("SELECT id FROM out ORDER BY id").fetchall()
+    finally:
+        conn.close()
+    assert rows == [(2,)]
+
+
 async def test_executor_asset_triggers_consumer(session: AsyncSession, tmp_path: Path) -> None:
     """Materializing dst/out auto-triggers an opt-in pipeline that reads it
     (ADR-0037) — but not one without auto_materialize."""

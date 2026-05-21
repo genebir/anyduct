@@ -119,12 +119,18 @@ async def _seed_workspace(
 
 
 async def _seed_pipeline_with_version(
-    session: AsyncSession, *, workspace_id: UUID, name: str
+    session: AsyncSession,
+    *,
+    workspace_id: UUID,
+    name: str,
+    config: dict[str, Any] | None = None,
 ) -> tuple[Pipeline, PipelineVersion]:
     p = Pipeline(workspace_id=workspace_id, name=name)
     session.add(p)
     await session.flush()
-    pv = PipelineVersion(pipeline_id=p.id, version=1, config_json={"name": name}, is_current=True)
+    pv = PipelineVersion(
+        pipeline_id=p.id, version=1, config_json=config or {"name": name}, is_current=True
+    )
     session.add(pv)
     await session.flush()
     return p, pv
@@ -431,3 +437,65 @@ async def test_logs_stream_404_for_unknown_run(session: AsyncSession) -> None:
             headers={"Authorization": f"Bearer {token}"},
         )
     assert resp.status_code == 404
+
+
+# --- POST /backfill (ADR-0039) ----------------------------------------------
+
+
+async def test_backfill_enqueues_run_with_cursor_range(session: AsyncSession) -> None:
+    user = await _seed_user(session, email="ra-bf@example.com")
+    ws = await _seed_workspace(session, slug="ra-bf", user=user, role=WorkspaceRole.RUNNER)
+    pipeline, pv = await _seed_pipeline_with_version(
+        session,
+        workspace_id=ws.id,
+        name="p",
+        config={
+            "name": "p",
+            "source": {"connection": "s", "query": "SELECT id FROM seed", "cursor_column": "id"},
+            "sink": {"connection": "k", "table": "out", "mode": "append"},
+        },
+    )
+    app = _build_app(session)
+    async with _client(app) as client:
+        token = await _login(client, email=user.email)
+        resp = await client.post(
+            f"/workspaces/{ws.id}/pipelines/{pipeline.id}/backfill",
+            json={"cursor_from": "2026-01-01", "cursor_to": "2026-02-01"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    assert resp.status_code == 202, resp.text
+    body = resp.json()
+    assert body["status"] == "pending"
+    assert body["pipeline_version_id"] == str(pv.id)
+
+    await session.commit()
+    run = (await session.execute(select(Run).where(Run.id == UUID(body["id"])))).scalar_one()
+    assert run.result_json["backfill"] == {
+        "cursor_from": "2026-01-01",
+        "cursor_to": "2026-02-01",
+    }
+    assert run.schedule_id is None
+
+
+async def test_backfill_without_cursor_column_is_400(session: AsyncSession) -> None:
+    user = await _seed_user(session, email="ra-bf-no@example.com")
+    ws = await _seed_workspace(session, slug="ra-bf-no", user=user, role=WorkspaceRole.RUNNER)
+    pipeline, _ = await _seed_pipeline_with_version(
+        session,
+        workspace_id=ws.id,
+        name="p",
+        config={
+            "name": "p",
+            "source": {"connection": "s", "query": "SELECT id FROM seed"},
+            "sink": {"connection": "k", "table": "out", "mode": "append"},
+        },
+    )
+    app = _build_app(session)
+    async with _client(app) as client:
+        token = await _login(client, email=user.email)
+        resp = await client.post(
+            f"/workspaces/{ws.id}/pipelines/{pipeline.id}/backfill",
+            json={"cursor_from": 1, "cursor_to": 10},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    assert resp.status_code == 400, resp.text

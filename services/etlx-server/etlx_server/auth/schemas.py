@@ -400,6 +400,19 @@ class RunTriggerRequest(BaseModel):
     """
 
 
+class RunBackfillRequest(BaseModel):
+    """Body of ``POST /workspaces/{ws}/pipelines/{pid}/backfill`` (ADR-0039).
+
+    Runs the current version over a cursor range on the source's
+    ``cursor_column``: records with value ``> cursor_from`` and
+    ``<= cursor_to``. Either bound may be omitted (open range). Values are
+    scalars compared by the DB against the cursor column (e.g. an ISO date
+    string for a timestamp column, an int for a sequence)."""
+
+    cursor_from: str | int | float | None = None
+    cursor_to: str | int | float | None = None
+
+
 class AuditLogEntry(BaseModel):
     """One row of the ``audit_log`` table, shaped for the ``/audit`` response."""
 
@@ -439,6 +452,7 @@ __all__ = [
     "PipelineUpdateRequest",
     "PipelineVersionEntry",
     "RefreshRequest",
+    "RunBackfillRequest",
     "RunDetail",
     "RunLogEntry",
     "RunMetricEntry",

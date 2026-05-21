@@ -43,6 +43,7 @@ from etlx_server.auth.schemas import (
     PipelineTriggersBody,
     PipelineUpdateRequest,
     PipelineVersionEntry,
+    RunBackfillRequest,
     RunSummary,
     RunTriggerRequest,
 )
@@ -413,6 +414,69 @@ async def trigger_pipeline(
             "pipeline_version_id": str(current.id),
             "version": current.version,
             "source": "manual",
+        },
+    )
+    await session.commit()
+    return RunSummary.model_validate(run)
+
+
+def _config_has_cursor(config_json: dict[str, object] | None) -> bool:
+    cfg = config_json or {}
+    src = cfg.get("source")
+    if isinstance(src, dict) and src.get("cursor_column"):
+        return True
+    tasks = cfg.get("tasks")
+    if isinstance(tasks, list):
+        for t in tasks:
+            ts = t.get("source") if isinstance(t, dict) else None
+            if isinstance(ts, dict) and ts.get("cursor_column"):
+                return True
+    return False
+
+
+@router.post(
+    "/{pipeline_id}/backfill",
+    response_model=RunSummary,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def backfill_pipeline(
+    pipeline_id: UUID,
+    body: RunBackfillRequest,
+    ctx: WorkspaceContext = _require_runner,
+    session: AsyncSession = Depends(get_session),  # noqa: B008
+    audit: AuditService = Depends(get_audit_service),  # noqa: B008
+) -> RunSummary:
+    """Enqueue a backfill run over a cursor range (ADR-0039). The pipeline's
+    source must declare a ``cursor_column``; otherwise this is a 400."""
+    pipeline, current = await _load_pipeline_and_current(
+        session, workspace_id=ctx.workspace.id, pipeline_id=pipeline_id
+    )
+    if not _config_has_cursor(current.config_json):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="pipeline has no source cursor_column — backfill needs an incremental cursor",
+        )
+    run = await RunRepository(session).add_manual(
+        pipeline=pipeline,
+        version=current,
+        triggered_by_user_id=ctx.user.id,
+        result_json={
+            "source": "backfill",
+            "backfill": {"cursor_from": body.cursor_from, "cursor_to": body.cursor_to},
+        },
+    )
+    await audit.record(
+        actor_user_id=ctx.user.id,
+        workspace_id=ctx.workspace.id,
+        action="run.backfill",
+        resource_type="run",
+        resource_id=str(run.id),
+        before=None,
+        after={
+            "pipeline_id": str(pipeline.id),
+            "pipeline_version_id": str(current.id),
+            "cursor_from": body.cursor_from,
+            "cursor_to": body.cursor_to,
         },
     )
     await session.commit()

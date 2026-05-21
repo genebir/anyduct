@@ -164,8 +164,18 @@ class RunExecutor:
                     # connectors + runs in-process; "spark" resolves connection
                     # configs and runs the Spark backend (bundled JVM, ADR-0032).
                     engine = (version.config_json or {}).get("engine", "local")
+                    # Backfill (ADR-0039): a run can carry a cursor range in
+                    # result_json.backfill, driving an incremental read.
+                    backfill = (run.result_json or {}).get("backfill") or {}
                     try:
-                        runner, run_name = await self._prepare(pipeline, version, session, run.id)
+                        runner, run_name = await self._prepare(
+                            pipeline,
+                            version,
+                            session,
+                            run.id,
+                            cursor_from=backfill.get("cursor_from"),
+                            cursor_to=backfill.get("cursor_to"),
+                        )
                     except _PipelineBuildError as e:
                         log.error(
                             "run.build_failed",
@@ -406,11 +416,16 @@ class RunExecutor:
         version: PipelineVersion,
         session: AsyncSession,
         run_id: UUID,
+        *,
+        cursor_from: Any = None,
+        cursor_to: Any = None,
     ) -> tuple[Callable[[], RunResult], str]:
         """Build a thread-callable that runs the pipeline on its engine.
 
         Returns ``(runner, name)``. Raises :class:`_PipelineBuildError` for any
         unrecoverable build/resolution problem (recorded as a failed run).
+        ``cursor_from`` / ``cursor_to`` drive a backfill over the source's
+        ``cursor_column`` (ADR-0039); only the local engine honours them.
         """
         try:
             cfg = PipelineConfig.model_validate(version.config_json)
@@ -453,7 +468,12 @@ class RunExecutor:
         # Connect + run + close happen in a single worker thread so drivers
         # (notably sqlite3) bound to a thread don't trip on cross-thread reuse.
         return functools.partial(
-            _run_pipeline_in_thread, core_pipeline, ctx, connectors
+            _run_pipeline_in_thread,
+            core_pipeline,
+            ctx,
+            connectors,
+            cursor_from=cursor_from,
+            cursor_to=cursor_to,
         ), core_pipeline.name
 
     async def _resolve_connection_configs(
@@ -517,6 +537,9 @@ def _run_pipeline_in_thread(
     pipeline: CorePipeline,
     context: Context,
     connectors: dict[str, Connector],
+    *,
+    cursor_from: Any = None,
+    cursor_to: Any = None,
 ) -> RunResult:
     """Open connectors, run the pipeline, close connectors — all in one thread.
 
@@ -524,11 +547,16 @@ def _run_pipeline_in_thread(
     thread other than the one that opened them, so we can't split
     ``connect`` / ``run`` / ``close`` across multiple ``asyncio.to_thread``
     calls — each call may land on a different pool worker.
+
+    ``cursor_from`` / ``cursor_to`` (when set) run a backfill over the task's
+    ``cursor_column`` instead of a full read (ADR-0039).
     """
     for c in connectors.values():
         c.connect()
     try:
-        return pipeline.run(context, connectors=connectors)
+        return pipeline.run(
+            context, connectors=connectors, cursor_from=cursor_from, cursor_to=cursor_to
+        )
     finally:
         for c in connectors.values():
             with contextlib.suppress(Exception):

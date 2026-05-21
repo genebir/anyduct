@@ -415,5 +415,61 @@ def test_list_columns_rejects_unsafe_identifier(sqlite_connector: SQLiteConnecto
         sqlite_connector.list_columns("orders; DROP TABLE orders")
 
 
+# ---------- atomic pre_sql (ADR-0035) ----------
+
+
+def test_write_pre_sql_atomic_success(db_path: Path) -> None:
+    """pre_sql DELETE + insert commit together → delete-then-insert."""
+    with sqlite3.connect(db_path) as raw:
+        raw.execute("CREATE TABLE t (id INTEGER PRIMARY KEY)")
+        raw.execute("INSERT INTO t VALUES (99)")
+        raw.commit()
+    conn = SQLiteConnector(database=str(db_path))
+    with conn:
+        n = conn.write(
+            iter([Record(data={"id": 1}), Record(data={"id": 2})]),
+            table="t",
+            pre_sql="DELETE FROM t",
+        )
+    assert n == 2
+    with sqlite3.connect(db_path) as raw:
+        rows = sorted(r[0] for r in raw.execute("SELECT id FROM t"))
+    assert rows == [1, 2]  # 99 deleted, 1/2 inserted — atomic
+
+
+def test_write_pre_sql_rolls_back_on_insert_failure(db_path: Path) -> None:
+    """If the insert fails, the pre_sql DELETE must roll back too (atomic)."""
+    with sqlite3.connect(db_path) as raw:
+        raw.execute("CREATE TABLE t (id INTEGER PRIMARY KEY)")
+        raw.executemany("INSERT INTO t VALUES (?)", [(1,), (2,)])
+        raw.commit()
+    conn = SQLiteConnector(database=str(db_path))
+    with conn, pytest.raises(WriteError):
+        # DELETE id=1, then insert id=2 → PK conflict (2 still present) → rollback.
+        conn.write(
+            iter([Record(data={"id": 2})]),
+            table="t",
+            pre_sql="DELETE FROM t WHERE id = 1",
+        )
+    with sqlite3.connect(db_path) as raw:
+        rows = sorted(r[0] for r in raw.execute("SELECT id FROM t"))
+    assert rows == [1, 2]  # DELETE rolled back with the failed insert
+
+
+def test_write_pre_sql_runs_on_empty_input(db_path: Path) -> None:
+    """pre_sql runs even with no records — clears the partition regardless."""
+    with sqlite3.connect(db_path) as raw:
+        raw.execute("CREATE TABLE t (id INTEGER)")
+        raw.executemany("INSERT INTO t VALUES (?)", [(1,), (2,)])
+        raw.commit()
+    conn = SQLiteConnector(database=str(db_path))
+    with conn:
+        n = conn.write(iter([]), table="t", pre_sql="DELETE FROM t WHERE id = 1")
+    assert n == 0
+    with sqlite3.connect(db_path) as raw:
+        rows = sorted(r[0] for r in raw.execute("SELECT id FROM t"))
+    assert rows == [2]  # the DELETE ran despite 0 input records
+
+
 def _unused(_: Any) -> None:
     """Silence ruff F401 for the type-only Any import."""

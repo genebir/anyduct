@@ -229,6 +229,7 @@ class MySQLConnector(BatchSource, BatchSink):
         key_columns: list[str] | None = None,
         table: str | None = None,
         batch_size: int = 1000,
+        pre_sql: str | None = None,
         **options: Any,
     ) -> int:
         if self._conn is None or not self._conn.open:
@@ -244,12 +245,22 @@ class MySQLConnector(BatchSource, BatchSink):
 
         it = iter(records)
         first = next(it, None)
-        if first is None:
+        # ``pre_sql`` (ADR-0035 atomic variant) runs as the first statement in
+        # the write transaction so a DELETE + the insert commit together. Use
+        # DELETE (DML, transactional in InnoDB) — TRUNCATE is DDL and would
+        # implicitly commit, breaking atomicity on MySQL.
+        if first is None and not pre_sql:
             return 0
 
-        columns: list[str] = list(first.data.keys())
-
         try:
+            if pre_sql:
+                with self._conn.cursor() as cur:
+                    cur.execute(pre_sql)
+            if first is None:
+                self._conn.commit()
+                return 0
+
+            columns: list[str] = list(first.data.keys())
             if mode == "overwrite":
                 with self._conn.cursor() as cur:
                     cur.execute(f"TRUNCATE TABLE {_table_ident(table)}")

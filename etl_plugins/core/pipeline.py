@@ -70,6 +70,11 @@ class SinkSpec:
     # Conditional routing predicate (ADR-0027). Sandboxed Python expression
     # evaluated per (transformed) record; ``None`` means this is a default sink.
     when: str | None = None
+    # Atomic pre-write SQL (ADR-0035). Runs as the first statement *inside* this
+    # sink's write transaction (before TRUNCATE/COPY/upsert), so a DELETE + the
+    # insert commit together — atomic delete-then-insert idempotency. RDBMS
+    # sinks only; runs even on empty input (clears the partition).
+    pre_sql: str | None = None
 
 
 @dataclass(frozen=True)
@@ -145,6 +150,7 @@ class Task:
     sink_mode: str = "append"
     sink_key_columns: list[str] | None = None
     sink_options: dict[str, Any] = field(default_factory=dict)
+    sink_pre_sql: str | None = None
     # Fan-out targets (ADR-0026). When non-empty these take precedence over the
     # flat ``sink*`` fields and the source is re-read once per sink.
     sinks: list[SinkSpec] = field(default_factory=list)
@@ -176,6 +182,7 @@ class Task:
                 mode=self.sink_mode,
                 key_columns=self.sink_key_columns,
                 options=self.sink_options,
+                pre_sql=self.sink_pre_sql,
             )
         ]
 
@@ -909,6 +916,7 @@ class Pipeline:
                 mode=spec.mode,
                 key_columns=spec.key_columns,
                 table=spec.table,
+                pre_sql=spec.pre_sql,
                 **spec.options,
             )
         return records_read, written, new_cursor

@@ -239,6 +239,7 @@ class PostgresConnector(BatchSource, BatchSink):
         mode: str = "append",
         key_columns: list[str] | None = None,
         table: str | None = None,
+        pre_sql: str | None = None,
         **options: Any,
     ) -> int:
         if self._conn is None:
@@ -254,13 +255,21 @@ class PostgresConnector(BatchSource, BatchSink):
 
         it = iter(records)
         first = next(it, None)
-        if first is None:
-            # 빈 입력. overwrite는 TRUNCATE만 수행해야 의미가 있으나, 안전한 디폴트로 no-op.
+        # ``pre_sql`` (ADR-0035 atomic variant) runs as the first statement in
+        # the write transaction so a DELETE + the COPY commit together — atomic
+        # delete-then-insert. It runs even on empty input (clears the partition).
+        if first is None and not pre_sql:
             return 0
 
-        columns: list[str] = list(first.data.keys())
-
         try:
+            if pre_sql:
+                with self._conn.cursor() as cur:
+                    cur.execute(pre_sql)
+            if first is None:
+                self._conn.commit()
+                return 0
+
+            columns: list[str] = list(first.data.keys())
             if mode == "overwrite":
                 with self._conn.cursor() as cur:
                     cur.execute(sql.SQL("TRUNCATE TABLE {}").format(_table_ident(table)))

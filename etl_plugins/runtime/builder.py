@@ -58,7 +58,7 @@ def build_connectors(config: ConnectionsConfig) -> dict[str, Connector]:
     return {name: build_connector(name, c) for name, c in config.connections.items()}
 
 
-_SINK_OPTS_EXCLUDE = {"connection", "table", "mode", "key_columns", "when"}
+_SINK_OPTS_EXCLUDE = {"connection", "table", "mode", "key_columns", "when", "pre_sql"}
 
 # Suffix for the dedicated sink-side connector instance created when a sink
 # reuses a connection that is also a source. See ``_dedicated_sink_key``.
@@ -173,6 +173,7 @@ def _build_task(
         task.sink_mode = snk.mode
         task.sink_key_columns = snk.key_columns
         task.sink_options = snk.model_dump(exclude=_SINK_OPTS_EXCLUDE)
+        task.sink_pre_sql = snk.model_dump().get("pre_sql")
     else:
         task.sinks = [
             SinkSpec(
@@ -182,6 +183,7 @@ def _build_task(
                 key_columns=snk.key_columns,
                 options=snk.model_dump(exclude=_SINK_OPTS_EXCLUDE),
                 when=snk.when,
+                pre_sql=snk.model_dump().get("pre_sql"),
             )
             for snk in sink_cfgs
         ]

@@ -1176,12 +1176,14 @@ ADR 본문이 P1.3에 남겨둔 미해결 포인트 "record-task 시스템에서
   3. **빌더 표현 = transform 팔레트의 "Run SQL (before load)" 오퍼레이터**(`type: "sql_exec"`, 필드 connection+statement). `extra=allow`인 `TransformConfig`로 그대로 직렬화. `build_pipeline._build_task`가 `type=="sql_exec"`를 per-record transform에서 분리해 `task.pre_sql`로 적재(나머지는 평소대로 `build_transform`). 노드 위치와 무관하게 항상 load 전 실행("before load" 라벨로 의미 전달).
   4. **연결 해석** — `referenced_connection_names`에 sql_exec 연결 포함 → 워커가 해당 커넥터를 빌드. 빌더 connection 드롭다운은 `anyConnection` 플래그로 전체 연결 노출(타입 제한 없음).
   5. **스코프** — 선형 파이프라인 batch 경로만(graph/stream은 후속). ADR-0034(연결 분리)와 정합: pre_sql이 sink와 같은 연결명을 써도 sink는 `::sink` 별도 인스턴스라 무관, DELETE는 단일 문 commit 후 즉시 해제.
+  6. **(Update 2026-05-21) 원자적 변형 — sink 트랜잭션 내 pre-write SQL**. 위 task-level pre_sql(별도 트랜잭션, 임의 연결, 비원자)에 더해, **sink에 `pre_sql`을 붙여 sink의 write 트랜잭션 *안에서* 첫 문으로 실행** → `DELETE + INSERT`가 한 트랜잭션으로 commit(원자적 delete-then-insert). `SinkSpec.pre_sql`/`Task.sink_pre_sql` + RDBMS `write(pre_sql=...)`(TRUNCATE/COPY/upsert 앞에서 실행, 빈 입력에도 실행해 파티션 클리어, 실패 시 rollback으로 DELETE까지 원복). 빌더는 RDBMS sink 노드에 "Pre-write SQL (atomic)" 필드. **MySQL은 DELETE(DML)만 원자적**(TRUNCATE는 DDL → implicit commit). 두 도구 구분: 같은 DB·원자 필요 → sink `pre_sql`; 다른 DB·setup → "Run SQL" transform.
 - **Consequences**:
   - (+) 재실행 멱등성 확보(검증: sqlite e2e — 같은 파이프라인 2회 실행 후에도 대상 테이블 중복 없음, stale 행 삭제됨).
-  - (+) 코어 capability 패턴 재사용(ADR-0033 SchemaInspector와 동일 구조), 빌더는 transform 노드 1개 추가로 노출.
-  - (−) **비원자적** — pre_sql DELETE는 sink INSERT와 다른 트랜잭션에서 commit. 중간 실패 시 "삭제됐지만 미적재" 상태 가능(중복은 없지만 데이터 공백). 진짜 원자성(같은 트랜잭션 delete+insert, 또는 스테이징+swap)은 후속 과제. 사용자 요구(중복 제거)는 충족.
-  - (−) statement는 검증 없이 그대로 실행(소스 query와 동일한 신뢰 모델). graph/stream 미지원.
-- **관련**: ADR-0033(capability 패턴) · ADR-0034(연결 분리) · ADR-0026(fan-out) · 향후: 원자적 full-refresh(staging+swap), upsert 키 빌더 강제
+  - (+) **원자성 확보(sink pre_sql)** — 검증: insert 실패 시 pre_sql DELETE까지 rollback돼 기존 데이터 보존(데이터 공백 없음), 빈 입력에도 DELETE 실행.
+  - (+) 코어 capability 패턴 재사용(ADR-0033 SchemaInspector와 동일 구조), 빌더는 transform 노드 + sink 필드로 노출.
+  - (−) task-level "Run SQL" transform은 여전히 비원자(별도 트랜잭션) — 크로스-DB/setup 용도. 원자 멱등은 sink `pre_sql` 사용.
+  - (−) statement는 검증 없이 그대로 실행(소스 query와 동일한 신뢰 모델). graph/stream 미지원. full-table rename swap(MySQL TRUNCATE 원자화)은 후속.
+- **관련**: ADR-0033(capability 패턴) · ADR-0034(연결 분리) · ADR-0026(fan-out) · 향후: full-refresh rename-swap, upsert 키 빌더 강제
 
 ---
 

@@ -222,6 +222,7 @@ class SQLiteConnector(BatchSource, BatchSink):
         key_columns: list[str] | None = None,
         table: str | None = None,
         batch_size: int = 1000,
+        pre_sql: str | None = None,
         **options: Any,
     ) -> int:
         if self._conn is None:
@@ -237,12 +238,22 @@ class SQLiteConnector(BatchSource, BatchSink):
 
         it = iter(records)
         first = next(it, None)
-        if first is None:
+
+        # ``pre_sql`` (ADR-0035 atomic variant) runs as the first statement in
+        # the write transaction, so a DELETE + the insert commit together —
+        # atomic delete-then-insert. It runs even on empty input so a partition
+        # is still cleared. No rows + no pre_sql ⇒ pure no-op.
+        if first is None and not pre_sql:
             return 0
 
-        columns: list[str] = list(first.data.keys())
-
         try:
+            if pre_sql:
+                self._conn.execute(pre_sql)
+            if first is None:
+                self._conn.commit()
+                return 0
+
+            columns: list[str] = list(first.data.keys())
             if mode == "overwrite":
                 self._conn.execute(f"DELETE FROM {_table_ident(table)}")
 

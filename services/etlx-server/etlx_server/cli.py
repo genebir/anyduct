@@ -737,12 +737,18 @@ def worker_run_cmd(
     secret_backend: str = typer.Option(
         "env",
         "--secret-backend",
-        help="One of: env, static, file, vault, aws_sm, gcp_sm.",
+        envvar="SECRET_BACKEND",
+        help=(
+            "One of: env, static, file, vault, aws_sm, gcp_sm. "
+            "Falls back to the SECRET_BACKEND env var so it matches the API "
+            "server's configuration (avoid worker/server backend mismatch)."
+        ),
     ),
     secret_file_path: str = typer.Option(
         "",
         "--secret-file-path",
-        help="Used only when --secret-backend=file.",
+        envvar="SECRET_BACKEND_FILE_PATH",
+        help="Used only when --secret-backend=file. Falls back to SECRET_BACKEND_FILE_PATH.",
     ),
     log_flush_interval: float = typer.Option(
         2.0,
@@ -942,12 +948,18 @@ def stream_worker_run_cmd(
     secret_backend: str = typer.Option(
         "env",
         "--secret-backend",
-        help="One of: env, static, file, vault, aws_sm, gcp_sm.",
+        envvar="SECRET_BACKEND",
+        help=(
+            "One of: env, static, file, vault, aws_sm, gcp_sm. "
+            "Falls back to the SECRET_BACKEND env var so it matches the API "
+            "server's configuration (avoid worker/server backend mismatch)."
+        ),
     ),
     secret_file_path: str = typer.Option(
         "",
         "--secret-file-path",
-        help="Used only when --secret-backend=file.",
+        envvar="SECRET_BACKEND_FILE_PATH",
+        help="Used only when --secret-backend=file. Falls back to SECRET_BACKEND_FILE_PATH.",
     ),
     log_flush_interval: float = typer.Option(
         2.0,

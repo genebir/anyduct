@@ -9,6 +9,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- **worker/stream-worker CLI가 `SECRET_BACKEND`/`SECRET_BACKEND_FILE_PATH` 환경변수 fallback** — `--secret-backend`/`--secret-file-path` typer 옵션에 `envvar=` 추가. 이전엔 플래그 미지정 시 무조건 `env` 백엔드로 떨어져, API 서버(file 백엔드)와 불일치 → 워커가 시크릿을 "env var not set"으로 못 찾는 문제. 이제 env-only(`SECRET_BACKEND=file`)로 띄워도 서버와 동일 백엔드 사용. (검증: env-only 워커로 run 실행 시 시크릿 정상 해석 확인.)
+
 ### Added
 - **빌더: 모드(batch/stream) 시각 구분 + 모드별 커넥터 제한 + 그래프 저장 검증** —
   - 파이프라인 목록에 **Batch/Stream 배지**(+ engine=spark면 Spark 태그). `current_config_json.mode`/`engine` 기반.

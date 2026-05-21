@@ -198,6 +198,11 @@ class RunExecutor:
                             records_written=result.records_written,
                             duration_seconds=result.duration_seconds,
                         )
+                        # Lineage (ADR-0036, Phase B): record the assets this
+                        # run materialized + their edges. Best-effort — a
+                        # catalog hiccup must not flip a successful run to
+                        # failed, so failures are logged and swallowed.
+                        await self._persist_lineage(session, run, version, result, log)
                         # Call-pipeline (ADR-0029): enqueue downstream pipelines
                         # on success, fire-and-forget. Same transaction as the
                         # success write so it's all-or-nothing.
@@ -221,6 +226,33 @@ class RunExecutor:
                     return run
                 finally:
                     current_run_id.reset(ctx_token)
+
+    async def _persist_lineage(
+        self,
+        session: AsyncSession,
+        run: Run,
+        version: PipelineVersion,
+        result: RunResult,
+        log: Any,
+    ) -> None:
+        """Record the run's derived asset lineage + a materialization per output
+        (ADR-0036). Best-effort: never fails the run."""
+        from etl_plugins.runtime.lineage import derive_lineage
+        from etlx_server.assets.repository import AssetRepository
+
+        try:
+            cfg = PipelineConfig.model_validate(version.config_json)
+            lineage = derive_lineage(cfg)
+            if not lineage.inputs and not lineage.outputs:
+                return
+            await AssetRepository(session).persist_run_lineage(
+                workspace_id=run.workspace_id,
+                run_id=run.id,
+                lineage=lineage,
+                records_written=result.records_written,
+            )
+        except Exception as e:
+            log.warning("run.lineage_persist_failed", error_class=type(e).__name__, error=str(e))
 
     async def _trigger_downstream(self, session: AsyncSession, run: Run, log: Any) -> None:
         """Enqueue runs of pipelines this one triggers on success (ADR-0029).

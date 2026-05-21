@@ -28,6 +28,7 @@ from typing import Any
 from uuid import UUID
 
 import pytest
+from etlx_server.assets.repository import AssetRepository
 from etlx_server.db.enums import RunStatus
 from etlx_server.db.models import (
     Connection,
@@ -296,6 +297,45 @@ async def test_executor_happy_path_sqlite(session: AsyncSession, tmp_path: Path)
     finally:
         conn.close()
     assert rows == [(1, "alice"), (2, "bob"), (3, "carol")]
+
+
+async def test_executor_persists_lineage(session: AsyncSession, tmp_path: Path) -> None:
+    """A successful run records its derived assets, edge, and a materialization
+    (ADR-0036, Phase B2)."""
+    db_path = _prepare_sqlite_fixture(tmp_path)
+    ws = await _seed_workspace(session, slug="we-lineage")
+    await _seed_connection(session, workspace_id=ws.id, name="src", config={"database": db_path})
+    await _seed_connection(session, workspace_id=ws.id, name="dst", config={"database": db_path})
+    cfg = {
+        "name": "p",
+        "source": {"connection": "src", "query": "SELECT id, name FROM seed"},
+        "sink": {"connection": "dst", "table": "out", "mode": "append"},
+    }
+    p, pv = await _seed_pipeline(session, workspace_id=ws.id, name="p", config=cfg)
+    run = await _seed_pending_run(
+        session, workspace_id=ws.id, pipeline_id=p.id, pipeline_version_id=pv.id
+    )
+    claimed = await claim_pending_run(session, worker_id="worker-L")
+    assert claimed is not None
+    await session.commit()
+
+    executor = RunExecutor(_SessionFactoryAdapter(session), StaticSecretBackend(), worker_id="w")
+    await executor.execute(run.id)
+
+    repo = AssetRepository(session)
+    assets = await repo.list_for_workspace(workspace_id=ws.id)
+    keys = {a.asset_key for a in assets}
+    assert "dst/out" in keys  # output asset
+    assert any(k.startswith("src/") for k in keys)  # input asset (query-keyed)
+
+    out_asset = next(a for a in assets if a.asset_key == "dst/out")
+    assert out_asset.last_materialized_at is not None
+    ups = await repo.upstream(out_asset.id)
+    assert any(a.asset_key.startswith("src/") for a in ups)  # input → output edge
+    mats = await repo.materializations(asset_id=out_asset.id)
+    assert len(mats) == 1
+    assert mats[0].records_written == 3
+    assert mats[0].run_id == run.id
 
 
 async def test_executor_triggers_downstream_on_success(

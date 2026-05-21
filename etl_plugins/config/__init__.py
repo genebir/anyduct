@@ -37,6 +37,7 @@ from etl_plugins.config.secrets import (
     StaticSecretBackend,
     get_secret_backend,
 )
+from etl_plugins.config.variables import resolve_config_variables, resolve_variables
 
 __all__ = [
     "BufferConfig",
@@ -69,5 +70,7 @@ __all__ = [
     "load_dotenv",
     "load_pipeline",
     "load_yaml",
+    "resolve_config_variables",
     "resolve_secrets",
+    "resolve_variables",
 ]

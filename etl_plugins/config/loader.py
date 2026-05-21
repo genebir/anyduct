@@ -21,6 +21,7 @@ import yaml
 
 from etl_plugins.config.models import ConnectionsConfig, PipelineConfig
 from etl_plugins.config.secrets import SecretBackend
+from etl_plugins.config.variables import resolve_config_variables
 from etl_plugins.core.exceptions import ConfigError
 
 VAR_PATTERN = re.compile(r"\$\{([A-Z_][A-Z0-9_]*)\}")
@@ -161,8 +162,14 @@ def load_pipeline(
     env: Mapping[str, str] | None = None,
     secret_backend: SecretBackend | None = None,
 ) -> PipelineConfig:
-    """Load and validate ``configs/pipelines/<x>.yaml``."""
+    """Load and validate ``configs/pipelines/<x>.yaml``.
+
+    Resolution order: ``${VAR}`` env → ``!secret`` → ``${var.name}`` pipeline
+    variables (ADR-0041), so a variable's value may itself contain an env ref.
+    """
     data = load_config(path, env=env, secret_backend=secret_backend)
+    if isinstance(data, dict):
+        data = resolve_config_variables(data)
     return PipelineConfig.model_validate(data)
 
 

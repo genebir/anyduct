@@ -494,6 +494,9 @@
 - **Phase I — 빌더 UX + 커스텀 op**: I1 자유구성 캔버스(트리 제약 해제·join UI) → I2 커스텀 operator + Python IDE(Monaco) + 서버 `custom_python` + RBAC/audit.
 - **Phase J — 컬럼 리니지**: J1 sqlglot + `derive_column_lineage`(하이브리드) + 코어 모델 → J2 `asset_columns`/`column_lineage_edges` 스키마+API → J3 웹 drill-down.
 - **Phase K — 부가(#6)**: graph 백필(다중source cursor) · OpenLineage export · 데이터 품질/assertion operator · 센서.
+- **변수(Variables) feature track** (전역 + 파이프라인별 지역, 사용자 요청 2026-05-21):
+  - [x] **V1 코어 지역 변수** ✅ (2026-05-21) — `PipelineConfig.variables` + `config/variables.py` `resolve_variables`/`resolve_config_variables`. `${var.name}` 치환(전체매칭=타입보존, 부분=문자열보간), env(`${UPPER}`)·secret(`!secret`)와 별도 네임스페이스. `load_pipeline`이 env→secret→variables 순 해석. 미정의 변수는 ConfigError. v1 한계: 변수 간 참조 불가. 코어 582 unit green.
+  - [ ] **V2 서비스 전역 변수 + 결선** — 워크스페이스 전역 변수 테이블(Alembic) + repo/API/UI, 워커·DryRun 빌드 경로에서 `resolve_config_variables(config_json, extra=globals)` 적용(지역이 전역 override). 시크릿 평문 0 원칙과 동일하게 변수도 마스킹/스코프 관리.
 
 ### 10.5 Schedule + Run 모니터링 (← 작업 중, 2026-05-18 Schedule CRUD + Run 상세까지 완료)
 - [x] Run 목록 (Data Table, StatusBadge, 5s polling) — `/w/[slug]/runs`. Row 클릭 시 상세 페이지로 이동.

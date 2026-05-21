@@ -374,6 +374,10 @@ class PipelineConfig(BaseModel):
     name: str
     mode: str = "batch"  # batch | stream
     schedule: str | None = None
+    # Pipeline-local variables (ADR-0041, V1). Referenced as ``${var.name}`` in
+    # string fields; resolved at load time (see config.variables). Workspace-wide
+    # globals merge underneath these (locals win) at the service layer (V2).
+    variables: dict[str, Any] = Field(default_factory=dict)
     # Asset-driven orchestration (ADR-0037). When true, the service auto-enqueues
     # a run of this pipeline whenever an upstream run materializes one of its
     # input assets (Dagster auto-materialize / Airflow Dataset trigger). Opt-in

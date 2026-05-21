@@ -1,9 +1,9 @@
 """Unified graph model + lowering (ADR-0041, G1).
 
 Covers the generalized :class:`GraphConfig` validation (join/fan-in/multi-source/
-cycles), :func:`to_graph` lowering of the single-task shape, ``topological_order``,
-and the builder guard that fails fast on shapes the current re-read engine can't
-run (multi-source / join) until the materialize engine (G2).
+cycles), :func:`to_graph` lowering of the single-task shape, and
+``topological_order``. Graph *execution* (multi-source + join) is exercised in
+``tests/unit/core/test_pipeline_graph.py``.
 """
 
 from __future__ import annotations
@@ -11,8 +11,6 @@ from __future__ import annotations
 import pytest
 
 from etl_plugins.config.models import GraphConfig, PipelineConfig
-from etl_plugins.core.exceptions import ConfigError
-from etl_plugins.runtime.builder import build_pipeline
 from etl_plugins.runtime.graph import to_graph, topological_order
 
 
@@ -190,56 +188,3 @@ def test_topological_order_respects_dependencies() -> None:
     assert order.index("source") < order.index("transform_0")
     assert order.index("transform_0") < order.index("transform_1")
     assert order.index("transform_1") < order.index("sink_0")
-
-
-# ---------- builder guard: relaxed shapes the re-read engine can't run yet ----------
-
-
-def test_build_rejects_multi_source_until_g2() -> None:
-    cfg = PipelineConfig.model_validate(
-        {
-            "name": "p",
-            "graph": {
-                "nodes": [
-                    _node("s1", "source", connection="a"),
-                    _node("s2", "source", connection="b"),
-                    _node("j", "join", on=["id"]),
-                    _node("k", "sink", connection="c"),
-                ],
-                "edges": [
-                    {"from_node": "s1", "to_node": "j"},
-                    {"from_node": "s2", "to_node": "j"},
-                    {"from_node": "j", "to_node": "k"},
-                ],
-            },
-        }
-    )
-    with pytest.raises(ConfigError, match="materialize engine"):
-        build_pipeline(cfg, connectors={})
-
-
-def test_build_rejects_join_until_g2() -> None:
-    # Single source, fan-out then join → not multi-source, but join present.
-    cfg = PipelineConfig.model_validate(
-        {
-            "name": "p",
-            "graph": {
-                "nodes": [
-                    _node("s", "source", connection="a"),
-                    _node("t1", "transform", transform={"type": "rename", "mapping": {}}),
-                    _node("t2", "transform", transform={"type": "rename", "mapping": {}}),
-                    _node("j", "join", on=["id"]),
-                    _node("k", "sink", connection="c"),
-                ],
-                "edges": [
-                    {"from_node": "s", "to_node": "t1"},
-                    {"from_node": "s", "to_node": "t2"},
-                    {"from_node": "t1", "to_node": "j"},
-                    {"from_node": "t2", "to_node": "j"},
-                    {"from_node": "j", "to_node": "k"},
-                ],
-            },
-        }
-    )
-    with pytest.raises(ConfigError, match="join nodes need the materialize engine"):
-        build_pipeline(cfg, connectors={})

@@ -6,7 +6,14 @@ import pytest
 
 from etl_plugins.config.models import GraphConfig, PipelineConfig
 from etl_plugins.core.exceptions import TaskError
-from etl_plugins.core.pipeline import GraphEdge, GraphNode, Pipeline, SinkSpec, Task
+from etl_plugins.core.pipeline import (
+    GraphEdge,
+    GraphNode,
+    Pipeline,
+    SinkSpec,
+    Task,
+    _join_records,
+)
 from etl_plugins.core.record import Record
 
 from .conftest import InMemoryBatchSink, InMemoryBatchSource
@@ -106,6 +113,155 @@ def test_graph_cursor_unsupported() -> None:
         Pipeline("g").add(_graph_task(nodes, edges)).run(
             connectors={"src": _src("a"), "snk": InMemoryBatchSink()}, cursor_from=1
         )
+
+
+# ---------- materialize engine: multi-source + join (ADR-0041, G2) ----------
+
+
+def _rows(*rows: dict) -> InMemoryBatchSource:
+    return InMemoryBatchSource([Record(data=r) for r in rows])
+
+
+def test_graph_multi_source_inner_join() -> None:
+    nodes = [
+        GraphNode(id="l", kind="source", source_name="L"),
+        GraphNode(id="r", kind="source", source_name="R"),
+        GraphNode(id="j", kind="join", join_on=["id"], join_how="inner"),
+        GraphNode(id="k", kind="sink", sink=SinkSpec(name="snk", table="o")),
+    ]
+    edges = [GraphEdge("l", "j"), GraphEdge("r", "j"), GraphEdge("j", "k")]
+    snk = InMemoryBatchSink()
+    result = (
+        Pipeline("g")
+        .add(_graph_task(nodes, edges))
+        .run(
+            connectors={
+                "L": _rows({"id": 1, "a": "x"}, {"id": 2, "a": "y"}),
+                "R": _rows({"id": 1, "b": "P"}, {"id": 3, "b": "Q"}),
+                "snk": snk,
+            }
+        )
+    )
+    assert result.success
+    assert result.records_read == 4  # both sources, read once each
+    assert [r.data for r in snk.records] == [{"id": 1, "a": "x", "b": "P"}]
+    assert result.records_written == 1
+
+
+def test_graph_left_join_keeps_unmatched_left() -> None:
+    nodes = [
+        GraphNode(id="l", kind="source", source_name="L"),
+        GraphNode(id="r", kind="source", source_name="R"),
+        GraphNode(id="j", kind="join", join_on=["id"], join_how="left"),
+        GraphNode(id="k", kind="sink", sink=SinkSpec(name="snk", table="o")),
+    ]
+    edges = [GraphEdge("l", "j"), GraphEdge("r", "j"), GraphEdge("j", "k")]
+    snk = InMemoryBatchSink()
+    Pipeline("g").add(_graph_task(nodes, edges)).run(
+        connectors={
+            "L": _rows({"id": 1, "a": "x"}, {"id": 2, "a": "y"}),
+            "R": _rows({"id": 1, "b": "P"}),
+            "snk": snk,
+        }
+    )
+    assert sorted((r.data for r in snk.records), key=lambda d: d["id"]) == [
+        {"id": 1, "a": "x", "b": "P"},
+        {"id": 2, "a": "y"},
+    ]
+
+
+def test_graph_join_requires_two_inputs() -> None:
+    nodes = [
+        GraphNode(id="s", kind="source", source_name="src"),
+        GraphNode(id="j", kind="join", join_on=["id"]),
+        GraphNode(id="k", kind="sink", sink=SinkSpec(name="snk", table="o")),
+    ]
+    edges = [GraphEdge("s", "j"), GraphEdge("j", "k")]
+    with pytest.raises(TaskError, match="at least two inputs"):
+        Pipeline("g").add(_graph_task(nodes, edges)).run(
+            connectors={"src": _rows({"id": 1}), "snk": InMemoryBatchSink()}
+        )
+
+
+def test_graph_fan_in_join_reads_single_source_once() -> None:
+    # source feeds two transform branches that re-join → the source is read
+    # exactly once (materialized), unlike the old per-sink re-read.
+    def add_x(r: Record) -> Record:
+        return Record(data={**r.data, "x": 1}, metadata=r.metadata)
+
+    def add_y(r: Record) -> Record:
+        return Record(data={**r.data, "y": 2}, metadata=r.metadata)
+
+    nodes = [
+        GraphNode(id="s", kind="source", source_name="src"),
+        GraphNode(id="t1", kind="transform", transform_fn=add_x),
+        GraphNode(id="t2", kind="transform", transform_fn=add_y),
+        GraphNode(id="j", kind="join", join_on=["id"], join_how="inner"),
+        GraphNode(id="k", kind="sink", sink=SinkSpec(name="snk", table="o")),
+    ]
+    edges = [
+        GraphEdge("s", "t1"),
+        GraphEdge("s", "t2"),
+        GraphEdge("t1", "j"),
+        GraphEdge("t2", "j"),
+        GraphEdge("j", "k"),
+    ]
+    snk = InMemoryBatchSink()
+    result = (
+        Pipeline("g")
+        .add(_graph_task(nodes, edges))
+        .run(connectors={"src": _rows({"id": 1}, {"id": 2}), "snk": snk})
+    )
+    assert result.records_read == 2  # single source, read once
+    assert sorted((r.data for r in snk.records), key=lambda d: d["id"]) == [
+        {"id": 1, "x": 1, "y": 2},
+        {"id": 2, "x": 1, "y": 2},
+    ]
+
+
+def test_graph_multi_source_independent_sinks() -> None:
+    nodes = [
+        GraphNode(id="s1", kind="source", source_name="A"),
+        GraphNode(id="s2", kind="source", source_name="B"),
+        GraphNode(id="k1", kind="sink", sink=SinkSpec(name="ka", table="o")),
+        GraphNode(id="k2", kind="sink", sink=SinkSpec(name="kb", table="o")),
+    ]
+    edges = [GraphEdge("s1", "k1"), GraphEdge("s2", "k2")]
+    ka, kb = InMemoryBatchSink(), InMemoryBatchSink()
+    result = (
+        Pipeline("g")
+        .add(_graph_task(nodes, edges))
+        .run(
+            connectors={
+                "A": _rows({"id": 1}),
+                "B": _rows({"id": 2}, {"id": 3}),
+                "ka": ka,
+                "kb": kb,
+            }
+        )
+    )
+    assert result.records_read == 3
+    assert [r.data["id"] for r in ka.records] == [1]
+    assert [r.data["id"] for r in kb.records] == [2, 3]
+
+
+def test_join_records_outer() -> None:
+    out = _join_records(
+        [Record(data={"id": 1, "a": "x"}), Record(data={"id": 2, "a": "y"})],
+        [Record(data={"id": 1, "b": "P"}), Record(data={"id": 3, "b": "Q"})],
+        ["id"],
+        "outer",
+    )
+    assert sorted((r.data for r in out), key=lambda d: d["id"]) == [
+        {"id": 1, "a": "x", "b": "P"},
+        {"id": 2, "a": "y"},
+        {"id": 3, "b": "Q"},
+    ]
+
+
+def test_join_records_requires_on() -> None:
+    with pytest.raises(TaskError, match="non-empty 'on'"):
+        _join_records([], [], [], "inner")
 
 
 # ---------- GraphConfig validation ----------

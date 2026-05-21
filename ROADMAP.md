@@ -485,8 +485,8 @@
 > 사용자 요건: ①graph 전면화 ②자유 구성(강제 source/sink 탈피) ③커스텀 operator(커넥션 템플릿+Python IDE) ④데이터 리니지 ⑤테이블+컬럼 리니지 ⑥부가 ⑦의존성 점검. fork 합의: 단일 graph 통합 / 노드 머티리얼라이즈 실행 / 노드 레벨 PG 스케줄링(Celery X) / 커스텀 op 신뢰모델+RBAC+샌드박스 seam / 컬럼리니지 하이브리드(선언transform+sqlglot). ADR-0041.
 - **Phase G — graph-first 통합 코어**:
   - [x] **G1 통합 graph config 모델 + 정규화기** ✅ (2026-05-21) — `GraphConfig`를 다중 source + `join` 노드(fan-in, indegree≥2) 허용으로 일반화 + 사이클(Kahn) 검출, 트리 그래프는 그대로 통과(하위호환). `runtime/graph.py` `to_graph()`(single-task→graph 로워링, sink `when`→edge, graph 그대로, task-DAG는 Phase H deferral) + `topological_order()`. 빌더 가드: 다중source/join은 머티리얼라이즈 엔진(G2) 전까지 fail-fast. 코어 564 unit green.
-  - [ ] **G2 노드 머티리얼라이즈 실행 엔진** — 각 노드가 staging 출력, downstream이 읽음. 위상 실행 + hash join. sqlite 다중source+join e2e.
-  - [ ] **G3 stateful operator 추상화** — join/aggregate/window(N입력→1출력), `Record→Record` 한계 확장.
+  - [x] **G2 노드 머티리얼라이즈 실행 엔진** ✅ (2026-05-21) — `Pipeline._run_graph_task`를 머티리얼라이즈로 교체: 위상 순서(Kahn)로 각 노드 출력을 메모리 materialize, downstream이 소비. source는 한 번만 읽음(per-sink 재읽기 폐기 → ADR-0034 데드락 자연 소멸), transform=단일입력 매핑, `join`=hash join(N-way fold, inner/left/right/outer), sink=입력 write. edge `when`은 입력 필터. 다중 source + fan-in 지원. linear 파이프라인은 별도 경로라 무영향. 기존 graph 테스트 동등성 유지 + 다중source/join/fan-in e2e(in-memory, connector-agnostic). 코어 569 unit green, 서버 graph 회귀 통과. (실 DB graph 실행은 connector contract가 보장 + Phase H 서비스 통합에서 검증.)
+  - [ ] **G3 stateful operator 추상화** — aggregate/window 등 N입력→1출력 operator 일반화, `Record→Record` 한계 확장(join은 G2에서 선행).
 - **Phase H — 노드 레벨 오케스트레이션(병렬)**: H1 `node_runs` 스키마+repo → H2 스케줄러 노드 enqueue + 워커 노드 claim(SKIP LOCKED 병렬, retry/heartbeat/reaper 재사용) → H3 노드별 리니지 훅 + Run 상세 DAG 뷰.
 - **Phase I — 빌더 UX + 커스텀 op**: I1 자유구성 캔버스(트리 제약 해제·join UI) → I2 커스텀 operator + Python IDE(Monaco) + 서버 `custom_python` + RBAC/audit.
 - **Phase J — 컬럼 리니지**: J1 sqlglot + `derive_column_lineage`(하이브리드) + 코어 모델 → J2 `asset_columns`/`column_lineage_edges` 스키마+API → J3 웹 drill-down.

@@ -104,10 +104,10 @@ class SqlAction:
 
 @dataclass
 class GraphNode:
-    """One node in a dataflow graph (ADR-0030)."""
+    """One node in a dataflow graph (ADR-0030, join added in ADR-0041)."""
 
     id: str
-    kind: str  # source | transform | sink
+    kind: str  # source | transform | sink | join
     # source
     source_name: str | None = None
     query: str | None = None
@@ -116,6 +116,9 @@ class GraphNode:
     transform_fn: TransformFn | None = None
     # sink
     sink: SinkSpec | None = None
+    # join (fan-in, ADR-0041) — merge ≥2 inputs on ``join_on`` keys
+    join_on: list[str] | None = None
+    join_how: str = "inner"
 
 
 @dataclass
@@ -258,6 +261,79 @@ class RunResult:
     # Per-task terminal state (ADR-0028). Empty for non-DAG runs; otherwise maps
     # task name → success / failed / skipped / upstream_failed.
     task_states: dict[str, str] = field(default_factory=dict)
+
+
+def _toposort_nodes(by_id: dict[str, GraphNode], edges: list[GraphEdge]) -> list[str]:
+    """Kahn topological order of node ids; raise on a cycle (ADR-0041)."""
+    indeg = dict.fromkeys(by_id, 0)
+    downstream: dict[str, list[str]] = {nid: [] for nid in by_id}
+    for e in edges:
+        indeg[e.to_id] += 1
+        downstream[e.from_id].append(e.to_id)
+    ready = [nid for nid, d in indeg.items() if d == 0]
+    order: list[str] = []
+    while ready:
+        cur = ready.pop(0)
+        order.append(cur)
+        for nxt in downstream[cur]:
+            indeg[nxt] -= 1
+            if indeg[nxt] == 0:
+                ready.append(nxt)
+    if len(order) != len(by_id):
+        raise TaskError("graph has a cycle")
+    return order
+
+
+def _join_records(left: list[Record], right: list[Record], on: list[str], how: str) -> list[Record]:
+    """Hash-join two record lists on ``on`` keys (ADR-0041).
+
+    ``how`` is inner | left | right | outer. Right columns are merged onto a
+    copy of the left record (right wins on non-key conflicts); unmatched rows
+    are emitted alone for the outer side(s).
+    """
+    if not on:
+        raise TaskError("join requires non-empty 'on' key columns")
+
+    def key_of(rec: Record, side: str) -> tuple[Any, ...]:
+        try:
+            return tuple(rec.data[k] for k in on)
+        except KeyError as exc:
+            raise TransformError(f"join key {exc} missing in {side} input") from exc
+
+    index: dict[tuple[Any, ...], list[Record]] = {}
+    for r in right:
+        index.setdefault(key_of(r, "right"), []).append(r)
+
+    out: list[Record] = []
+    matched: set[tuple[Any, ...]] = set()
+    for lrec in left:
+        k = key_of(lrec, "left")
+        rights = index.get(k)
+        if rights:
+            matched.add(k)
+            for r in rights:
+                out.append(
+                    Record(
+                        data={**lrec.data, **r.data},
+                        metadata=lrec.metadata,
+                        schema_version=lrec.schema_version,
+                    )
+                )
+        elif how in ("left", "outer"):
+            out.append(lrec)
+    if how in ("right", "outer"):
+        for k, rights in index.items():
+            if k not in matched:
+                out.extend(rights)
+    return out
+
+
+def _hash_join(inputs: list[list[Record]], on: list[str], how: str) -> list[Record]:
+    """Fold ≥2 inputs left-to-right with :func:`_join_records`."""
+    result = inputs[0]
+    for nxt in inputs[1:]:
+        result = _join_records(result, nxt, on, how)
+    return result
 
 
 @dataclass
@@ -744,122 +820,123 @@ class Pipeline:
         cursor_from: CursorValue,
         cursor_to: CursorValue,
     ) -> tuple[int, int, CursorValue]:
-        """Execute a dataflow graph (ADR-0030).
+        """Execute a dataflow graph by materializing each node (ADR-0041).
 
-        v1 is a source-rooted tree: one source, branching/fan-out via per-edge
-        ``when`` predicates, sinks as leaves. For each sink we re-read the source
-        and replay the unique path source→sink (transforms + edge predicates),
-        mirroring the fan-out re-read model. records_read is counted on the first
-        sink's pass; records_written sums across sinks.
+        Nodes run in topological order; each node's output records are held in
+        memory and consumed by its downstream nodes. Sources are read once (no
+        per-sink re-read), transforms map their single input, ``join`` nodes
+        hash-join their inputs (fan-in), and sinks write their input. Per-edge
+        ``when`` predicates filter the records flowing along that edge.
+        Multi-source and join are supported. Reading each source fully before
+        any sink writes also sidesteps the same-connection deadlock (ADR-0034).
+
+        records_read sums all source reads; records_written sums all sink
+        writes. Cursor backfill is not yet supported for graphs.
         """
         if cursor_from is not None or cursor_to is not None:
             raise TaskError("graph pipelines do not support cursor backfill yet")
 
         by_id = {n.id: n for n in task.graph_nodes}
-        sources = [n for n in task.graph_nodes if n.kind == "source"]
-        sinks = [n for n in task.graph_nodes if n.kind == "sink"]
-        if len(sources) != 1:
-            raise TaskError("graph must have exactly one source node")
-        src_node = sources[0]
-        if not src_node.source_name:
-            raise TaskError(f"graph source node {src_node.id!r} has no connection")
-        source = connectors.get(src_node.source_name)
-        if source is None:
-            raise TaskError(f"No connector for graph source '{src_node.source_name}'")
-        if not isinstance(source, BatchSource):
-            raise TaskError(f"Graph source '{src_node.source_name}' is not a BatchSource")
-
-        # Each non-source node has exactly one incoming edge (tree invariant).
-        incoming: dict[str, GraphEdge] = {}
+        incoming: dict[str, list[GraphEdge]] = {n.id: [] for n in task.graph_nodes}
         for e in task.graph_edges:
-            incoming[e.to_id] = e
-        # Precompile edge predicates once.
+            if e.to_id not in by_id or e.from_id not in by_id:
+                raise TaskError(f"graph edge references unknown node: {e.from_id}→{e.to_id}")
+            incoming[e.to_id].append(e)
+
+        # Precompile edge predicates once, keyed by edge identity.
         compiled: dict[int, CodeType] = {}
-        for i, e in enumerate(task.graph_edges):
+        for e in task.graph_edges:
             if e.when is not None:
                 try:
-                    compiled[i] = compile(e.when, "<edge:when>", "eval")
+                    compiled[id(e)] = compile(e.when, "<edge:when>", "eval")
                 except SyntaxError as exc:
                     raise TaskError(f"edge {e.from_id}→{e.to_id}: invalid 'when': {exc}") from exc
-        edge_index = {id(e): i for i, e in enumerate(task.graph_edges)}
 
-        def _path_to(sink_id: str) -> list[GraphNode]:
-            # Walk parents up to the source, then reverse → [n1, …, sink].
-            chain: list[GraphNode] = []
-            cur = sink_id
-            seen: set[str] = set()
-            while cur != src_node.id:
-                if cur in seen:
-                    raise TaskError(f"cycle detected reaching sink {sink_id!r}")
-                seen.add(cur)
-                edge = incoming.get(cur)
-                if edge is None:
-                    raise TaskError(f"node {cur!r} is not reachable from the source")
-                chain.append(by_id[cur])
-                cur = edge.from_id
-            chain.reverse()
-            return chain
+        outputs: dict[str, list[Record]] = {}
 
-        def _edge_ok(node_id: str, record: Record) -> bool:
-            edge = incoming.get(node_id)
-            if edge is None:
-                return True
-            code = compiled.get(edge_index[id(edge)])
+        def _edge_records(edge: GraphEdge) -> list[Record]:
+            records = outputs[edge.from_id]
+            code = compiled.get(id(edge))
             if code is None:
-                return True
-            try:
-                return bool(
-                    eval(
-                        code,
-                        {"__builtins__": {}},
-                        {"data": record.data, "metadata": record.metadata},
+                return records
+            kept: list[Record] = []
+            for rec in records:
+                try:
+                    ok = bool(
+                        eval(
+                            code,
+                            {"__builtins__": {}},
+                            {"data": rec.data, "metadata": rec.metadata},
+                        )
                     )
-                )
-            except Exception as exc:
-                raise TransformError(
-                    f"edge {edge.from_id}→{edge.to_id}: 'when' failed: {exc}"
-                ) from exc
+                except Exception as exc:
+                    raise TransformError(
+                        f"edge {edge.from_id}→{edge.to_id}: 'when' failed: {exc}"
+                    ) from exc
+                if ok:
+                    kept.append(rec)
+            return kept
 
+        def _inputs(node_id: str) -> list[list[Record]]:
+            # One filtered record-list per incoming edge, in declaration order.
+            return [_edge_records(e) for e in incoming[node_id]]
+
+        order = _toposort_nodes(by_id, task.graph_edges)
         records_read = 0
-        new_cursor: CursorValue = None  # cursoring unsupported in graph v1
-
-        def _stream_for(sink_node: GraphNode, count: bool) -> Iterator[Record]:
-            nonlocal records_read
-            path = _path_to(sink_node.id)
-            for raw in source.read(query=src_node.query, **src_node.source_options):
-                if count:
-                    records_read += 1
-                rec: Record | None = raw
-                for node in path:
-                    if rec is None:
-                        break
-                    if not _edge_ok(node.id, rec):
-                        rec = None
-                        break
-                    if node.kind == "transform" and node.transform_fn is not None:
-                        rec = node.transform_fn(rec)
-                    # sink node = terminal; nothing to apply
-                if rec is not None:
-                    yield rec
-
         written = 0
-        for i, sink_node in enumerate(sinks):
-            if sink_node.sink is None:
-                raise TaskError(f"graph sink node {sink_node.id!r} has no sink spec")
-            spec = sink_node.sink
-            sink = connectors.get(spec.name)
-            if sink is None:
-                raise TaskError(f"No connector for graph sink '{spec.name}'")
-            if not isinstance(sink, BatchSink):
-                raise TaskError(f"Graph sink '{spec.name}' is not a BatchSink")
-            written += sink.write(
-                _stream_for(sink_node, count=(i == 0)),
-                mode=spec.mode,
-                key_columns=spec.key_columns,
-                table=spec.table,
-                **spec.options,
-            )
-        return records_read, written, new_cursor
+
+        for node_id in order:
+            node = by_id[node_id]
+            if node.kind == "source":
+                if not node.source_name:
+                    raise TaskError(f"graph source node {node.id!r} has no connection")
+                source = connectors.get(node.source_name)
+                if source is None:
+                    raise TaskError(f"No connector for graph source '{node.source_name}'")
+                if not isinstance(source, BatchSource):
+                    raise TaskError(f"Graph source '{node.source_name}' is not a BatchSource")
+                recs = list(source.read(query=node.query, **node.source_options))
+                records_read += len(recs)
+                outputs[node.id] = recs
+            elif node.kind == "transform":
+                ins = _inputs(node.id)
+                if len(ins) != 1:
+                    raise TaskError(f"transform node {node.id!r} takes exactly one input")
+                out_recs: list[Record] = []
+                for rec in ins[0]:
+                    result = node.transform_fn(rec) if node.transform_fn is not None else rec
+                    if result is not None:
+                        out_recs.append(result)
+                outputs[node.id] = out_recs
+            elif node.kind == "join":
+                ins = _inputs(node.id)
+                if len(ins) < 2:
+                    raise TaskError(f"join node {node.id!r} needs at least two inputs")
+                outputs[node.id] = _hash_join(ins, node.join_on or [], node.join_how)
+            elif node.kind == "sink":
+                ins = _inputs(node.id)
+                if len(ins) != 1:
+                    raise TaskError(f"sink node {node.id!r} takes exactly one input")
+                if node.sink is None:
+                    raise TaskError(f"graph sink node {node.id!r} has no sink spec")
+                spec = node.sink
+                sink = connectors.get(spec.name)
+                if sink is None:
+                    raise TaskError(f"No connector for graph sink '{spec.name}'")
+                if not isinstance(sink, BatchSink):
+                    raise TaskError(f"Graph sink '{spec.name}' is not a BatchSink")
+                written += sink.write(
+                    iter(ins[0]),
+                    mode=spec.mode,
+                    key_columns=spec.key_columns,
+                    table=spec.table,
+                    **spec.options,
+                )
+                outputs[node.id] = ins[0]
+            else:
+                raise TaskError(f"graph node {node.id!r} has unknown kind {node.kind!r}")
+
+        return records_read, written, None
 
     def _run_pre_sql(self, task: Task, connectors: dict[str, Connector]) -> None:
         """Execute the task's pre-load SQL actions once, in order (ADR-0035)."""

@@ -10,6 +10,7 @@
 ## [Unreleased]
 
 ### Added
+- **노드 머티리얼라이즈 실행 엔진 — G2** [ADR-0041] — `Pipeline._run_graph_task`를 re-read 방식에서 **머티리얼라이즈**로 교체. 위상 순서(Kahn)로 각 노드 출력을 메모리에 materialize하고 downstream이 소비: source는 한 번만 읽음(per-sink 재읽기 폐기 → 같은 연결 데드락 ADR-0034 자연 소멸), transform=단일입력 매핑, `join`=hash join(N-way fold, inner/left/right/outer), sink=입력 write. edge `when`은 입력 필터. **다중 source + fan-in(join) 실행 지원**. `GraphNode`에 join 종류(join_on/join_how) + 모듈 헬퍼 `_join_records`/`_hash_join`/`_toposort_nodes`. 빌더가 join 노드 빌드 + G1 임시 가드 제거. linear 파이프라인은 별도 경로라 무영향, 기존 graph 동등성 유지. 다중source/join/fan-in/단일읽기 e2e(in-memory) + outer join 헬퍼 테스트. 코어 569 unit green, ruff/mypy(52) OK, 서버 graph 회귀 통과.
 - **graph-first 통합 DAG 모델 — G1 (파이프라인 전면 개선 시작)** [ADR-0041] — linear/task-DAG/dataflow-graph 3모델을 단일 `GraphConfig`로 통합하는 첫 슬라이스. 검증/정규화만(실행 변경 0).
   - `GraphConfig` 일반화: 다중 source + `join` 노드(fan-in, indegree≥2) 허용, source(indegree 0)/transform·sink(indegree 1)/join(≥2) 규칙 + 사이클(Kahn) 검출. 기존 단일-source 트리 그래프는 그대로 통과(하위호환). `GraphNodeConfig`에 `join` 타입 + `on`/`how` 필드 + 노드 타입/how 검증.
   - `etl_plugins/runtime/graph.py` 신설: `to_graph(cfg)` — single-task를 `source→transform*→sink+`로 lower(sink `when` 라우팅→edge predicate), graph는 그대로, task-DAG는 Phase H로 deferral(NotImplementedError). `topological_order(graph)`(Kahn). `etl_plugins.runtime`에서 export.

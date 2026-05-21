@@ -228,16 +228,13 @@ def _build_graph_task(
     connectors: dict[str, Connector],
     connector_factory: Callable[[str], Connector] | None = None,
 ) -> Task:
-    """Build a dataflow-graph :class:`Task` from a :class:`GraphConfig` (ADR-0030)."""
+    """Build a dataflow-graph :class:`Task` from a :class:`GraphConfig`.
+
+    ADR-0030 single-source trees and ADR-0041 free DAGs (multi-source + ``join``
+    fan-in) both build here; the materialize engine (``Pipeline._run_graph_task``)
+    executes them topologically.
+    """
     label = f"pipeline {pipeline_name!r} graph"
-    # ADR-0041 (G1) generalized GraphConfig to multi-source + join (fan-in).
-    # This re-read engine only runs single-source trees; the materialize engine
-    # that executes joins/multi-source lands in G2. Fail fast with a clear
-    # message until then rather than silently mis-running a relaxed graph.
-    if sum(1 for n in graph.nodes if n.type == "source") > 1:
-        raise ConfigError(f"{label}: multi-source graphs need the materialize engine (ADR-0041 G2)")
-    if any(n.type == "join" for n in graph.nodes):
-        raise ConfigError(f"{label}: join nodes need the materialize engine (ADR-0041 G2)")
     # Sinks that reuse a source connection get a dedicated instance so the
     # streaming read + write don't deadlock on one shared connection.
     source_names = {n.connection for n in graph.nodes if n.type == "source" and n.connection}
@@ -287,6 +284,8 @@ def _build_graph_task(
                     ),
                 )
             )
+        elif n.type == "join":
+            nodes.append(GraphNode(id=n.id, kind="join", join_on=n.on, join_how=n.how))
         else:
             raise ConfigError(f"{label}: node {n.id!r} has unknown type {n.type!r}")
 

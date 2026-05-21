@@ -201,42 +201,8 @@ make clean       # __pycache__, .pytest_cache, dist 삭제
 
 ---
 
-## 10. Spark 워커 배포 (TB급/분산, ADR-0031/0032)
+## 10. ~~Spark 워커 배포~~ — 제거됨 (ADR-0040)
 
-파이프라인은 `engine`으로 실행 백엔드를 고른다: `local`(기본, 인프로세스 행 스트리밍) / `spark`(분산). `engine: "spark"` 파이프라인은 **Spark 워커**가 실행한다.
+Spark 실행 백엔드 + `ExecutionBackend` 추상화 + `PipelineConfig.engine`은 **ADR-0040에서 제거**됐다(2026-05-21). 프로젝트가 오케스트레이션 축([[ultimate-vision]]: Airflow + Dagster)에 집중하면서, 분산 컴퓨트 엔진은 결이 다르고 ADR-0032 P3.4b(외부 클러스터 submit)는 검증 환경이 없어 미구현으로 멈춰 있었다. 실행 모델은 이제 **로컬 인프로세스 단일 경로**(linear / task-DAG / dataflow graph)만 남는다.
 
-### 핵심: "전부 번들, 최소 설정"
-- **pyspark가 Spark 런타임 jar를 포함**한다 → 별도 Spark 다운로드 불필요. 시스템 의존성은 **JRE 하나뿐**.
-- **JDBC 드라이버는 자동 fetch**: Spark 백엔드가 connection 종류에서 Maven 좌표를 뽑아 `spark.jars.packages`로 받는다(`etl_plugins/runtime/spark/backend.py`의 `_JDBC`). → 사용자가 JAR을 손수 배치할 필요 없음. (단, **첫 실행 시 Maven Central 접근(egress) 필요**.)
-
-### 워커 이미지 빌드/실행
-전용 이미지 `services/etlx-server/Dockerfile.worker`(= 기존 server 이미지 + JRE17 + `[spark]` extra). 빌드 컨텍스트는 **repo 루트**(uv workspace).
-
-```bash
-# 빌드
-docker build -f services/etlx-server/Dockerfile.worker -t etlx-worker:dev .
-
-# 번들 단일노드(local[*])로 실행 — 추가 클러스터 불필요
-docker run --rm \
-  -e DATABASE_URL=postgresql+asyncpg://etl:...@db:5432/etl \
-  -e SECRET_BACKEND=vault -e VAULT_ADDR=... \
-  etlx-worker:dev
-
-# 외부 클러스터에 driver로 붙기 (마스터만 바꾸면 됨)
-docker run … etlx-worker:dev etlx-server worker run \
-  --spark-master "spark://spark-master:7077"     # 또는 yarn / k8s://…
-```
-
-- 기본 CMD = `etlx-server worker run`(spark-master 기본 `local[*]`).
-- 평범한 API/로컬 워커는 기존 `services/etlx-server/Dockerfile`을 쓴다(이미지가 가볍다 — JRE/pyspark 없음). Spark 워커만 이 이미지를 쓴다.
-- 워커는 HTTP 포트가 없다(큐 소비자). 살아있음은 `runs.heartbeat_at` + ZombieReaper(9.3b)로 관측.
-
-### 시크릿(분산)
-드라이버가 런타임에 `SecretBackend`(Vault/AWS SM/GCP SM)에서 재해석한다(평문 인자/Spark conf 금지). 클러스터/컨테이너에는 시크릿 backend 접근 권한(IAM/role)만 부여(ADR-0032).
-
-### 제약 / 미지원 (v1)
-- 선언적 transform만 pushdown(rename/cast/select/drop/add_constant/dedupe/filter). **임의 `python` transform·raw Python 필터식은 Spark 거부** — 빌더 UI가 경고하고, 그런 파이프라인은 `local`로 돌린다.
-- 현재는 **번들 in-process(worker-as-driver)** 모델. spark-submit/Databricks Jobs로 *제출*하는 thin-worker 모드는 후속(ADR-0032 P3.4b).
-
-### Air-gapped (Maven egress 불가)
-JAR을 빌드 시 `/app/jars/`에 받아두고 `spark.jars`로 지정(향후 `--spark-jars` 플래그 예정). 좌표는 `backend.py`의 `_JDBC` 참조. `Dockerfile.worker` 하단 주석 참고.
+분산/TB급이 다시 필요해지면 ADR-0031의 `ExecutionBackend` seam을 새 ADR로 재도입한다(과거 구현은 git 히스토리 + ADR-0031/0032 참조).

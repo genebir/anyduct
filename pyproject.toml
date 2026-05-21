@@ -41,11 +41,6 @@ kafka = ["aiokafka>=0.11"]
 airflow = ["apache-airflow>=2.10"]
 dagster = ["dagster>=1.9"]
 prefect = ["prefect>=3.0"]
-# Spark execution backend (ADR-0031/0032, P3.2+). Heavy + needs a JVM, so it is
-# strictly opt-in. The `spark` ExecutionBackend imports pyspark lazily; the
-# `local` backend never touches it. Cluster/Databricks submission may add the
-# Databricks SDK as a further extra in P3.4.
-spark = ["pyspark>=3.5"]
 observability = [
     "opentelemetry-sdk>=1.25",
     "opentelemetry-exporter-otlp-proto-grpc>=1.25",
@@ -230,12 +225,6 @@ ignore_missing_imports = true
 # Optional orchestrator extras — only installed via [project.optional-dependencies].
 [[tool.mypy.overrides]]
 module = ["airflow", "airflow.*", "dagster", "dagster.*", "prefect", "prefect.*"]
-ignore_missing_imports = true
-
-# Spark backend (ADR-0031/0032) — pyspark ships no type stubs and is an optional
-# [spark] extra (absent in the default + pre-commit mypy envs).
-[[tool.mypy.overrides]]
-module = ["pyspark", "pyspark.*", "py4j", "py4j.*"]
 ignore_missing_imports = true
 
 # Adapters use heavy decorators (Airflow BaseOperator, Dagster @op, Prefect @flow)

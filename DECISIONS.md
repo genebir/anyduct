@@ -1062,7 +1062,7 @@ ADR 본문이 P1.3에 남겨둔 미해결 포인트 "record-task 시스템에서
 ## ADR-0031: TB급/분산 실행 — ExecutionBackend 추상화 + Spark/Databricks pushdown (단계적)
 
 - **Date**: 2026-05-20
-- **Status**: Accepted (P3.1 코어 abstraction 구현; P3.2~P3.5 예정)
+- **Status**: **Superseded by ADR-0040** (2026-05-21 — Spark 백엔드 + ExecutionBackend 추상화 전면 제거). 아래는 역사적 기록.
 - **Context**:
   사용자가 TB급/분산을 진짜 목표로 잡았다. 현재 실행 모델은 row-by-row Python `Record` 스트리밍이라 근본적으로 단일 프로세스·행 단위 — TB급에선 불가. 게다가 dataflow graph(ADR-0030)의 "sink별 source 재읽기"는 분기 시 source를 N번 읽고 공유 prefix를 N번 재계산해 대용량에 부적합. 핵심 인식: **TB급에선 바이트를 Python으로 끌어오지 않는다** — 라이브러리 역할이 "행 이동"에서 **"파이프라인 정의 → 타깃 엔진 연산으로 컴파일 → 실행 위임(pushdown/ELT)"** 으로 이동. 타깃 환경: **Spark/Databricks**(사용자 선택).
 - **Decision**:
@@ -1085,6 +1085,8 @@ ADR 본문이 P1.3에 남겨둔 미해결 포인트 "record-task 시스템에서
   - ADR-0026(fan-out 재읽기)·ADR-0030(dataflow graph — 재읽기 한계가 본 ADR의 동기) · CLAUDE.md §2(orchestrator/backend-agnostic 원칙과 정합 — 실행 백엔드 다변화)
 
 ---
+
+> **Superseded by ADR-0040** (2026-05-21). 아래는 역사적 기록.
 
 ## ADR-0032: Spark 백엔드 — 운영·배포·분산 실행 설계 (thin worker + 외부 클러스터 잡 제출)
 
@@ -1275,6 +1277,32 @@ ADR 본문이 P1.3에 남겨둔 미해결 포인트 "record-task 시스템에서
   - (−) cursor 값은 스칼라(str/int/float) — DB가 커서 컬럼과 비교 시 coerce(예: ISO 문자열 ↔ timestamp). 타입 안전성은 DB에 위임.
   - (−) Spark 엔진·graph shape 백필 미지원. CursorState 자동 진행(다음 resume의 base)과 수동 백필의 상호작용은 별도(수동 백필은 result_json만 사용, CursorState 미갱신).
 - **관련**: Step 6.1(cursor/read_since/CursorState) · ADR-0021(worker queue/result_json) · ADR-0029(add_manual)
+
+---
+
+## ADR-0040: Spark 실행 백엔드 + ExecutionBackend 추상화 전면 제거 (오케스트레이션 집중)
+
+- **Date**: 2026-05-21
+- **Status**: Accepted
+- **Supersedes**: ADR-0031, ADR-0032
+- **Context**:
+  Asset/Lineage 축(A→D3, ADR-0036~0039)을 얹고 나서, 사용자가 다음 방향으로 **"pipeline 전면 개선 — 오케스트레이션 위주"**([[ultimate-vision]]: Airflow 오케스트레이션 + Dagster 리니지)를 지정했다. 이 맥락에서 Spark는 **분산 컴퓨트 엔진**으로 결이 다른 축이다:
+  - 궁극 비전(Airflow+Dagster asset-centric)에 분산 컴퓨트는 들어있지 않다. 오케스트레이션·리니지가 차별점이지, 실행 엔진이 아니다.
+  - ADR-0031이 도입한 **세 번째 실행 모델 분기**(`engine: local|spark`)가 linear/task-DAG(ADR-0028)/dataflow graph(ADR-0030)와 공존하며 실행 모델을 복잡하게 만들었다. 오케스트레이션 집중을 위해 단순화가 필요.
+  - ADR-0032 P3.4b(외부 클러스터 잡 submit, thin worker)는 **Java+클러스터 환경이 없어 미구현으로 멈춰** 있었고, 번들 in-process(worker-as-driver) 모델만 검증됐다 — 끌고 가도 검증 불가한 죽은 코드.
+  - 결합도 조사 결과 Spark는 lazy-import로 격리돼 있어 제거 blast radius가 작았다(코어 ~445줄 + 서비스 dispatch + 테스트, `local` 기본 경로는 pyspark를 import조차 안 함).
+- **Decision**:
+  1. **Spark 백엔드 삭제** — `etl_plugins/runtime/spark/`(backend.py/predicate.py) 전부 제거.
+  2. **`ExecutionBackend` 추상화 삭제** — `etl_plugins/runtime/backends.py`(ABC + 레지스트리 + `LocalBackend` + `run_config` 디스패치) 제거. (사용자 선택: seam 유지가 아닌 **완전 제거** — local 단일 경로.) 실행은 `Pipeline.run`(in-process)이 유일.
+  3. **`PipelineConfig.engine` 필드 삭제** — 단, `extra="forbid"`이므로 제거 전 저장된 config_json(P3.5 직렬화는 spark일 때만 `engine` emit)이 로드 실패하지 않도록 **`model_validator(mode="before")`로 legacy `engine` 키를 흘려보낸다**(값 무시).
+  4. **서비스 정리** — 워커 `RunExecutor`/`RunWorker`/CLI의 `engine` 분기·`_run_spark`·`spark_master`·`--spark-master` 제거. `Dockerfile.worker`(Spark 워커 이미지) 삭제, `docker-compose.prod.yml`의 `etlx-spark-worker`(--profile spark) 제거. 양 pyproject의 `[spark]` extra + pyspark mypy override 제거.
+  5. **웹 정리** — 빌더 엔진 select·Spark 경고 배너·`isSparkUnsupported`·`Engine` 타입·serialize의 `engine` emit·파이프라인 목록 Spark 배지·i18n `engine.*` 제거.
+- **Consequences**:
+  - (+) 실행 모델이 **로컬 인프로세스 단일 경로**로 단순화 — linear / task-DAG / dataflow graph만 남고, 모두 `Pipeline.run`. 오케스트레이션 개선의 깨끗한 출발점.
+  - (+) JVM/pyspark 의존성·전용 워커 이미지·air-gapped JAR 운영 부담 소멸. CI/문서/이미지 단순화.
+  - (−) TB급/분산 pushdown 기능 상실. 다시 필요하면 ADR-0031의 `ExecutionBackend` seam을 **새 ADR로 재도입**(과거 구현은 git 히스토리 + 본 ADR가 supersede한 0031/0032 참조).
+  - (−) `engine: "spark"`로 저장된 기존 파이프라인은 이제 로컬로 실행된다(선언적 transform은 그대로 동작; Spark 전용 동작에 의존했다면 동작 차이 가능). v0.1.0 미릴리스·서비스 user-gated라 실사용 영향 최소.
+- **관련**: ADR-0028(task-DAG) · ADR-0030(dataflow graph) · [[ultimate-vision]] · [[pipeline-overhaul-intent]]
 
 ---
 

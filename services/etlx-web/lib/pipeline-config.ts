@@ -51,14 +51,9 @@ export const DEFAULT_DLQ: DlqSettings = {
   mode: "append",
 };
 
-export type Engine = "local" | "spark";
-
 export interface PipelineConfigJson {
   name: string;
   mode: "batch" | "stream";
-  // Execution backend (ADR-0031). "local" = row-streaming (default); "spark"
-  // compiles the DAG to Spark for distributed/TB-scale runs.
-  engine?: Engine;
   // Asset-driven orchestration (ADR-0037). Auto-run when an upstream run
   // materializes one of this pipeline's input assets.
   auto_materialize?: boolean;
@@ -146,19 +141,11 @@ export function reorderNodes(nodes: BuilderNode[]): BuilderNode[] {
   });
 }
 
-/** True if an operator can't be pushed down to Spark (ADR-0031): the arbitrary
- *  `python` transform has no Spark equivalent. Such pipelines must run `local`. */
-export function isSparkUnsupported(operatorId: string): boolean {
-  const op = findOperator(operatorId);
-  return op?.kind === "transform" && op.connectorType === "python";
-}
-
 export function serialize(
   state: BuilderState,
   meta: {
     name: string;
     mode?: "batch" | "stream";
-    engine?: Engine;
     auto_materialize?: boolean;
     freshness_sla_minutes?: number | null;
   },
@@ -178,7 +165,6 @@ export function serialize(
   const config: PipelineConfigJson = {
     name: meta.name,
     mode: meta.mode ?? "batch",
-    ...(meta.engine && meta.engine !== "local" ? { engine: meta.engine } : {}),
     ...(meta.auto_materialize ? { auto_materialize: true } : {}),
     ...(meta.freshness_sla_minutes
       ? { freshness_sla_minutes: meta.freshness_sla_minutes }
@@ -435,7 +421,6 @@ export function serializeGraph(
   meta: {
     name: string;
     mode?: "batch" | "stream";
-    engine?: Engine;
     auto_materialize?: boolean;
     freshness_sla_minutes?: number | null;
   },
@@ -465,7 +450,6 @@ export function serializeGraph(
   return {
     name: meta.name,
     mode: meta.mode ?? "batch",
-    ...(meta.engine && meta.engine !== "local" ? { engine: meta.engine } : {}),
     ...(meta.auto_materialize ? { auto_materialize: true } : {}),
     ...(meta.freshness_sla_minutes
       ? { freshness_sla_minutes: meta.freshness_sla_minutes }

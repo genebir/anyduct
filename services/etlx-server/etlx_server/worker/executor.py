@@ -96,7 +96,6 @@ class RunExecutor:
         *,
         worker_id: str,
         log_flush_interval_seconds: float | None = None,
-        spark_master: str = "local[*]",
     ) -> None:
         """
         Parameters
@@ -121,9 +120,6 @@ class RunExecutor:
         self._backend = backend
         self._worker_id = worker_id
         self._log_flush_interval = log_flush_interval_seconds
-        # Spark master for engine="spark" pipelines (ADR-0032). Default local[*]
-        # = the bundled single-node mode; set to a cluster URL in deployment.
-        self._spark_master = spark_master
 
     async def execute(self, run_id: UUID) -> Run:
         """Execute the run identified by ``run_id``; persist the result.
@@ -160,10 +156,6 @@ class RunExecutor:
                         pipeline_id=str(pipeline.id),
                         version=version.version,
                     )
-                    # Route by execution engine (ADR-0031): "local" builds Python
-                    # connectors + runs in-process; "spark" resolves connection
-                    # configs and runs the Spark backend (bundled JVM, ADR-0032).
-                    engine = (version.config_json or {}).get("engine", "local")
                     # Backfill (ADR-0039): a run can carry a cursor range in
                     # result_json.backfill, driving an incremental read.
                     backfill = (run.result_json or {}).get("backfill") or {}
@@ -200,7 +192,7 @@ class RunExecutor:
                         )
                     )
                     try:
-                        log.info("run.pipeline_started", pipeline=run_name, engine=engine)
+                        log.info("run.pipeline_started", pipeline=run_name)
                         result = await asyncio.to_thread(runner)
                         _record_success(run, result)
                         log.info(
@@ -420,12 +412,12 @@ class RunExecutor:
         cursor_from: Any = None,
         cursor_to: Any = None,
     ) -> tuple[Callable[[], RunResult], str]:
-        """Build a thread-callable that runs the pipeline on its engine.
+        """Build a thread-callable that runs the pipeline in-process.
 
         Returns ``(runner, name)``. Raises :class:`_PipelineBuildError` for any
         unrecoverable build/resolution problem (recorded as a failed run).
         ``cursor_from`` / ``cursor_to`` drive a backfill over the source's
-        ``cursor_column`` (ADR-0039); only the local engine honours them.
+        ``cursor_column`` (ADR-0039).
         """
         try:
             cfg = PipelineConfig.model_validate(version.config_json)
@@ -438,13 +430,7 @@ class RunExecutor:
 
         conn_cfgs = await self._resolve_connection_configs(pipeline, cfg, session)
 
-        if cfg.engine == "spark":
-            # Spark reads/writes natively from connection configs (ADR-0031/0032).
-            return functools.partial(
-                _run_spark, cfg, conn_cfgs, str(run_id), self._spark_master
-            ), cfg.name
-
-        # local engine: build connector instances + a core Pipeline.
+        # Build connector instances + a core Pipeline (in-process execution).
         connectors: dict[str, Connector] = {}
         for name, conn_cfg in conn_cfgs.items():
             try:
@@ -561,22 +547,6 @@ def _run_pipeline_in_thread(
         for c in connectors.values():
             with contextlib.suppress(Exception):
                 c.close()
-
-
-def _run_spark(
-    cfg: PipelineConfig,
-    conn_cfgs: dict[str, ConnectionConfig],
-    run_id: str,
-    master: str,
-) -> RunResult:
-    """Run a pipeline on the Spark backend (ADR-0031/0032). pyspark imported lazily."""
-    from etl_plugins.runtime.spark.backend import SparkBackend
-
-    return SparkBackend(master=master).run(
-        cfg,
-        connections=conn_cfgs,
-        context=Context(pipeline_name=cfg.name, run_id=run_id),
-    )
 
 
 __all__ = ["RunExecutor"]

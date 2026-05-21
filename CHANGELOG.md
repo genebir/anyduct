@@ -9,6 +9,13 @@
 
 ## [Unreleased]
 
+### Removed
+- **Spark 실행 백엔드 + ExecutionBackend 추상화 전면 제거** [ADR-0040, supersedes ADR-0031/0032] — 오케스트레이션 축([[ultimate-vision]]: Airflow + Dagster) 집중을 위해 분산 컴퓨트 경로를 걷어내고 실행 모델을 **로컬 인프로세스 단일 경로**(linear / task-DAG / dataflow graph)로 단순화.
+  - 코어: `etl_plugins/runtime/spark/`(backend.py/predicate.py) + `runtime/backends.py`(`ExecutionBackend` ABC·레지스트리·`LocalBackend`·`run_config`) 삭제. `PipelineConfig.engine` 필드 제거 — 단 `extra="forbid"` 호환 위해 `model_validator(mode="before")`로 저장된 config의 legacy `engine` 키를 흘려보냄(값 무시).
+  - 서비스: 워커 `engine` 분기·`_run_spark`·`spark_master`·`--spark-master` 제거, `Dockerfile.worker` 삭제, `docker-compose.prod.yml`의 `etlx-spark-worker`(--profile spark) 제거, `[spark]` extra(양 pyproject) + pyspark mypy override 제거.
+  - 웹: 빌더 엔진 select·Spark 경고 배너·`isSparkUnsupported`·`Engine` 타입·`engine` emit·목록 Spark 배지·i18n `engine.*` 제거.
+  - 미구현이던 P3.4b(외부 클러스터 submit)도 함께 폐기. 재도입 필요 시 새 ADR. 과거 구현은 git 히스토리 + ADR-0031/0032 참조. 테스트: 코어 `test_spark_backend.py`/`test_backends.py` + 서버 spark e2e 삭제.
+
 ### Fixed
 - **같은 연결 source+sink 데드락 수정** [ADR-0034] — 파이프라인이 한 연결을 읽기·쓰기에 동시에 쓰면(같은 DB 내 테이블 복사 등) 워커가 영구 "running"으로 멈추던 문제. 원인은 연결 이름당 커넥터 1개 → psycopg 연결 하나로 server-side cursor 읽기 + COPY 쓰기를 동시에 잡아 self-deadlock(`futex_wait` / `COPY … ClientRead`). 수정: `build_pipeline(connector_factory=...)`로 sink가 source 연결을 재사용하면 sink 전용 인스턴스(별도 물리 연결)를 `"<name>::sink"` 키로 분리 — 스트리밍/메모리 보장 유지(버퍼링 안 함). linear+graph+fan-out 적용, 워커/YAML 경로에 factory 주입. 검증: 실 Postgres에서 source=sink 동일 연결 read=2/written=2 0.01s 완료(이전엔 무한 멈춤). 코어 +3 unit(536 green).
 - **worker/stream-worker CLI가 `SECRET_BACKEND`/`SECRET_BACKEND_FILE_PATH` 환경변수 fallback** — `--secret-backend`/`--secret-file-path` typer 옵션에 `envvar=` 추가. 이전엔 플래그 미지정 시 무조건 `env` 백엔드로 떨어져, API 서버(file 백엔드)와 불일치 → 워커가 시크릿을 "env var not set"으로 못 찾는 문제. 이제 env-only(`SECRET_BACKEND=file`)로 띄워도 서버와 동일 백엔드 사용. (검증: env-only 워커로 run 실행 시 시크릿 정상 해석 확인.)

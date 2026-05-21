@@ -761,15 +761,6 @@ def worker_run_cmd(
         min=0.0,
         max=60.0,
     ),
-    spark_master: str = typer.Option(
-        "local[*]",
-        "--spark-master",
-        help=(
-            "Spark master for engine='spark' pipelines (ADR-0032). Default "
-            "'local[*]' = bundled single-node; set a cluster URL "
-            "(e.g. spark://host:7077, yarn, k8s://…) in deployment."
-        ),
-    ),
     log_level: str = typer.Option("INFO", "--log-level"),
 ) -> None:
     """Run the worker poll loop until SIGTERM/SIGINT.
@@ -801,7 +792,6 @@ def worker_run_cmd(
             worker_id=wid,
             poll_interval=poll_interval,
             log_flush_interval_seconds=(log_flush_interval if log_flush_interval > 0 else None),
-            spark_master=spark_master,
         )
 
         loop = asyncio.get_running_loop()

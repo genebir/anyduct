@@ -289,10 +289,6 @@ class PipelineConfig(BaseModel):
     name: str
     mode: str = "batch"  # batch | stream
     schedule: str | None = None
-    # Execution backend (ADR-0031). "local" = row-streaming (default); "spark"
-    # compiles the DAG to Spark. Validated at run time by the backend registry
-    # (config layer stays unaware of which backends exist).
-    engine: str = "local"
     # Asset-driven orchestration (ADR-0037). When true, the service auto-enqueues
     # a run of this pipeline whenever an upstream run materializes one of its
     # input assets (Dagster auto-materialize / Airflow Dataset trigger). Opt-in
@@ -316,6 +312,17 @@ class PipelineConfig(BaseModel):
     observability: ObservabilityConfig | None = None
     commit: CommitConfig | None = None
     dlq: DlqConfig | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_legacy_engine(cls, data: object) -> object:
+        # The Spark execution backend + ``engine`` field were removed (ADR-0040);
+        # local in-process execution is the only model now. Tolerate the stale
+        # ``engine`` key on configs persisted before the removal so they keep
+        # loading under ``extra="forbid"`` (the value is simply ignored).
+        if isinstance(data, dict):
+            data.pop("engine", None)
+        return data
 
     @model_validator(mode="after")
     def _check_shape(self) -> PipelineConfig:

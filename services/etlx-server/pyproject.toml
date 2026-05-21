@@ -25,13 +25,6 @@ dependencies = [
     "typer>=0.12",            # etlx-server admin CLI (Step 7.3)
 ]
 
-[project.optional-dependencies]
-# Spark execution backend (ADR-0031/0032). Opt-in: only the Spark worker image
-# installs it. pyspark bundles the Spark runtime jars, so the worker only needs
-# a JVM on the host (see Dockerfile.worker). The `spark` ExecutionBackend in
-# etl_plugins imports pyspark lazily, so the API/local worker never load it.
-spark = ["pyspark>=3.5"]
-
 [project.scripts]
 # Admin CLI for the metadata DB (Step 7.3). Stays on the service side so the
 # core ``etlx`` CLI in etl_plugins.cli remains DB-agnostic (ADR-0017).

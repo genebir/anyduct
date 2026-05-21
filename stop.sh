@@ -55,6 +55,8 @@ cd "$SCRIPT_DIR"
 RUN_DIR=".run"
 SERVER_PID="$RUN_DIR/etlx-server.pid"
 WEB_PID="$RUN_DIR/etlx-web.pid"
+WORKER_PID="$RUN_DIR/etlx-worker.pid"
+REAPER_PID="$RUN_DIR/etlx-reaper.pid"
 
 # ----- helpers ---------------------------------------------------------------
 stop_pid_file() {
@@ -113,7 +115,15 @@ else
 fi
 
 # =============================================================================
-# 2. etlx-server
+# 2. etlx-server worker + reaper (stopped alongside the server)
+# =============================================================================
+if [ "$STOP_SERVER" -eq 1 ]; then
+    stop_pid_file "etlx-worker" "$WORKER_PID"
+    stop_pid_file "etlx-reaper" "$REAPER_PID"
+fi
+
+# =============================================================================
+# 3. etlx-server
 # =============================================================================
 if [ "$STOP_SERVER" -eq 1 ]; then
     stop_pid_file "etlx-server" "$SERVER_PID"
@@ -122,7 +132,7 @@ else
 fi
 
 # =============================================================================
-# 3. docker compose (only with --all; volumes are preserved)
+# 4. docker compose (only with --all; volumes are preserved)
 # =============================================================================
 if [ "$STOP_DOCKER" -eq 1 ]; then
     if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then

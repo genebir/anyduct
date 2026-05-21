@@ -191,14 +191,16 @@ wait_for_pg() {
 }
 
 if [ "$DOCKER_OK" -eq 1 ]; then
-    log_info "waiting for Postgres (localhost:5432) ..."
-    if wait_for_pg 127.0.0.1 5432 60; then
-        log_ok "postgres reachable on port 5432"
+    # Postgres host port — matches docker-compose.dev.yml's ${LOCAL_PG_PORT:-55432}.
+    _PG_PORT="${LOCAL_PG_PORT:-55432}"
+    log_info "waiting for Postgres (localhost:$_PG_PORT) ..."
+    if wait_for_pg 127.0.0.1 "$_PG_PORT" 60; then
+        log_ok "postgres reachable on port $_PG_PORT"
         log_info "alembic upgrade head (metadata DB)"
         # Non-fatal — auth/port conflicts (e.g. native Postgres already on
-        # :5432) get reported but don't abort the rest of install.
+        # the host port) get reported but don't abort the rest of install.
         # Literal dev defaults from .env.example — not real credentials.
-        _DEV_DB_URL="${DATABASE_URL:-postgresql+asyncpg://etl:etl@127.0.0.1:5432/etl_dev}"  # pragma: allowlist secret
+        _DEV_DB_URL="${DATABASE_URL:-postgresql+asyncpg://etl:etl@127.0.0.1:${_PG_PORT}/etl_dev}"  # pragma: allowlist secret
         if (
             cd services/etlx-server
             DATABASE_URL="$_DEV_DB_URL" uv run alembic upgrade head
@@ -206,7 +208,7 @@ if [ "$DOCKER_OK" -eq 1 ]; then
             log_ok "metadata schema is at head"
         else
             log_warn "alembic upgrade failed — see error above"
-            log_warn "  common cause: a native Postgres on host port 5432 is intercepting"
+            log_warn "  common cause: a native Postgres on host port $_PG_PORT is intercepting"
             log_warn "  the compose container. Try one of:"
             log_warn "    (a) stop the native Postgres, then: ./install.sh"
             log_warn "    (b) override creds: DATABASE_URL=... ./install.sh"

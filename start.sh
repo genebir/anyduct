@@ -6,8 +6,9 @@
 # 다시 띄우지 않고 상태만 보고합니다.
 #
 # 사용:
-#     ./start.sh                # 전부 시작 (docker + server + web)
-#     ./start.sh --no-web       # 웹 dev 서버는 건너뛰기 (서버만)
+#     ./start.sh                # 전부 시작 (docker + migrate + server + worker + reaper + web)
+#     ./start.sh --no-web       # 웹 dev 서버는 건너뛰기
+#     ./start.sh --no-worker    # worker + reaper 건너뛰기 (server만)
 #     ./start.sh --no-docker    # docker compose / Alembic 건너뛰기
 #     ./start.sh --no-migrate   # docker는 띄우되 alembic upgrade는 생략
 #     ./start.sh --help
@@ -16,8 +17,14 @@
 #   1. docker compose up -d              (--no-docker 면 생략)
 #   2. alembic upgrade head              (--no-migrate / --no-docker 면 생략)
 #   3. uvicorn etlx_server.main:app      (백그라운드, PID/log: .run/)
-#   4. pnpm --filter @etlx/web dev       (백그라운드, --no-web 이면 생략)
-#   5. /health + 웹 포트가 응답할 때까지 polling
+#   4. etlx-server worker run            (백그라운드, --no-worker 면 생략)
+#   5. etlx-server reaper run            (백그라운드, --no-worker 면 생략)
+#   6. pnpm --filter @etlx/web dev       (백그라운드, --no-web 이면 생략)
+#   7. /health + 웹 포트가 응답할 때까지 polling
+#
+# Postgres 포트는 LOCAL_PG_PORT(기본 55432, docker-compose.dev.yml 기본값)를 따른다.
+# 시크릿은 file 백엔드(.run/secrets.json)를 기본으로 써서 UI에서 만든 연결의
+# 시크릿을 server·worker가 동일하게 해석한다.
 #
 # 상태/로그:
 #   .run/etlx-server.pid      .run/logs/etlx-server.log
@@ -42,12 +49,14 @@ log_skip()  { printf '%s  skip%s %s\n' "$C_DIM"    "$C_RESET" "$*"; }
 START_WEB=1
 START_DOCKER=1
 RUN_MIGRATE=1
+START_WORKER=1
 while [ $# -gt 0 ]; do
     case "$1" in
         --no-web)     START_WEB=0 ;;
+        --no-worker)  START_WORKER=0 ;;
         --no-docker)  START_DOCKER=0; RUN_MIGRATE=0 ;;
         --no-migrate) RUN_MIGRATE=0 ;;
-        -h|--help)    sed -n '2,24p' "$0"; exit 0 ;;
+        -h|--help)    sed -n '2,30p' "$0"; exit 0 ;;
         *) log_error "unknown argument: $1"; exit 2 ;;
     esac
     shift
@@ -62,12 +71,27 @@ LOG_DIR="$RUN_DIR/logs"
 KEY_DIR="$RUN_DIR/keys"
 SERVER_PID="$RUN_DIR/etlx-server.pid"
 WEB_PID="$RUN_DIR/etlx-web.pid"
+WORKER_PID="$RUN_DIR/etlx-worker.pid"
+REAPER_PID="$RUN_DIR/etlx-reaper.pid"
 SERVER_LOG="$LOG_DIR/etlx-server.log"
 WEB_LOG="$LOG_DIR/etlx-web.log"
+WORKER_LOG="$LOG_DIR/etlx-worker.log"
+REAPER_LOG="$LOG_DIR/etlx-reaper.log"
 
 SERVER_HOST="${ETLX_SERVER_HOST:-127.0.0.1}"
 SERVER_PORT="${ETLX_SERVER_PORT:-8000}"
 WEB_PORT="${ETLX_WEB_PORT:-3000}"
+
+# Postgres host port — matches docker-compose.dev.yml's ${LOCAL_PG_PORT:-55432}.
+PG_PORT="${LOCAL_PG_PORT:-55432}"
+# Single source of truth for the DB URL used by migration + server + worker.
+# Literal dev defaults from .env.example — not real credentials.
+DATABASE_URL="${DATABASE_URL:-postgresql+asyncpg://etl:etl@127.0.0.1:${PG_PORT}/etl_dev}"  # pragma: allowlist secret
+export DATABASE_URL
+# Writable secret backend so secrets entered in the UI (server writes them)
+# resolve identically in the worker. Override by exporting before running.
+export SECRET_BACKEND="${SECRET_BACKEND:-file}"
+export SECRET_BACKEND_FILE_PATH="${SECRET_BACKEND_FILE_PATH:-$SCRIPT_DIR/$RUN_DIR/secrets.json}"
 
 mkdir -p "$LOG_DIR" "$KEY_DIR"
 
@@ -161,20 +185,19 @@ fi
 # 2. alembic upgrade head
 # =============================================================================
 if [ "$RUN_MIGRATE" -eq 1 ]; then
-    log_info "waiting for Postgres on 127.0.0.1:5432 ..."
-    if wait_for_tcp 127.0.0.1 5432 30 "postgres"; then
-        log_info "alembic upgrade head"
-        # Non-fatal — continue even if auth/port conflicts surface.
-        # Literal dev defaults from .env.example — not real credentials.
-        _DEV_DB_URL="${DATABASE_URL:-postgresql+asyncpg://etl:etl@127.0.0.1:5432/etl_dev}"  # pragma: allowlist secret
+    log_info "waiting for Postgres on 127.0.0.1:$PG_PORT ..."
+    if wait_for_tcp 127.0.0.1 "$PG_PORT" 30 "postgres"; then
+        log_info "alembic upgrade head (DATABASE_URL → :$PG_PORT)"
+        # Non-fatal — continue even if auth/port conflicts surface. Uses the
+        # same DATABASE_URL the server + worker will use, so all three agree.
         if (
             cd services/etlx-server
-            DATABASE_URL="$_DEV_DB_URL" uv run alembic upgrade head
+            uv run alembic upgrade head
         ) >/dev/null 2>&1; then
             log_ok "metadata schema at head"
         else
             log_warn "alembic upgrade failed — server will still start but DB-backed"
-            log_warn "  endpoints may 5xx. Check whose Postgres is on :5432 and re-run."
+            log_warn "  endpoints may 5xx. Check whose Postgres is on :$PG_PORT and re-run."
         fi
     else
         log_warn "postgres not ready — skipping migrations (run ./install.sh later)"
@@ -206,10 +229,8 @@ if is_running "$SERVER_PID"; then
 else
     log_info "starting etlx-server on $SERVER_HOST:$SERVER_PORT (log: $SERVER_LOG)"
     # Production-like: no --reload. Use `uv run --package etlx-server` so it
-    # resolves against the workspace member's venv.
-    # Literal dev defaults from .env.example — not real credentials.
-    DATABASE_URL="${DATABASE_URL:-postgresql+asyncpg://etl:etl@127.0.0.1:5432/etl_dev}"  # pragma: allowlist secret
-    export DATABASE_URL
+    # resolves against the workspace member's venv. DATABASE_URL +
+    # SECRET_BACKEND were exported above (shared with migration + worker).
     spawn_background "$SERVER_PID" "$SERVER_LOG" \
         uv run --package etlx-server uvicorn etlx_server.main:app \
             --host "$SERVER_HOST" --port "$SERVER_PORT"
@@ -223,7 +244,34 @@ else
 fi
 
 # =============================================================================
-# 5. etlx-web (Next.js dev) — idempotent start
+# 5. etlx-server worker + reaper — idempotent start
+#    The worker executes claimed runs; the reaper fails out stuck/zombie runs.
+#    Both inherit DATABASE_URL + SECRET_BACKEND exported above, and run only
+#    after migrations so they never hit a missing table.
+# =============================================================================
+if [ "$START_WORKER" -eq 0 ]; then
+    log_skip "--no-worker"
+else
+    if is_running "$WORKER_PID"; then
+        log_skip "etlx-worker already running (pid=$(cat "$WORKER_PID"))"
+    else
+        log_info "starting etlx-worker (log: $WORKER_LOG)"
+        spawn_background "$WORKER_PID" "$WORKER_LOG" \
+            uv run --package etlx-server etlx-server worker run --log-flush-interval 2.0
+        log_ok "etlx-worker spawned (pid=$(cat "$WORKER_PID"))"
+    fi
+    if is_running "$REAPER_PID"; then
+        log_skip "etlx-reaper already running (pid=$(cat "$REAPER_PID"))"
+    else
+        log_info "starting etlx-reaper (log: $REAPER_LOG)"
+        spawn_background "$REAPER_PID" "$REAPER_LOG" \
+            uv run --package etlx-server etlx-server reaper run
+        log_ok "etlx-reaper spawned (pid=$(cat "$REAPER_PID"))"
+    fi
+fi
+
+# =============================================================================
+# 6. etlx-web (Next.js dev) — idempotent start
 # =============================================================================
 if [ "$START_WEB" -eq 0 ]; then
     log_skip "--no-web"
@@ -254,12 +302,15 @@ ${C_GREEN}stack is up.${C_RESET}
 
   etlx-server   http://$SERVER_HOST:$SERVER_PORT      ${C_DIM}(/docs, /health, /version)${C_RESET}
 EOF
+if [ "$START_WORKER" -eq 1 ]; then
+    echo "  etlx-worker   ${C_DIM}(executes runs)${C_RESET}        etlx-reaper ${C_DIM}(fails out zombies)${C_RESET}"
+fi
 if [ "$START_WEB" -eq 1 ]; then
     echo "  etlx-web      http://127.0.0.1:$WEB_PORT          ${C_DIM}(Next.js dev)${C_RESET}"
 fi
 cat <<EOF
 
-  logs:    tail -f .run/logs/etlx-server.log .run/logs/etlx-web.log
+  logs:    tail -f .run/logs/etlx-server.log .run/logs/etlx-worker.log
   stop:    ./stop.sh            (--all to also stop docker compose)
 
 EOF

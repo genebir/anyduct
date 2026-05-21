@@ -106,9 +106,10 @@ export function PipelineNode({ id, data }: NodeProps) {
       </div>
       <div
         className={cn(
-          "px-3 py-2 text-xs",
+          "truncate px-3 py-2 text-xs",
           incomplete ? "text-warning" : "text-text-secondary",
         )}
+        title={summary}
       >
         {summary}
       </div>
@@ -139,6 +140,6 @@ function describeNode(
   const first = op.fields[0]?.key;
   const v = first ? values[first] : undefined;
   if (v === undefined || v === null || v === "") return t("builder.notConfigured");
-  if (typeof v === "string") return v.length > 40 ? `${v.slice(0, 40)}…` : v;
-  return JSON.stringify(v);
+  const s = typeof v === "string" ? v : JSON.stringify(v);
+  return s.length > 40 ? `${s.slice(0, 40)}…` : s;
 }

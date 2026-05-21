@@ -1,5 +1,12 @@
 """Core abstractions: Connector, Record, Schema, Registry, Context, Pipeline."""
 
+from etl_plugins.core.asset import (
+    AssetGraph,
+    AssetKey,
+    AssetLineage,
+    AssetSpec,
+    LineageEdge,
+)
 from etl_plugins.core.connector import (
     BatchSink,
     BatchSource,
@@ -49,6 +56,10 @@ from etl_plugins.core.schema import Field, Schema
 from etl_plugins.core.sql_exec import SqlExecutor
 
 __all__ = [
+    "AssetGraph",
+    "AssetKey",
+    "AssetLineage",
+    "AssetSpec",
     "BatchSink",
     "BatchSource",
     "BranchRule",
@@ -69,6 +80,7 @@ __all__ = [
     "GraphNode",
     "Hook",
     "InMemoryCursorState",
+    "LineageEdge",
     "Pipeline",
     "PipelineError",
     "ReadError",
@@ -79,9 +91,9 @@ __all__ = [
     "Schema",
     "SchemaInspector",
     "SecretError",
+    "SinkSpec",
     "SqlAction",
     "SqlExecutor",
-    "SinkSpec",
     "StreamSink",
     "StreamSource",
     "Task",

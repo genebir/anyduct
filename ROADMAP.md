@@ -186,26 +186,29 @@
 - [x] `release.yml` 워크플로 점검 — tag 패턴 `v[0-9]+.[0-9]+.[0-9]+` 매치(`v0.1.0`), `etl_plugins.__version__`와 태그 일치 검증, CHANGELOG `^## \[?<v>\]?` grep 검증, `uv build` → Trusted Publisher OIDC → PyPI `etl-plugins` + GitHub Release auto-create. 로컬 `uv build` clean (`etl_plugins-0.1.0.tar.gz` 831kB + `etl_plugins-0.1.0-py3-none-any.whl` 81kB).
 - [ ] **사용자 승인 후**: `git tag v0.1.0` + `git push origin main v0.1.0` → release.yml 자동 실행 → PyPI 발행 + GitHub Release. **사전 요구사항**(repo 설정): PyPI 측에 Trusted Publisher 등록(project `etl-plugins`, workflow `release.yml`, env `pypi`) + GitHub Settings → Environments → `pypi` 생성(보호 규칙 권장). 한 번도 발행한 적 없는 신규 프로젝트라면 PyPI에 minimal manual upload 1회로 namespace 점유한 뒤 Trusted Publisher 전환이 일반적 패턴.
 
-### 6.6 Asset 1급 모델 → v0.2.0
-- [ ] `etl_plugins.core.asset`: `Asset(name, schema, partitions, freshness_policy, deps)`, `AssetGroup`
-- [ ] `@Asset.register("orders")` 데코레이터
-- [ ] 기존 `Pipeline`을 "default Asset 1개를 materialize"하는 wrapper로 매핑 (backward compatible)
-- [ ] Asset materialization contract
+> **궁극 목표 = Airflow 오케스트레이션 + Dagster 리니지 결합** ([[ultimate-vision]], ADR-0036). 오케스트레이션축(task-DAG·스케줄러·worker queue·call-pipeline·Spark)은 성숙 → asset/리니지축을 채우는 게 v0.2 핵심. 단계: **A(코어 모델+emit+catalog) → B(메타DB 영속화) → C(웹 카탈로그+리니지 그래프) → D(asset-aware 오케스트레이션) → E(백필·컬럼리니지·export)**. B~E는 서비스 레벨(Step 8~11)에 매핑.
 
-### 6.7 Lineage emit (OpenLineage) → v0.2.0
+### 6.6 Asset 1급 모델 + 정적 리니지 (A1) → v0.2.0 🔄 (모델+파생 완료, ADR-0036)
+- [x] **Derived-first 설계 확정** (ADR-0036) — source=input/sink=output/`input→output` edge 자동 파생, zero-config 리니지.
+- [x] `etl_plugins/core/asset.py`: `AssetKey`(`conn/target`)·`AssetSpec`(선언형, deps/group/kind)·`LineageEdge`·`AssetLineage`·`AssetGraph`(upstream/downstream/ancestors/descendants, cycle-safe). config/runtime 무의존 leaf, top-level export.
+- [x] `etl_plugins/runtime/lineage.py` `derive_lineage(cfg)` — single-task/Task-DAG/dataflow graph 정적 파생. 크로스-파이프라인은 AssetKey 일치로 자동 연결. +12 unit.
+- [ ] (후속) 선언형 `AssetSpec` 등록 + Pipeline `materializes=[...]` 명시 경로 (지금은 derived만)
+- [ ] (후속) source query의 table 파싱 개선(`SELECT…JOIN` → 정확한 input 키)
+
+### 6.7 Lineage emit (OpenLineage) (A2) → v0.2.0 ← 다음 작업
 - [ ] `etl_plugins.observability.lineage` 모듈 + `openlineage-python>=1.0` (`[lineage]` extra)
-- [ ] `Pipeline.run` / `arun_stream`에서 RunEvent (START/COMPLETE/FAIL/ABORT) 자동 emit
-- [ ] Inputs/outputs를 source/sink connector + table/topic에서 추출
+- [ ] `Pipeline.run` / `arun_stream`에서 RunEvent (START/COMPLETE/FAIL/ABORT) 자동 emit, derive_lineage 키 재사용
 - [ ] 백엔드: NoOp 기본 / Marquez / 우리 자체 Catalog API
 
-### 6.8 Catalog API (core) → v0.2.0
-- [ ] `etl_plugins.catalog` — read-only API (`list_assets / get_asset / lineage(asset_name)`)
+### 6.8 Catalog API (core) (A3) → v0.2.0
+- [ ] `etl_plugins.catalog` — read-only API (`list_assets / get_asset / lineage(asset_name)`) on `AssetGraph`
 - [ ] In-memory 구현 + DB-backed 구현 (서비스가 메타DB로 wrap)
-- [ ] Step 8의 REST API가 이 위에 얹힘
 
 ### 6.9 v0.2.0 PyPI 릴리스 → v0.2.0
 - [ ] Asset/Lineage 사용 가이드 문서
 - [ ] v0.2.0 bump + 릴리스
+
+> **서비스 레벨 후속(Step 8~11):** **B** 메타DB(assets/materializations/asset_edges) + 워커 hook으로 run마다 리니지 영속화 → **C** 웹 Asset 카탈로그 + 리니지 그래프(`@xyflow/react` 재사용) + Run↔Asset 연결 → **D** asset-aware 오케스트레이션(upstream materialize 시 downstream 자동 트리거 = call-pipeline ADR-0029의 asset 의존 일반화, freshness/센서) → **E** 백필 UI(cursor 활용)·컬럼 레벨 리니지·OpenLineage export.
 
 ---
 

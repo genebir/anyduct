@@ -1187,4 +1187,29 @@ ADR 본문이 P1.3에 남겨둔 미해결 포인트 "record-task 시스템에서
 
 ---
 
+## ADR-0036: Asset/Lineage v0.2 — derived-first 모델 + 정적 리니지 (Airflow×Dagster 결합의 기반)
+
+- **Date**: 2026-05-21
+- **Status**: Accepted
+- **Context**:
+  사용자의 궁극 목표 확정: **"Airflow 오케스트레이션 + Dagster 리니지(asset)의 결합."** 현재 오케스트레이션축(task-DAG·스케줄러·worker queue·call-pipeline·Spark)은 성숙했으나 **asset/리니지축은 Cursor만** 있고 Asset 1급 모델·Lineage·Catalog가 비어 있음(ADR-0024가 방향만 못박음, v0.2 미착수). ADR-0024는 "인터페이스 우선, 좁은 PoC로 검증"을 명시 — Asset 추상화는 잘못 잡으면 가장 비싼 후회 지점.
+- **Decision**:
+  1. **Derived-first 리니지(zero-config)** — 사용자가 asset을 선언하지 않아도 **source = input asset, sink = output asset, `input→output` 엣지 = 리니지**를 config에서 자동 파생. 이게 Fivetran/Airbyte류와의 차별점이자 진입 장벽 0.
+  2. **AssetKey = `(connection, target)`** path 튜플(`"conn/target"` 렌더). target = 커넥터의 자연 식별자(table > topic > key > collection > query 우선순위). 코어는 connection *이름* 기반 — 서비스(Phase B)가 실제 host/db로 enrich.
+  3. **코어 모델**(`etl_plugins/core/asset.py`, config/runtime 무의존 leaf): `AssetKey`·`AssetSpec`(선언형, deps/group/kind/freshness 후속)·`LineageEdge`·`AssetLineage`(파이프라인 1개의 inputs/outputs/edges)·`AssetGraph`(전역 그래프, upstream/downstream/ancestors/descendants, cycle-safe).
+  4. **정적 파생**(`etl_plugins/runtime/lineage.py` `derive_lineage(cfg)`): run 없이 config만으로 리니지 계산. single-task/Task-DAG/dataflow graph 모든 shape 지원. **크로스-파이프라인 리니지는 키 일치로 자동 발생**(파이프라인 A가 쓴 asset을 B가 읽으면 같은 AssetKey → 자동 연결 = Dagster의 핵심 마법).
+  5. **선언형(AssetSpec)은 모델만 정의, 스케줄 연결은 Phase D**(upstream materialize 시 downstream 자동 트리거 = call-pipeline ADR-0029의 asset 의존 일반화).
+  6. **backward compatible** — 기존 Pipeline/Connector/Task 무변경. Asset은 위에 얹는 layer. 단순 라이브러리 사용자는 몰라도 됨.
+  7. **로드맵 단계**(ROADMAP §6 v0.2 반영): **A1=모델+정적파생(이번 ADR)** → A2=런타임 OpenLineage emit(`[lineage]` extra) → A3=catalog read API → B=메타DB 영속화(assets/materializations/edges + 워커 hook) → C=웹 카탈로그+리니지 그래프(`@xyflow/react` 재사용) → D=asset-aware 오케스트레이션(freshness/센서/auto-materialize) → E=백필 UI·컬럼 리니지·OpenLineage export.
+- **Consequences**:
+  - (+) zero-config 리니지 — 설정 0으로 "이 테이블 누가 만들었나/뭐가 깨지나" 답변. 정적이라 run 전에도 빌더/카탈로그가 표시 가능.
+  - (+) 모델 최소화(키+그래프)로 후세 부담↓, OpenLineage/Marquez/DataHub 매핑 용이. AssetGraph가 전역 결합점.
+  - (+) 기존 자산 재사용: derive_lineage가 fan-out/graph/task-DAG 다 흡수, 키 일치로 크로스-파이프라인 자동.
+  - (−) 코어 AssetKey가 connection-*이름* 기반 → 같은 물리 테이블을 다른 연결명으로 가리키면 다른 asset으로 보임. 서비스 enrich(connection→host/db)로 정규화(Phase B).
+  - (−) source query에 table 없으면(`SELECT ... JOIN ...`) 키가 connection 단위로 coarse — table 파싱 개선은 후속(SchemaInspector/SQL 파서 활용 가능).
+  - (−) 런타임 emit·메타DB·UI·오케스트레이션은 아직 — 이번은 모델+정적 파생까지.
+- **관련**: ADR-0024(Asset/Lineage 격상 원안) · ADR-0028(task-DAG) · ADR-0029(call-pipeline→asset 트리거로 일반화) · ADR-0030(dataflow graph) · ADR-0033(SchemaInspector capability 패턴) · [[ultimate-vision]]
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

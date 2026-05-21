@@ -21,6 +21,10 @@ from etl_plugins.config import (
     resolve_secrets,
 )
 from etl_plugins.core import (
+    AssetGraph,
+    AssetKey,
+    AssetLineage,
+    AssetSpec,
     BatchSink,
     BatchSource,
     BranchRule,
@@ -39,6 +43,7 @@ from etl_plugins.core import (
     FileCursorState,
     Hook,
     InMemoryCursorState,
+    LineageEdge,
     Pipeline,
     PipelineError,
     ReadError,
@@ -82,6 +87,10 @@ from etl_plugins.utils import (
 __version__ = "0.1.0"
 
 __all__ = [
+    "AssetGraph",
+    "AssetKey",
+    "AssetLineage",
+    "AssetSpec",
     "BatchSink",
     "BatchSource",
     "BranchRule",
@@ -105,6 +114,7 @@ __all__ = [
     "Histogram",
     "Hook",
     "InMemoryCursorState",
+    "LineageEdge",
     "Metrics",
     "Pipeline",
     "PipelineConfig",

@@ -14,6 +14,11 @@
 - **worker/stream-worker CLI가 `SECRET_BACKEND`/`SECRET_BACKEND_FILE_PATH` 환경변수 fallback** — `--secret-backend`/`--secret-file-path` typer 옵션에 `envvar=` 추가. 이전엔 플래그 미지정 시 무조건 `env` 백엔드로 떨어져, API 서버(file 백엔드)와 불일치 → 워커가 시크릿을 "env var not set"으로 못 찾는 문제. 이제 env-only(`SECRET_BACKEND=file`)로 띄워도 서버와 동일 백엔드 사용. (검증: env-only 워커로 run 실행 시 시크릿 정상 해석 확인.)
 
 ### Added
+- **Asset / Lineage 1급 모델 (v0.2 시작, A1)** [ADR-0024/0036] — 궁극 목표(Airflow 오케스트레이션 + Dagster 리니지 결합)의 asset축 첫 슬라이스.
+  - **Derived-first 리니지(zero-config)**: 사용자 선언 없이 source=input asset, sink=output asset, `input→output` 엣지를 config에서 자동 파생.
+  - 코어 `etl_plugins/core/asset.py`: `AssetKey`(`conn/target`)·`AssetSpec`·`LineageEdge`·`AssetLineage`·`AssetGraph`(upstream/downstream/ancestors/descendants, cycle-safe). config/runtime 무의존 leaf. top-level export.
+  - `etl_plugins/runtime/lineage.py` `derive_lineage(cfg)`: run 없이 정적 파생, single-task/Task-DAG/dataflow graph 모든 shape. **크로스-파이프라인 리니지는 AssetKey 일치로 자동 연결**. backward compatible(기존 Pipeline/Connector 무변경).
+  - 검증: +12 unit(키/그래프/파생 — fanout·graph·kafka/s3 포함), 555 green, mypy/ruff OK. 다음: A2 OpenLineage emit → A3 catalog API → B 메타DB 영속화 → C 웹 리니지 그래프 → D asset-aware 오케스트레이션.
 - **멱등성 — "Run SQL (before load)" transform** [ADR-0035] — 적재 전에 SQL 한 줄(예: `DELETE`)을 실행해 delete-then-insert로 재실행 시 중복을 없앰.
   - **코어**: 옵셔널 capability `SqlExecutor`(`execute_statement`) — RDBMS 3종 구현. `Task.pre_sql: list[SqlAction]` + `Pipeline._run_pre_sql`이 **읽기 전 1회씩** 실행(레코드 0건이어도 보장). `build_pipeline`이 `type:"sql_exec"` transform을 per-record 체인에서 분리해 `pre_sql`로 적재. `referenced_connection_names`에 sql_exec 연결 포함.
   - **웹**: transform 팔레트에 "Run SQL (before load)"(connection + SQL textarea, `anyConnection`으로 전체 연결 노출). "Database" 카테고리.

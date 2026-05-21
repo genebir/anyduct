@@ -293,6 +293,10 @@ class PipelineConfig(BaseModel):
     # input assets (Dagster auto-materialize / Airflow Dataset trigger). Opt-in
     # to avoid surprising cascades; the core ignores it (service-only behaviour).
     auto_materialize: bool = False
+    # Freshness SLA in minutes (ADR-0038, service-only). When set, the scheduler
+    # re-runs this pipeline if its output assets go staler than this (or were
+    # never materialized) — Dagster freshness-based auto-materialize. None = off.
+    freshness_sla_minutes: int | None = None
     # --- single-task shape ---
     source: SourceConfig | None = None
     transforms: list[TransformConfig] = Field(default_factory=list)

@@ -62,6 +62,9 @@ export interface PipelineConfigJson {
   // Asset-driven orchestration (ADR-0037). Auto-run when an upstream run
   // materializes one of this pipeline's input assets.
   auto_materialize?: boolean;
+  // Freshness SLA in minutes (ADR-0038). Scheduler re-runs this pipeline when
+  // its outputs go staler than this. Null/absent = off.
+  freshness_sla_minutes?: number | null;
   // Single-task shape. Optional so DAG/graph configs (which omit the top-level
   // source) still type-check.
   source?: { connection: string; [k: string]: unknown };
@@ -152,7 +155,13 @@ export function isSparkUnsupported(operatorId: string): boolean {
 
 export function serialize(
   state: BuilderState,
-  meta: { name: string; mode?: "batch" | "stream"; engine?: Engine; auto_materialize?: boolean },
+  meta: {
+    name: string;
+    mode?: "batch" | "stream";
+    engine?: Engine;
+    auto_materialize?: boolean;
+    freshness_sla_minutes?: number | null;
+  },
 ): PipelineConfigJson {
   const sorted = reorderNodes(state.nodes);
   const source = sorted.find(
@@ -171,6 +180,9 @@ export function serialize(
     mode: meta.mode ?? "batch",
     ...(meta.engine && meta.engine !== "local" ? { engine: meta.engine } : {}),
     ...(meta.auto_materialize ? { auto_materialize: true } : {}),
+    ...(meta.freshness_sla_minutes
+      ? { freshness_sla_minutes: meta.freshness_sla_minutes }
+      : {}),
     source: {
       connection: "",
       ...source.data,
@@ -420,7 +432,13 @@ export function validateGraph(state: GraphBuilderState): string[] {
 
 export function serializeGraph(
   state: GraphBuilderState,
-  meta: { name: string; mode?: "batch" | "stream"; engine?: Engine; auto_materialize?: boolean },
+  meta: {
+    name: string;
+    mode?: "batch" | "stream";
+    engine?: Engine;
+    auto_materialize?: boolean;
+    freshness_sla_minutes?: number | null;
+  },
 ): PipelineConfigJson {
   const nodes = state.nodes.map((n) => {
     const op = findOperator(n.operatorId);
@@ -449,6 +467,9 @@ export function serializeGraph(
     mode: meta.mode ?? "batch",
     ...(meta.engine && meta.engine !== "local" ? { engine: meta.engine } : {}),
     ...(meta.auto_materialize ? { auto_materialize: true } : {}),
+    ...(meta.freshness_sla_minutes
+      ? { freshness_sla_minutes: meta.freshness_sla_minutes }
+      : {}),
     // `graph` is an extra key on PipelineConfigJson (index signature allows it).
     graph: { nodes, edges },
   } as PipelineConfigJson;

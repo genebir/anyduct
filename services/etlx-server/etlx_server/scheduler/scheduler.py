@@ -32,8 +32,13 @@ from croniter import croniter  # type: ignore[import-untyped]
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from etl_plugins.config.models import PipelineConfig
+from etl_plugins.runtime.lineage import derive_lineage
 from etlx_server.db.enums import PipelineMode, RunStatus
-from etlx_server.db.models import Pipeline, PipelineVersion, Run, Schedule
+from etlx_server.db.models import Asset, Pipeline, PipelineVersion, Run, Schedule
+
+# Runs in pending/running are "in flight" — don't pile up a fresh trigger on top.
+_IN_FLIGHT = (RunStatus.PENDING, RunStatus.RUNNING)
 
 logger = logging.getLogger(__name__)
 
@@ -101,9 +106,95 @@ class Scheduler:
                     )
                 )
                 fired += 1
+            fired += await self._tick_freshness(session, now)
             if fired:
                 await session.commit()
             return fired
+
+    async def _tick_freshness(self, session: AsyncSession, now: datetime) -> int:
+        """Enqueue runs for pipelines whose output assets are staler than their
+        ``freshness_sla_minutes`` (ADR-0038). Guards: skip if a run is already
+        in flight, and don't re-fire more than once per SLA window (so a failing
+        pipeline doesn't storm). Caller commits."""
+        rows = (
+            await session.execute(
+                select(
+                    Pipeline.id,
+                    Pipeline.workspace_id,
+                    PipelineVersion.id,
+                    PipelineVersion.config_json,
+                )
+                .join(PipelineVersion, PipelineVersion.pipeline_id == Pipeline.id)
+                .where(PipelineVersion.is_current.is_(True))
+            )
+        ).all()
+
+        fired = 0
+        for pipeline_id, ws_id, version_id, config_json in rows:
+            cfg_dict = config_json or {}
+            sla = cfg_dict.get("freshness_sla_minutes")
+            if not isinstance(sla, int) or sla <= 0:
+                continue
+            threshold = now - timedelta(minutes=sla)
+
+            recent = (
+                await session.execute(
+                    select(Run.status, Run.created_at)
+                    .where(Run.pipeline_id == pipeline_id)
+                    .order_by(Run.created_at.desc())
+                    .limit(1)
+                )
+            ).first()
+            if recent is not None:
+                if recent[0] in _IN_FLIGHT:
+                    continue  # already pending/running
+                if recent[1] >= threshold:
+                    continue  # attempted within the SLA window — cooldown
+
+            try:
+                cfg = PipelineConfig.model_validate(cfg_dict)
+            except Exception:
+                continue
+            if cfg.mode != PipelineMode.BATCH.value:
+                continue
+            out_keys = [str(k) for k in derive_lineage(cfg).outputs]
+            if not out_keys:
+                continue
+
+            mat_rows = (
+                await session.execute(
+                    select(Asset.asset_key, Asset.last_materialized_at).where(
+                        Asset.workspace_id == ws_id, Asset.asset_key.in_(out_keys)
+                    )
+                )
+            ).all()
+            mat: dict[str, datetime | None] = {}
+            for key, lm in mat_rows:
+                mat[key] = lm
+
+            # Stale if any output was never materialized or is older than the SLA.
+            stale = False
+            for k in out_keys:
+                lm = mat.get(k)
+                if lm is None or lm < threshold:
+                    stale = True
+                    break
+            if not stale:
+                continue
+
+            session.add(
+                Run(
+                    workspace_id=ws_id,
+                    pipeline_id=pipeline_id,
+                    pipeline_version_id=version_id,
+                    schedule_id=None,
+                    status=RunStatus.PENDING,
+                    result_json={"triggered_by": "freshness", "sla_minutes": sla},
+                )
+            )
+            fired += 1
+            logger.info("scheduler: freshness trigger for pipeline %s (sla=%dm)", pipeline_id, sla)
+        return fired
 
     def stop(self) -> None:
         """Request graceful shutdown — loop exits after current tick."""

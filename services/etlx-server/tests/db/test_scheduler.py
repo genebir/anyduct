@@ -20,7 +20,7 @@ from uuid import UUID
 
 import pytest
 from etlx_server.db.enums import PipelineMode, RunStatus
-from etlx_server.db.models import Pipeline, PipelineVersion, Run, Schedule, Workspace
+from etlx_server.db.models import Asset, Pipeline, PipelineVersion, Run, Schedule, Workspace
 from etlx_server.scheduler import Scheduler
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -286,3 +286,146 @@ async def test_run_loop_fires_then_stops(session: AsyncSession) -> None:
 
     rows = await _runs_for_schedule_async(session, s.id)
     assert len(rows) >= 1
+
+
+# --- freshness auto-materialize (ADR-0038) ----------------------------------
+
+
+async def _seed_fresh_pipeline(
+    session: AsyncSession, *, workspace_id: UUID, name: str, sla: int | None, table: str = "out"
+) -> tuple[Pipeline, PipelineVersion]:
+    p = Pipeline(workspace_id=workspace_id, name=name)
+    session.add(p)
+    await session.flush()
+    cfg: dict = {
+        "name": name,
+        "source": {"connection": "raw", "query": "SELECT id FROM seed"},
+        "sink": {"connection": "wh", "table": table, "mode": "append"},
+    }
+    if sla is not None:
+        cfg["freshness_sla_minutes"] = sla
+    pv = PipelineVersion(pipeline_id=p.id, version=1, config_json=cfg, is_current=True)
+    session.add(pv)
+    await session.flush()
+    return p, pv
+
+
+async def _seed_asset(
+    session: AsyncSession, *, workspace_id: UUID, key: str, last_materialized_at: datetime | None
+) -> Asset:
+    a = Asset(
+        workspace_id=workspace_id,
+        asset_key=key,
+        kind="table",
+        last_materialized_at=last_materialized_at,
+    )
+    session.add(a)
+    await session.flush()
+    return a
+
+
+async def _fresh_runs(session: AsyncSession, pipeline_id: UUID) -> list[Run]:
+    await session.commit()
+    return list(
+        (await session.execute(select(Run).where(Run.pipeline_id == pipeline_id))).scalars().all()
+    )
+
+
+async def test_freshness_triggers_when_stale(session: AsyncSession) -> None:
+    ws = await _seed_workspace(session, slug="fr-stale")
+    p, _ = await _seed_fresh_pipeline(session, workspace_id=ws.id, name="p", sla=5)
+    await _seed_asset(
+        session,
+        workspace_id=ws.id,
+        key="wh/out",
+        last_materialized_at=datetime.now(UTC) - timedelta(minutes=30),
+    )
+    fired = await Scheduler(_SessionFactoryAdapter(session)).tick_once()
+    assert fired == 1
+    runs = await _fresh_runs(session, p.id)
+    assert len(runs) == 1
+    assert runs[0].status == RunStatus.PENDING
+    assert runs[0].schedule_id is None
+    assert runs[0].result_json["triggered_by"] == "freshness"
+
+
+async def test_freshness_triggers_when_never_materialized(session: AsyncSession) -> None:
+    ws = await _seed_workspace(session, slug="fr-never")
+    p, _ = await _seed_fresh_pipeline(session, workspace_id=ws.id, name="p", sla=5)
+    # No asset row at all → never materialized → stale.
+    fired = await Scheduler(_SessionFactoryAdapter(session)).tick_once()
+    assert fired == 1
+    assert len(await _fresh_runs(session, p.id)) == 1
+
+
+async def test_freshness_skips_when_fresh(session: AsyncSession) -> None:
+    ws = await _seed_workspace(session, slug="fr-fresh")
+    p, _ = await _seed_fresh_pipeline(session, workspace_id=ws.id, name="p", sla=60)
+    await _seed_asset(
+        session,
+        workspace_id=ws.id,
+        key="wh/out",
+        last_materialized_at=datetime.now(UTC) - timedelta(minutes=2),
+    )
+    fired = await Scheduler(_SessionFactoryAdapter(session)).tick_once()
+    assert fired == 0
+    assert len(await _fresh_runs(session, p.id)) == 0
+
+
+async def test_freshness_skips_without_sla(session: AsyncSession) -> None:
+    ws = await _seed_workspace(session, slug="fr-nosla")
+    await _seed_fresh_pipeline(session, workspace_id=ws.id, name="p", sla=None)
+    await _seed_asset(
+        session,
+        workspace_id=ws.id,
+        key="wh/out",
+        last_materialized_at=datetime.now(UTC) - timedelta(days=1),
+    )
+    fired = await Scheduler(_SessionFactoryAdapter(session)).tick_once()
+    assert fired == 0
+
+
+async def test_freshness_skips_when_run_in_flight(session: AsyncSession) -> None:
+    ws = await _seed_workspace(session, slug="fr-inflight")
+    p, pv = await _seed_fresh_pipeline(session, workspace_id=ws.id, name="p", sla=5)
+    await _seed_asset(
+        session,
+        workspace_id=ws.id,
+        key="wh/out",
+        last_materialized_at=datetime.now(UTC) - timedelta(minutes=30),
+    )
+    # A pending run already exists — don't pile up.
+    session.add(
+        Run(
+            workspace_id=ws.id,
+            pipeline_id=p.id,
+            pipeline_version_id=pv.id,
+            status=RunStatus.PENDING,
+        )
+    )
+    await session.flush()
+    fired = await Scheduler(_SessionFactoryAdapter(session)).tick_once()
+    assert fired == 0
+    # still just the one pending run we seeded
+    assert len(await _fresh_runs(session, p.id)) == 1
+
+
+async def test_freshness_cooldown_after_recent_attempt(session: AsyncSession) -> None:
+    """A failed run within the SLA window suppresses re-firing (no storm)."""
+    ws = await _seed_workspace(session, slug="fr-cooldown")
+    p, pv = await _seed_fresh_pipeline(session, workspace_id=ws.id, name="p", sla=30)
+    await _seed_asset(
+        session,
+        workspace_id=ws.id,
+        key="wh/out",
+        last_materialized_at=datetime.now(UTC) - timedelta(hours=2),
+    )
+    r = Run(
+        workspace_id=ws.id, pipeline_id=p.id, pipeline_version_id=pv.id, status=RunStatus.FAILED
+    )
+    session.add(r)
+    await session.flush()
+    r.created_at = datetime.now(UTC) - timedelta(minutes=2)  # within 30m SLA
+    await session.flush()
+    fired = await Scheduler(_SessionFactoryAdapter(session)).tick_once()
+    assert fired == 0  # cooldown: attempted 2m ago, SLA 30m

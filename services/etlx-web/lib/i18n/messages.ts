@@ -413,6 +413,10 @@ export const en = {
   "autoMat.label": "Auto-materialize",
   "autoMat.help":
     "Auto-run this pipeline whenever an upstream run writes one of the tables it reads (asset-driven; no cron needed).",
+  "freshness.label": "Freshness (min)",
+  "freshness.placeholder": "off",
+  "freshness.help":
+    "Freshness SLA: the scheduler re-runs this pipeline if its output tables go staler than this many minutes (or were never built). Blank = off.",
   "graph.streamNoGraph": "Graph mode is batch-only; stream pipelines stay linear.",
   "graph.invalid": "Graph can't be saved yet: {issue}",
 
@@ -948,6 +952,10 @@ export const ko: Messages = {
   "autoMat.label": "자동 생성",
   "autoMat.help":
     "이 파이프라인이 읽는 테이블을 상류 실행이 쓰면 자동으로 실행합니다 (asset 기반, 크론 불필요).",
+  "freshness.label": "신선도(분)",
+  "freshness.placeholder": "off",
+  "freshness.help":
+    "신선도 SLA: 출력 테이블이 이 분 수보다 오래되면(또는 한 번도 생성 안 됐으면) 스케줄러가 이 파이프라인을 재실행합니다. 비우면 off.",
   "graph.streamNoGraph": "그래프 모드는 배치 전용입니다. 스트림 파이프라인은 선형으로 유지됩니다.",
   "graph.invalid": "아직 저장할 수 없습니다: {issue}",
 

@@ -1236,4 +1236,26 @@ ADR 본문이 P1.3에 남겨둔 미해결 포인트 "record-task 시스템에서
 
 ---
 
+## ADR-0038: Freshness 기반 auto-materialize — 시간 기반 센서 (Dagster freshness policy)
+
+- **Date**: 2026-05-21
+- **Status**: Accepted
+- **Context**:
+  D1(ADR-0037)은 "upstream이 성공하면" 이벤트 기반 트리거였다. 데이터 흐름이 멈춰 있을 때(소스가 외부에서 갱신되는데 우리 파이프라인이 안 돌면) asset이 stale해진다. Dagster의 freshness policy처럼 "이 asset은 N분 이상 오래되면 안 된다 → 오래되면 만드는 파이프라인을 재실행"하는 시간 기반 트리거가 필요. 이미 `assets.last_materialized_at`(B)와 cron `Scheduler.tick_once`(9.2)가 있어 재활용.
+- **Decision**:
+  1. **Opt-in `PipelineConfig.freshness_sla_minutes: int | None`**(기본 None=off, 서비스 전용). "내 출력 asset은 이 분 수보다 오래되면 안 됨"을 파이프라인이 선언(asset이 아닌 producing 파이프라인에 선언 — 매핑 단순).
+  2. **스케줄러 틱에 freshness 패스 추가**(`Scheduler._tick_freshness`, cron 패스 뒤). current 버전 config에 `freshness_sla_minutes`가 있는 batch 파이프라인을 스캔 → `derive_lineage` output 키들의 `last_materialized_at`을 조회 → 하나라도 None(미생성)이거나 `now - SLA`보다 오래되면 **stale → PENDING Run enqueue**(`result_json.triggered_by="freshness"`).
+  3. **폭주 가드 2종**: ① in-flight — pending/running run이 있으면 skip(쌓지 않음). ② 쿨다운 — 가장 최근 run의 `created_at`이 SLA 윈도우 안이면 skip(실패하는 파이프라인이 매 틱 재시도하는 storm 방지 → SLA당 최대 1회 시도).
+  4. **D1과 합성** — freshness가 root를 신선하게 유지하면, 그 run의 output이 D1(auto-materialize)로 downstream을 연쇄. freshness=시간 기반 root 트리거, auto_materialize=이벤트 기반 전파.
+  5. **빌더 UI** — 헤더에 "Freshness (min)" 숫자 입력 → config `freshness_sla_minutes` emit/restore. **스케줄러 프로세스 필요**(`etlx-server scheduler run`) — start.sh에 추가.
+- **Consequences**:
+  - (+) "데이터를 항상 N분 이내 신선하게" 선언적 보장 — cron 시각을 직접 안 짜도 됨. Dagster freshness policy UX.
+  - (+) 기존 스케줄러·assets.last_materialized_at·worker-queue 재사용, 코어 변경은 플래그 1개.
+  - (+) in-flight + 쿨다운 가드로 storm/중복 방지.
+  - (−) 정적 스캔(모든 current 버전 + asset 조회)이 틱마다 — 파이프라인 많으면 비용↑(D1과 같은 한계, 인덱스 후속). multi-replica는 schedule처럼 `FOR UPDATE SKIP LOCKED` 필요(Step 11).
+  - (−) SLA는 분 단위 정수(초/유연 정책 없음). 출력 여러 개면 "하나라도 stale" 기준(가장 보수적).
+- **관련**: ADR-0037(이벤트 기반 auto-materialize — 합성) · ADR-0036(asset/lineage) · 9.2(cron scheduler — 틱 재사용) · [[ultimate-vision]]
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

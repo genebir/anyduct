@@ -69,6 +69,7 @@ export default function PipelineEditorPage() {
   const [graphState, setGraphState] = useState<GraphBuilderState | null>(null);
   const [engine, setEngine] = useState<Engine>("local");
   const [autoMaterialize, setAutoMaterialize] = useState(false);
+  const [freshnessSla, setFreshnessSla] = useState<number | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [dryRunning, setDryRunning] = useState(false);
@@ -94,6 +95,9 @@ export default function PipelineEditorPage() {
         const cfg = p.current_config_json as PipelineConfigJson | null;
         setEngine((cfg?.engine as Engine) === "spark" ? "spark" : "local");
         setAutoMaterialize(Boolean(cfg?.auto_materialize));
+        setFreshnessSla(
+          typeof cfg?.freshness_sla_minutes === "number" ? cfg.freshness_sla_minutes : null,
+        );
         // Graph pipelines (ADR-0030) open in the free-form graph editor.
         if (isGraphConfig(cfg)) {
           if (cancelled) return;
@@ -267,6 +271,7 @@ export default function PipelineEditorPage() {
           mode: m,
           engine,
           auto_materialize: autoMaterialize,
+          freshness_sla_minutes: freshnessSla,
         });
         const updated = await pipelinesApi.update(ws.id, pipeline.id, { config });
         setPipeline(updated);
@@ -279,6 +284,7 @@ export default function PipelineEditorPage() {
         mode: m,
         engine,
         auto_materialize: autoMaterialize,
+        freshness_sla_minutes: freshnessSla,
       });
       const updated = await pipelinesApi.update(ws.id, pipeline.id, { config });
       // Call-pipeline nodes live outside config_json (ADR-0029) — persist them
@@ -297,7 +303,7 @@ export default function PipelineEditorPage() {
     } finally {
       setSaving(false);
     }
-  }, [ws, pipeline, state, mode, graphState, engine, autoMaterialize, t]);
+  }, [ws, pipeline, state, mode, graphState, engine, autoMaterialize, freshnessSla, t]);
 
   const setEngineDirty = useCallback((next: Engine) => {
     setEngine(next);
@@ -409,6 +415,24 @@ export default function PipelineEditorPage() {
                 className="accent-[rgb(var(--accent))]"
               />
               <span className="text-text-muted">{t("autoMat.label")}</span>
+            </label>
+            <label
+              className="flex items-center gap-1.5 text-xs text-text-secondary"
+              title={t("freshness.help")}
+            >
+              <span className="text-text-muted">{t("freshness.label")}</span>
+              <input
+                type="number"
+                min={0}
+                value={freshnessSla ?? ""}
+                placeholder={t("freshness.placeholder")}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setFreshnessSla(v === "" ? null : Math.max(0, Number(v)));
+                  setDirty(true);
+                }}
+                className="h-8 w-20 rounded-md border border-border-subtle bg-elevated px-2 text-sm text-text focus-visible:border-accent focus-visible:outline-none"
+              />
             </label>
             {mode === "linear" ? (
               <Button

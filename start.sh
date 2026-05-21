@@ -73,10 +73,12 @@ SERVER_PID="$RUN_DIR/etlx-server.pid"
 WEB_PID="$RUN_DIR/etlx-web.pid"
 WORKER_PID="$RUN_DIR/etlx-worker.pid"
 REAPER_PID="$RUN_DIR/etlx-reaper.pid"
+SCHEDULER_PID="$RUN_DIR/etlx-scheduler.pid"
 SERVER_LOG="$LOG_DIR/etlx-server.log"
 WEB_LOG="$LOG_DIR/etlx-web.log"
 WORKER_LOG="$LOG_DIR/etlx-worker.log"
 REAPER_LOG="$LOG_DIR/etlx-reaper.log"
+SCHEDULER_LOG="$LOG_DIR/etlx-scheduler.log"
 
 SERVER_HOST="${ETLX_SERVER_HOST:-127.0.0.1}"
 SERVER_PORT="${ETLX_SERVER_PORT:-8000}"
@@ -275,6 +277,15 @@ else
         spawn_background "$REAPER_PID" "$REAPER_LOG" \
             uv run --package etlx-server etlx-server reaper run
         log_ok "etlx-reaper spawned (pid=$(cat "$REAPER_PID"))"
+    fi
+    # Scheduler: fires cron schedules + freshness-based re-runs (ADR-0038).
+    if is_running "$SCHEDULER_PID"; then
+        log_skip "etlx-scheduler already running (pid=$(cat "$SCHEDULER_PID"))"
+    else
+        log_info "starting etlx-scheduler (log: $SCHEDULER_LOG)"
+        spawn_background "$SCHEDULER_PID" "$SCHEDULER_LOG" \
+            uv run --package etlx-server etlx-server scheduler run
+        log_ok "etlx-scheduler spawned (pid=$(cat "$SCHEDULER_PID"))"
     fi
 fi
 

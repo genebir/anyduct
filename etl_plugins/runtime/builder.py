@@ -29,6 +29,7 @@ from etl_plugins.config.secrets import SecretBackend
 from etl_plugins.core.connector import Connector
 from etl_plugins.core.exceptions import ConfigError
 from etl_plugins.core.pipeline import (
+    AggSpec,
     BranchRule,
     GraphEdge,
     GraphNode,
@@ -286,6 +287,18 @@ def _build_graph_task(
             )
         elif n.type == "join":
             nodes.append(GraphNode(id=n.id, kind="join", join_on=n.on, join_how=n.how))
+        elif n.type == "aggregate":
+            nodes.append(
+                GraphNode(
+                    id=n.id,
+                    kind="aggregate",
+                    agg_group_by=n.group_by,
+                    aggregations=[
+                        AggSpec(op=a.op, name=a.name, column=a.column)
+                        for a in (n.aggregations or [])
+                    ],
+                )
+            )
         else:
             raise ConfigError(f"{label}: node {n.id!r} has unknown type {n.type!r}")
 

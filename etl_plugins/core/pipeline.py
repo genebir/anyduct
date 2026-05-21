@@ -102,12 +102,23 @@ class SqlAction:
     statement: str
 
 
+@dataclass(frozen=True)
+class AggSpec:
+    """One aggregation in an ``aggregate`` node (ADR-0041). ``op`` is
+    count|sum|min|max|avg over ``column`` (count may omit it); ``name`` is the
+    output column."""
+
+    op: str
+    name: str
+    column: str | None = None
+
+
 @dataclass
 class GraphNode:
-    """One node in a dataflow graph (ADR-0030, join added in ADR-0041)."""
+    """One node in a dataflow graph (ADR-0030, join/aggregate added in ADR-0041)."""
 
     id: str
-    kind: str  # source | transform | sink | join
+    kind: str  # source | transform | sink | join | aggregate
     # source
     source_name: str | None = None
     query: str | None = None
@@ -119,6 +130,9 @@ class GraphNode:
     # join (fan-in, ADR-0041) — merge ≥2 inputs on ``join_on`` keys
     join_on: list[str] | None = None
     join_how: str = "inner"
+    # aggregate (ADR-0041) — group ``agg_group_by`` keys, emit one record/group
+    agg_group_by: list[str] | None = None
+    aggregations: list[AggSpec] = field(default_factory=list)
 
 
 @dataclass
@@ -334,6 +348,57 @@ def _hash_join(inputs: list[list[Record]], on: list[str], how: str) -> list[Reco
     for nxt in inputs[1:]:
         result = _join_records(result, nxt, on, how)
     return result
+
+
+def _agg_value(op: str, values: list[Any]) -> Any:
+    """Reduce non-null ``values`` with ``op`` (count|sum|min|max|avg)."""
+    if op == "count":
+        return len(values)
+    present = [v for v in values if v is not None]
+    if not present:
+        return None
+    if op == "sum":
+        return sum(present)
+    if op == "min":
+        return min(present)
+    if op == "max":
+        return max(present)
+    if op == "avg":
+        return sum(present) / len(present)
+    raise TaskError(f"unknown aggregation op {op!r}")
+
+
+def _aggregate(records: list[Record], group_by: list[str], specs: list[AggSpec]) -> list[Record]:
+    """Group ``records`` by ``group_by`` keys, emit one record per group.
+
+    Each output carries the group-key columns plus one column per spec. Empty
+    ``group_by`` aggregates the whole input into a single record.
+    """
+    groups: dict[tuple[Any, ...], list[Record]] = {}
+    order: list[tuple[Any, ...]] = []
+    for rec in records:
+        try:
+            key = tuple(rec.data[k] for k in group_by)
+        except KeyError as exc:
+            raise TransformError(f"aggregate group_by key {exc} missing") from exc
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(rec)
+
+    out: list[Record] = []
+    for key in order:
+        members = groups[key]
+        data: dict[str, Any] = dict(zip(group_by, key, strict=True))
+        for spec in specs:
+            if spec.op == "count":
+                data[spec.name] = len(members)  # count(*) — row count per group
+            else:
+                col = spec.column
+                values = [m.data.get(col) for m in members] if col is not None else []
+                data[spec.name] = _agg_value(spec.op, values)
+        out.append(Record(data=data, metadata=members[0].metadata))
+    return out
 
 
 @dataclass
@@ -913,6 +978,11 @@ class Pipeline:
                 if len(ins) < 2:
                     raise TaskError(f"join node {node.id!r} needs at least two inputs")
                 outputs[node.id] = _hash_join(ins, node.join_on or [], node.join_how)
+            elif node.kind == "aggregate":
+                ins = _inputs(node.id)
+                if len(ins) != 1:
+                    raise TaskError(f"aggregate node {node.id!r} takes exactly one input")
+                outputs[node.id] = _aggregate(ins[0], node.agg_group_by or [], node.aggregations)
             elif node.kind == "sink":
                 ins = _inputs(node.id)
                 if len(ins) != 1:

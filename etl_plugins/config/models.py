@@ -191,19 +191,41 @@ class TaskConfig(BaseModel):
         return [self.sink] if self.sink is not None else self.sinks
 
 
-GRAPH_NODE_TYPES = frozenset({"source", "transform", "sink", "join"})
+GRAPH_NODE_TYPES = frozenset({"source", "transform", "sink", "join", "aggregate"})
 JOIN_HOWS = frozenset({"inner", "left", "right", "outer"})
+AGG_OPS = frozenset({"count", "sum", "min", "max", "avg"})
+
+
+class AggregationConfig(BaseModel):
+    """One aggregation in an ``aggregate`` node (ADR-0041, G3).
+
+    ``op`` is count | sum | min | max | avg over ``column`` (``count`` may omit
+    ``column`` to count rows); ``name`` is the output column.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    op: str
+    column: str | None = None
+    name: str
+
+    @model_validator(mode="after")
+    def _check(self) -> AggregationConfig:
+        if self.op not in AGG_OPS:
+            raise ValueError(f"unknown aggregation op {self.op!r} (allowed: {sorted(AGG_OPS)})")
+        if self.op != "count" and not self.column:
+            raise ValueError(f"aggregation {self.name!r}: op {self.op!r} requires a 'column'")
+        return self
 
 
 class GraphNodeConfig(BaseModel):
     """One node in a dataflow graph (ADR-0030, generalized in ADR-0041).
 
-    ``type`` is ``source`` | ``transform`` | ``sink`` | ``join``. Source/sink
-    carry their connector fields (``extra=allow`` for connector-specific
-    options); a ``transform`` nests a :class:`TransformConfig` under
-    ``transform``; a ``join`` is a fan-in node (≥2 incoming edges) that merges
-    its inputs on ``on`` keys with the ``how`` strategy. Join *execution* lands
-    with the materialize engine (ADR-0041, G2/G3); G1 only models + validates it.
+    ``type`` is ``source`` | ``transform`` | ``sink`` | ``join`` | ``aggregate``.
+    Source/sink carry their connector fields (``extra=allow``); a ``transform``
+    nests a :class:`TransformConfig`; a ``join`` is a fan-in node (≥2 incoming)
+    merging inputs on ``on`` keys with ``how``; an ``aggregate`` groups its single
+    input by ``group_by`` and emits one record per group with ``aggregations``.
     """
 
     model_config = ConfigDict(extra="allow")
@@ -221,6 +243,9 @@ class GraphNodeConfig(BaseModel):
     # join (fan-in) — merge ≥2 inputs on ``on`` keys (ADR-0041)
     on: list[str] | None = None
     how: str = "inner"
+    # aggregate — group ``group_by`` keys, emit one record per group (ADR-0041)
+    group_by: list[str] | None = None
+    aggregations: list[AggregationConfig] | None = None
 
     @model_validator(mode="after")
     def _check_node(self) -> GraphNodeConfig:
@@ -233,6 +258,8 @@ class GraphNodeConfig(BaseModel):
             raise ValueError(
                 f"join node {self.id!r}: unknown how {self.how!r} (allowed: {sorted(JOIN_HOWS)})"
             )
+        if self.type == "aggregate" and not self.aggregations:
+            raise ValueError(f"aggregate node {self.id!r}: needs at least one aggregation")
         return self
 
 

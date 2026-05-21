@@ -66,6 +66,44 @@ def test_bad_join_how_rejected() -> None:
         GraphConfig.model_validate({"nodes": [_node("j", "join", how="sideways")], "edges": []})
 
 
+def test_aggregate_needs_aggregations() -> None:
+    with pytest.raises(ValueError, match="at least one aggregation"):
+        GraphConfig.model_validate(
+            {
+                "nodes": [
+                    _node("s", "source", connection="a"),
+                    _node("agg", "aggregate", group_by=["g"]),
+                    _node("k", "sink", connection="c"),
+                ],
+                "edges": [
+                    {"from_node": "s", "to_node": "agg"},
+                    {"from_node": "agg", "to_node": "k"},
+                ],
+            }
+        )
+
+
+def test_bad_aggregation_op_rejected() -> None:
+    with pytest.raises(ValueError, match="unknown aggregation op"):
+        GraphConfig.model_validate(
+            {
+                "nodes": [
+                    _node("s", "source", connection="a"),
+                    _node(
+                        "agg",
+                        "aggregate",
+                        aggregations=[{"op": "median", "column": "v", "name": "m"}],
+                    ),
+                    _node("k", "sink", connection="c"),
+                ],
+                "edges": [
+                    {"from_node": "s", "to_node": "agg"},
+                    {"from_node": "agg", "to_node": "k"},
+                ],
+            }
+        )
+
+
 def test_cycle_rejected() -> None:
     # s→k is a valid path; t1↔t2 is an isolated 2-cycle (both indegree 1, so the
     # indegree rules pass and only the acyclicity check catches it).

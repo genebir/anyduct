@@ -7,6 +7,7 @@ import pytest
 from etl_plugins.config.models import GraphConfig, PipelineConfig
 from etl_plugins.core.exceptions import TaskError
 from etl_plugins.core.pipeline import (
+    AggSpec,
     GraphEdge,
     GraphNode,
     Pipeline,
@@ -262,6 +263,63 @@ def test_join_records_outer() -> None:
 def test_join_records_requires_on() -> None:
     with pytest.raises(TaskError, match="non-empty 'on'"):
         _join_records([], [], [], "inner")
+
+
+# ---------- aggregate operator (ADR-0041, G3) ----------
+
+
+def test_graph_aggregate_group_by() -> None:
+    nodes = [
+        GraphNode(id="s", kind="source", source_name="src"),
+        GraphNode(
+            id="agg",
+            kind="aggregate",
+            agg_group_by=["g"],
+            aggregations=[
+                AggSpec(op="sum", name="total", column="v"),
+                AggSpec(op="count", name="n"),
+            ],
+        ),
+        GraphNode(id="k", kind="sink", sink=SinkSpec(name="snk", table="o")),
+    ]
+    edges = [GraphEdge("s", "agg"), GraphEdge("agg", "k")]
+    snk = InMemoryBatchSink()
+    Pipeline("g").add(_graph_task(nodes, edges)).run(
+        connectors={
+            "src": _rows(
+                {"g": "a", "v": 1},
+                {"g": "a", "v": 2},
+                {"g": "b", "v": 5},
+            ),
+            "snk": snk,
+        }
+    )
+    assert sorted((r.data for r in snk.records), key=lambda d: d["g"]) == [
+        {"g": "a", "total": 3, "n": 2},
+        {"g": "b", "total": 5, "n": 1},
+    ]
+
+
+def test_graph_aggregate_global_avg() -> None:
+    nodes = [
+        GraphNode(id="s", kind="source", source_name="src"),
+        GraphNode(
+            id="agg",
+            kind="aggregate",
+            agg_group_by=[],
+            aggregations=[
+                AggSpec(op="avg", name="mean", column="v"),
+                AggSpec(op="max", name="hi", column="v"),
+            ],
+        ),
+        GraphNode(id="k", kind="sink", sink=SinkSpec(name="snk", table="o")),
+    ]
+    edges = [GraphEdge("s", "agg"), GraphEdge("agg", "k")]
+    snk = InMemoryBatchSink()
+    Pipeline("g").add(_graph_task(nodes, edges)).run(
+        connectors={"src": _rows({"v": 2}, {"v": 4}, {"v": 6}), "snk": snk}
+    )
+    assert [r.data for r in snk.records] == [{"mean": 4.0, "hi": 6}]
 
 
 # ---------- GraphConfig validation ----------

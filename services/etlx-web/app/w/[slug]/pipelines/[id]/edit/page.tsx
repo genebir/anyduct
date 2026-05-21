@@ -37,12 +37,14 @@ import {
   deserialize,
   deserializeGraph,
   isGraphConfig,
+  isSparkUnsupported,
   linearToGraph,
   makeCallNode,
   makeNode,
   reorderNodes,
   serialize,
   serializeGraph,
+  type Engine,
   type BuilderNode,
   type BuilderState,
   type DlqSettings,
@@ -64,6 +66,7 @@ export default function PipelineEditorPage() {
   const [state, setState] = useState<BuilderState>(() => blankBuilder());
   const [mode, setMode] = useState<"linear" | "graph">("linear");
   const [graphState, setGraphState] = useState<GraphBuilderState | null>(null);
+  const [engine, setEngine] = useState<Engine>("local");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [dryRunning, setDryRunning] = useState(false);
@@ -87,6 +90,7 @@ export default function PipelineEditorPage() {
         setConnections(conns);
         setAllPipelines(pipelines.filter((x) => x.id !== id));
         const cfg = p.current_config_json as PipelineConfigJson | null;
+        setEngine((cfg?.engine as Engine) === "spark" ? "spark" : "local");
         // Graph pipelines (ADR-0030) open in the free-form graph editor.
         if (isGraphConfig(cfg)) {
           if (cancelled) return;
@@ -250,14 +254,14 @@ export default function PipelineEditorPage() {
       const existingMode = (pipeline.current_config_json as { mode?: string } | null)?.mode;
       const m = existingMode === "stream" ? "stream" : "batch";
       if (mode === "graph" && graphState) {
-        const config = serializeGraph(graphState, { name: pipeline.name, mode: m });
+        const config = serializeGraph(graphState, { name: pipeline.name, mode: m, engine });
         const updated = await pipelinesApi.update(ws.id, pipeline.id, { config });
         setPipeline(updated);
         setDirty(false);
         toast.success(t("builder.saved", { version: updated.current_version ?? "?" }));
         return;
       }
-      const config = serialize(state, { name: pipeline.name, mode: m });
+      const config = serialize(state, { name: pipeline.name, mode: m, engine });
       const updated = await pipelinesApi.update(ws.id, pipeline.id, { config });
       // Call-pipeline nodes live outside config_json (ADR-0029) — persist them
       // as downstream triggers. Best-effort so a pending `0003` migration
@@ -275,7 +279,23 @@ export default function PipelineEditorPage() {
     } finally {
       setSaving(false);
     }
-  }, [ws, pipeline, state, mode, graphState, t]);
+  }, [ws, pipeline, state, mode, graphState, engine, t]);
+
+  const setEngineDirty = useCallback((next: Engine) => {
+    setEngine(next);
+    setDirty(true);
+  }, []);
+
+  // Operators that can't run on Spark (ADR-0031) — surfaced as a warning when
+  // the Spark engine is selected so the user fixes it before saving/running.
+  const sparkBlockers = useMemo(() => {
+    if (engine !== "spark") return [];
+    const nodes =
+      mode === "graph" && graphState ? graphState.nodes : state.nodes;
+    return nodes
+      .filter((n) => isSparkUnsupported(n.operatorId))
+      .map((n) => findOperator(n.operatorId)?.label ?? n.operatorId);
+  }, [engine, mode, graphState, state.nodes]);
 
   const onDryRun = useCallback(async () => {
     if (!ws || !pipeline) return;
@@ -331,6 +351,18 @@ export default function PipelineEditorPage() {
                 {t("builder.unsaved")}
               </span>
             ) : null}
+            <label className="flex items-center gap-1.5 text-xs text-text-secondary">
+              <span className="text-text-muted">{t("engine.label")}</span>
+              <select
+                value={engine}
+                onChange={(e) => setEngineDirty(e.target.value as Engine)}
+                className="h-8 rounded-md border border-border-subtle bg-elevated px-2 text-sm text-text focus-visible:border-accent focus-visible:outline-none"
+                title={t("engine.help")}
+              >
+                <option value="local">{t("engine.local")}</option>
+                <option value="spark">{t("engine.spark")}</option>
+              </select>
+            </label>
             {mode === "linear" ? (
               <Button variant="ghost" onClick={switchToGraph} disabled={!pipeline}>
                 {t("graph.switchToGraph")}
@@ -366,6 +398,12 @@ export default function PipelineEditorPage() {
           </div>
         }
       />
+      {sparkBlockers.length > 0 ? (
+        <div className="flex shrink-0 items-center gap-2 border-b border-error/40 bg-error/10 px-4 py-2 text-sm text-error">
+          <XCircleIcon size={16} className="shrink-0" />
+          <span>{t("engine.sparkUnsupported", { ops: sparkBlockers.join(", ") })}</span>
+        </div>
+      ) : null}
       {mode === "graph" && graphState ? (
         <GraphEditor state={graphState} connections={connections} onChange={updateGraph} />
       ) : (

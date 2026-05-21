@@ -481,7 +481,7 @@
 - [x] **P3.3 Spark graph 분기** ✅ (2026-05-20) — `_run_graph`: source `cache()` 1회 + sink별 유일 경로(transform + edge `when` filter) 컴파일. parquet e2e로 어느 노드에서나 분기 검증.
 - [x] **P3.4 워커 엔진 라우팅 + Spark 실행(번들/최소설정), 검증됨** ✅ (2026-05-20) — RunExecutor가 `engine`으로 분기: local=커넥터 빌드+in-process, spark=connection config 해석(시크릿 포함)→SparkBackend 실행. `_resolve_connection_configs` 공유. `spark_master`(RunExecutor→RunWorker→CLI `--spark-master`, 기본 `local[*]`=번들 단일노드, 클러스터 URL로 전환). **워커 e2e 검증**(gated): pending run→claim→connection 해석→Spark 실행(filter)→SUCCEEDED(records 3/2, parquet 출력). 서버 14 worker + spark gated 통과, mypy/ruff OK.
   - [ ] **P3.4b 외부 클러스터 잡 submit(thin worker)** — 워커가 in-process 대신 spark-submit/Databricks Jobs로 제출+폴링(ADR-0032). 실 클러스터 필요. 현재는 번들 in-process(worker-as-driver) 모델.
-- [ ] **P3.5 UI** — 엔진 선택 + pushdown 불가 노드 표시.
+- [x] **P3.5 UI 엔진 선택** ✅ (2026-05-21) — 빌더 헤더에 엔진 select(Local/Spark), `serialize`/`serializeGraph`가 `engine` emit(spark일 때만), 로드 시 `cfg.engine` 복원. Spark pushdown 불가 노드(`python` transform)는 상단 경고 배너로 표시. i18n `engine.*`. 웹 typecheck OK.
 
 ### 10.5 Schedule + Run 모니터링 (← 작업 중, 2026-05-18 Schedule CRUD + Run 상세까지 완료)
 - [x] Run 목록 (Data Table, StatusBadge, 5s polling) — `/w/[slug]/runs`. Row 클릭 시 상세 페이지로 이동.

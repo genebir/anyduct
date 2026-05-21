@@ -51,9 +51,14 @@ export const DEFAULT_DLQ: DlqSettings = {
   mode: "append",
 };
 
+export type Engine = "local" | "spark";
+
 export interface PipelineConfigJson {
   name: string;
   mode: "batch" | "stream";
+  // Execution backend (ADR-0031). "local" = row-streaming (default); "spark"
+  // compiles the DAG to Spark for distributed/TB-scale runs.
+  engine?: Engine;
   // Single-task shape. Optional so DAG/graph configs (which omit the top-level
   // source) still type-check.
   source?: { connection: string; [k: string]: unknown };
@@ -135,9 +140,16 @@ export function reorderNodes(nodes: BuilderNode[]): BuilderNode[] {
   });
 }
 
+/** True if an operator can't be pushed down to Spark (ADR-0031): the arbitrary
+ *  `python` transform has no Spark equivalent. Such pipelines must run `local`. */
+export function isSparkUnsupported(operatorId: string): boolean {
+  const op = findOperator(operatorId);
+  return op?.kind === "transform" && op.connectorType === "python";
+}
+
 export function serialize(
   state: BuilderState,
-  meta: { name: string; mode?: "batch" | "stream" },
+  meta: { name: string; mode?: "batch" | "stream"; engine?: Engine },
 ): PipelineConfigJson {
   const sorted = reorderNodes(state.nodes);
   const source = sorted.find(
@@ -154,6 +166,7 @@ export function serialize(
   const config: PipelineConfigJson = {
     name: meta.name,
     mode: meta.mode ?? "batch",
+    ...(meta.engine && meta.engine !== "local" ? { engine: meta.engine } : {}),
     source: {
       connection: "",
       ...source.data,
@@ -377,7 +390,7 @@ export function nextEdgeId(): string {
 
 export function serializeGraph(
   state: GraphBuilderState,
-  meta: { name: string; mode?: "batch" | "stream" },
+  meta: { name: string; mode?: "batch" | "stream"; engine?: Engine },
 ): PipelineConfigJson {
   const nodes = state.nodes.map((n) => {
     const op = findOperator(n.operatorId);
@@ -404,6 +417,7 @@ export function serializeGraph(
   return {
     name: meta.name,
     mode: meta.mode ?? "batch",
+    ...(meta.engine && meta.engine !== "local" ? { engine: meta.engine } : {}),
     // `graph` is an extra key on PipelineConfigJson (index signature allows it).
     graph: { nodes, edges },
   } as PipelineConfigJson;

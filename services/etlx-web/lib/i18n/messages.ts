@@ -379,6 +379,13 @@ export const en = {
   "graph.switchToLinear": "Switch to linear",
   "graph.convertConfirm":
     "Convert this pipeline to a free-form graph? You can branch at any node. (Call-pipeline nodes are dropped.)",
+  "engine.label": "Engine",
+  "engine.help":
+    "Local = in-process row streaming (dev/small). Spark = distributed/TB-scale (declarative transforms only).",
+  "engine.local": "Local",
+  "engine.spark": "Spark",
+  "engine.sparkUnsupported":
+    "These operators can't run on Spark: {ops}. Remove them or switch the engine to Local.",
 
   // runs list
   "runs.colReadWritten": "Read / Written",
@@ -852,6 +859,13 @@ export const ko: Messages = {
   "graph.switchToLinear": "선형으로 전환",
   "graph.convertConfirm":
     "이 파이프라인을 자유 그래프로 변환할까요? 어느 노드에서나 분기할 수 있습니다. (파이프라인 호출 노드는 제거됩니다.)",
+  "engine.label": "엔진",
+  "engine.help":
+    "Local = 인프로세스 행 스트리밍(개발·소규모). Spark = 분산/TB급(선언적 transform만).",
+  "engine.local": "로컬",
+  "engine.spark": "Spark",
+  "engine.sparkUnsupported":
+    "이 오퍼레이터는 Spark에서 실행할 수 없습니다: {ops}. 제거하거나 엔진을 로컬로 바꾸세요.",
 
   "runs.colReadWritten": "읽음 / 기록",
   "runs.emptyTitle": "아직 실행이 없습니다",

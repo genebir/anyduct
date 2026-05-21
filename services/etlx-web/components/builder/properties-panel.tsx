@@ -3,9 +3,10 @@
 import { useEffect, useState } from "react";
 import { ArrowLeftIcon, ArrowRightIcon, PlusIcon, XIcon } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import { findOperator, type FieldDef } from "@/lib/operators";
+import { findOperator, type FieldDef, type OperatorSpec } from "@/lib/operators";
 import type { ConnectionSummary } from "@/lib/api";
 import { TableBrowser, TableField } from "./table-picker";
+import { ColumnsField } from "./columns-field";
 import type { BuilderNode } from "@/lib/pipeline-config";
 import {
   buildExpr,
@@ -33,10 +34,53 @@ const FILTER_OP_LABEL: Record<FilterOp, keyof Messages> = {
   notEmpty: "builder.opNotEmpty",
 };
 
+/** Pull a table name out of a simple `... FROM <table> ...` SQL query so a
+ *  downstream column picker can introspect it. Returns undefined for queries
+ *  too complex to parse (joins/subqueries) — the picker then falls back to
+ *  free-text entry. */
+function parseTableFromQuery(query: unknown): string | undefined {
+  if (typeof query !== "string") return undefined;
+  const m = /\bfrom\s+([A-Za-z0-9_."`]+)/i.exec(query);
+  if (!m) return undefined;
+  return m[1].replace(/["`]/g, "");
+}
+
+/** Resolve the (connectionId, table) the column picker should introspect for
+ *  the selected node: the node's own table for sinks, the upstream source's
+ *  table for transforms. */
+function resolveColumnsContext(
+  op: OperatorSpec,
+  node: BuilderNode,
+  ownConnectionId: string | undefined,
+  nodes: BuilderNode[],
+  connections: ConnectionSummary[],
+): { connectionId?: string; table?: string } {
+  if (op.kind === "sink") {
+    return { connectionId: ownConnectionId, table: node.data.table as string | undefined };
+  }
+  if (op.kind !== "transform") return {};
+  const sourceNode = nodes.find((n) => findOperator(n.operatorId)?.kind === "source");
+  const sourceOp = sourceNode && findOperator(sourceNode.operatorId);
+  if (!sourceNode || !sourceOp) return {};
+  const connField = sourceOp.fields.find((f) => f.kind === "connection");
+  const connName = connField ? (sourceNode.data[connField.key] as string | undefined) : undefined;
+  const connId = connName
+    ? connections.find((c) => c.name === connName && c.type === sourceOp.connectorType)?.id
+    : undefined;
+  // MongoDB sources store the collection name directly in `query`; SQL sources
+  // need the table parsed out of the SELECT.
+  const table =
+    sourceOp.connectorType === "mongodb"
+      ? (sourceNode.data.query as string | undefined)
+      : parseTableFromQuery(sourceNode.data.query);
+  return { connectionId: connId, table };
+}
+
 export function PropertiesPanel({
   node,
   connections,
   workspaceId,
+  nodes = [],
   pipelines = [],
   onChange,
   transformIndex = -1,
@@ -47,6 +91,9 @@ export function PropertiesPanel({
   connections: ConnectionSummary[];
   /** Workspace id — needed for connection introspection (table pickers). */
   workspaceId?: string;
+  /** All nodes in the linear pipeline — used to resolve the upstream source's
+   *  table so downstream transforms can introspect its columns. */
+  nodes?: BuilderNode[];
   /** Other pipelines in the workspace — for the call-pipeline target picker. */
   pipelines?: { id: string; name: string }[];
   onChange: (id: string, values: Record<string, unknown>) => void;
@@ -80,6 +127,14 @@ export function PropertiesPanel({
   const selectedConnectionId = selectedConnName
     ? matchingConnections.find((c) => c.name === selectedConnName)?.id
     : undefined;
+
+  const columnsCtx = resolveColumnsContext(
+    op,
+    node,
+    selectedConnectionId,
+    nodes,
+    connections,
+  );
 
   return (
     <aside className="flex w-80 shrink-0 flex-col gap-4 overflow-y-auto border-l border-border-subtle bg-surface px-4 py-5">
@@ -133,6 +188,8 @@ export function PropertiesPanel({
             pipelines={pipelines}
             workspaceId={workspaceId}
             connectionId={selectedConnectionId}
+            columnsConnectionId={columnsCtx.connectionId}
+            columnsTable={columnsCtx.table}
             t={t}
             onChange={(v) =>
               onChange(node.id, { ...node.data, [field.key]: v })
@@ -151,6 +208,8 @@ function FieldEditor({
   pipelines,
   workspaceId,
   connectionId,
+  columnsConnectionId,
+  columnsTable,
   onChange,
   t,
 }: {
@@ -160,6 +219,8 @@ function FieldEditor({
   pipelines: { id: string; name: string }[];
   workspaceId?: string;
   connectionId?: string;
+  columnsConnectionId?: string;
+  columnsTable?: string;
   onChange: (v: unknown) => void;
   t: Translate;
 }) {
@@ -182,6 +243,8 @@ function FieldEditor({
         pipelines={pipelines}
         workspaceId={workspaceId}
         connectionId={connectionId}
+        columnsConnectionId={columnsConnectionId}
+        columnsTable={columnsTable}
         onChange={onChange}
         t={t}
       />
@@ -201,6 +264,8 @@ function FieldInput({
   pipelines,
   workspaceId,
   connectionId,
+  columnsConnectionId,
+  columnsTable,
   onChange,
   t,
 }: {
@@ -210,6 +275,8 @@ function FieldInput({
   pipelines: { id: string; name: string }[];
   workspaceId?: string;
   connectionId?: string;
+  columnsConnectionId?: string;
+  columnsTable?: string;
   onChange: (v: unknown) => void;
   t: Translate;
 }) {
@@ -294,6 +361,18 @@ function FieldInput({
           if (v === "") onChange(undefined);
           else onChange(Number(v));
         }}
+      />
+    );
+  }
+  if (field.kind === "columns") {
+    return (
+      <ColumnsField
+        value={value}
+        workspaceId={workspaceId}
+        connectionId={columnsConnectionId}
+        table={columnsTable}
+        onChange={onChange}
+        t={t}
       />
     );
   }

@@ -73,6 +73,13 @@ export type FieldDef =
       placeholder?: string;
     })
   | (FieldBase & {
+      // A list of column names. Renders a checklist of introspected columns
+      // (ADR-0033) — upstream source columns for transforms, the sink table's
+      // own columns for upsert keys — plus free-text add. Serializes to a
+      // string[], identical wire shape to the old raw-JSON array field.
+      kind: "columns";
+    })
+  | (FieldBase & {
       kind: "connection";
     })
   | (FieldBase & {
@@ -369,10 +376,9 @@ const TRANSFORMS: OperatorSpec[] = [
       {
         key: "columns",
         label: "Columns to keep",
-        kind: "json",
+        kind: "columns",
         required: true,
-        placeholder: '["id", "name"]',
-        help: "JSON array of column names to keep.",
+        help: "Tick the upstream columns to keep, or add by name.",
       },
     ],
   },
@@ -388,10 +394,9 @@ const TRANSFORMS: OperatorSpec[] = [
       {
         key: "columns",
         label: "Columns to drop",
-        kind: "json",
+        kind: "columns",
         required: true,
-        placeholder: '["secret", "_internal"]',
-        help: "JSON array of column names to remove.",
+        help: "Tick the upstream columns to remove, or add by name.",
       },
     ],
   },
@@ -432,10 +437,9 @@ const TRANSFORMS: OperatorSpec[] = [
       {
         key: "key_columns",
         label: "Key columns",
-        kind: "json",
+        kind: "columns",
         required: true,
-        placeholder: '["id"]',
-        help: "JSON array — records with a repeated key tuple are dropped.",
+        help: "Records with a repeated key tuple are dropped.",
       },
     ],
   },
@@ -485,9 +489,8 @@ const SINKS: OperatorSpec[] = [
       {
         key: "key_columns",
         label: "Key columns",
-        kind: "json",
-        placeholder: '["id"]',
-        help: "Required for upsert mode.",
+        kind: "columns",
+        help: "Required for upsert mode. Ticks the destination table's columns.",
       },
     ],
   },
@@ -512,7 +515,7 @@ const SINKS: OperatorSpec[] = [
           { label: "upsert", value: "upsert" },
         ],
       },
-      { key: "key_columns", label: "Key columns", kind: "json" },
+      { key: "key_columns", label: "Key columns", kind: "columns" },
     ],
   },
   {

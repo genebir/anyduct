@@ -466,6 +466,7 @@ export default function PipelineEditorPage() {
               <PropertiesPanel
                 node={selectedNode}
                 connections={connections}
+                workspaceId={ws?.id}
                 pipelines={allPipelines}
                 onChange={updateNode}
                 transformIndex={selectedTransformIndex}

@@ -357,6 +357,14 @@ export const connectionsApi = {
       `/workspaces/${workspaceId}/connections/${id}/test`,
       { method: "POST" },
     ),
+  tables: (workspaceId: string, id: string) =>
+    api<{ tables: string[] }>(
+      `/workspaces/${workspaceId}/connections/${id}/tables`,
+    ),
+  columns: (workspaceId: string, id: string, table: string) =>
+    api<{ table: string; columns: { name: string; type: string }[] }>(
+      `/workspaces/${workspaceId}/connections/${id}/columns?table=${encodeURIComponent(table)}`,
+    ),
 };
 
 export const pipelinesApi = {

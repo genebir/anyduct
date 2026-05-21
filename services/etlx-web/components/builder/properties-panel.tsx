@@ -5,6 +5,7 @@ import { ArrowLeftIcon, ArrowRightIcon, PlusIcon, XIcon } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { findOperator, type FieldDef } from "@/lib/operators";
 import type { ConnectionSummary } from "@/lib/api";
+import { TableBrowser, TableField } from "./table-picker";
 import type { BuilderNode } from "@/lib/pipeline-config";
 import {
   buildExpr,
@@ -35,6 +36,7 @@ const FILTER_OP_LABEL: Record<FilterOp, keyof Messages> = {
 export function PropertiesPanel({
   node,
   connections,
+  workspaceId,
   pipelines = [],
   onChange,
   transformIndex = -1,
@@ -43,6 +45,8 @@ export function PropertiesPanel({
 }: {
   node: BuilderNode | null;
   connections: ConnectionSummary[];
+  /** Workspace id — needed for connection introspection (table pickers). */
+  workspaceId?: string;
   /** Other pipelines in the workspace — for the call-pipeline target picker. */
   pipelines?: { id: string; name: string }[];
   onChange: (id: string, values: Record<string, unknown>) => void;
@@ -66,6 +70,16 @@ export function PropertiesPanel({
     op.kind === "source" || op.kind === "sink"
       ? connections.filter((c) => c.type === op.connectorType)
       : [];
+
+  // Resolve the node's selected connection (stored by name) to its id so
+  // table-picker fields can introspect it (ADR-0033).
+  const connectionField = op.fields.find((f) => f.kind === "connection");
+  const selectedConnName = connectionField
+    ? (node.data[connectionField.key] as string | undefined)
+    : undefined;
+  const selectedConnectionId = selectedConnName
+    ? matchingConnections.find((c) => c.name === selectedConnName)?.id
+    : undefined;
 
   return (
     <aside className="flex w-80 shrink-0 flex-col gap-4 overflow-y-auto border-l border-border-subtle bg-surface px-4 py-5">
@@ -117,6 +131,8 @@ export function PropertiesPanel({
             value={node.data[field.key]}
             connections={matchingConnections}
             pipelines={pipelines}
+            workspaceId={workspaceId}
+            connectionId={selectedConnectionId}
             t={t}
             onChange={(v) =>
               onChange(node.id, { ...node.data, [field.key]: v })
@@ -133,6 +149,8 @@ function FieldEditor({
   value,
   connections,
   pipelines,
+  workspaceId,
+  connectionId,
   onChange,
   t,
 }: {
@@ -140,6 +158,8 @@ function FieldEditor({
   value: unknown;
   connections: ConnectionSummary[];
   pipelines: { id: string; name: string }[];
+  workspaceId?: string;
+  connectionId?: string;
   onChange: (v: unknown) => void;
   t: Translate;
 }) {
@@ -160,6 +180,8 @@ function FieldEditor({
         value={value}
         connections={connections}
         pipelines={pipelines}
+        workspaceId={workspaceId}
+        connectionId={connectionId}
         onChange={onChange}
         t={t}
       />
@@ -177,6 +199,8 @@ function FieldInput({
   value,
   connections,
   pipelines,
+  workspaceId,
+  connectionId,
   onChange,
   t,
 }: {
@@ -184,6 +208,8 @@ function FieldInput({
   value: unknown;
   connections: ConnectionSummary[];
   pipelines: { id: string; name: string }[];
+  workspaceId?: string;
+  connectionId?: string;
   onChange: (v: unknown) => void;
   t: Translate;
 }) {
@@ -227,6 +253,18 @@ function FieldInput({
           </option>
         ))}
       </select>
+    );
+  }
+  if (field.kind === "table") {
+    return (
+      <TableField
+        value={value}
+        placeholder={field.placeholder}
+        workspaceId={workspaceId}
+        connectionId={connectionId}
+        onChange={onChange}
+        t={t}
+      />
     );
   }
   if (field.kind === "select") {
@@ -275,18 +313,28 @@ function FieldInput({
   if (field.kind === "filter") {
     return <FilterEditor value={value} onChange={onChange} t={t} />;
   }
-  if (field.multiline) {
+  if (field.kind === "string" && field.multiline) {
     return (
-      <textarea
-        rows={4}
-        value={(value as string) ?? ""}
-        placeholder={field.placeholder}
-        onChange={(e) => onChange(e.target.value || undefined)}
-        className={cn(
-          "min-h-20 w-full rounded-md border border-border-subtle bg-elevated px-3 py-2 font-mono text-xs text-text",
-          "transition duration-200 focus-visible:border-accent focus-visible:outline-none",
-        )}
-      />
+      <div className="flex flex-col gap-2">
+        {field.tableHelper ? (
+          <TableBrowser
+            workspaceId={workspaceId}
+            connectionId={connectionId}
+            onPick={(table) => onChange(`SELECT * FROM ${table}`)}
+            t={t}
+          />
+        ) : null}
+        <textarea
+          rows={4}
+          value={(value as string) ?? ""}
+          placeholder={field.placeholder}
+          onChange={(e) => onChange(e.target.value || undefined)}
+          className={cn(
+            "min-h-20 w-full rounded-md border border-border-subtle bg-elevated px-3 py-2 font-mono text-xs text-text",
+            "transition duration-200 focus-visible:border-accent focus-visible:outline-none",
+          )}
+        />
+      </div>
     );
   }
   return (

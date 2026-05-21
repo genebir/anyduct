@@ -30,6 +30,7 @@
   - 서버 14 worker + spark gated 통과, mypy strict 76 OK, ruff OK.
   - 남은 것: P3.4b 외부 클러스터 잡 submit(thin worker, spark-submit/Databricks) — 실 클러스터 필요.
 - **빌더 UI 엔진 선택 (P3.5)** [ADR-0031] — 빌더 헤더에 엔진 select(Local/Spark). `PipelineConfigJson.engine` + `serialize`/`serializeGraph`가 spark일 때 `engine` emit, 로드 시 복원. `isSparkUnsupported`(현재 `python` transform)로 Spark에서 못 도는 노드를 상단 경고 배너로 표시(엔진=spark일 때). i18n `engine.*`(en/ko). 웹 typecheck OK.
+- **Spark 워커 배포 이미지 + 문서** [ADR-0031/0032] — `services/etlx-server/Dockerfile.worker`(기존 server 이미지 + OpenJDK17 JRE + `[spark]` extra). pyspark가 Spark jar를 포함해 시스템 의존성은 JRE 하나; JDBC 드라이버는 `spark.jars.packages` 자동 fetch(최소 설정). etlx-server `[project.optional-dependencies] spark`. `docker-compose.prod.yml`에 `etlx-spark-worker`(`--profile spark`, 기본 `local[*]`, `--spark-master`로 클러스터). `DEVELOPMENT.md §10`에 빌드/실행/시크릿/제약/air-gapped 정리. ⚠️ 이미지 빌드는 이 환경에서 미검증(설계/문서).
 - **Dataflow DAG — 레코드 단위 그래프 실행 + 어느 노드에서나 분기 (P2.1+P2.2)** [ADR-0030] — "자유 순서 + 모든 작업에서 분기".
   - 코어: `PipelineConfig.graph`(세 번째 상호배타 shape) = `GraphNodeConfig`(source/transform/sink) + `GraphEdgeConfig`(from_node/to_node/`when`). 검증: 단일 source, 비-source 노드 incoming edge 1개(tree, fan-in 미지원), sink≥1, id 유일. `Task.graph_nodes/graph_edges` + `_run_graph_task`(sink별 source 재읽기 + source→sink 유일 경로 재생, edge `when`으로 분기). batch 전용, cursor/stream 미지원. public export `GraphConfig`/`GraphNode`/`GraphEdge`.
   - 서버: `referenced_connection_names`가 graph 노드 순회. config_json 자동 round-trip. 워커가 graph task 그대로 실행(sqlite 분기 e2e 검증).

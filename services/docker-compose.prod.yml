@@ -99,6 +99,26 @@ services:
       disable: true
     restart: unless-stopped
 
+  # Spark-engine worker (ADR-0031/0032). Separate image (Dockerfile.worker)
+  # bundling a JRE + pyspark; runs pipelines with engine="spark". Disabled by
+  # default (heavier image); enable with `--profile spark`. Set --spark-master
+  # to point at a cluster (default local[*] = bundled single node).
+  etlx-spark-worker:
+    profiles: ["spark"]
+    build:
+      context: ..
+      dockerfile: services/etlx-server/Dockerfile.worker
+    image: etlx-worker:prod
+    depends_on:
+      etlx-migrate:
+        condition: service_completed_successfully
+    environment: *server-env
+    command:
+      ["etlx-server", "worker", "run", "--log-flush-interval", "2.0", "--spark-master", "local[*]"]
+    healthcheck:
+      disable: true
+    restart: unless-stopped
+
   etlx-scheduler:
     <<: *server-build
     depends_on:

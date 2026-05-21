@@ -230,6 +230,14 @@ def _build_graph_task(
 ) -> Task:
     """Build a dataflow-graph :class:`Task` from a :class:`GraphConfig` (ADR-0030)."""
     label = f"pipeline {pipeline_name!r} graph"
+    # ADR-0041 (G1) generalized GraphConfig to multi-source + join (fan-in).
+    # This re-read engine only runs single-source trees; the materialize engine
+    # that executes joins/multi-source lands in G2. Fail fast with a clear
+    # message until then rather than silently mis-running a relaxed graph.
+    if sum(1 for n in graph.nodes if n.type == "source") > 1:
+        raise ConfigError(f"{label}: multi-source graphs need the materialize engine (ADR-0041 G2)")
+    if any(n.type == "join" for n in graph.nodes):
+        raise ConfigError(f"{label}: join nodes need the materialize engine (ADR-0041 G2)")
     # Sinks that reuse a source connection get a dedicated instance so the
     # streaming read + write don't deadlock on one shared connection.
     source_names = {n.connection for n in graph.nodes if n.type == "source" and n.connection}

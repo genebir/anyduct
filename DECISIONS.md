@@ -1306,4 +1306,39 @@ ADR 본문이 P1.3에 남겨둔 미해결 포인트 "record-task 시스템에서
 
 ---
 
+## ADR-0041: 파이프라인 전면 개선 — graph-first 통합 DAG + 노드 머티리얼라이즈 + 노드 레벨 PG 스케줄링 + 커스텀 operator + 컬럼 리니지
+
+- **Date**: 2026-05-21
+- **Status**: Accepted (방향 합의 완료; 구현은 Phase G1부터 단계적)
+- **Builds on**: ADR-0028(task-DAG) · ADR-0030(dataflow graph) · ADR-0021(PG worker queue) · ADR-0036(asset/lineage) · ADR-0040(Spark 제거 — 단순화된 출발점)
+- **Context**:
+  Spark 제거(ADR-0040)로 데크를 정리한 뒤, 사용자가 지정한 "pipeline 전면 개선 — 오케스트레이션 위주"([[ultimate-vision]]: Airflow + Dagster)의 본 작업. 요건: ①graph로 파이프라인 구성 전면화 ②강제 source/sink 아닌 자유 구성 ③커스텀 operator(커넥션 템플릿 + Python IDE) ④데이터 리니지 ⑤테이블+컬럼 리니지 ⑥부가기능 ⑦의존성/검증 점검. 현재 한계: dataflow graph(ADR-0030)가 **단일 source·트리 강제**(fan-in 금지)·batch 전용·cursor 미지원, linear/task-DAG/graph 3모델 공존, 리니지는 테이블 레벨·SQL 파싱은 정규식 첫 FROM뿐, 브라우저 코드 에디터 0, 병렬은 "1 run=파이프라인 전체" 단위.
+- **Decision** (사용자와 fork별 합의):
+  1. **단일 graph DAG로 모델 통합** — operator=노드, data 엣지(+ 선택적 trigger rule). linear/task-DAG/기존 graph는 normalizer로 흡수해 **하위호환** 유지(기존 config 그대로 로드/실행).
+  2. **노드 머티리얼라이즈 실행** — 각 노드가 staging 타깃에 출력하고 downstream이 읽는다. fan-in/join/다중 source를 가능케 하고(메모리 바운드 스트리밍 깨짐 문제 해소), 노드별 retry·idempotency·리니지 경계가 자연스러워짐(Airflow/dbt식). 순수 인-메모리 스트리밍은 단일 노드 내부로 국한.
+  3. **노드 레벨 PG 스케줄링(병렬)** — ADR-0021의 PG worker queue를 **노드 단위**로 확장(`node_runs` + depends_on, `FOR UPDATE SKIP LOCKED` 멀티 워커). 독립 노드는 워커들이 병렬 claim. **Celery/브로커 도입 안 함** — 이미 수평확장되는 PG 큐가 있고, Spark 제거로 단순화한 직후 브로커 추가는 역행. control plane(메타 Postgres) ↔ data plane(커넥터, 임의 DB)은 분리되어 큐 백엔드와 파이프라인이 만지는 DB는 무관.
+  4. **커스텀 operator** — 커넥션 종류별 템플릿(이미 connector-schemas 존재) + 브라우저 Python IDE(Monaco/CodeMirror, FieldDef `pythonCode` 신설, 서버 `custom_python` operator). **보안: 신뢰 모델(인프로세스 실행) + RBAC 게이트(Editor+만 코드 작성, audit) + 단일 실행 seam**(`run_custom_transform`)으로 향후 샌드박스 교체 가능. 현 `python` transform이 이미 임의 코드 인프로세스 실행이라 위협 모델 불변. 멀티테넌트/외부 사용자로 트러스트 경계 바뀌면 샌드박스(subprocess/seccomp/gVisor) 필수 — seam에서 교체.
+  5. **컬럼 리니지(하이브리드)** — 테이블 레벨(기존) 유지 + 컬럼 레벨 신설. **선언적 transform(rename/cast/select/drop/add_constant)이 컬럼 매핑을 이미 인코딩** → SQL 파싱 없이 공짜. SQL 노드는 **sqlglot**로 컬럼 의존 추출, `python`/임의 코드는 불투명 passthrough. 코어 컬럼 모델 + `asset_columns`/`column_lineage_edges` 스키마 + API + 웹 drill-down.
+- **단계(각 = 단일 슬라이스 PR)**:
+  - **G** graph-first 통합 코어: G1 통합 config 모델(트리 제약 해제·join 노드·normalizer, 검증만) → G2 노드 머티리얼라이즈 실행 엔진(위상 실행·hash join) → G3 stateful operator 추상화(N입력→1출력).
+  - **H** 노드 레벨 오케스트레이션: H1 `node_runs` 스키마+repo → H2 스케줄러 노드 enqueue + 워커 노드 claim(병렬·retry/heartbeat/reaper 재사용) → H3 노드별 리니지 훅 + Run 상세 DAG 뷰.
+  - **I** 빌더: I1 자유구성 캔버스(트리 제약 해제·join UI) → I2 커스텀 op + Python IDE + 서버 custom_python + RBAC/audit.
+  - **J** 컬럼 리니지: J1 sqlglot + `derive_column_lineage` + 코어 모델 → J2 스키마+API → J3 웹 drill-down.
+  - **K** 부가(#6, 추후 스코프): graph 백필(다중source cursor) · OpenLineage export(Marquez/DataHub) · 데이터 품질/assertion operator · 센서.
+- **검증/리스크(요건 #7)**:
+  - **메모리 모델**: join/fan-in은 머티리얼라이즈로 해결(스트리밍 보장은 노드 내부로 한정).
+  - **하위호환**: 기존 linear/task-DAG/graph 파이프라인 무중단 — normalizer + 좁은 PoC 우선(ADR-0024 "모델 오설계 비용" 경고 준수).
+  - **기존 ADR 상호작용**: 멱등성(ADR-0035, staging swap/MERGE와 정합) · 동일연결 데드락(ADR-0034, 다중 source/sink 증폭 주의) · cursor/backfill(ADR-0039, 다중 source 백필 의미는 Phase K) · stream 모드(graph는 batch, stream 적용은 후속).
+  - **stateless 한계**: `TransformFn=Record→Record` → G3에서 N입력 operator로 확장.
+  - **웹**: 신규 컴포넌트 Storybook story + a11y AA + DESIGN 토큰 강제. Monaco 번들 비용(에디터 라우트 first-load JS 예산).
+  - **DB 카디널리티**: 컬럼 리니지 고카디널리티 → 인덱싱 설계.
+- **Consequences**:
+  - (+) 실행 모델이 진짜 DAG로 — 자유 구성·다중 source·join·노드 병렬. ultimate-vision(Airflow+Dagster)에 직결.
+  - (+) 노드 머티리얼라이즈로 retry/리니지/관측이 노드 단위로 정밀해짐.
+  - (−) 머티리얼라이즈는 staging I/O 비용 + 임시 객체 정리 필요. 순수 스트리밍 대비 오버헤드.
+  - (−) 큰 변경 — 다슬라이스·다세션. 각 슬라이스 단위 PR + 테스트로 리스크 분산.
+- **관련**: [[ultimate-vision]] · [[pipeline-overhaul-intent]] · [[dag-direction]]
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

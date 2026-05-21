@@ -481,6 +481,17 @@
 #### Phase 3 — ~~TB급/분산 실행: ExecutionBackend + Spark/Databricks pushdown~~ — **제거됨 (ADR-0040, 2026-05-21)**
 > Spark 백엔드 + `ExecutionBackend` 추상화 + `PipelineConfig.engine`(P3.1~P3.5)은 ADR-0040에서 전부 제거됐다. 오케스트레이션 축([[ultimate-vision]]) 집중을 위해 분산 컴퓨트 경로를 걷어내고 실행 모델을 **로컬 인프로세스 단일 경로**로 단순화. 미구현이던 P3.4b(외부 클러스터 submit)도 함께 폐기. 재도입 필요 시 새 ADR로. 과거 구현은 git 히스토리 + ADR-0031/0032 참조.
 
+#### 파이프라인 전면 개선 — graph-first 통합 DAG (ADR-0041, 2026-05-21~) ← 작업 중
+> 사용자 요건: ①graph 전면화 ②자유 구성(강제 source/sink 탈피) ③커스텀 operator(커넥션 템플릿+Python IDE) ④데이터 리니지 ⑤테이블+컬럼 리니지 ⑥부가 ⑦의존성 점검. fork 합의: 단일 graph 통합 / 노드 머티리얼라이즈 실행 / 노드 레벨 PG 스케줄링(Celery X) / 커스텀 op 신뢰모델+RBAC+샌드박스 seam / 컬럼리니지 하이브리드(선언transform+sqlglot). ADR-0041.
+- **Phase G — graph-first 통합 코어**:
+  - [x] **G1 통합 graph config 모델 + 정규화기** ✅ (2026-05-21) — `GraphConfig`를 다중 source + `join` 노드(fan-in, indegree≥2) 허용으로 일반화 + 사이클(Kahn) 검출, 트리 그래프는 그대로 통과(하위호환). `runtime/graph.py` `to_graph()`(single-task→graph 로워링, sink `when`→edge, graph 그대로, task-DAG는 Phase H deferral) + `topological_order()`. 빌더 가드: 다중source/join은 머티리얼라이즈 엔진(G2) 전까지 fail-fast. 코어 564 unit green.
+  - [ ] **G2 노드 머티리얼라이즈 실행 엔진** — 각 노드가 staging 출력, downstream이 읽음. 위상 실행 + hash join. sqlite 다중source+join e2e.
+  - [ ] **G3 stateful operator 추상화** — join/aggregate/window(N입력→1출력), `Record→Record` 한계 확장.
+- **Phase H — 노드 레벨 오케스트레이션(병렬)**: H1 `node_runs` 스키마+repo → H2 스케줄러 노드 enqueue + 워커 노드 claim(SKIP LOCKED 병렬, retry/heartbeat/reaper 재사용) → H3 노드별 리니지 훅 + Run 상세 DAG 뷰.
+- **Phase I — 빌더 UX + 커스텀 op**: I1 자유구성 캔버스(트리 제약 해제·join UI) → I2 커스텀 operator + Python IDE(Monaco) + 서버 `custom_python` + RBAC/audit.
+- **Phase J — 컬럼 리니지**: J1 sqlglot + `derive_column_lineage`(하이브리드) + 코어 모델 → J2 `asset_columns`/`column_lineage_edges` 스키마+API → J3 웹 drill-down.
+- **Phase K — 부가(#6)**: graph 백필(다중source cursor) · OpenLineage export · 데이터 품질/assertion operator · 센서.
+
 ### 10.5 Schedule + Run 모니터링 (← 작업 중, 2026-05-18 Schedule CRUD + Run 상세까지 완료)
 - [x] Run 목록 (Data Table, StatusBadge, 5s polling) — `/w/[slug]/runs`. Row 클릭 시 상세 페이지로 이동.
 - [x] Schedule 목록 — `/w/[slug]/schedules` (across pipelines flattened, cron/mode 표시).

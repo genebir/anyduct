@@ -9,6 +9,13 @@
 
 ## [Unreleased]
 
+### Added
+- **graph-first 통합 DAG 모델 — G1 (파이프라인 전면 개선 시작)** [ADR-0041] — linear/task-DAG/dataflow-graph 3모델을 단일 `GraphConfig`로 통합하는 첫 슬라이스. 검증/정규화만(실행 변경 0).
+  - `GraphConfig` 일반화: 다중 source + `join` 노드(fan-in, indegree≥2) 허용, source(indegree 0)/transform·sink(indegree 1)/join(≥2) 규칙 + 사이클(Kahn) 검출. 기존 단일-source 트리 그래프는 그대로 통과(하위호환). `GraphNodeConfig`에 `join` 타입 + `on`/`how` 필드 + 노드 타입/how 검증.
+  - `etl_plugins/runtime/graph.py` 신설: `to_graph(cfg)` — single-task를 `source→transform*→sink+`로 lower(sink `when` 라우팅→edge predicate), graph는 그대로, task-DAG는 Phase H로 deferral(NotImplementedError). `topological_order(graph)`(Kahn). `etl_plugins.runtime`에서 export.
+  - 빌더 가드: `_build_graph_task`가 다중source/join 그래프를 받으면 "materialize engine (ADR-0041 G2)"로 fail-fast — 구 re-read 엔진이 조용히 오작동하지 않도록. 기존 트리 그래프 실행은 무변경.
+  - 검증: 신규 `tests/unit/runtime/test_graph.py` + `test_pipeline_graph.py` 갱신(다중source/join/사이클/lowering/가드). 코어 564 unit + 3 skip green, ruff/mypy(52) OK, 서버 graph 빌드 회귀 통과.
+
 ### Removed
 - **Spark 실행 백엔드 + ExecutionBackend 추상화 전면 제거** [ADR-0040, supersedes ADR-0031/0032] — 오케스트레이션 축([[ultimate-vision]]: Airflow + Dagster) 집중을 위해 분산 컴퓨트 경로를 걷어내고 실행 모델을 **로컬 인프로세스 단일 경로**(linear / task-DAG / dataflow graph)로 단순화.
   - 코어: `etl_plugins/runtime/spark/`(backend.py/predicate.py) + `runtime/backends.py`(`ExecutionBackend` ABC·레지스트리·`LocalBackend`·`run_config`) 삭제. `PipelineConfig.engine` 필드 제거 — 단 `extra="forbid"` 호환 위해 `model_validator(mode="before")`로 저장된 config의 legacy `engine` 키를 흘려보냄(값 무시).

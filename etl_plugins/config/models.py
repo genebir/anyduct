@@ -191,12 +191,19 @@ class TaskConfig(BaseModel):
         return [self.sink] if self.sink is not None else self.sinks
 
 
-class GraphNodeConfig(BaseModel):
-    """One node in a dataflow graph (ADR-0030).
+GRAPH_NODE_TYPES = frozenset({"source", "transform", "sink", "join"})
+JOIN_HOWS = frozenset({"inner", "left", "right", "outer"})
 
-    ``type`` is ``source`` | ``transform`` | ``sink``. Source/sink carry their
-    connector fields (``extra=allow`` for connector-specific options); a
-    transform nests a :class:`TransformConfig` under ``transform``.
+
+class GraphNodeConfig(BaseModel):
+    """One node in a dataflow graph (ADR-0030, generalized in ADR-0041).
+
+    ``type`` is ``source`` | ``transform`` | ``sink`` | ``join``. Source/sink
+    carry their connector fields (``extra=allow`` for connector-specific
+    options); a ``transform`` nests a :class:`TransformConfig` under
+    ``transform``; a ``join`` is a fan-in node (≥2 incoming edges) that merges
+    its inputs on ``on`` keys with the ``how`` strategy. Join *execution* lands
+    with the materialize engine (ADR-0041, G2/G3); G1 only models + validates it.
     """
 
     model_config = ConfigDict(extra="allow")
@@ -211,6 +218,22 @@ class GraphNodeConfig(BaseModel):
     key_columns: list[str] | None = None  # sink
     # transform
     transform: TransformConfig | None = None
+    # join (fan-in) — merge ≥2 inputs on ``on`` keys (ADR-0041)
+    on: list[str] | None = None
+    how: str = "inner"
+
+    @model_validator(mode="after")
+    def _check_node(self) -> GraphNodeConfig:
+        if self.type not in GRAPH_NODE_TYPES:
+            raise ValueError(
+                f"graph node {self.id!r}: unknown type {self.type!r} "
+                f"(allowed: {sorted(GRAPH_NODE_TYPES)})"
+            )
+        if self.type == "join" and self.how not in JOIN_HOWS:
+            raise ValueError(
+                f"join node {self.id!r}: unknown how {self.how!r} (allowed: {sorted(JOIN_HOWS)})"
+            )
+        return self
 
 
 class GraphEdgeConfig(BaseModel):
@@ -229,11 +252,20 @@ class GraphEdgeConfig(BaseModel):
 
 
 class GraphConfig(BaseModel):
-    """A dataflow graph: nodes + edges (ADR-0030).
+    """A dataflow graph: nodes + edges (ADR-0030, generalized in ADR-0041).
 
-    v1 is a source-rooted tree (one source, branching/fan-out, no fan-in), so
-    every non-source node has exactly one incoming edge and each sink has a
-    unique path back to the source.
+    The unified pipeline model — every shape lowers into one of these
+    (see :func:`etl_plugins.runtime.graph.to_graph`). A free DAG:
+
+    * ≥1 ``source`` (indegree 0) and ≥1 ``sink`` (indegree 1);
+    * ``transform`` nodes have exactly one incoming edge;
+    * ``join`` nodes are the fan-in points (≥2 incoming edges);
+    * the graph is acyclic.
+
+    Fan-in only happens at an explicit ``join`` node, so a regular transform's
+    semantics stay unambiguous (one input stream). Multi-source + join
+    *execution* lands with the materialize engine (ADR-0041, G2); G1 validates
+    the shape so the model and builder can be built against it first.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -249,25 +281,51 @@ class GraphConfig(BaseModel):
         id_set = set(ids)
         sources = [n for n in self.nodes if n.type == "source"]
         sinks = [n for n in self.nodes if n.type == "sink"]
-        if len(sources) != 1:
-            raise ValueError("graph must have exactly one source node (v1)")
+        if not sources:
+            raise ValueError("graph must have at least one source node")
         if not sinks:
             raise ValueError("graph must have at least one sink node")
+
         indegree: dict[str, int] = dict.fromkeys(ids, 0)
+        adjacency: dict[str, list[str]] = {i: [] for i in ids}
         for e in self.edges:
             if e.from_node not in id_set or e.to_node not in id_set:
                 raise ValueError(f"edge references unknown node: {e.from_node}→{e.to_node}")
             indegree[e.to_node] += 1
+            adjacency[e.from_node].append(e.to_node)
+
         for n in self.nodes:
+            deg = indegree[n.id]
             if n.type == "source":
-                if indegree[n.id] != 0:
+                if deg != 0:
                     raise ValueError(f"source node {n.id!r} must have no incoming edges")
-            elif indegree[n.id] != 1:
-                # tree invariant — fan-in/joins are out of scope for v1
+            elif n.type == "join":
+                if deg < 2:
+                    raise ValueError(
+                        f"join node {n.id!r} must have at least two incoming edges "
+                        f"(got {deg}); use a transform/sink for single-input nodes"
+                    )
+            elif deg != 1:
+                # transform / sink take exactly one input stream — fan-in goes
+                # through an explicit ``join`` node so semantics stay unambiguous.
                 raise ValueError(
-                    f"node {n.id!r} must have exactly one incoming edge "
-                    f"(got {indegree[n.id]}); fan-in is not supported yet"
+                    f"node {n.id!r} ({n.type}) must have exactly one incoming edge "
+                    f"(got {deg}); merge multiple inputs with a 'join' node"
                 )
+
+        # Acyclic (Kahn) — fan-in makes cycles possible, so detect them.
+        remaining = dict(indegree)
+        queue = [i for i, d in remaining.items() if d == 0]
+        visited = 0
+        while queue:
+            cur = queue.pop()
+            visited += 1
+            for nxt in adjacency[cur]:
+                remaining[nxt] -= 1
+                if remaining[nxt] == 0:
+                    queue.append(nxt)
+        if visited != len(ids):
+            raise ValueError("graph has a cycle")
         return self
 
 

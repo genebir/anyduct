@@ -115,22 +115,29 @@ def _node(id: str, type: str, **kw: object) -> dict:
     return {"id": id, "type": type, **kw}
 
 
-def test_graph_config_requires_single_source() -> None:
-    with pytest.raises(ValueError, match="exactly one source"):
-        GraphConfig.model_validate(
-            {
-                "nodes": [
-                    _node("s1", "source", connection="a"),
-                    _node("s2", "source", connection="b"),
-                    _node("k", "sink", connection="c"),
-                ],
-                "edges": [{"from_node": "s1", "to_node": "k"}],
-            }
-        )
+def test_graph_config_allows_multi_source_via_join() -> None:
+    # ADR-0041: multiple sources converging at a join node is now a valid shape.
+    GraphConfig.model_validate(
+        {
+            "nodes": [
+                _node("s1", "source", connection="a"),
+                _node("s2", "source", connection="b"),
+                _node("j", "join", on=["id"]),
+                _node("k", "sink", connection="c"),
+            ],
+            "edges": [
+                {"from_node": "s1", "to_node": "j"},
+                {"from_node": "s2", "to_node": "j"},
+                {"from_node": "j", "to_node": "k"},
+            ],
+        }
+    )
 
 
-def test_graph_config_rejects_fan_in() -> None:
-    with pytest.raises(ValueError, match="exactly one incoming edge"):
+def test_graph_config_rejects_fan_in_without_join() -> None:
+    # Fan-in into a transform/sink (not a join) is still rejected — merge must
+    # go through an explicit join node so single-input semantics stay clear.
+    with pytest.raises(ValueError, match="join"):
         GraphConfig.model_validate(
             {
                 "nodes": [

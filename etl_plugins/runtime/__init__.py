@@ -10,6 +10,7 @@ from etl_plugins.runtime.builder import (
     build_pipeline,
     build_pipeline_from_yaml,
 )
+from etl_plugins.runtime.graph import to_graph, topological_order
 from etl_plugins.runtime.runner import arun_stream_pipeline_yaml, run_pipeline_yaml
 from etl_plugins.runtime.transforms import (
     BuiltinTransform,
@@ -27,4 +28,6 @@ __all__ = [
     "build_transform",
     "register_transform",
     "run_pipeline_yaml",
+    "to_graph",
+    "topological_order",
 ]

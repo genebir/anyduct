@@ -39,6 +39,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from etl_plugins.config.models import ConnectionConfig, PipelineConfig
 from etl_plugins.config.secrets import SecretBackend
+from etl_plugins.core.asset import AssetLineage
 from etl_plugins.core.connector import Connector
 from etl_plugins.core.context import Context
 from etl_plugins.core.exceptions import ConfigError, RegistryError, SecretError
@@ -198,11 +199,14 @@ class RunExecutor:
                             records_written=result.records_written,
                             duration_seconds=result.duration_seconds,
                         )
-                        # Lineage (ADR-0036, Phase B): record the assets this
-                        # run materialized + their edges. Best-effort — a
-                        # catalog hiccup must not flip a successful run to
-                        # failed, so failures are logged and swallowed.
-                        await self._persist_lineage(session, run, version, result, log)
+                        # Lineage (ADR-0036/0037): record the assets this run
+                        # materialized + edges, then auto-trigger downstream
+                        # pipelines that consume them. Best-effort — a catalog
+                        # hiccup must not flip a successful run to failed.
+                        lineage = self._lineage_for(version, log)
+                        if lineage is not None:
+                            await self._persist_lineage(session, run, result, lineage, log)
+                            await self._trigger_asset_consumers(session, run, lineage, log)
                         # Call-pipeline (ADR-0029): enqueue downstream pipelines
                         # on success, fire-and-forget. Same transaction as the
                         # success write so it's all-or-nothing.
@@ -227,24 +231,32 @@ class RunExecutor:
                 finally:
                     current_run_id.reset(ctx_token)
 
+    def _lineage_for(self, version: PipelineVersion, log: Any) -> AssetLineage | None:
+        """Derive the run's static asset lineage from config. ``None`` on any
+        parse/derive error (best-effort — lineage never fails a run)."""
+        from etl_plugins.runtime.lineage import derive_lineage
+
+        try:
+            return derive_lineage(PipelineConfig.model_validate(version.config_json))
+        except Exception as e:
+            log.warning("run.lineage_derive_failed", error_class=type(e).__name__, error=str(e))
+            return None
+
     async def _persist_lineage(
         self,
         session: AsyncSession,
         run: Run,
-        version: PipelineVersion,
         result: RunResult,
+        lineage: AssetLineage,
         log: Any,
     ) -> None:
-        """Record the run's derived asset lineage + a materialization per output
+        """Record the run's assets + edges + a materialization per output
         (ADR-0036). Best-effort: never fails the run."""
-        from etl_plugins.runtime.lineage import derive_lineage
         from etlx_server.assets.repository import AssetRepository
 
+        if not lineage.inputs and not lineage.outputs:
+            return
         try:
-            cfg = PipelineConfig.model_validate(version.config_json)
-            lineage = derive_lineage(cfg)
-            if not lineage.inputs and not lineage.outputs:
-                return
             await AssetRepository(session).persist_run_lineage(
                 workspace_id=run.workspace_id,
                 run_id=run.id,
@@ -253,6 +265,84 @@ class RunExecutor:
             )
         except Exception as e:
             log.warning("run.lineage_persist_failed", error_class=type(e).__name__, error=str(e))
+
+    async def _trigger_asset_consumers(
+        self, session: AsyncSession, run: Run, lineage: AssetLineage, log: Any
+    ) -> None:
+        """Auto-enqueue runs of opt-in pipelines whose inputs match the assets
+        this run just materialized (ADR-0037 — asset-driven orchestration).
+
+        Only batch pipelines with ``auto_materialize: true`` in their current
+        version are considered. A ``trigger_chain`` on ``result_json`` breaks
+        cycles (a pipeline already upstream in this lineage isn't re-enqueued)
+        and a depth cap bounds runaway fan. Best-effort — never fails the run.
+        """
+        from etl_plugins.runtime.lineage import derive_lineage
+
+        output_keys = {str(k) for k in lineage.outputs}
+        if not output_keys:
+            return
+        prior_chain = list((run.result_json or {}).get("trigger_chain") or [])
+        if len(prior_chain) >= _MAX_TRIGGER_CHAIN:
+            log.warning("run.trigger_chain_capped", depth=len(prior_chain))
+            return
+        new_chain = [*prior_chain, str(run.pipeline_id)]
+
+        try:
+            rows = (
+                await session.execute(
+                    select(
+                        Pipeline.id,
+                        Pipeline.workspace_id,
+                        PipelineVersion.id,
+                        PipelineVersion.config_json,
+                    )
+                    .join(PipelineVersion, PipelineVersion.pipeline_id == Pipeline.id)
+                    .where(
+                        Pipeline.workspace_id == run.workspace_id,
+                        PipelineVersion.is_current.is_(True),
+                    )
+                )
+            ).all()
+        except Exception as e:
+            log.warning("run.asset_trigger_failed", error_class=type(e).__name__, error=str(e))
+            return
+
+        for pipeline_id, ws_id, version_id, config_json in rows:
+            if str(pipeline_id) in new_chain:
+                continue  # cycle, or the pipeline that just ran
+            cfg_dict = config_json or {}
+            if not cfg_dict.get("auto_materialize"):
+                continue
+            try:
+                cfg = PipelineConfig.model_validate(cfg_dict)
+            except ValidationError:
+                continue
+            if cfg.mode != PipelineMode.BATCH.value:
+                continue  # stream pipelines aren't driven by the runs queue
+            matched = {str(k) for k in derive_lineage(cfg).inputs} & output_keys
+            if not matched:
+                continue
+            session.add(
+                Run(
+                    workspace_id=ws_id,
+                    pipeline_id=pipeline_id,
+                    pipeline_version_id=version_id,
+                    schedule_id=None,
+                    triggered_by_user_id=None,
+                    status=RunStatus.PENDING,
+                    result_json={
+                        "triggered_by_run": str(run.id),
+                        "trigger_chain": new_chain,
+                        "triggered_by_assets": sorted(matched),
+                    },
+                )
+            )
+            log.info(
+                "run.triggered_by_asset",
+                target_pipeline_id=str(pipeline_id),
+                assets=sorted(matched),
+            )
 
     async def _trigger_downstream(self, session: AsyncSession, run: Run, log: Any) -> None:
         """Enqueue runs of pipelines this one triggers on success (ADR-0029).

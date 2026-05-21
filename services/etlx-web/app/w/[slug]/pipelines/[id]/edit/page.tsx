@@ -68,6 +68,7 @@ export default function PipelineEditorPage() {
   const [mode, setMode] = useState<"linear" | "graph">("linear");
   const [graphState, setGraphState] = useState<GraphBuilderState | null>(null);
   const [engine, setEngine] = useState<Engine>("local");
+  const [autoMaterialize, setAutoMaterialize] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [dryRunning, setDryRunning] = useState(false);
@@ -92,6 +93,7 @@ export default function PipelineEditorPage() {
         setAllPipelines(pipelines.filter((x) => x.id !== id));
         const cfg = p.current_config_json as PipelineConfigJson | null;
         setEngine((cfg?.engine as Engine) === "spark" ? "spark" : "local");
+        setAutoMaterialize(Boolean(cfg?.auto_materialize));
         // Graph pipelines (ADR-0030) open in the free-form graph editor.
         if (isGraphConfig(cfg)) {
           if (cancelled) return;
@@ -260,14 +262,24 @@ export default function PipelineEditorPage() {
           toast.error(issues[0]);
           return;
         }
-        const config = serializeGraph(graphState, { name: pipeline.name, mode: m, engine });
+        const config = serializeGraph(graphState, {
+          name: pipeline.name,
+          mode: m,
+          engine,
+          auto_materialize: autoMaterialize,
+        });
         const updated = await pipelinesApi.update(ws.id, pipeline.id, { config });
         setPipeline(updated);
         setDirty(false);
         toast.success(t("builder.saved", { version: updated.current_version ?? "?" }));
         return;
       }
-      const config = serialize(state, { name: pipeline.name, mode: m, engine });
+      const config = serialize(state, {
+        name: pipeline.name,
+        mode: m,
+        engine,
+        auto_materialize: autoMaterialize,
+      });
       const updated = await pipelinesApi.update(ws.id, pipeline.id, { config });
       // Call-pipeline nodes live outside config_json (ADR-0029) — persist them
       // as downstream triggers. Best-effort so a pending `0003` migration
@@ -285,7 +297,7 @@ export default function PipelineEditorPage() {
     } finally {
       setSaving(false);
     }
-  }, [ws, pipeline, state, mode, graphState, engine, t]);
+  }, [ws, pipeline, state, mode, graphState, engine, autoMaterialize, t]);
 
   const setEngineDirty = useCallback((next: Engine) => {
     setEngine(next);
@@ -382,6 +394,21 @@ export default function PipelineEditorPage() {
                 <option value="local">{t("engine.local")}</option>
                 <option value="spark">{t("engine.spark")}</option>
               </select>
+            </label>
+            <label
+              className="flex items-center gap-1.5 text-xs text-text-secondary"
+              title={t("autoMat.help")}
+            >
+              <input
+                type="checkbox"
+                checked={autoMaterialize}
+                onChange={(e) => {
+                  setAutoMaterialize(e.target.checked);
+                  setDirty(true);
+                }}
+                className="accent-[rgb(var(--accent))]"
+              />
+              <span className="text-text-muted">{t("autoMat.label")}</span>
             </label>
             {mode === "linear" ? (
               <Button

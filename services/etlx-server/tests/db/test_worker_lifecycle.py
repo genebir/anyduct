@@ -382,6 +382,60 @@ async def test_executor_triggers_downstream_on_success(
     assert triggered[0].triggered_by_user_id is None
 
 
+async def test_executor_asset_triggers_consumer(session: AsyncSession, tmp_path: Path) -> None:
+    """Materializing dst/out auto-triggers an opt-in pipeline that reads it
+    (ADR-0037) — but not one without auto_materialize."""
+    db_path = _prepare_sqlite_fixture(tmp_path)
+    ws = await _seed_workspace(session, slug="we-asset")
+    await _seed_connection(session, workspace_id=ws.id, name="src", config={"database": db_path})
+    await _seed_connection(session, workspace_id=ws.id, name="dst", config={"database": db_path})
+
+    # A: seed → dst.out (the asset that gets materialized).
+    a_cfg = {
+        "name": "a",
+        "source": {"connection": "src", "query": "SELECT id, name FROM seed"},
+        "sink": {"connection": "dst", "table": "out", "mode": "append"},
+    }
+    a, a_v = await _seed_pipeline(session, workspace_id=ws.id, name="a", config=a_cfg)
+
+    # B: reads dst.out, opt-in → should be auto-triggered.
+    b_cfg = {
+        "name": "b",
+        "auto_materialize": True,
+        "source": {"connection": "dst", "query": "SELECT id FROM out"},
+        "sink": {"connection": "dst", "table": "out2", "mode": "append"},
+    }
+    b, _b_v = await _seed_pipeline(session, workspace_id=ws.id, name="b", config=b_cfg)
+
+    # C: reads dst.out but NOT opt-in → must stay untriggered.
+    c_cfg = {
+        "name": "c",
+        "source": {"connection": "dst", "query": "SELECT id FROM out"},
+        "sink": {"connection": "dst", "table": "out3", "mode": "append"},
+    }
+    c, _c_v = await _seed_pipeline(session, workspace_id=ws.id, name="c", config=c_cfg)
+
+    run = await _seed_pending_run(
+        session, workspace_id=ws.id, pipeline_id=a.id, pipeline_version_id=a_v.id
+    )
+    claimed = await claim_pending_run(session, worker_id="worker-A")
+    assert claimed is not None
+    await session.commit()
+
+    await RunExecutor(
+        _SessionFactoryAdapter(session), StaticSecretBackend(), worker_id="worker-A"
+    ).execute(run.id)
+
+    b_runs = (await session.execute(select(Run).where(Run.pipeline_id == b.id))).scalars().all()
+    assert len(b_runs) == 1
+    assert b_runs[0].status == RunStatus.PENDING
+    assert "dst/out" in b_runs[0].result_json["triggered_by_assets"]
+    assert b_runs[0].result_json["trigger_chain"] == [str(a.id)]
+
+    c_runs = (await session.execute(select(Run).where(Run.pipeline_id == c.id))).scalars().all()
+    assert len(c_runs) == 0  # not opt-in
+
+
 async def test_executor_trigger_cycle_is_broken(session: AsyncSession, tmp_path: Path) -> None:
     """A target already in the trigger chain is not re-enqueued (cycle guard)."""
     db_path = _prepare_sqlite_fixture(tmp_path)

@@ -410,6 +410,9 @@ export const en = {
   "engine.spark": "Spark",
   "engine.sparkUnsupported":
     "These operators can't run on Spark: {ops}. Remove them or switch the engine to Local.",
+  "autoMat.label": "Auto-materialize",
+  "autoMat.help":
+    "Auto-run this pipeline whenever an upstream run writes one of the tables it reads (asset-driven; no cron needed).",
   "graph.streamNoGraph": "Graph mode is batch-only; stream pipelines stay linear.",
   "graph.invalid": "Graph can't be saved yet: {issue}",
 
@@ -942,6 +945,9 @@ export const ko: Messages = {
   "engine.spark": "Spark",
   "engine.sparkUnsupported":
     "이 오퍼레이터는 Spark에서 실행할 수 없습니다: {ops}. 제거하거나 엔진을 로컬로 바꾸세요.",
+  "autoMat.label": "자동 생성",
+  "autoMat.help":
+    "이 파이프라인이 읽는 테이블을 상류 실행이 쓰면 자동으로 실행합니다 (asset 기반, 크론 불필요).",
   "graph.streamNoGraph": "그래프 모드는 배치 전용입니다. 스트림 파이프라인은 선형으로 유지됩니다.",
   "graph.invalid": "아직 저장할 수 없습니다: {issue}",
 

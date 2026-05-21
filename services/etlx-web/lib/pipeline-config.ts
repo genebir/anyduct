@@ -59,6 +59,9 @@ export interface PipelineConfigJson {
   // Execution backend (ADR-0031). "local" = row-streaming (default); "spark"
   // compiles the DAG to Spark for distributed/TB-scale runs.
   engine?: Engine;
+  // Asset-driven orchestration (ADR-0037). Auto-run when an upstream run
+  // materializes one of this pipeline's input assets.
+  auto_materialize?: boolean;
   // Single-task shape. Optional so DAG/graph configs (which omit the top-level
   // source) still type-check.
   source?: { connection: string; [k: string]: unknown };
@@ -149,7 +152,7 @@ export function isSparkUnsupported(operatorId: string): boolean {
 
 export function serialize(
   state: BuilderState,
-  meta: { name: string; mode?: "batch" | "stream"; engine?: Engine },
+  meta: { name: string; mode?: "batch" | "stream"; engine?: Engine; auto_materialize?: boolean },
 ): PipelineConfigJson {
   const sorted = reorderNodes(state.nodes);
   const source = sorted.find(
@@ -167,6 +170,7 @@ export function serialize(
     name: meta.name,
     mode: meta.mode ?? "batch",
     ...(meta.engine && meta.engine !== "local" ? { engine: meta.engine } : {}),
+    ...(meta.auto_materialize ? { auto_materialize: true } : {}),
     source: {
       connection: "",
       ...source.data,
@@ -416,7 +420,7 @@ export function validateGraph(state: GraphBuilderState): string[] {
 
 export function serializeGraph(
   state: GraphBuilderState,
-  meta: { name: string; mode?: "batch" | "stream"; engine?: Engine },
+  meta: { name: string; mode?: "batch" | "stream"; engine?: Engine; auto_materialize?: boolean },
 ): PipelineConfigJson {
   const nodes = state.nodes.map((n) => {
     const op = findOperator(n.operatorId);
@@ -444,6 +448,7 @@ export function serializeGraph(
     name: meta.name,
     mode: meta.mode ?? "batch",
     ...(meta.engine && meta.engine !== "local" ? { engine: meta.engine } : {}),
+    ...(meta.auto_materialize ? { auto_materialize: true } : {}),
     // `graph` is an extra key on PipelineConfigJson (index signature allows it).
     graph: { nodes, edges },
   } as PipelineConfigJson;

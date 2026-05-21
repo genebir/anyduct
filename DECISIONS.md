@@ -1212,4 +1212,28 @@ ADR 본문이 P1.3에 남겨둔 미해결 포인트 "record-task 시스템에서
 
 ---
 
+## ADR-0037: Asset-driven 오케스트레이션 — auto-materialize (Airflow Dataset × Dagster)
+
+- **Date**: 2026-05-21
+- **Status**: Accepted
+- **Context**:
+  궁극 목표(Airflow 오케스트레이션 + Dagster 리니지)의 정점은 **리니지가 오케스트레이션을 구동**하는 것 — upstream asset이 새로 만들어지면 그걸 읽는 downstream 파이프라인이 자동 실행(= Dagster auto-materialize / Airflow Dataset trigger). A/B/C에서 asset 모델·리니지·카탈로그를 갖췄으니, 이제 "asset X가 materialize되면 X를 읽는 파이프라인을 큐에 넣는다"를 구현. 기존 call-pipeline(ADR-0029, 명시적 pipeline→pipeline 링크)을 **asset 의존**으로 일반화한 것.
+- **Decision**:
+  1. **Opt-in** — `PipelineConfig.auto_materialize: bool`(기본 false). 자동이면 "테이블 쓸 때마다 그걸 읽는 모든 파이프라인이 실행"되는 폭주/서프라이즈가 생기므로 명시적 opt-in. 코어는 이 플래그를 무시(서비스 전용 동작).
+  2. **트리거 시점 = run 성공 직후**(워커 `_trigger_asset_consumers`). materialize된 output asset 키들을 구해, **워크스페이스 내 current 버전이 그 키를 input으로 갖고 `auto_materialize:true`인 batch 파이프라인**을 찾아 PENDING Run enqueue. lineage 영속화(B2)와 같은 트랜잭션.
+  3. **키 일치가 핵심** — source 키와 sink 키가 같은 테이블을 가리켜야 매칭됨. 그래서 ADR-0036의 derived 규칙을 보강(D1a): SQL source 쿼리에서 `FROM <table>`을 파싱해 `(connection, table)`로 키잉 → `SELECT … FROM orders` source가 `orders` sink와 같은 키. 워크스페이스 스코프 + 연결명 유니크라 안전.
+  4. **사이클·폭주 가드** — 기존 `trigger_chain`(result_json) 재사용: 체인에 이미 있는 파이프라인은 재enqueue 안 함(A→B→A 차단), `_MAX_TRIGGER_CHAIN` 깊이 캡. stream 파이프라인 제외(runs 큐가 아닌 stream worker가 처리). self 제외.
+  5. **정적 스캔(현 버전)** — 트리거 시 워크스페이스 파이프라인들의 current config를 `derive_lineage`로 그때그때 매칭. O(pipelines)이지만 단순·항상 정확. 인덱스 테이블(asset→consuming pipelines)은 규모 커지면 후속(E).
+  6. **빌더 UI** — 헤더에 "Auto-materialize" 체크박스 → config_json `auto_materialize` emit/restore.
+- **Consequences**:
+  - (+) cron 없이 **데이터 흐름대로 자동 실행** — raw 적재 → staging → mart가 키 일치로 자동 연쇄. Airflow Dataset/Dagster SDA의 핵심 UX.
+  - (+) 기존 worker-queue·trigger_chain·lineage 인프라 재사용, 코어 변경 최소(플래그 1개).
+  - (+) opt-in이라 안전 — 켠 파이프라인만 자동 실행.
+  - (−) 정적 스캔은 파이프라인 많으면 run마다 비용↑(인덱스 테이블로 후속 최적화). 같은 microsecond 다중 트리거의 중복 enqueue 방지(같은 키로 여러 upstream)는 아직 — pending 중복 가드는 후속.
+  - (−) FROM 파싱은 첫 테이블만(JOIN/subquery 근사). 정확 매칭이 필요하면 명시적 asset 선언(AssetSpec deps) 경로가 후속.
+  - (−) freshness/센서(시간 기반 트리거)는 D2로 미룸. 지금은 "upstream 성공 시" 이벤트 기반만.
+- **관련**: ADR-0024/0036(asset/lineage) · ADR-0029(call-pipeline — asset 의존으로 일반화) · ADR-0021(worker queue) · [[ultimate-vision]]
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

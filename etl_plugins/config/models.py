@@ -288,6 +288,11 @@ class PipelineConfig(BaseModel):
     # compiles the DAG to Spark. Validated at run time by the backend registry
     # (config layer stays unaware of which backends exist).
     engine: str = "local"
+    # Asset-driven orchestration (ADR-0037). When true, the service auto-enqueues
+    # a run of this pipeline whenever an upstream run materializes one of its
+    # input assets (Dagster auto-materialize / Airflow Dataset trigger). Opt-in
+    # to avoid surprising cascades; the core ignores it (service-only behaviour).
+    auto_materialize: bool = False
     # --- single-task shape ---
     source: SourceConfig | None = None
     transforms: list[TransformConfig] = Field(default_factory=list)

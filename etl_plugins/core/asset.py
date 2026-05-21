@@ -21,13 +21,16 @@ stays a leaf the rest of the core can depend on. Backward compatible: existing
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
 # Fields a connector uses to name its target, in priority order. The first one
 # present on a source/sink config (or Task field set) is the asset's "target".
-_TARGET_PRIORITY = ("table", "topic", "key", "collection", "query")
+# ``query`` is last and special-cased (a SQL ``SELECT … FROM <table>`` keys to
+# the table so a query-source matches a table-sink — see ``_table_from_query``).
+_DIRECT_TARGET_FIELDS = ("table", "topic", "key", "collection")
 _KIND_BY_FIELD = {
     "table": "table",
     "topic": "topic",
@@ -35,6 +38,19 @@ _KIND_BY_FIELD = {
     "collection": "collection",
     "query": "query",
 }
+
+# Pull the first ``FROM <table>`` out of a simple SELECT so a query-based source
+# resolves to the same asset key as a table-based sink. JOIN/subquery queries
+# only catch the first table — approximate, but far better than keying on the
+# whole query string (which never matches anything downstream).
+_FROM_RE = re.compile(r"\bfrom\s+([A-Za-z0-9_.\"`]+)", re.IGNORECASE)
+
+
+def _table_from_query(query: str) -> str | None:
+    m = _FROM_RE.search(query)
+    if not m:
+        return None
+    return m.group(1).replace('"', "").replace("`", "")
 
 
 def derive_asset_key(connection: str | None, fields: Mapping[str, Any]) -> AssetKey | None:
@@ -44,19 +60,26 @@ def derive_asset_key(connection: str | None, fields: Mapping[str, Any]) -> Asset
     runtime emit. ``None`` connection ⇒ no asset."""
     if not connection:
         return None
-    for f in _TARGET_PRIORITY:
+    for f in _DIRECT_TARGET_FIELDS:
         v = fields.get(f)
         if isinstance(v, str) and v:
             return AssetKey.of(connection, v)
+    q = fields.get("query")
+    if isinstance(q, str) and q:
+        # SQL source → key on the FROM table (matches a sink's table key);
+        # a non-SQL "query" (e.g. a Mongo collection name) falls back to itself.
+        return AssetKey.of(connection, _table_from_query(q) or q)
     return AssetKey.of(connection)
 
 
 def asset_kind(fields: Mapping[str, Any]) -> str | None:
     """The asset 'kind' label (table/topic/object/...) for a field set."""
-    for f in _TARGET_PRIORITY:
+    for f in _DIRECT_TARGET_FIELDS:
         v = fields.get(f)
         if isinstance(v, str) and v:
             return _KIND_BY_FIELD[f]
+    if isinstance(fields.get("query"), str) and fields["query"]:
+        return "table"
     return None
 
 

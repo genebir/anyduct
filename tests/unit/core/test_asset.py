@@ -80,11 +80,34 @@ def test_derive_lineage_single_task() -> None:
         }
     )
     lin = derive_lineage(cfg)
-    src_key = AssetKey.of("src", "SELECT * FROM public.orders")
+    # A SQL source keys to its FROM table so it matches a table-based sink.
+    src_key = AssetKey.of("src", "public.orders")
     dst_key = AssetKey.of("dst", "public.orders_copy")
     assert lin.inputs == [src_key]
     assert lin.outputs == [dst_key]
     assert lin.edges == [LineageEdge(src_key, dst_key)]
+
+
+def test_derive_lineage_query_without_from_falls_back() -> None:
+    cfg = PipelineConfig.model_validate(
+        {
+            "name": "p",
+            "source": {"connection": "mongo", "query": "users"},  # collection, no FROM
+            "sink": {"connection": "dst", "table": "out", "mode": "append"},
+        }
+    )
+    lin = derive_lineage(cfg)
+    assert lin.inputs == [AssetKey.of("mongo", "users")]
+
+
+def test_source_query_key_matches_sink_table_key() -> None:
+    """The whole point of FROM-parsing: a pipeline reading `SELECT * FROM orders`
+    produces the same key a sink writing to `orders` does — so lineage links."""
+    from etl_plugins.core.asset import derive_asset_key
+
+    src = derive_asset_key("wh", {"query": "SELECT a, b FROM orders WHERE x > 1"})
+    sink = derive_asset_key("wh", {"table": "orders"})
+    assert src == sink == AssetKey.of("wh", "orders")
 
 
 def test_derive_lineage_prefers_table_over_query() -> None:

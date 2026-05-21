@@ -8,6 +8,7 @@ from etlx_server.db.models.asset import Asset, AssetEdge, AssetMaterialization
 from etlx_server.db.models.audit import AuditLog
 from etlx_server.db.models.connection import Connection
 from etlx_server.db.models.cursor import Cursor
+from etlx_server.db.models.node_run import NodeRun
 from etlx_server.db.models.pipeline import (
     Pipeline,
     PipelineTrigger,
@@ -30,6 +31,7 @@ __all__ = [
     "Connection",
     "Cursor",
     "Membership",
+    "NodeRun",
     "PersonalAccessToken",
     "Pipeline",
     "PipelineTrigger",

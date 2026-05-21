@@ -20,7 +20,11 @@
   - `etl_plugins/runtime/lineage.py` `derive_lineage(cfg)`: run 없이 정적 파생, single-task/Task-DAG/dataflow graph 모든 shape. **크로스-파이프라인 리니지는 AssetKey 일치로 자동 연결**. backward compatible(기존 Pipeline/Connector 무변경).
   - 검증: +12 unit(키/그래프/파생 — fanout·graph·kafka/s3 포함), 555 green, mypy/ruff OK.
   - **A2 — 런타임 lineage emit**: `etl_plugins/observability/lineage.py`(`LineageEvent`·`LineageEmitter` ABC·`NoOpLineageEmitter` 기본·`CollectingLineageEmitter`·get/set/reset, metrics와 동일 글로벌 패턴). `Pipeline.run`이 START/COMPLETE/FAIL emit(record counts/error 포함), `Pipeline.lineage()`가 Task에서 derived 키 산출(연결 분리 `::sink` 정규화). 기본 NoOp이라 비용 0·의존 0. OpenLineage 와이어 백엔드는 Phase E로 이연. +4 unit(559 green).
-  - **A3 — Catalog read API**: `etl_plugins/catalog.py` `Catalog`(`list_assets`/`get_asset`/`lineage(key)`) on `AssetGraph`. `AssetNode`·`AssetLineageView`(direct+transitive). `from_lineages`/`add_spec`/`set_kind`. in-memory(서비스 DB-backed은 Phase B). +5 unit(564 green). 다음: B 메타DB 영속화 → C 웹 리니지 그래프 → D asset-aware 오케스트레이션.
+  - **A3 — Catalog read API**: `etl_plugins/catalog.py` `Catalog`(`list_assets`/`get_asset`/`lineage(key)`) on `AssetGraph`. `AssetNode`·`AssetLineageView`(direct+transitive). `from_lineages`/`add_spec`/`set_kind`. in-memory(서비스 DB-backed은 Phase B). +5 unit(564 green).
+  - **B — 서비스 메타DB 영속화 + 카탈로그 REST**:
+    - **B1**: `assets`/`asset_edges`/`asset_materializations` 테이블(Alembic 0004) + ORM + `AssetRepository.persist_run_lineage`(멱등 upsert, output당 materialization, 워크스페이스 스코프, 키 공유로 크로스-파이프라인 자동 연결). +4 it.
+    - **B2**: `RunExecutor`가 성공 run 후 `derive_lineage(cfg)`로 assets/edges/materialization 기록(같은 트랜잭션, best-effort — 실패해도 run은 succeeded). +1 it.
+    - **B3**: 카탈로그 REST(Viewer+) — `GET /workspaces/{ws}/assets` · `/{id}/lineage`(upstream/downstream) · `/{id}/materializations`. asset은 uuid id로 주소(키의 `/` 회피). +3 it. 다음: C 웹 카탈로그+리니지 그래프 → D asset-aware 오케스트레이션.
 - **멱등성 — "Run SQL (before load)" transform** [ADR-0035] — 적재 전에 SQL 한 줄(예: `DELETE`)을 실행해 delete-then-insert로 재실행 시 중복을 없앰.
   - **코어**: 옵셔널 capability `SqlExecutor`(`execute_statement`) — RDBMS 3종 구현. `Task.pre_sql: list[SqlAction]` + `Pipeline._run_pre_sql`이 **읽기 전 1회씩** 실행(레코드 0건이어도 보장). `build_pipeline`이 `type:"sql_exec"` transform을 per-record 체인에서 분리해 `pre_sql`로 적재. `referenced_connection_names`에 sql_exec 연결 포함.
   - **웹**: transform 팔레트에 "Run SQL (before load)"(connection + SQL textarea, `anyConnection`으로 전체 연결 노출). "Database" 카테고리.

@@ -164,6 +164,45 @@ class ConnectionTestResult(BaseModel):
     error: str | None = None
 
 
+class AssetSummary(BaseModel):
+    """One row of ``GET /workspaces/{ws}/assets`` (ADR-0036)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    asset_key: str
+    kind: str | None = None
+    last_materialized_at: datetime | None = None
+
+
+class AssetRef(BaseModel):
+    """A neighbouring asset in a lineage response."""
+
+    id: UUID
+    asset_key: str
+    kind: str | None = None
+
+
+class AssetLineageResponse(BaseModel):
+    """Response from ``GET /workspaces/{ws}/assets/{id}/lineage`` — direct
+    upstream + downstream neighbours."""
+
+    id: UUID
+    asset_key: str
+    upstream: list[AssetRef]
+    downstream: list[AssetRef]
+
+
+class AssetMaterializationEntry(BaseModel):
+    """One row of ``GET /workspaces/{ws}/assets/{id}/materializations``."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    run_id: UUID | None = None
+    records_written: int
+    materialized_at: datetime
+
+
 class ConnectionTablesResult(BaseModel):
     """Response from ``GET /connections/{id}/tables`` (ADR-0033)."""
 

@@ -7,11 +7,15 @@
 #
 # 사용:
 #     ./start.sh                # 전부 시작 (docker + migrate + server + worker + reaper + web)
+#     ./start.sh --restart      # 먼저 stop.sh로 전부 내린 뒤 새로 띄움 (코드 변경 반영)
 #     ./start.sh --no-web       # 웹 dev 서버는 건너뛰기
 #     ./start.sh --no-worker    # worker + reaper 건너뛰기 (server만)
 #     ./start.sh --no-docker    # docker compose / Alembic 건너뛰기
 #     ./start.sh --no-migrate   # docker는 띄우되 alembic upgrade는 생략
 #     ./start.sh --help
+#
+# 코드를 바꾼 뒤에는 ``--restart``를 써야 한다 — 기본 start.sh는 idempotent라
+# 이미 떠 있는 프로세스를 그대로 두므로(옛 코드가 계속 실행됨).
 #
 # 무엇을 하는가:
 #   1. docker compose up -d              (--no-docker 면 생략)
@@ -50,13 +54,15 @@ START_WEB=1
 START_DOCKER=1
 RUN_MIGRATE=1
 START_WORKER=1
+RESTART=0
 while [ $# -gt 0 ]; do
     case "$1" in
+        --restart)    RESTART=1 ;;
         --no-web)     START_WEB=0 ;;
         --no-worker)  START_WORKER=0 ;;
         --no-docker)  START_DOCKER=0; RUN_MIGRATE=0 ;;
         --no-migrate) RUN_MIGRATE=0 ;;
-        -h|--help)    sed -n '2,30p' "$0"; exit 0 ;;
+        -h|--help)    sed -n '2,34p' "$0"; exit 0 ;;
         *) log_error "unknown argument: $1"; exit 2 ;;
     esac
     shift
@@ -65,6 +71,13 @@ done
 # ----- 리포 루트로 이동 ------------------------------------------------------
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 cd "$SCRIPT_DIR"
+
+# --restart: tear everything down first so the idempotent checks below spawn
+# fresh processes with the current code (a plain start.sh skips running ones).
+if [ "$RESTART" -eq 1 ]; then
+    log_info "restart: stopping existing processes first"
+    "$SCRIPT_DIR/stop.sh" || true
+fi
 
 RUN_DIR=".run"
 LOG_DIR="$RUN_DIR/logs"

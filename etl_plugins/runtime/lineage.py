@@ -14,54 +14,16 @@ and the builder can show lineage before anything executes. Runtime emit
 
 from __future__ import annotations
 
-from typing import Any
-
 from etl_plugins.config.models import PipelineConfig, SinkConfig, SourceConfig
-from etl_plugins.core.asset import AssetKey, AssetLineage, LineageEdge
-
-# Fields a connector uses to name its target, in priority order. The first one
-# present on a source/sink config is the asset's "target" part of the key.
-_TARGET_FIELDS = ("table", "topic", "key", "collection", "query")
-
-# target field → asset kind label (informational, for the catalog).
-_KIND_BY_FIELD = {
-    "table": "table",
-    "topic": "topic",
-    "key": "object",
-    "collection": "collection",
-    "query": "query",
-}
-
-
-def _target_and_kind(cfg_dict: dict[str, Any]) -> tuple[str | None, str | None]:
-    for f in _TARGET_FIELDS:
-        v = cfg_dict.get(f)
-        if isinstance(v, str) and v:
-            return v, _KIND_BY_FIELD[f]
-    return None, None
-
-
-def _asset_key(connection: str | None, cfg_dict: dict[str, Any]) -> AssetKey | None:
-    if not connection:
-        return None
-    target, _kind = _target_and_kind(cfg_dict)
-    # No explicit target (e.g. a source query with no table) → key on the
-    # connection alone so the asset is still tracked, just coarse-grained.
-    return AssetKey.of(connection, target) if target else AssetKey.of(connection)
-
-
-def asset_kind(connection: str | None, cfg_dict: dict[str, Any]) -> str | None:
-    """The asset 'kind' label for a source/sink config (table/topic/...)."""
-    _target, kind = _target_and_kind(cfg_dict)
-    return kind
+from etl_plugins.core.asset import AssetKey, AssetLineage, LineageEdge, derive_asset_key
 
 
 def _source_key(src: SourceConfig) -> AssetKey | None:
-    return _asset_key(src.connection, src.model_dump())
+    return derive_asset_key(src.connection, src.model_dump())
 
 
 def _sink_key(snk: SinkConfig) -> AssetKey | None:
-    return _asset_key(snk.connection, snk.model_dump())
+    return derive_asset_key(snk.connection, snk.model_dump())
 
 
 def derive_lineage(cfg: PipelineConfig) -> AssetLineage:
@@ -98,12 +60,12 @@ def derive_lineage(cfg: PipelineConfig) -> AssetLineage:
         for node in cfg.graph.nodes:
             data = node.model_dump()
             if node.type == "source":
-                k = _asset_key(node.connection, data)
+                k = derive_asset_key(node.connection, data)
                 _add_in(k)
                 if k is not None:
                     src_keys.append(k)
             elif node.type == "sink":
-                k = _asset_key(node.connection, data)
+                k = derive_asset_key(node.connection, data)
                 _add_out(k)
                 # Tree-shaped graph (ADR-0030): every sink derives from the
                 # single source. Edge each source → each sink.
@@ -121,4 +83,4 @@ def derive_lineage(cfg: PipelineConfig) -> AssetLineage:
     return AssetLineage(inputs=inputs, outputs=outputs, edges=edges)
 
 
-__all__ = ["asset_kind", "derive_lineage"]
+__all__ = ["derive_lineage"]

@@ -21,7 +21,43 @@ stays a leaf the rest of the core can depend on. Backward compatible: existing
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
+from typing import Any
+
+# Fields a connector uses to name its target, in priority order. The first one
+# present on a source/sink config (or Task field set) is the asset's "target".
+_TARGET_PRIORITY = ("table", "topic", "key", "collection", "query")
+_KIND_BY_FIELD = {
+    "table": "table",
+    "topic": "topic",
+    "key": "object",
+    "collection": "collection",
+    "query": "query",
+}
+
+
+def derive_asset_key(connection: str | None, fields: Mapping[str, Any]) -> AssetKey | None:
+    """Derive an :class:`AssetKey` from a connection name + a source/sink field
+    set (config dict or Task options). The single source of truth for the
+    derived-first rule (ADR-0036), shared by static config derivation and
+    runtime emit. ``None`` connection ⇒ no asset."""
+    if not connection:
+        return None
+    for f in _TARGET_PRIORITY:
+        v = fields.get(f)
+        if isinstance(v, str) and v:
+            return AssetKey.of(connection, v)
+    return AssetKey.of(connection)
+
+
+def asset_kind(fields: Mapping[str, Any]) -> str | None:
+    """The asset 'kind' label (table/topic/object/...) for a field set."""
+    for f in _TARGET_PRIORITY:
+        v = fields.get(f)
+        if isinstance(v, str) and v:
+            return _KIND_BY_FIELD[f]
+    return None
 
 
 @dataclass(frozen=True)
@@ -149,4 +185,6 @@ __all__ = [
     "AssetLineage",
     "AssetSpec",
     "LineageEdge",
+    "asset_kind",
+    "derive_asset_key",
 ]

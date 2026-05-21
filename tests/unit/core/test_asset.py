@@ -157,3 +157,103 @@ def test_derive_lineage_kafka_topic_and_s3_key() -> None:
     lin = derive_lineage(cfg)
     assert lin.inputs == [AssetKey.of("kafka", "events")]
     assert lin.outputs == [AssetKey.of("lake", "exports/out.parquet")]
+
+
+# ---------- Pipeline.lineage() + runtime emit (A2) ----------
+
+
+def _idem_pipeline() -> object:
+    from etl_plugins.runtime.builder import build_pipeline
+    from tests.fixtures.connectors import InMemoryBatchSink, InMemoryBatchSource
+
+    pc = PipelineConfig.model_validate(
+        {
+            "name": "p",
+            "source": {"connection": "src", "table": "orders"},
+            "sink": {"connection": "dst", "table": "out", "mode": "append"},
+        }
+    )
+    return build_pipeline(pc, {"src": InMemoryBatchSource(), "dst": InMemoryBatchSink()})
+
+
+def test_pipeline_lineage_derives_from_tasks() -> None:
+    pipeline, _ = _idem_pipeline()
+    lin = pipeline.lineage()
+    assert lin.inputs == [AssetKey.of("src", "orders")]
+    assert lin.outputs == [AssetKey.of("dst", "out")]
+    assert lin.edges == [LineageEdge(AssetKey.of("src", "orders"), AssetKey.of("dst", "out"))]
+
+
+def test_pipeline_lineage_normalises_split_sink_key() -> None:
+    """A sink split to '<conn>::sink' (ADR-0034) reports the original conn."""
+    from etl_plugins.runtime.builder import build_pipeline
+    from tests.fixtures.connectors import InMemoryBatchSink
+
+    pc = PipelineConfig.model_validate(
+        {
+            "name": "p",
+            "source": {"connection": "db", "table": "orders"},
+            "sink": {"connection": "db", "table": "out", "mode": "append"},
+        }
+    )
+    pipeline, _ = build_pipeline(
+        pc, {"db": InMemoryBatchSink()}, connector_factory=lambda _n: InMemoryBatchSink()
+    )
+    lin = pipeline.lineage()
+    assert AssetKey.of("db", "out") in lin.outputs
+    assert all("::sink" not in str(k) for k in lin.outputs)
+
+
+def test_run_emits_start_and_complete() -> None:
+    from etl_plugins.observability.lineage import (
+        COMPLETE,
+        START,
+        CollectingLineageEmitter,
+        reset_lineage_emitter,
+        set_lineage_emitter,
+    )
+
+    pipeline, connectors = _idem_pipeline()
+    em = CollectingLineageEmitter()
+    set_lineage_emitter(em)
+    try:
+        for c in connectors.values():
+            c.connect()
+        pipeline.run(connectors=connectors)
+    finally:
+        for c in connectors.values():
+            c.close()
+        reset_lineage_emitter()
+
+    assert [e.event_type for e in em.events] == [START, COMPLETE]
+    assert em.events[0].inputs == (AssetKey.of("src", "orders"),)
+    assert em.events[0].outputs == (AssetKey.of("dst", "out"),)
+    assert em.events[1].records_read is not None
+
+
+def test_run_emits_fail_on_error() -> None:
+    from etl_plugins.core.exceptions import TaskError
+    from etl_plugins.observability.lineage import (
+        FAIL,
+        START,
+        CollectingLineageEmitter,
+        reset_lineage_emitter,
+        set_lineage_emitter,
+    )
+
+    pipeline, connectors = _idem_pipeline()
+    del connectors["dst"]  # force a load failure
+    em = CollectingLineageEmitter()
+    set_lineage_emitter(em)
+    try:
+        for c in connectors.values():
+            c.connect()
+        with pytest.raises(TaskError):
+            pipeline.run(connectors=connectors)
+    finally:
+        for c in connectors.values():
+            c.close()
+        reset_lineage_emitter()
+
+    assert [e.event_type for e in em.events] == [START, FAIL]
+    assert em.events[1].error is not None

@@ -195,10 +195,11 @@
 - [ ] (후속) 선언형 `AssetSpec` 등록 + Pipeline `materializes=[...]` 명시 경로 (지금은 derived만)
 - [ ] (후속) source query의 table 파싱 개선(`SELECT…JOIN` → 정확한 input 키)
 
-### 6.7 Lineage emit (OpenLineage) (A2) → v0.2.0 ← 다음 작업
-- [ ] `etl_plugins.observability.lineage` 모듈 + `openlineage-python>=1.0` (`[lineage]` extra)
-- [ ] `Pipeline.run` / `arun_stream`에서 RunEvent (START/COMPLETE/FAIL/ABORT) 자동 emit, derive_lineage 키 재사용
-- [ ] 백엔드: NoOp 기본 / Marquez / 우리 자체 Catalog API
+### 6.7 Lineage emit (A2) → v0.2.0 🔄 (emit 추상화+batch run 완료)
+- [x] `etl_plugins/observability/lineage.py` — `LineageEvent` + `LineageEmitter` ABC + `NoOpLineageEmitter`(기본) + `CollectingLineageEmitter` + get/set/reset (metrics와 동일 글로벌 패턴).
+- [x] `Pipeline.run`에서 START/COMPLETE/FAIL emit(records/error 포함) + `Pipeline.lineage()`(Task에서 derived 키, `::sink` 정규화). 기본 NoOp → 비용/의존 0.
+- [ ] `arun_stream` emit (stream START/COMPLETE) → 후속
+- [ ] OpenLineage 와이어 백엔드(`openlineage-python`, `[lineage]` extra) + Marquez → **Phase E**(export)로 이연. 자체 catalog/DB emitter(Phase B)가 우선.
 
 ### 6.8 Catalog API (core) (A3) → v0.2.0
 - [ ] `etl_plugins.catalog` — read-only API (`list_assets / get_asset / lineage(asset_name)`) on `AssetGraph`

@@ -15,6 +15,12 @@ from types import CodeType
 from typing import Any
 
 from etl_plugins.config.models import DlqConfig, RetryConfig
+from etl_plugins.core.asset import (
+    AssetKey,
+    AssetLineage,
+    LineageEdge,
+    derive_asset_key,
+)
 from etl_plugins.core.connector import (
     BatchSink,
     BatchSource,
@@ -27,6 +33,13 @@ from etl_plugins.core.cursor import CursorValue
 from etl_plugins.core.exceptions import PipelineError, TaskError, TransformError
 from etl_plugins.core.record import Record
 from etl_plugins.core.sql_exec import SqlExecutor
+from etl_plugins.observability.lineage import (
+    COMPLETE,
+    FAIL,
+    START,
+    LineageEvent,
+    get_lineage_emitter,
+)
 from etl_plugins.observability.metrics import (
     DURATION_SECONDS,
     ERRORS_TOTAL,
@@ -325,6 +338,61 @@ class Pipeline:
             raise PipelineError(f"dependency cycle detected among tasks: {remaining}")
         return [by_name[n] for n in ordered_names]
 
+    def lineage(self) -> AssetLineage:
+        """Derived-first lineage of this pipeline (ADR-0036): the input assets
+        (sources) and output assets (sinks), with ``input → output`` edges.
+        Connection-split sink keys (``name::sink``, ADR-0034) are normalised
+        back to the original connection so lineage isn't fragmented."""
+        inputs: list[AssetKey] = []
+        outputs: list[AssetKey] = []
+        edges: list[LineageEdge] = []
+        seen_in: set[AssetKey] = set()
+        seen_out: set[AssetKey] = set()
+        seen_edge: set[tuple[AssetKey, AssetKey]] = set()
+
+        def add_in(k: AssetKey | None) -> None:
+            if k is not None and k not in seen_in:
+                seen_in.add(k)
+                inputs.append(k)
+
+        def add_out(k: AssetKey | None) -> None:
+            if k is not None and k not in seen_out:
+                seen_out.add(k)
+                outputs.append(k)
+
+        def add_edge(u: AssetKey | None, d: AssetKey | None) -> None:
+            if u is not None and d is not None and (u, d) not in seen_edge:
+                seen_edge.add((u, d))
+                edges.append(LineageEdge(upstream=u, downstream=d))
+
+        def sink_key(spec: SinkSpec) -> AssetKey | None:
+            conn = spec.name.removesuffix("::sink") if spec.name else spec.name
+            return derive_asset_key(conn, {"table": spec.table, **spec.options})
+
+        for task in self.tasks:
+            if task.graph_nodes:
+                src_keys: list[AssetKey] = []
+                for n in task.graph_nodes:
+                    if n.kind == "source":
+                        k = derive_asset_key(n.source_name, {"query": n.query, **n.source_options})
+                        add_in(k)
+                        if k is not None:
+                            src_keys.append(k)
+                    elif n.kind == "sink" and n.sink is not None:
+                        k = sink_key(n.sink)
+                        add_out(k)
+                        for sk in src_keys:
+                            add_edge(sk, k)
+                continue
+            in_key = derive_asset_key(task.source, {"query": task.query, **task.source_options})
+            add_in(in_key)
+            for spec in task.effective_sinks():
+                out_key = sink_key(spec)
+                add_out(out_key)
+                add_edge(in_key, out_key)
+
+        return AssetLineage(inputs=inputs, outputs=outputs, edges=edges)
+
     def run(
         self,
         context: Context | None = None,
@@ -367,6 +435,22 @@ class Pipeline:
         task_runner = self._run_task
         if self.retry is not None:
             task_runner = retryable(**self._retry_kwargs())(task_runner)
+
+        # Lineage (ADR-0036): emit START now; COMPLETE/FAIL after the run. The
+        # default emitter is a no-op, so this is free unless a backend is set.
+        emitter = get_lineage_emitter()
+        lin = self.lineage()
+        lin_inputs = tuple(lin.inputs)
+        lin_outputs = tuple(lin.outputs)
+        emitter.emit(
+            LineageEvent(
+                event_type=START,
+                run_id=ctx.run_id,
+                job_name=self.name,
+                inputs=lin_inputs,
+                outputs=lin_outputs,
+            )
+        )
 
         # ``pipeline.run`` span wraps the whole sequence of tasks plus the
         # bookkeeping that emits aggregate counters. Task-level spans are
@@ -417,11 +501,32 @@ class Pipeline:
             run_span.set_attribute("success", True)
             run_span.set_attribute("records_read_total", result.records_read)
             run_span.set_attribute("records_written_total", result.records_written)
+            emitter.emit(
+                LineageEvent(
+                    event_type=COMPLETE,
+                    run_id=ctx.run_id,
+                    job_name=self.name,
+                    inputs=lin_inputs,
+                    outputs=lin_outputs,
+                    records_read=result.records_read,
+                    records_written=result.records_written,
+                )
+            )
         except Exception as exc:
             result.error = exc
             metrics.counter(ERRORS_TOTAL).add(1, {**attrs, "phase": "run"})
             run_span.set_attribute("success", False)
             run_span.record_exception(exc)
+            emitter.emit(
+                LineageEvent(
+                    event_type=FAIL,
+                    run_id=ctx.run_id,
+                    job_name=self.name,
+                    inputs=lin_inputs,
+                    outputs=lin_outputs,
+                    error=str(exc),
+                )
+            )
             self._fire("on_error", ctx, exc)
             raise
         finally:

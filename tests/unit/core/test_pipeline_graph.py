@@ -14,6 +14,8 @@ from etl_plugins.core.pipeline import (
     SinkSpec,
     Task,
     _join_records,
+    apply_edge_predicate,
+    execute_graph_node,
 )
 from etl_plugins.core.record import Record
 
@@ -320,6 +322,57 @@ def test_graph_aggregate_global_avg() -> None:
         connectors={"src": _rows({"v": 2}, {"v": 4}, {"v": 6}), "snk": snk}
     )
     assert [r.data for r in snk.records] == [{"mean": 4.0, "hi": 6}]
+
+
+# ---------- execute_graph_node (per-node operator, ADR-0041 H2) ----------
+
+
+def test_execute_graph_node_source_and_sink() -> None:
+    src = InMemoryBatchSource([Record(data={"id": 1}), Record(data={"id": 2})])
+    res = execute_graph_node(GraphNode(id="s", kind="source", source_name="src"), [], {"src": src})
+    assert res.records_read == 2
+    assert [r.data["id"] for r in res.output] == [1, 2]
+
+    snk = InMemoryBatchSink()
+    res2 = execute_graph_node(
+        GraphNode(id="k", kind="sink", sink=SinkSpec(name="snk", table="o")),
+        [res.output],
+        {"snk": snk},
+    )
+    assert res2.records_written == 2
+    assert len(snk.records) == 2
+
+
+def test_execute_graph_node_transform_join_aggregate() -> None:
+    tnode = GraphNode(
+        id="t",
+        kind="transform",
+        transform_fn=lambda r: Record(data={**r.data, "x": 1}, metadata=r.metadata),
+    )
+    assert execute_graph_node(tnode, [[Record(data={"id": 1})]], {}).output[0].data == {
+        "id": 1,
+        "x": 1,
+    }
+
+    jnode = GraphNode(id="j", kind="join", join_on=["id"], join_how="inner")
+    jout = execute_graph_node(
+        jnode,
+        [[Record(data={"id": 1, "a": 1})], [Record(data={"id": 1, "b": 2})]],
+        {},
+    ).output
+    assert jout[0].data == {"id": 1, "a": 1, "b": 2}
+
+    anode = GraphNode(
+        id="a", kind="aggregate", agg_group_by=[], aggregations=[AggSpec(op="count", name="n")]
+    )
+    aout = execute_graph_node(anode, [[Record(data={"id": 1}), Record(data={"id": 2})]], {}).output
+    assert aout[0].data == {"n": 2}
+
+
+def test_apply_edge_predicate() -> None:
+    recs = [Record(data={"v": 1}), Record(data={"v": 5})]
+    assert [r.data["v"] for r in apply_edge_predicate(recs, "data['v'] > 2")] == [5]
+    assert apply_edge_predicate(recs, None) == recs
 
 
 # ---------- GraphConfig validation ----------

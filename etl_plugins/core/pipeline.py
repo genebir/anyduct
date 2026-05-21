@@ -401,6 +401,100 @@ def _aggregate(records: list[Record], group_by: list[str], specs: list[AggSpec])
     return out
 
 
+def apply_edge_predicate(records: list[Record], when: str | None) -> list[Record]:
+    """Filter ``records`` by an edge ``when`` predicate (sandboxed, no builtins).
+
+    ``data`` / ``metadata`` are in scope. ``None`` passes everything through.
+    Shared by the in-process graph engine and node-level execution (ADR-0041).
+    """
+    if when is None:
+        return records
+    try:
+        code = compile(when, "<edge:when>", "eval")
+    except SyntaxError as exc:
+        raise TaskError(f"edge predicate {when!r} is invalid: {exc}") from exc
+    kept: list[Record] = []
+    for rec in records:
+        try:
+            ok = bool(
+                eval(code, {"__builtins__": {}}, {"data": rec.data, "metadata": rec.metadata})
+            )
+        except Exception as exc:
+            raise TransformError(f"edge 'when' {when!r} failed: {exc}") from exc
+        if ok:
+            kept.append(rec)
+    return kept
+
+
+@dataclass
+class NodeResult:
+    """Outcome of executing one graph node (ADR-0041). ``output`` feeds downstream
+    nodes; counters roll up into the run's totals."""
+
+    output: list[Record]
+    records_read: int = 0
+    records_written: int = 0
+
+
+def execute_graph_node(
+    node: GraphNode,
+    inputs: list[list[Record]],
+    connectors: dict[str, Connector],
+) -> NodeResult:
+    """Run one graph node given its already-filtered inputs (one list per incoming
+    edge, in edge-declaration order). Operator dispatch shared by the in-process
+    materialize engine (:meth:`Pipeline._run_graph_task`) and node-level execution
+    (ADR-0041, H2). Edge ``when`` filtering happens before this (see
+    :func:`apply_edge_predicate`)."""
+    if node.kind == "source":
+        if not node.source_name:
+            raise TaskError(f"graph source node {node.id!r} has no connection")
+        source = connectors.get(node.source_name)
+        if source is None:
+            raise TaskError(f"No connector for graph source '{node.source_name}'")
+        if not isinstance(source, BatchSource):
+            raise TaskError(f"Graph source '{node.source_name}' is not a BatchSource")
+        recs = list(source.read(query=node.query, **node.source_options))
+        return NodeResult(output=recs, records_read=len(recs))
+    if node.kind == "transform":
+        if len(inputs) != 1:
+            raise TaskError(f"transform node {node.id!r} takes exactly one input")
+        out_recs: list[Record] = []
+        for rec in inputs[0]:
+            result = node.transform_fn(rec) if node.transform_fn is not None else rec
+            if result is not None:
+                out_recs.append(result)
+        return NodeResult(output=out_recs)
+    if node.kind == "join":
+        if len(inputs) < 2:
+            raise TaskError(f"join node {node.id!r} needs at least two inputs")
+        return NodeResult(output=_hash_join(inputs, node.join_on or [], node.join_how))
+    if node.kind == "aggregate":
+        if len(inputs) != 1:
+            raise TaskError(f"aggregate node {node.id!r} takes exactly one input")
+        return NodeResult(output=_aggregate(inputs[0], node.agg_group_by or [], node.aggregations))
+    if node.kind == "sink":
+        if len(inputs) != 1:
+            raise TaskError(f"sink node {node.id!r} takes exactly one input")
+        if node.sink is None:
+            raise TaskError(f"graph sink node {node.id!r} has no sink spec")
+        spec = node.sink
+        sink = connectors.get(spec.name)
+        if sink is None:
+            raise TaskError(f"No connector for graph sink '{spec.name}'")
+        if not isinstance(sink, BatchSink):
+            raise TaskError(f"Graph sink '{spec.name}' is not a BatchSink")
+        written = sink.write(
+            iter(inputs[0]),
+            mode=spec.mode,
+            key_columns=spec.key_columns,
+            table=spec.table,
+            **spec.options,
+        )
+        return NodeResult(output=inputs[0], records_written=written)
+    raise TaskError(f"graph node {node.id!r} has unknown kind {node.kind!r}")
+
+
 @dataclass
 class Pipeline:
     """A named sequence of Tasks.
@@ -908,103 +1002,20 @@ class Pipeline:
                 raise TaskError(f"graph edge references unknown node: {e.from_id}→{e.to_id}")
             incoming[e.to_id].append(e)
 
-        # Precompile edge predicates once, keyed by edge identity.
-        compiled: dict[int, CodeType] = {}
-        for e in task.graph_edges:
-            if e.when is not None:
-                try:
-                    compiled[id(e)] = compile(e.when, "<edge:when>", "eval")
-                except SyntaxError as exc:
-                    raise TaskError(f"edge {e.from_id}→{e.to_id}: invalid 'when': {exc}") from exc
-
         outputs: dict[str, list[Record]] = {}
 
-        def _edge_records(edge: GraphEdge) -> list[Record]:
-            records = outputs[edge.from_id]
-            code = compiled.get(id(edge))
-            if code is None:
-                return records
-            kept: list[Record] = []
-            for rec in records:
-                try:
-                    ok = bool(
-                        eval(
-                            code,
-                            {"__builtins__": {}},
-                            {"data": rec.data, "metadata": rec.metadata},
-                        )
-                    )
-                except Exception as exc:
-                    raise TransformError(
-                        f"edge {edge.from_id}→{edge.to_id}: 'when' failed: {exc}"
-                    ) from exc
-                if ok:
-                    kept.append(rec)
-            return kept
-
         def _inputs(node_id: str) -> list[list[Record]]:
-            # One filtered record-list per incoming edge, in declaration order.
-            return [_edge_records(e) for e in incoming[node_id]]
+            # One edge-filtered record-list per incoming edge, in declaration order.
+            return [apply_edge_predicate(outputs[e.from_id], e.when) for e in incoming[node_id]]
 
-        order = _toposort_nodes(by_id, task.graph_edges)
         records_read = 0
         written = 0
-
-        for node_id in order:
+        for node_id in _toposort_nodes(by_id, task.graph_edges):
             node = by_id[node_id]
-            if node.kind == "source":
-                if not node.source_name:
-                    raise TaskError(f"graph source node {node.id!r} has no connection")
-                source = connectors.get(node.source_name)
-                if source is None:
-                    raise TaskError(f"No connector for graph source '{node.source_name}'")
-                if not isinstance(source, BatchSource):
-                    raise TaskError(f"Graph source '{node.source_name}' is not a BatchSource")
-                recs = list(source.read(query=node.query, **node.source_options))
-                records_read += len(recs)
-                outputs[node.id] = recs
-            elif node.kind == "transform":
-                ins = _inputs(node.id)
-                if len(ins) != 1:
-                    raise TaskError(f"transform node {node.id!r} takes exactly one input")
-                out_recs: list[Record] = []
-                for rec in ins[0]:
-                    result = node.transform_fn(rec) if node.transform_fn is not None else rec
-                    if result is not None:
-                        out_recs.append(result)
-                outputs[node.id] = out_recs
-            elif node.kind == "join":
-                ins = _inputs(node.id)
-                if len(ins) < 2:
-                    raise TaskError(f"join node {node.id!r} needs at least two inputs")
-                outputs[node.id] = _hash_join(ins, node.join_on or [], node.join_how)
-            elif node.kind == "aggregate":
-                ins = _inputs(node.id)
-                if len(ins) != 1:
-                    raise TaskError(f"aggregate node {node.id!r} takes exactly one input")
-                outputs[node.id] = _aggregate(ins[0], node.agg_group_by or [], node.aggregations)
-            elif node.kind == "sink":
-                ins = _inputs(node.id)
-                if len(ins) != 1:
-                    raise TaskError(f"sink node {node.id!r} takes exactly one input")
-                if node.sink is None:
-                    raise TaskError(f"graph sink node {node.id!r} has no sink spec")
-                spec = node.sink
-                sink = connectors.get(spec.name)
-                if sink is None:
-                    raise TaskError(f"No connector for graph sink '{spec.name}'")
-                if not isinstance(sink, BatchSink):
-                    raise TaskError(f"Graph sink '{spec.name}' is not a BatchSink")
-                written += sink.write(
-                    iter(ins[0]),
-                    mode=spec.mode,
-                    key_columns=spec.key_columns,
-                    table=spec.table,
-                    **spec.options,
-                )
-                outputs[node.id] = ins[0]
-            else:
-                raise TaskError(f"graph node {node.id!r} has unknown kind {node.kind!r}")
+            result = execute_graph_node(node, _inputs(node_id), connectors)
+            outputs[node_id] = result.output
+            records_read += result.records_read
+            written += result.records_written
 
         return records_read, written, None
 
@@ -1014,8 +1025,7 @@ class Pipeline:
             conn = connectors.get(action.connection)
             if conn is None:
                 raise TaskError(
-                    f"No connector instance provided for pre-SQL connection "
-                    f"'{action.connection}'"
+                    f"No connector instance provided for pre-SQL connection '{action.connection}'"
                 )
             if not isinstance(conn, SqlExecutor):
                 raise TaskError(

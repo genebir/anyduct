@@ -23,7 +23,7 @@ from etl_plugins.config.models import (
     PipelineConfig,
 )
 
-__all__ = ["to_graph", "topological_order"]
+__all__ = ["node_dependencies", "to_graph", "topological_order"]
 
 _SOURCE_ID = "source"
 
@@ -70,6 +70,18 @@ def to_graph(cfg: PipelineConfig) -> GraphConfig:
         edges.append(GraphEdgeConfig(from_node=tail, to_node=node_id, when=sink.when))
 
     return GraphConfig(nodes=nodes, edges=edges)
+
+
+def node_dependencies(graph: GraphConfig) -> dict[str, list[str]]:
+    """Map each node id → its direct upstream node ids (incoming-edge sources).
+
+    Used to expand a graph into ``node_runs`` with ``depends_on`` for node-level
+    scheduling (ADR-0041, H2).
+    """
+    deps: dict[str, list[str]] = {n.id: [] for n in graph.nodes}
+    for e in graph.edges:
+        deps[e.to_node].append(e.from_node)
+    return deps
 
 
 def topological_order(graph: GraphConfig) -> list[str]:

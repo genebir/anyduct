@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 
 from etl_plugins.config.models import GraphConfig, PipelineConfig
-from etl_plugins.runtime.graph import to_graph, topological_order
+from etl_plugins.runtime.graph import node_dependencies, to_graph, topological_order
 
 
 def _node(id: str, type: str, **kw: object) -> dict:
@@ -226,3 +226,11 @@ def test_topological_order_respects_dependencies() -> None:
     assert order.index("source") < order.index("transform_0")
     assert order.index("transform_0") < order.index("transform_1")
     assert order.index("transform_1") < order.index("sink_0")
+
+
+def test_node_dependencies_maps_upstreams() -> None:
+    deps = node_dependencies(to_graph(_single_task()))
+    assert deps["source"] == []
+    assert deps["transform_0"] == ["source"]
+    assert deps["transform_1"] == ["transform_0"]
+    assert deps["sink_0"] == ["transform_1"]

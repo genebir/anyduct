@@ -201,9 +201,9 @@
 - [ ] `arun_stream` emit (stream START/COMPLETE) → 후속
 - [ ] OpenLineage 와이어 백엔드(`openlineage-python`, `[lineage]` extra) + Marquez → **Phase E**(export)로 이연. 자체 catalog/DB emitter(Phase B)가 우선.
 
-### 6.8 Catalog API (core) (A3) → v0.2.0
-- [ ] `etl_plugins.catalog` — read-only API (`list_assets / get_asset / lineage(asset_name)`) on `AssetGraph`
-- [ ] In-memory 구현 + DB-backed 구현 (서비스가 메타DB로 wrap)
+### 6.8 Catalog API (core) (A3) → v0.2.0 🔄 (in-memory 완료)
+- [x] `etl_plugins/catalog.py` — read-only `Catalog`(`list_assets`/`get_asset`/`lineage(key)`) on `AssetGraph`. `AssetNode`(key+kind+spec)·`AssetLineageView`(direct+transitive upstream/downstream). `from_lineages`·`add_spec`(declared deps→edge)·`set_kind`. +5 unit.
+- [ ] DB-backed 구현 → **Phase B**(서비스가 메타DB로 wrap, 동일 query shape)
 
 ### 6.9 v0.2.0 PyPI 릴리스 → v0.2.0
 - [ ] Asset/Lineage 사용 가이드 문서

@@ -1122,4 +1122,25 @@ ADR 본문이 P1.3에 남겨둔 미해결 포인트 "record-task 시스템에서
 
 ---
 
+## ADR-0033: 커넥터 스키마 인트로스펙션 — `SchemaInspector` 옵셔널 capability ("딸깍" 빌더)
+
+- **Date**: 2026-05-21
+- **Status**: Accepted
+- **Context**:
+  no-code 빌더에서 사용자가 Postgres 등 DB 작업 시 스키마/테이블/컬럼을 **직접 타이핑**해야 했다. 사용자 요구: "스키마 및 테이블 목록을 읽어와서 선택, source/target 둘 다, 후행 작업도 선행 결과 컬럼을 불러와 '딸깍'". 즉 빌더가 연결에서 메타데이터를 읽어 드롭다운/체크박스로 제공해야 한다. 단, 모든 커넥터가 인트로스펙션 가능한 건 아니다(HTTP/Kafka/plain object store는 "테이블" 개념이 없음).
+- **Decision**:
+  1. 코어에 **옵셔널 capability** `etl_plugins.core.inspect.SchemaInspector`(`@runtime_checkable` Protocol) + `ColumnInfo`(frozen dataclass: `name`, `type`) 추가. `list_tables() -> list[str]` + `list_columns(table) -> list[ColumnInfo]`.
+  2. **구조적(structural) 타이핑** — 커넥터는 상속 없이 두 메서드만 구현하면 capability 보유. 호출자는 `isinstance(conn, SchemaInspector)`로 가드. 인트로스펙션 불가 커넥터는 그냥 미구현 → UI는 자유 입력 fallback.
+  3. **테이블 주소 형식 = 커넥터 natural form** 유지: Postgres `"schema.table"`(information_schema, pg_catalog/information_schema 제외), MySQL `"table"`(`table_schema = DATABASE()`), SQLite bare `"table"`(sqlite_master, `sqlite_%` 제외). `list_tables`가 돌려준 문자열을 그대로 sink `table` 필드에 쓸 수 있어야 한다.
+  4. **SQL injection 가드**: 컬럼 조회는 가능한 한 파라미터 바인딩(information_schema). SQLite `PRAGMA table_info`는 파라미터 불가 → `_SAFE_IDENT` 정규식(`^[A-Za-z_][A-Za-z0-9_]*$`)으로 식별자 검증 후만 보간, 실패 시 `ReadError`.
+  5. RDBMS 3종(postgres/mysql/sqlite)에 우선 구현. 서비스 계층(Step 8.5c+)이 `GET /connections/{id}/tables`·`/columns`로 노출하고 etlx-web 빌더가 소비(별도 슬라이스).
+- **Consequences**:
+  - (+) 빌더 UX 대폭 개선("딸깍"). 코어는 서비스를 모름 — 단방향 의존 유지.
+  - (+) capability 패턴이라 미지원 커넥터에 부담 0, 향후 DW/NoSQL 확장 시 동일 패턴.
+  - (−) `type` 라벨은 커넥터-native 문자열(정규화 안 함) — 빌더는 표시/힌트 용도로만. 타입 강제 매핑은 향후 과제.
+  - (−) 인트로스펙션은 라이브 커넥션 필요 → 서비스 엔드포인트는 connect 비용·권한을 고려해야 함(read-only, audit 없음).
+- **관련**: ADR-0008(postgres) · 5.1(mysql/sqlite) · Step 8.5c(connections API — 엔드포인트가 얹힐 자리) · Step 10.4(Pipeline Builder — 소비처)
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

@@ -16,14 +16,19 @@ bounded for large result sets.
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from collections.abc import Iterable, Iterator
 from typing import Any, Literal, cast
 
 from etl_plugins.core.connector import BatchSink, BatchSource
 from etl_plugins.core.exceptions import ConnectError, ReadError, WriteError
+from etl_plugins.core.inspect import ColumnInfo
 from etl_plugins.core.record import Record
 from etl_plugins.core.registry import ConnectorRegistry
+
+# Identifier guard for PRAGMA table_info (which can't be parameterized).
+_SAFE_IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 @ConnectorRegistry.register("sqlite")
@@ -87,6 +92,22 @@ class SQLiteConnector(BatchSource, BatchSink):
         if self._conn is None:
             raise ConnectError("SQLiteConnector is not connected")
         return self._conn
+
+    # ---------- SchemaInspector (ADR-0033) ---------------------------------
+
+    def list_tables(self) -> list[str]:
+        rows = self.connection.execute(
+            "SELECT name FROM sqlite_master WHERE type IN ('table','view') "
+            "AND name NOT LIKE 'sqlite_%' ORDER BY name"
+        ).fetchall()
+        return [r[0] for r in rows]
+
+    def list_columns(self, table: str) -> list[ColumnInfo]:
+        if not _SAFE_IDENT.match(table):
+            raise ReadError(f"invalid table name for introspection: {table!r}")
+        # PRAGMA can't be parameterized; the identifier is validated above.
+        rows = self.connection.execute(f'PRAGMA table_info("{table}")').fetchall()
+        return [ColumnInfo(name=r["name"], type=r["type"] or "") for r in rows]
 
     # ---------- BatchSource ------------------------------------------------
 

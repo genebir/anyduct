@@ -378,5 +378,42 @@ def test_write_with_no_columns_returns_zero_and_doesnt_error(
     assert n == 0
 
 
+# ---------- SchemaInspector (ADR-0033) ----------
+
+
+def test_implements_schema_inspector(sqlite_connector: SQLiteConnector) -> None:
+    from etl_plugins.core.inspect import SchemaInspector
+
+    with sqlite_connector:
+        assert isinstance(sqlite_connector, SchemaInspector)
+
+
+def test_list_tables(sqlite_connector: SQLiteConnector, sqlite_table: str) -> None:
+    with sqlite_connector:
+        assert sqlite_table in sqlite_connector.list_tables()
+
+
+def test_list_tables_excludes_internal(
+    sqlite_connector: SQLiteConnector, sqlite_table: str
+) -> None:
+    with sqlite_connector:
+        assert all(not t.startswith("sqlite_") for t in sqlite_connector.list_tables())
+
+
+def test_list_columns(sqlite_connector: SQLiteConnector, sqlite_table: str) -> None:
+    from etl_plugins.core.inspect import ColumnInfo
+
+    with sqlite_connector:
+        cols = sqlite_connector.list_columns(sqlite_table)
+    assert [c.name for c in cols] == ["id", "name", "age", "active"]
+    assert all(isinstance(c, ColumnInfo) for c in cols)
+    assert cols[0].type  # native type label populated
+
+
+def test_list_columns_rejects_unsafe_identifier(sqlite_connector: SQLiteConnector) -> None:
+    with sqlite_connector, pytest.raises(ReadError):
+        sqlite_connector.list_columns("orders; DROP TABLE orders")
+
+
 def _unused(_: Any) -> None:
     """Silence ruff F401 for the type-only Any import."""

@@ -24,6 +24,7 @@ from psycopg import sql
 
 from etl_plugins.core.connector import BatchSink, BatchSource
 from etl_plugins.core.exceptions import ConnectError, ReadError, WriteError
+from etl_plugins.core.inspect import ColumnInfo
 from etl_plugins.core.record import Record
 from etl_plugins.core.registry import ConnectorRegistry
 
@@ -103,6 +104,29 @@ class PostgresConnector(BatchSource, BatchSink):
         if self._conn is None:
             raise ConnectError("PostgresConnector is not connected")
         return self._conn
+
+    # ---------- SchemaInspector (ADR-0033) ---------------------------------
+
+    def list_tables(self) -> list[str]:
+        with self.connection.cursor() as cur:
+            cur.execute(
+                "SELECT table_schema, table_name FROM information_schema.tables "
+                "WHERE table_schema NOT IN ('pg_catalog', 'information_schema') "
+                "ORDER BY table_schema, table_name"
+            )
+            return [f"{schema}.{name}" for schema, name in cur.fetchall()]
+
+    def list_columns(self, table: str) -> list[ColumnInfo]:
+        schema, sep, name = table.rpartition(".")
+        if not sep:
+            schema, name = "public", table
+        with self.connection.cursor() as cur:
+            cur.execute(
+                "SELECT column_name, data_type FROM information_schema.columns "
+                "WHERE table_schema = %s AND table_name = %s ORDER BY ordinal_position",
+                (schema, name),
+            )
+            return [ColumnInfo(name=col, type=dtype) for col, dtype in cur.fetchall()]
 
     # ---------- BatchSource ------------------------------------------------
 

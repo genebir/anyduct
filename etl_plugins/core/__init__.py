@@ -30,6 +30,7 @@ from etl_plugins.core.exceptions import (
     TransformError,
     WriteError,
 )
+from etl_plugins.core.inspect import ColumnInfo, SchemaInspector
 from etl_plugins.core.pipeline import (
     BranchRule,
     GraphEdge,
@@ -49,6 +50,7 @@ __all__ = [
     "BatchSink",
     "BatchSource",
     "BranchRule",
+    "ColumnInfo",
     "ConfigError",
     "ConnectError",
     "Connector",
@@ -73,6 +75,7 @@ __all__ = [
     "RegistryError",
     "RunResult",
     "Schema",
+    "SchemaInspector",
     "SecretError",
     "SinkSpec",
     "StreamSink",

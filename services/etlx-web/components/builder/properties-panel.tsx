@@ -226,8 +226,19 @@ function FieldEditor({
 }) {
   const isEmpty = value === undefined || value === null || value === "";
   const showRequired = Boolean(field.required) && isEmpty;
+  // Fields with more than one interactive control (checklists, condition/
+  // mapping builders, the SQL field's "browse tables" button) must NOT be
+  // wrapped in a <label> — a label forwards clicks from its whitespace to its
+  // first control, so clicking empty space would toggle a checkbox / focus an
+  // input. Single-control fields keep the <label> for click-to-focus.
+  const composite =
+    field.kind === "filter" ||
+    field.kind === "mapping" ||
+    field.kind === "columns" ||
+    (field.kind === "string" && field.multiline === true && field.tableHelper === true);
+  const Wrapper = composite ? "div" : "label";
   return (
-    <label className="flex flex-col gap-1.5">
+    <Wrapper className="flex flex-col gap-1.5">
       <span className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider text-text-secondary">
         {field.label}
         {field.required ? (
@@ -253,7 +264,7 @@ function FieldEditor({
       ) : field.help ? (
         <span className="text-[11px] text-text-muted">{field.help}</span>
       ) : null}
-    </label>
+    </Wrapper>
   );
 }
 

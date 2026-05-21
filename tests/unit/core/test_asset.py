@@ -169,6 +169,19 @@ def test_derive_lineage_graph_shape() -> None:
     assert lin.edges == [LineageEdge(AssetKey.of("src", "orders"), AssetKey.of("dst", "out"))]
 
 
+def test_derive_lineage_records_kinds() -> None:
+    cfg = PipelineConfig.model_validate(
+        {
+            "name": "p",
+            "source": {"connection": "kafka", "topic": "events"},
+            "sink": {"connection": "lake", "key": "exports/out.parquet", "mode": "append"},
+        }
+    )
+    lin = derive_lineage(cfg)
+    assert lin.kinds[AssetKey.of("kafka", "events")] == "topic"
+    assert lin.kinds[AssetKey.of("lake", "exports/out.parquet")] == "object"
+
+
 def test_derive_lineage_kafka_topic_and_s3_key() -> None:
     cfg = PipelineConfig.model_validate(
         {

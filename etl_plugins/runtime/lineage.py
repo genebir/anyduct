@@ -14,16 +14,14 @@ and the builder can show lineage before anything executes. Runtime emit
 
 from __future__ import annotations
 
-from etl_plugins.config.models import PipelineConfig, SinkConfig, SourceConfig
-from etl_plugins.core.asset import AssetKey, AssetLineage, LineageEdge, derive_asset_key
-
-
-def _source_key(src: SourceConfig) -> AssetKey | None:
-    return derive_asset_key(src.connection, src.model_dump())
-
-
-def _sink_key(snk: SinkConfig) -> AssetKey | None:
-    return derive_asset_key(snk.connection, snk.model_dump())
+from etl_plugins.config.models import PipelineConfig
+from etl_plugins.core.asset import (
+    AssetKey,
+    AssetLineage,
+    LineageEdge,
+    asset_kind,
+    derive_asset_key,
+)
 
 
 def derive_lineage(cfg: PipelineConfig) -> AssetLineage:
@@ -31,22 +29,35 @@ def derive_lineage(cfg: PipelineConfig) -> AssetLineage:
 
     Handles all shapes: single-task, Task-orchestration DAG (``effective_tasks``),
     and dataflow graph (``graph`` source/sink nodes). Keys are deduped with
-    first-seen order preserved.
+    first-seen order preserved; ``kinds`` records each key's kind label.
     """
     inputs: list[AssetKey] = []
     outputs: list[AssetKey] = []
     edges: list[LineageEdge] = []
+    kinds: dict[AssetKey, str | None] = {}
     seen_in: set[AssetKey] = set()
     seen_out: set[AssetKey] = set()
     seen_edge: set[tuple[AssetKey, AssetKey]] = set()
 
-    def _add_in(k: AssetKey | None) -> None:
-        if k is not None and k not in seen_in:
+    def _record_kind(k: AssetKey, kind: str | None) -> None:
+        # First non-null wins; never clobber a known kind with None.
+        if kind and not kinds.get(k):
+            kinds[k] = kind
+        kinds.setdefault(k, kind)
+
+    def _add_in(k: AssetKey | None, kind: str | None = None) -> None:
+        if k is None:
+            return
+        _record_kind(k, kind)
+        if k not in seen_in:
             seen_in.add(k)
             inputs.append(k)
 
-    def _add_out(k: AssetKey | None) -> None:
-        if k is not None and k not in seen_out:
+    def _add_out(k: AssetKey | None, kind: str | None = None) -> None:
+        if k is None:
+            return
+        _record_kind(k, kind)
+        if k not in seen_out:
             seen_out.add(k)
             outputs.append(k)
 
@@ -61,26 +72,28 @@ def derive_lineage(cfg: PipelineConfig) -> AssetLineage:
             data = node.model_dump()
             if node.type == "source":
                 k = derive_asset_key(node.connection, data)
-                _add_in(k)
+                _add_in(k, asset_kind(data))
                 if k is not None:
                     src_keys.append(k)
             elif node.type == "sink":
                 k = derive_asset_key(node.connection, data)
-                _add_out(k)
+                _add_out(k, asset_kind(data))
                 # Tree-shaped graph (ADR-0030): every sink derives from the
                 # single source. Edge each source → each sink.
                 for sk in src_keys:
                     _add_edge(sk, k)
     else:
         for task in cfg.effective_tasks():
-            in_key = _source_key(task.source)
-            _add_in(in_key)
+            src_data = task.source.model_dump()
+            in_key = derive_asset_key(task.source.connection, src_data)
+            _add_in(in_key, asset_kind(src_data))
             for snk in task.effective_sinks():
-                out_key = _sink_key(snk)
-                _add_out(out_key)
+                snk_data = snk.model_dump()
+                out_key = derive_asset_key(snk.connection, snk_data)
+                _add_out(out_key, asset_kind(snk_data))
                 _add_edge(in_key, out_key)
 
-    return AssetLineage(inputs=inputs, outputs=outputs, edges=edges)
+    return AssetLineage(inputs=inputs, outputs=outputs, edges=edges, kinds=kinds)
 
 
 __all__ = ["derive_lineage"]

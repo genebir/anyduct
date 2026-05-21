@@ -133,11 +133,13 @@ class AssetSpec:
 class AssetLineage:
     """Static lineage of a single pipeline (no run needed): the assets it reads
     (``inputs``), writes (``outputs``), and the ``input → output`` edges. Keys
-    are deduped, first-seen order preserved."""
+    are deduped, first-seen order preserved. ``kinds`` maps each key to its
+    connector-native kind label (table/topic/object/...) when known."""
 
     inputs: list[AssetKey] = field(default_factory=list)
     outputs: list[AssetKey] = field(default_factory=list)
     edges: list[LineageEdge] = field(default_factory=list)
+    kinds: dict[AssetKey, str | None] = field(default_factory=dict)
 
 
 class AssetGraph:

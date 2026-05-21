@@ -262,6 +262,7 @@ class RunExecutor:
                 run_id=run.id,
                 lineage=lineage,
                 records_written=result.records_written,
+                kinds=lineage.kinds,
             )
         except Exception as e:
             log.warning("run.lineage_persist_failed", error_class=type(e).__name__, error=str(e))

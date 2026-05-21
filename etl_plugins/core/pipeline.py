@@ -19,6 +19,7 @@ from etl_plugins.core.asset import (
     AssetKey,
     AssetLineage,
     LineageEdge,
+    asset_kind,
     derive_asset_key,
 )
 from etl_plugins.core.connector import (
@@ -346,17 +347,30 @@ class Pipeline:
         inputs: list[AssetKey] = []
         outputs: list[AssetKey] = []
         edges: list[LineageEdge] = []
+        kinds: dict[AssetKey, str | None] = {}
         seen_in: set[AssetKey] = set()
         seen_out: set[AssetKey] = set()
         seen_edge: set[tuple[AssetKey, AssetKey]] = set()
 
-        def add_in(k: AssetKey | None) -> None:
-            if k is not None and k not in seen_in:
+        def record_kind(k: AssetKey, fields: dict[str, Any]) -> None:
+            kind = asset_kind(fields)
+            if kind and not kinds.get(k):
+                kinds[k] = kind
+            kinds.setdefault(k, kind)
+
+        def add_in(k: AssetKey | None, fields: dict[str, Any]) -> None:
+            if k is None:
+                return
+            record_kind(k, fields)
+            if k not in seen_in:
                 seen_in.add(k)
                 inputs.append(k)
 
-        def add_out(k: AssetKey | None) -> None:
-            if k is not None and k not in seen_out:
+        def add_out(k: AssetKey | None, fields: dict[str, Any]) -> None:
+            if k is None:
+                return
+            record_kind(k, fields)
+            if k not in seen_out:
                 seen_out.add(k)
                 outputs.append(k)
 
@@ -365,33 +379,38 @@ class Pipeline:
                 seen_edge.add((u, d))
                 edges.append(LineageEdge(upstream=u, downstream=d))
 
+        def sink_fields(spec: SinkSpec) -> dict[str, Any]:
+            return {"table": spec.table, **spec.options}
+
         def sink_key(spec: SinkSpec) -> AssetKey | None:
             conn = spec.name.removesuffix("::sink") if spec.name else spec.name
-            return derive_asset_key(conn, {"table": spec.table, **spec.options})
+            return derive_asset_key(conn, sink_fields(spec))
 
         for task in self.tasks:
             if task.graph_nodes:
                 src_keys: list[AssetKey] = []
                 for n in task.graph_nodes:
                     if n.kind == "source":
-                        k = derive_asset_key(n.source_name, {"query": n.query, **n.source_options})
-                        add_in(k)
+                        sf = {"query": n.query, **n.source_options}
+                        k = derive_asset_key(n.source_name, sf)
+                        add_in(k, sf)
                         if k is not None:
                             src_keys.append(k)
                     elif n.kind == "sink" and n.sink is not None:
                         k = sink_key(n.sink)
-                        add_out(k)
+                        add_out(k, sink_fields(n.sink))
                         for sk in src_keys:
                             add_edge(sk, k)
                 continue
-            in_key = derive_asset_key(task.source, {"query": task.query, **task.source_options})
-            add_in(in_key)
+            src_fields = {"query": task.query, **task.source_options}
+            in_key = derive_asset_key(task.source, src_fields)
+            add_in(in_key, src_fields)
             for spec in task.effective_sinks():
                 out_key = sink_key(spec)
-                add_out(out_key)
+                add_out(out_key, sink_fields(spec))
                 add_edge(in_key, out_key)
 
-        return AssetLineage(inputs=inputs, outputs=outputs, edges=edges)
+        return AssetLineage(inputs=inputs, outputs=outputs, edges=edges, kinds=kinds)
 
     def run(
         self,

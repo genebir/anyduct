@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { BackfillDialog } from "@/components/pipelines/backfill-dialog";
 import { ApiError, pipelinesApi, type PipelineSummary } from "@/lib/api";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import { useLocale } from "@/components/providers/locale-provider";
@@ -98,6 +99,7 @@ export default function PipelinesPage() {
     null,
   );
   const [deleting, setDeleting] = useState(false);
+  const [backfillRow, setBackfillRow] = useState<PipelineSummary | null>(null);
 
   useEffect(() => {
     if (!ws) return;
@@ -278,7 +280,7 @@ export default function PipelinesPage() {
                 {
                   key: "actions",
                   header: "",
-                  className: "w-64 text-right",
+                  className: "w-80 text-right",
                   cell: (row) => (
                     <div className="flex justify-end gap-1">
                       <Link
@@ -301,6 +303,17 @@ export default function PipelinesPage() {
                         disabled={!row.current_version}
                       >
                         {t("common.trigger")}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setBackfillRow(row);
+                        }}
+                        disabled={!row.current_version}
+                      >
+                        {t("backfill.action")}
                       </Button>
                       <Button
                         size="sm"
@@ -351,6 +364,15 @@ export default function PipelinesPage() {
         onConfirm={onConfirmDelete}
         onCancel={() => (deleting ? undefined : setPendingDelete(null))}
       />
+
+      {ws ? (
+        <BackfillDialog
+          open={backfillRow !== null}
+          workspaceId={ws.id}
+          pipeline={backfillRow}
+          onClose={() => setBackfillRow(null)}
+        />
+      ) : null}
     </>
   );
 }

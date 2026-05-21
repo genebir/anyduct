@@ -138,6 +138,16 @@ export function operatorAllowedForMode(
   return mode === "stream" ? spec.streaming === true : spec.streaming !== true;
 }
 
+// Incremental / backfill cursor (ADR-0039). Optional on RDBMS sources; enables
+// the Backfill action to read a value range via the connector's read_since.
+const CURSOR_COLUMN_FIELD: FieldDef = {
+  key: "cursor_column",
+  label: "Cursor column",
+  kind: "string",
+  placeholder: "updated_at",
+  help: "Optional. A column the query returns (e.g. updated_at, id) used for incremental reads — enables the Backfill action over a value range.",
+};
+
 const SOURCES: OperatorSpec[] = [
   {
     id: "source:postgres",
@@ -156,6 +166,7 @@ const SOURCES: OperatorSpec[] = [
         placeholder: "SELECT id, name, created_at FROM users",
       },
       { key: "chunk_size", label: "Chunk size", kind: "number", placeholder: "10000" },
+      CURSOR_COLUMN_FIELD,
     ],
   },
   {
@@ -170,6 +181,7 @@ const SOURCES: OperatorSpec[] = [
       { key: "connection", label: "Connection", kind: "connection", required: true },
       { key: "query", label: "Read", kind: "sourceQuery" },
       { key: "chunk_size", label: "Chunk size", kind: "number" },
+      CURSOR_COLUMN_FIELD,
     ],
   },
   {
@@ -183,6 +195,7 @@ const SOURCES: OperatorSpec[] = [
     fields: [
       { key: "connection", label: "Connection", kind: "connection", required: true },
       { key: "query", label: "Read", kind: "sourceQuery" },
+      CURSOR_COLUMN_FIELD,
     ],
   },
   {

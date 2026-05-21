@@ -31,6 +31,10 @@
   - **D1b 서버**: `PipelineConfig.auto_materialize`(opt-in) + 워커 `_trigger_asset_consumers` — run 성공 시 materialize된 output 키를 input으로 갖는 워크스페이스 내 `auto_materialize:true` batch 파이프라인을 자동 PENDING enqueue. `trigger_chain` 사이클 가드·깊이 캡·stream 제외 재사용. +1 it(consumer 트리거 / non-opt-in 제외).
   - **D1c 빌더**: 헤더 "Auto-materialize" 체크박스 → config `auto_materialize` emit/restore. i18n(en/ko). 웹 typecheck OK.
   - 효과: cron 없이 raw→staging→mart가 키 일치로 자동 연쇄(Airflow Dataset / Dagster auto-materialize). 566 코어 unit green.
+- **백필 — cursor 범위 재실행 (D3)** [ADR-0039] — 코어의 `Pipeline.run(cursor_from/to)`/`read_since`를 서비스·UI에 노출.
+  - **D3a 코어**: `SourceConfig.cursor_column` + `_build_task`가 `Task.cursor_column`으로 전파(누락 수정).
+  - **D3b 서버**: `POST .../pipelines/{pid}/backfill`(Runner+, cursor_column 없으면 400) → `result_json.backfill={cursor_from,cursor_to}`로 enqueue. 워커가 읽어 `pipeline.run(cursor_from/to)`로 전달, source가 범위(`cv>from and cv<=to`)만 read_since. local 엔진 한정. +1 worker it(윈도우 읽기) +2 router it.
+  - **D3c 웹**: RDBMS source에 "Cursor column" 필드 + 파이프라인 목록 "Backfill" 버튼 + from/to 다이얼로그(`BackfillDialog`) + i18n. typecheck OK.
 - **Freshness 기반 auto-materialize (D2)** [ADR-0038] — 시간 기반 센서. `PipelineConfig.freshness_sla_minutes`(opt-in) + 스케줄러 `_tick_freshness` 패스: 출력 asset이 SLA보다 오래되거나(미생성 포함) stale하면 PENDING Run enqueue(`triggered_by=freshness`). in-flight + 쿨다운(최근 시도 SLA 윈도우 내) 가드로 storm 방지. D1과 합성(freshness=root 시간 트리거, auto_materialize=다운스트림 전파). 빌더 헤더 "Freshness (min)" 입력 + i18n. asset의 `kind`도 채워지도록 보강(`AssetLineage.kinds`). +6 it(stale/never/fresh/no-sla/in-flight/cooldown) + +1 unit. 567 코어 unit green. 다음: D3 백필 UI.
 - **멱등성 — "Run SQL (before load)" transform** [ADR-0035] — 적재 전에 SQL 한 줄(예: `DELETE`)을 실행해 delete-then-insert로 재실행 시 중복을 없앰.
   - **코어**: 옵셔널 capability `SqlExecutor`(`execute_statement`) — RDBMS 3종 구현. `Task.pre_sql: list[SqlAction]` + `Pipeline._run_pre_sql`이 **읽기 전 1회씩** 실행(레코드 0건이어도 보장). `build_pipeline`이 `type:"sql_exec"` transform을 per-record 체인에서 분리해 `pre_sql`로 적재. `referenced_connection_names`에 sql_exec 연결 포함.

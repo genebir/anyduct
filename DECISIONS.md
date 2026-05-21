@@ -1258,4 +1258,24 @@ ADR 본문이 P1.3에 남겨둔 미해결 포인트 "record-task 시스템에서
 
 ---
 
+## ADR-0039: 백필 — cursor 범위 재실행을 서비스/UI에 노출
+
+- **Date**: 2026-05-21
+- **Status**: Accepted
+- **Context**:
+  코어는 Step 6.1부터 `Pipeline.run(cursor_from, cursor_to)` + `BatchSource.read_since`로 증분/백필을 지원했지만, **서비스·UI에 노출 안 됨**. 게다가 config의 `cursor_column`이 `build_pipeline`에서 `Task.cursor_column`으로 전파되지 않아(누락) config-driven 백필이 동작 불가였다. 과거 구간 재적재(백필)는 ETL 운영의 기본 기능.
+- **Decision**:
+  1. **코어 배선(D3a)**: `SourceConfig.cursor_column` 필드 추가 + `_build_task`가 `Task.cursor_column`으로 전파(source_options에서 제외해 read() kwarg 누수 방지).
+  2. **Run이 백필 파라미터 운반(D3b)**: 스키마 변경 없이 `runs.result_json.backfill = {cursor_from, cursor_to}`(스칼라, 사용자 입력값)에 저장. 워커 `_prepare`/`_run_pipeline_in_thread`가 읽어 `pipeline.run(cursor_from=, cursor_to=)`로 전달 → source가 `read_since`로 `cv > from AND cv <= to` 범위만 읽음. **local 엔진만**(Spark backfill 미지원).
+  3. **엔드포인트(D3b)**: `POST /workspaces/{ws}/pipelines/{pid}/backfill`(Runner+) — body `{cursor_from?, cursor_to?}`. current 버전 config에 source `cursor_column`이 없으면 **400**(워커가 TaskError로 죽는 대신 명확한 거부). `add_manual(result_json=...)` 재사용, audit `run.backfill`.
+  4. **빌더/UI(D3c)**: RDBMS source에 `cursor_column` 필드(옵션). 파이프라인 목록에 "Backfill" 버튼 → from/to 입력 다이얼로그 → 엔드포인트 호출.
+- **Consequences**:
+  - (+) 과거 구간 재적재가 UI에서 가능. 코어 cursor 인프라(read_since/CursorState) 재사용, 메타DB 스키마 무변경(result_json 활용).
+  - (+) cursor_column 없으면 400으로 즉시 피드백.
+  - (−) cursor 값은 스칼라(str/int/float) — DB가 커서 컬럼과 비교 시 coerce(예: ISO 문자열 ↔ timestamp). 타입 안전성은 DB에 위임.
+  - (−) Spark 엔진·graph shape 백필 미지원. CursorState 자동 진행(다음 resume의 base)과 수동 백필의 상호작용은 별도(수동 백필은 result_json만 사용, CursorState 미갱신).
+- **관련**: Step 6.1(cursor/read_since/CursorState) · ADR-0021(worker queue/result_json) · ADR-0029(add_manual)
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

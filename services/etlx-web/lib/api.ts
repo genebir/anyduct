@@ -398,6 +398,15 @@ export const pipelinesApi = {
       method: "POST",
       json: {},
     }),
+  backfill: (
+    workspaceId: string,
+    id: string,
+    body: { cursor_from?: string | number | null; cursor_to?: string | number | null },
+  ) =>
+    api<RunSummary>(`/workspaces/${workspaceId}/pipelines/${id}/backfill`, {
+      method: "POST",
+      json: body,
+    }),
   dryRun: (workspaceId: string, id: string) =>
     api<DryRunResponse>(
       `/workspaces/${workspaceId}/pipelines/${id}/dry-run`,

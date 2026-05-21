@@ -209,7 +209,7 @@
 - [ ] Asset/Lineage 사용 가이드 문서
 - [ ] v0.2.0 bump + 릴리스
 
-> **서비스 레벨 후속(Step 8~11):** ✅ **B** 메타DB(assets/asset_edges/asset_materializations, Alembic 0004) + 워커 hook으로 run마다 리니지 영속화 + 카탈로그 REST → ✅ **C** 웹 카탈로그(`/w/[slug]/assets`) + 리니지 그래프(`LineageGraph`, `@xyflow/react`) + materialization→run 링크 → 🔄 **D** asset-aware 오케스트레이션 — ✅ **D1**(auto-materialize, ADR-0037: opt-in `auto_materialize` + 워커 `_trigger_asset_consumers`로 upstream materialize 시 downstream 자동 enqueue, SQL source `FROM` 파싱으로 키 일치, 빌더 체크박스) / ✅ **D2**(freshness policy, ADR-0038: opt-in `freshness_sla_minutes` + 스케줄러 `_tick_freshness`로 stale 출력 재실행, in-flight+쿨다운 가드, 빌더 입력) / **D3**(다음) 백필 UI(cursor) → **E** 컬럼 레벨 리니지·OpenLineage export·asset→consuming-pipeline 인덱스 테이블·multi-replica 스케줄러 락.
+> **서비스 레벨 후속(Step 8~11):** ✅ **B** 메타DB(assets/asset_edges/asset_materializations, Alembic 0004) + 워커 hook으로 run마다 리니지 영속화 + 카탈로그 REST → ✅ **C** 웹 카탈로그(`/w/[slug]/assets`) + 리니지 그래프(`LineageGraph`, `@xyflow/react`) + materialization→run 링크 → 🔄 **D** asset-aware 오케스트레이션 — ✅ **D1**(auto-materialize, ADR-0037: opt-in `auto_materialize` + 워커 `_trigger_asset_consumers`로 upstream materialize 시 downstream 자동 enqueue, SQL source `FROM` 파싱으로 키 일치, 빌더 체크박스) / ✅ **D2**(freshness policy, ADR-0038: opt-in `freshness_sla_minutes` + 스케줄러 `_tick_freshness`로 stale 출력 재실행, in-flight+쿨다운 가드, 빌더 입력) / ✅ **D3**(백필, ADR-0039: `SourceConfig.cursor_column` 배선 + `POST .../backfill` 엔드포인트 + 워커가 `result_json.backfill` cursor 범위를 `pipeline.run`에 전달 + 빌더 cursor 필드 + Backfill 다이얼로그) → **E** 컬럼 레벨 리니지·OpenLineage export·asset→consuming-pipeline 인덱스 테이블·multi-replica 스케줄러 락.
 
 ---
 

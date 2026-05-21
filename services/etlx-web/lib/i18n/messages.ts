@@ -277,6 +277,18 @@ export const en = {
   "pipelines.deleteFailed": "Couldn't delete pipeline.",
   "pipelines.runQueued": "Run queued for {name}",
   "pipelines.triggerFailed": "Trigger failed.",
+  "backfill.action": "Backfill",
+  "backfill.title": "Backfill {name}",
+  "backfill.desc":
+    "Re-run over a cursor range on the source's cursor column. Records with value > from and ≤ to are read.",
+  "backfill.from": "From (exclusive)",
+  "backfill.to": "To (inclusive)",
+  "backfill.fromPlaceholder": "e.g. 2026-01-01 — blank = no lower bound",
+  "backfill.toPlaceholder": "e.g. 2026-02-01 — blank = up to latest",
+  "backfill.rangeHint": "Needs a source cursor column. Both bounds optional.",
+  "backfill.run": "Queue backfill",
+  "backfill.queued": "Backfill queued for {name}",
+  "backfill.failed": "Backfill failed — does the source have a cursor column?",
 
   // pipeline builder (edit page + builder components)
   "builder.title": "Pipeline builder",
@@ -818,6 +830,18 @@ export const ko: Messages = {
   "pipelines.deleteFailed": "파이프라인을 삭제할 수 없습니다.",
   "pipelines.runQueued": "{name} 실행이 큐에 추가됨",
   "pipelines.triggerFailed": "실행에 실패했습니다.",
+  "backfill.action": "백필",
+  "backfill.title": "{name} 백필",
+  "backfill.desc":
+    "소스의 커서 컬럼 범위로 재실행합니다. 값이 from 초과 ~ to 이하인 레코드만 읽습니다.",
+  "backfill.from": "From (초과)",
+  "backfill.to": "To (이하)",
+  "backfill.fromPlaceholder": "예: 2026-01-01 — 비우면 하한 없음",
+  "backfill.toPlaceholder": "예: 2026-02-01 — 비우면 최신까지",
+  "backfill.rangeHint": "소스에 커서 컬럼이 필요합니다. 두 값 모두 선택.",
+  "backfill.run": "백필 실행",
+  "backfill.queued": "{name} 백필이 큐에 추가됨",
+  "backfill.failed": "백필 실패 — 소스에 커서 컬럼이 있나요?",
 
   "builder.title": "파이프라인 빌더",
   "builder.draft": "초안",

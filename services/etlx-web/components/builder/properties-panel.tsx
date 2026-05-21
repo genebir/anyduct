@@ -236,7 +236,8 @@ function FieldEditor({
     field.kind === "filter" ||
     field.kind === "mapping" ||
     field.kind === "columns" ||
-    field.kind === "sourceQuery";
+    field.kind === "sourceQuery" ||
+    field.kind === "table";
   const Wrapper = composite ? "div" : "label";
   return (
     <Wrapper className="flex flex-col gap-1.5">

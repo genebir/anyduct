@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { cn } from "@/lib/cn";
-import { useTables } from "./table-picker";
+import { useTables, groupBySchema } from "./table-picker";
 import { useColumns } from "./columns-field";
 import type { Messages } from "@/lib/i18n/messages";
 
@@ -41,21 +41,6 @@ function buildQuery(schema: string, table: string, columns: string[]): string {
   const ref = schema ? `${schema}.${table}` : table;
   const cols = columns.length ? columns.join(", ") : "*";
   return `SELECT ${cols} FROM ${ref}`;
-}
-
-/** Group introspected "schema.table" / "table" names by schema. Bare names
- *  (MySQL/SQLite) land under the "" (default) schema. */
-function groupBySchema(tables: string[]): Map<string, { name: string; fullId: string }[]> {
-  const bySchema = new Map<string, { name: string; fullId: string }[]>();
-  for (const full of tables) {
-    const dot = full.indexOf(".");
-    const schema = dot >= 0 ? full.slice(0, dot) : "";
-    const name = dot >= 0 ? full.slice(dot + 1) : full;
-    const arr = bySchema.get(schema) ?? [];
-    arr.push({ name, fullId: full });
-    bySchema.set(schema, arr);
-  }
-  return bySchema;
 }
 
 export function SourceQueryField({

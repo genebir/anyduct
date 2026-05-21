@@ -312,6 +312,9 @@ export const en = {
   "builder.settingsTitle": "Pipeline settings",
   "builder.settingsDesc":
     "Pipeline-wide policies. Click a node on the canvas to edit its fields instead.",
+  "builder.variables": "Variables",
+  "builder.variablesDesc":
+    "Pipeline-local values referenced as ${var.name}. Override workspace globals of the same name.",
   "builder.retryPolicy": "Retry policy",
   "builder.retryDesc":
     "Wraps task execution with tenacity; on failure the task is re-attempted before the run is marked failed.",
@@ -873,6 +876,9 @@ export const ko: Messages = {
   "builder.settingsTitle": "파이프라인 설정",
   "builder.settingsDesc":
     "파이프라인 전역 정책. 개별 필드를 편집하려면 캔버스의 노드를 클릭하세요.",
+  "builder.variables": "변수",
+  "builder.variablesDesc":
+    "${var.name}으로 참조하는 파이프라인 지역 값. 동명의 워크스페이스 전역 변수를 덮어씁니다.",
   "builder.retryPolicy": "재시도 정책",
   "builder.retryDesc":
     "tenacity로 태스크 실행을 감쌉니다. 실패 시 실행이 실패로 표시되기 전에 태스크를 재시도합니다.",

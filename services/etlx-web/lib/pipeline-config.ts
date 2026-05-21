@@ -54,6 +54,9 @@ export const DEFAULT_DLQ: DlqSettings = {
 export interface PipelineConfigJson {
   name: string;
   mode: "batch" | "stream";
+  // Pipeline-local variables (ADR-0041). Referenced as ${var.name}; override
+  // workspace globals of the same name at build time.
+  variables?: Record<string, unknown>;
   // Asset-driven orchestration (ADR-0037). Auto-run when an upstream run
   // materializes one of this pipeline's input assets.
   auto_materialize?: boolean;
@@ -146,6 +149,7 @@ export function serialize(
   meta: {
     name: string;
     mode?: "batch" | "stream";
+    variables?: Record<string, unknown>;
     auto_materialize?: boolean;
     freshness_sla_minutes?: number | null;
   },
@@ -165,6 +169,9 @@ export function serialize(
   const config: PipelineConfigJson = {
     name: meta.name,
     mode: meta.mode ?? "batch",
+    ...(meta.variables && Object.keys(meta.variables).length
+      ? { variables: meta.variables }
+      : {}),
     ...(meta.auto_materialize ? { auto_materialize: true } : {}),
     ...(meta.freshness_sla_minutes
       ? { freshness_sla_minutes: meta.freshness_sla_minutes }
@@ -421,6 +428,7 @@ export function serializeGraph(
   meta: {
     name: string;
     mode?: "batch" | "stream";
+    variables?: Record<string, unknown>;
     auto_materialize?: boolean;
     freshness_sla_minutes?: number | null;
   },
@@ -450,6 +458,9 @@ export function serializeGraph(
   return {
     name: meta.name,
     mode: meta.mode ?? "batch",
+    ...(meta.variables && Object.keys(meta.variables).length
+      ? { variables: meta.variables }
+      : {}),
     ...(meta.auto_materialize ? { auto_materialize: true } : {}),
     ...(meta.freshness_sla_minutes
       ? { freshness_sla_minutes: meta.freshness_sla_minutes }

@@ -1,5 +1,8 @@
 "use client";
 
+import { useState } from "react";
+import { Trash2Icon } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/cn";
 import type { ConnectionSummary } from "@/lib/api";
@@ -18,14 +21,18 @@ export function PipelineSettingsPanel({
   retry,
   dlq,
   connections,
+  variables,
   onChangeRetry,
   onChangeDlq,
+  onChangeVariables,
 }: {
   retry: RetrySettings;
   dlq: DlqSettings;
   connections: ConnectionSummary[];
+  variables: Record<string, unknown>;
   onChangeRetry: (next: RetrySettings) => void;
   onChangeDlq: (next: DlqSettings) => void;
+  onChangeVariables: (next: Record<string, unknown>) => void;
 }) {
   const { t } = useLocale();
   const enableLabel = t("builder.enable");
@@ -156,7 +163,86 @@ export function PipelineSettingsPanel({
           </select>
         </FieldRow>
       </Section>
+
+      <VariablesEditor variables={variables} onChange={onChangeVariables} />
     </aside>
+  );
+}
+
+function VariablesEditor({
+  variables,
+  onChange,
+}: {
+  variables: Record<string, unknown>;
+  onChange: (next: Record<string, unknown>) => void;
+}) {
+  const { t } = useLocale();
+  const [name, setName] = useState("");
+  const [valueText, setValueText] = useState("");
+  const entries = Object.entries(variables);
+
+  function add() {
+    const key = name.trim();
+    if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key)) return;
+    let value: unknown;
+    try {
+      value = JSON.parse(valueText);
+    } catch {
+      value = valueText;
+    }
+    onChange({ ...variables, [key]: value });
+    setName("");
+    setValueText("");
+  }
+
+  function remove(key: string) {
+    const next = { ...variables };
+    delete next[key];
+    onChange(next);
+  }
+
+  return (
+    <section className="flex flex-col gap-3 rounded-md border border-border-subtle p-3">
+      <header>
+        <h3 className="text-sm font-semibold text-text">{t("builder.variables")}</h3>
+        <p className="mt-1 text-[11px] text-text-muted">{t("builder.variablesDesc")}</p>
+      </header>
+      {entries.length > 0 ? (
+        <ul className="flex flex-col gap-1.5">
+          {entries.map(([key, value]) => (
+            <li key={key} className="flex items-center gap-2 text-sm">
+              <code className="text-text">{`\${var.${key}}`}</code>
+              <span className="min-w-0 flex-1 truncate text-text-secondary">
+                {JSON.stringify(value)}
+              </span>
+              <button
+                type="button"
+                aria-label={t("variables.deleteAria", { name: key })}
+                onClick={() => remove(key)}
+                className="text-text-muted hover:text-error"
+              >
+                <Trash2Icon size={14} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      <div className="flex items-end gap-2">
+        <FieldRow label={t("variables.name")}>
+          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="min_id" />
+        </FieldRow>
+        <FieldRow label={t("variables.value")}>
+          <Input
+            value={valueText}
+            onChange={(e) => setValueText(e.target.value)}
+            placeholder="100"
+          />
+        </FieldRow>
+        <Button type="button" variant="secondary" size="sm" onClick={add}>
+          {t("common.add")}
+        </Button>
+      </div>
+    </section>
   );
 }
 

@@ -67,6 +67,7 @@ export default function PipelineEditorPage() {
   const [graphState, setGraphState] = useState<GraphBuilderState | null>(null);
   const [autoMaterialize, setAutoMaterialize] = useState(false);
   const [freshnessSla, setFreshnessSla] = useState<number | null>(null);
+  const [variables, setVariables] = useState<Record<string, unknown>>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [dryRunning, setDryRunning] = useState(false);
@@ -93,6 +94,9 @@ export default function PipelineEditorPage() {
         setAutoMaterialize(Boolean(cfg?.auto_materialize));
         setFreshnessSla(
           typeof cfg?.freshness_sla_minutes === "number" ? cfg.freshness_sla_minutes : null,
+        );
+        setVariables(
+          cfg?.variables && typeof cfg.variables === "object" ? cfg.variables : {},
         );
         // Graph pipelines (ADR-0030) open in the free-form graph editor.
         if (isGraphConfig(cfg)) {
@@ -265,6 +269,7 @@ export default function PipelineEditorPage() {
         const config = serializeGraph(graphState, {
           name: pipeline.name,
           mode: m,
+          variables,
           auto_materialize: autoMaterialize,
           freshness_sla_minutes: freshnessSla,
         });
@@ -277,6 +282,7 @@ export default function PipelineEditorPage() {
       const config = serialize(state, {
         name: pipeline.name,
         mode: m,
+        variables,
         auto_materialize: autoMaterialize,
         freshness_sla_minutes: freshnessSla,
       });
@@ -297,7 +303,7 @@ export default function PipelineEditorPage() {
     } finally {
       setSaving(false);
     }
-  }, [ws, pipeline, state, mode, graphState, autoMaterialize, freshnessSla, t]);
+  }, [ws, pipeline, state, mode, graphState, variables, autoMaterialize, freshnessSla, t]);
 
   // Pipeline data mode (batch | stream) — drives palette connector filtering
   // and gates graph mode (graphs are batch-only, ADR-0030).
@@ -490,8 +496,10 @@ export default function PipelineEditorPage() {
                 retry={state.retry}
                 dlq={state.dlq}
                 connections={connections}
+                variables={variables}
                 onChangeRetry={updateRetry}
                 onChangeDlq={updateDlq}
+                onChangeVariables={setVariables}
               />
             )}
           </div>

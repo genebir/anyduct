@@ -497,7 +497,7 @@
 - **변수(Variables) feature track** (전역 + 파이프라인별 지역, 사용자 요청 2026-05-21):
   - [x] **V1 코어 지역 변수** ✅ (2026-05-21) — `PipelineConfig.variables` + `config/variables.py` `resolve_variables`/`resolve_config_variables`. `${var.name}` 치환(전체매칭=타입보존, 부분=문자열보간), env(`${UPPER}`)·secret(`!secret`)와 별도 네임스페이스. `load_pipeline`이 env→secret→variables 순 해석. 미정의 변수는 ConfigError. v1 한계: 변수 간 참조 불가. 코어 582 unit green.
   - [x] **V2a 서비스 전역 변수 + 빌드 결선** ✅ (2026-05-21) — `workspace_variables` 테이블(Alembic 0006, 워크스페이스 스코프, JSONB value, 비밀 아님) + `WorkspaceVariableRepository`(list/get/set upsert/delete/as_dict) + REST `/workspaces/{ws}/variables`(GET Viewer+ / PUT·DELETE Editor+, name=식별자 검증, audit pairing). **워커 `_prepare` + `DryRunService`가 `resolve_config_variables(config_json, extra=globals)` 적용**(지역 override 전역), 미정의 변수는 빌드 실패/dry-run 에러. 비밀값은 시크릿 backend로(변수는 평문). 서버 360 + 변수 e2e(전역 tbl + 지역 threshold가 실행 결과에 반영) green.
-  - [ ] **V2b 웹 전역 변수 UI** — 워크스페이스 설정에 변수 CRUD 페이지.
+  - [x] **V2b 웹 전역 변수 UI** ✅ (2026-05-21) — 워크스페이스 설정에 `VariablesSection`(목록 + name/value(JSON 파싱, fallback 텍스트)/description add·edit·upsert·delete, Editor+ 게이트, ConfirmDialog). `variablesApi`(list/set/delete) + `WorkspaceVariableEntry` 타입. 기존 primitive 재사용(신규 시각 컴포넌트 0 → Storybook 불요). i18n en/ko. 웹 tsc 통과.
   - [ ] **V2c 웹 지역 변수 UI** — 빌더에 파이프라인 `variables` 편집 패널.
   - 미해결: 리니지 파생 경로(`_lineage_for`/`_trigger_asset_consumers`)는 아직 변수 미해석 — 변수가 테이블명에 쓰여 asset 키에 영향 시 follow-up 필요.
 

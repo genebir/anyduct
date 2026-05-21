@@ -151,6 +151,12 @@ export interface ConnectionSummary {
   secret_refs: string[];
 }
 
+export interface WorkspaceVariableEntry {
+  name: string;
+  value: unknown;
+  description: string | null;
+}
+
 export interface PipelineSummary {
   id: string;
   workspace_id: string;
@@ -540,6 +546,24 @@ export interface AssetMaterializationEntry {
   records_written: number;
   materialized_at: string;
 }
+
+export const variablesApi = {
+  list: (workspaceId: string) =>
+    api<WorkspaceVariableEntry[]>(`/workspaces/${workspaceId}/variables`),
+  set: (
+    workspaceId: string,
+    name: string,
+    body: { value: unknown; description?: string | null },
+  ) =>
+    api<WorkspaceVariableEntry>(
+      `/workspaces/${workspaceId}/variables/${encodeURIComponent(name)}`,
+      { method: "PUT", json: body },
+    ),
+  delete: (workspaceId: string, name: string) =>
+    api<void>(`/workspaces/${workspaceId}/variables/${encodeURIComponent(name)}`, {
+      method: "DELETE",
+    }),
+};
 
 export const assetsApi = {
   list: (workspaceId: string) =>

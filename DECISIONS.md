@@ -1143,4 +1143,25 @@ ADR 본문이 P1.3에 남겨둔 미해결 포인트 "record-task 시스템에서
 
 ---
 
+## ADR-0034: 같은 연결 source+sink 데드락 — sink 전용 연결 인스턴스 분리
+
+- **Date**: 2026-05-21
+- **Status**: Accepted
+- **Context**:
+  파이프라인이 **같은 연결**을 source(읽기)와 sink(쓰기)에 동시에 쓰면(예: 한 DB 안에서 테이블 A→B 복사) 워커가 무한정 "running"에 멈추는 현상 발견. 원인: 런타임은 연결 *이름*당 커넥터를 1개만 만든다(`connectors: dict[str, Connector]`). 코어는 스트리밍으로 `sink.write(read_and_transform(...))` — sink의 `COPY ... FROM STDIN`이 source 제너레이터에서 행을 lazy하게 당겨온다. 그런데 source·sink가 같은 이름이면 **psycopg 연결 1개를 공유** → COPY가 연결의 non-reentrant 락을 쥔 채 같은 연결에서 server-side cursor `FETCH`를 시도 → **self-deadlock**(스레드 `futex_wait`, 서버측 `COPY … ClientRead` 영구 대기). ZombieReaper가 안 떠 있으면 자동 실패 처리도 안 됨.
+- **Decision**:
+  1. **sink가 source 연결을 재사용하면 sink에 전용 커넥터 인스턴스(별도 물리 연결)를 만든다.** `build_pipeline(..., connector_factory=...)`(옵셔널) 추가 — `factory(name) -> Connector`로 새 인스턴스 생성. 같은-이름 충돌 시 synthetic key `"<name>::sink"`로 등록하고 task/SinkSpec의 sink 참조를 그 키로 교체. 생성된 인스턴스는 반환 `connectors` dict에 추가돼 caller가 동일하게 connect/close.
+  2. **스트리밍·메모리 보장 유지** — 전체 버퍼링(소스를 리스트로 모두 적재) 대안은 거부(코어 핵심 가치인 bounded-memory 위반). 연결을 하나 더 여는 비용만 든다.
+  3. linear(`_build_task`) + dataflow graph(`_build_graph_task`) 양쪽 적용. fan-out에선 source 연결을 재사용하는 sink만 분리(나머지는 그대로).
+  4. `connector_factory`가 없으면(미리 만든 커넥터만 넘긴 caller·테스트·동시 read/write 허용 드라이버) 기존 단일 인스턴스 동작 유지 — 하위호환. 워커(`RunExecutor._prepare`)와 `build_pipeline_from_yaml`은 config에서 재인스턴스화하는 factory를 주입.
+- **Consequences**:
+  - (+) 한 DB 안에서 읽고 쓰는 흔한 ETL 패턴이 데드락 없이 동작(검증: 실 Postgres에서 source=sink='test', read=2/written=2, 0.01s 완료).
+  - (+) 코어 시그니처만 확장(옵셔널 인자), 기존 호출부·테스트 무변경 통과(코어 +3 unit, 536 전부 green).
+  - (−) 같은 연결 read+write 시 물리 연결 2개 사용(설계상 정상 — ETL 도구 표준).
+  - (−) graph/fan-out에서 source 연결을 공유하는 sink가 여럿이면 각각 `::sink` 1개를 공유(순차 쓰기라 안전). 동시 쓰기가 필요해지면 키 네이밍 확장 필요.
+  - 참고: 별개 문제로 데이터 타입 불일치(예: UUID `id` → `time` 컬럼)는 데드락 제거 후 이제 **즉시 COPY 타입 에러로 실패**(무한 멈춤 아님).
+- **관련**: ADR-0021(worker queue) · 9.3b(heartbeat/ZombieReaper) · ADR-0026(fan-out) · ADR-0030(dataflow graph)
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

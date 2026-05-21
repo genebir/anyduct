@@ -10,6 +10,7 @@
 ## [Unreleased]
 
 ### Fixed
+- **같은 연결 source+sink 데드락 수정** [ADR-0034] — 파이프라인이 한 연결을 읽기·쓰기에 동시에 쓰면(같은 DB 내 테이블 복사 등) 워커가 영구 "running"으로 멈추던 문제. 원인은 연결 이름당 커넥터 1개 → psycopg 연결 하나로 server-side cursor 읽기 + COPY 쓰기를 동시에 잡아 self-deadlock(`futex_wait` / `COPY … ClientRead`). 수정: `build_pipeline(connector_factory=...)`로 sink가 source 연결을 재사용하면 sink 전용 인스턴스(별도 물리 연결)를 `"<name>::sink"` 키로 분리 — 스트리밍/메모리 보장 유지(버퍼링 안 함). linear+graph+fan-out 적용, 워커/YAML 경로에 factory 주입. 검증: 실 Postgres에서 source=sink 동일 연결 read=2/written=2 0.01s 완료(이전엔 무한 멈춤). 코어 +3 unit(536 green).
 - **worker/stream-worker CLI가 `SECRET_BACKEND`/`SECRET_BACKEND_FILE_PATH` 환경변수 fallback** — `--secret-backend`/`--secret-file-path` typer 옵션에 `envvar=` 추가. 이전엔 플래그 미지정 시 무조건 `env` 백엔드로 떨어져, API 서버(file 백엔드)와 불일치 → 워커가 시크릿을 "env var not set"으로 못 찾는 문제. 이제 env-only(`SECRET_BACKEND=file`)로 띄워도 서버와 동일 백엔드 사용. (검증: env-only 워커로 run 실행 시 시크릿 정상 해석 확인.)
 
 ### Added

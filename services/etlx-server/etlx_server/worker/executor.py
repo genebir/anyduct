@@ -313,8 +313,17 @@ class RunExecutor:
                 connectors[name] = build_connector(name, conn_cfg)
             except (ConfigError, RegistryError) as e:
                 raise _PipelineBuildError(f"connection {name!r}: {type(e).__name__}: {e}") from e
+
+        # Factory for dedicated sink connections: a pipeline that reads from and
+        # writes to the same connection needs two physical connections, or the
+        # streaming read cursor and the write deadlock on one shared connection.
+        def _factory(name: str) -> Connector:
+            return build_connector(name, conn_cfgs[name])
+
         try:
-            core_pipeline, _ = build_pipeline(cfg, connectors=connectors)
+            core_pipeline, connectors = build_pipeline(
+                cfg, connectors=connectors, connector_factory=_factory
+            )
         except ConfigError as e:
             raise _PipelineBuildError(f"pipeline build failed: {e}") from e
         ctx = Context(pipeline_name=core_pipeline.name, run_id=str(run_id))

@@ -104,6 +104,73 @@ def test_build_pipeline_minimum() -> None:
     assert connectors == {"s": src, "k": snk}
 
 
+def test_build_pipeline_splits_shared_source_sink_connection() -> None:
+    """A sink reusing the source's connection gets its own instance (a separate
+    physical connection) so the streaming read cursor and the write don't
+    deadlock on one shared connection."""
+    pc = PipelineConfig.model_validate(
+        {
+            "name": "p",
+            "source": {"connection": "db", "query": "SELECT 1"},
+            "sink": {"connection": "db", "table": "T", "mode": "append"},
+        }
+    )
+    shared = InMemoryBatchSink()
+    made: list[str] = []
+
+    def factory(name: str) -> Any:
+        made.append(name)
+        return InMemoryBatchSink()
+
+    pipeline, connectors = build_pipeline(pc, {"db": shared}, connector_factory=factory)
+    task = pipeline.tasks[0]
+    assert task.source == "db"
+    assert task.sink == "db::sink"
+    assert made == ["db"]
+    assert connectors["db"] is shared
+    assert connectors["db::sink"] is not shared
+
+
+def test_build_pipeline_shared_connection_without_factory_keeps_single() -> None:
+    """Without a factory we can't split — preserve the original single-instance
+    behaviour (drivers that tolerate concurrent read/write, mocks, tests)."""
+    pc = PipelineConfig.model_validate(
+        {
+            "name": "p",
+            "source": {"connection": "db", "query": "SELECT 1"},
+            "sink": {"connection": "db", "table": "T", "mode": "append"},
+        }
+    )
+    inst = InMemoryBatchSink()
+    pipeline, connectors = build_pipeline(pc, {"db": inst})
+    assert pipeline.tasks[0].sink == "db"
+    assert set(connectors) == {"db"}
+
+
+def test_build_pipeline_fanout_splits_only_shared_sink() -> None:
+    """In fan-out, only the sink that reuses the source connection is split."""
+    pc = PipelineConfig.model_validate(
+        {
+            "name": "p",
+            "source": {"connection": "db", "query": "SELECT 1"},
+            "sinks": [
+                {"connection": "db", "table": "T1", "mode": "append"},
+                {"connection": "other", "table": "T2", "mode": "append"},
+            ],
+        }
+    )
+
+    def factory(name: str) -> Any:
+        return InMemoryBatchSink()
+
+    pipeline, connectors = build_pipeline(
+        pc, {"db": InMemoryBatchSink(), "other": InMemoryBatchSink()}, connector_factory=factory
+    )
+    sink_names = [s.name for s in pipeline.tasks[0].sinks]
+    assert sink_names == ["db::sink", "other"]
+    assert "db::sink" in connectors
+
+
 def test_build_pipeline_with_transforms() -> None:
     pc = PipelineConfig.model_validate(
         {

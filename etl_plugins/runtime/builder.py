@@ -13,7 +13,7 @@ The composition root:
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -59,6 +59,38 @@ def build_connectors(config: ConnectionsConfig) -> dict[str, Connector]:
 
 _SINK_OPTS_EXCLUDE = {"connection", "table", "mode", "key_columns", "when"}
 
+# Suffix for the dedicated sink-side connector instance created when a sink
+# reuses a connection that is also a source. See ``_dedicated_sink_key``.
+_SINK_ROLE_SUFFIX = "::sink"
+
+
+def _dedicated_sink_key(
+    conn_name: str,
+    *,
+    source_names: set[str],
+    connectors: dict[str, Connector],
+    factory: Callable[[str], Connector] | None,
+) -> str:
+    """Pick the connectors-dict key a sink should use.
+
+    A pipeline that both reads from and writes to the *same* connection would
+    otherwise share a single driver connection for the streaming read cursor
+    and the write — which deadlocks on drivers that serialize connection
+    access (e.g. psycopg's COPY vs. a server-side cursor). When a sink reuses a
+    source's connection and a ``factory`` is available, mint a *second*
+    connector instance (a separate physical connection) under a synthetic key
+    so read and write never contend. Preserves bounded-memory streaming — no
+    buffering. Without a factory the original key is kept (callers that supply
+    pre-built connectors, e.g. single-connection drivers that tolerate
+    concurrent read/write, or tests).
+    """
+    if conn_name in source_names and factory is not None:
+        key = f"{conn_name}{_SINK_ROLE_SUFFIX}"
+        if key not in connectors:
+            connectors[key] = factory(conn_name)
+        return key
+    return conn_name
+
 
 def _build_task(
     task_cfg: TaskConfig,
@@ -66,6 +98,7 @@ def _build_task(
     pipeline_name: str,
     mode: str,
     connectors: dict[str, Connector],
+    connector_factory: Callable[[str], Connector] | None = None,
 ) -> Task:
     """Build one runtime :class:`Task` from a :class:`TaskConfig`."""
     src = task_cfg.source
@@ -117,11 +150,24 @@ def _build_task(
         trigger_rule=task_cfg.trigger_rule,
         branch=[BranchRule(when=br.when, to=list(br.to)) for br in task_cfg.branch],
     )
+    # When a sink reuses the source's connection, give it a dedicated instance
+    # (separate physical connection) so the streaming read cursor and the write
+    # don't deadlock on a single shared connection.
+    source_names = {src.connection}
+
+    def _sink_key(conn_name: str) -> str:
+        return _dedicated_sink_key(
+            conn_name,
+            source_names=source_names,
+            connectors=connectors,
+            factory=connector_factory,
+        )
+
     # Collapse to the flat single-sink fields only when there's exactly one
     # sink with no routing predicate (that path can't carry ``when``).
     if len(sink_cfgs) == 1 and sink_cfgs[0].when is None:
         snk = sink_cfgs[0]
-        task.sink = snk.connection
+        task.sink = _sink_key(snk.connection)
         task.sink_table = snk.table
         task.sink_mode = snk.mode
         task.sink_key_columns = snk.key_columns
@@ -129,7 +175,7 @@ def _build_task(
     else:
         task.sinks = [
             SinkSpec(
-                name=snk.connection,
+                name=_sink_key(snk.connection),
                 table=snk.table,
                 mode=snk.mode,
                 key_columns=snk.key_columns,
@@ -156,10 +202,17 @@ _GRAPH_NODE_EXCLUDE = {
 
 
 def _build_graph_task(
-    graph: GraphConfig, *, pipeline_name: str, connectors: dict[str, Connector]
+    graph: GraphConfig,
+    *,
+    pipeline_name: str,
+    connectors: dict[str, Connector],
+    connector_factory: Callable[[str], Connector] | None = None,
 ) -> Task:
     """Build a dataflow-graph :class:`Task` from a :class:`GraphConfig` (ADR-0030)."""
     label = f"pipeline {pipeline_name!r} graph"
+    # Sinks that reuse a source connection get a dedicated instance so the
+    # streaming read + write don't deadlock on one shared connection.
+    source_names = {n.connection for n in graph.nodes if n.type == "source" and n.connection}
     nodes: list[GraphNode] = []
     for n in graph.nodes:
         if n.type == "source":
@@ -187,12 +240,18 @@ def _build_graph_task(
                 raise ConfigError(
                     f"{label}: node {n.id!r} sink connection {n.connection!r} unavailable"
                 )
+            sink_key = _dedicated_sink_key(
+                n.connection,
+                source_names=source_names,
+                connectors=connectors,
+                factory=connector_factory,
+            )
             nodes.append(
                 GraphNode(
                     id=n.id,
                     kind="sink",
                     sink=SinkSpec(
-                        name=n.connection,
+                        name=sink_key,
                         table=n.table,
                         mode=n.mode,
                         key_columns=n.key_columns,
@@ -220,6 +279,8 @@ def _build_graph_task(
 def build_pipeline(
     pipeline_config: PipelineConfig,
     connectors: dict[str, Connector] | None = None,
+    *,
+    connector_factory: Callable[[str], Connector] | None = None,
 ) -> tuple[Pipeline, dict[str, Connector]]:
     """Build a Pipeline from a PipelineConfig.
 
@@ -227,6 +288,13 @@ def build_pipeline(
     ``depends_on``, ADR-0028), and a dataflow graph (``graph``, ADR-0030).
     ``connectors`` is the available set; missing connections raise
     :class:`ConfigError`.
+
+    ``connector_factory`` (optional) mints a fresh connector instance for a
+    given connection name. When provided, any sink that reuses a source's
+    connection is given its own instance (a separate physical connection) so
+    the streaming read + write don't deadlock on one shared connection. The
+    minted instances are added to the returned ``connectors`` dict so the
+    caller connects/closes them like the rest.
     """
     if connectors is None:
         connectors = {}
@@ -236,7 +304,10 @@ def build_pipeline(
         if pipeline_config.mode == "stream":
             raise ConfigError(f"pipeline {pipeline_config.name!r}: dataflow graphs are batch-only")
         graph_task = _build_graph_task(
-            pipeline_config.graph, pipeline_name=pipeline_config.name, connectors=connectors
+            pipeline_config.graph,
+            pipeline_name=pipeline_config.name,
+            connectors=connectors,
+            connector_factory=connector_factory,
         )
         commit_strategy = (
             pipeline_config.commit.strategy if pipeline_config.commit else "after_sink_flush"
@@ -265,6 +336,7 @@ def build_pipeline(
             pipeline_name=pipeline_config.name,
             mode=pipeline_config.mode,
             connectors=connectors,
+            connector_factory=connector_factory,
         )
         for tc in task_cfgs
     ]
@@ -340,12 +412,25 @@ def build_pipeline_from_yaml(
     """
     pc = load_pipeline(pipeline_path, env=env, secret_backend=secret_backend)
     connectors: dict[str, Connector] = {}
+    conn_configs: dict[str, ConnectionConfig] = {}
     if connections_path is not None:
         cc = load_connections(connections_path, env=env, secret_backend=secret_backend)
+        conn_configs = dict(cc.connections)
         connectors.update(build_connectors(cc))
     if extra_connectors:
         connectors.update(extra_connectors)
-    return build_pipeline(pc, connectors)
+
+    # Re-instantiate from config so a sink reusing a source connection gets its
+    # own connection (avoids the single-connection read+write deadlock).
+    def _factory(name: str) -> Connector:
+        if name not in conn_configs:
+            raise ConfigError(
+                f"cannot create a dedicated sink connection for {name!r}: "
+                "no connection config available (pre-built connector only)"
+            )
+        return build_connector(name, conn_configs[name])
+
+    return build_pipeline(pc, connectors, connector_factory=_factory)
 
 
 __all__ = [

@@ -48,7 +48,7 @@ from etl_plugins.core.pipeline import Pipeline as CorePipeline
 from etl_plugins.core.pipeline import RunResult
 from etl_plugins.runtime.builder import build_connector, build_pipeline
 from etlx_server.db.enums import PipelineMode, RunStatus
-from etlx_server.db.models import Pipeline, PipelineTrigger, PipelineVersion, Run
+from etlx_server.db.models import NodeRun, Pipeline, PipelineTrigger, PipelineVersion, Run
 from etlx_server.pipelines.runtime import (
     load_connections_by_name,
     referenced_connection_names,
@@ -56,9 +56,27 @@ from etlx_server.pipelines.runtime import (
 )
 from etlx_server.variables.repository import WorkspaceVariableRepository
 from etlx_server.worker.heartbeat import heartbeat_loop
+from etlx_server.worker.node_graph import (
+    NODE_FAILED,
+    NODE_SKIPPED,
+    NODE_SUCCEEDED,
+    NodeOutcome,
+    execute_graph_nodes,
+)
 from etlx_server.worker.recorder import RunRecorder, current_run_id
 
 logger = logging.getLogger(__name__)
+
+_NODE_STATUS_MAP = {
+    NODE_SUCCEEDED: RunStatus.SUCCEEDED,
+    NODE_FAILED: RunStatus.FAILED,
+    NODE_SKIPPED: RunStatus.CANCELLED,  # no SKIPPED enum; cancelled = not run
+}
+
+
+class _NodeExecutionError(Exception):
+    """Raised when a node-level graph run had a failing node (routes the run to failed)."""
+
 
 # Truncate stored error_message to fit reasonable UI display + DB column.
 # error_class is a short class name; error_message can be arbitrarily long
@@ -122,6 +140,10 @@ class RunExecutor:
         self._backend = backend
         self._worker_id = worker_id
         self._log_flush_interval = log_flush_interval_seconds
+        # Node-level execution (ADR-0041, H2b): the runner stashes per-node outcomes
+        # here so ``execute`` can persist node_runs after the run thread finishes.
+        self._node_outcomes: list[NodeOutcome] | None = None
+        self._node_deps: dict[str, list[str]] = {}
 
     async def execute(self, run_id: UUID) -> Run:
         """Execute the run identified by ``run_id``; persist the result.
@@ -230,10 +252,43 @@ class RunExecutor:
                         heartbeat_stop.set()
                         with contextlib.suppress(asyncio.CancelledError):
                             await heartbeat_task
+                    # Node-level run: record one node_run per node (ADR-0041 H2b).
+                    if self._node_outcomes is not None:
+                        await self._record_node_runs(session, run.id)
                     await session.commit()
                     return run
                 finally:
                     current_run_id.reset(ctx_token)
+
+    async def _record_node_runs(self, session: AsyncSession, run_id: UUID) -> None:
+        """Persist one node_run per node from the run thread's outcomes (ADR-0041 H2b).
+
+        Written post-hoc (terminal status) — the run-owning worker executed all
+        nodes itself, so this is a record, not the live claim queue (that's H2c).
+        """
+        now = datetime.now(UTC)
+        for outcome in self._node_outcomes or []:
+            session.add(
+                NodeRun(
+                    run_id=run_id,
+                    node_id=outcome.node_id,
+                    kind=outcome.kind,
+                    status=_NODE_STATUS_MAP[outcome.status],
+                    depends_on=self._node_deps.get(outcome.node_id, []),
+                    pending_deps=0,
+                    records_read=outcome.records_read,
+                    records_written=outcome.records_written,
+                    error_class=outcome.error_class,
+                    error_message=(
+                        outcome.error_message[:_MAX_ERROR_MESSAGE_LEN]
+                        if outcome.error_message
+                        else None
+                    ),
+                    finished_at=now,
+                    worker_id=self._worker_id,
+                )
+            )
+        await session.flush()
 
     def _lineage_for(self, version: PipelineVersion, log: Any) -> AssetLineage | None:
         """Derive the run's static asset lineage from config. ``None`` on any
@@ -461,6 +516,38 @@ class RunExecutor:
         except ConfigError as e:
             raise _PipelineBuildError(f"pipeline build failed: {e}") from e
         ctx = Context(pipeline_name=core_pipeline.name, run_id=str(run_id))
+
+        # Node-level execution (ADR-0041, H2b, opt-in): run the graph node-by-node
+        # so each node gets a node_run record (status/counters). Sequential in one
+        # thread — intra-run parallelism (per-node connectors) lands in H2c.
+        if cfg.node_level and cfg.graph is not None:
+            task = core_pipeline.tasks[0]
+            self._node_deps = {n.id: [] for n in task.graph_nodes}
+            for edge in task.graph_edges:
+                self._node_deps[edge.to_id].append(edge.from_id)
+            run_name = core_pipeline.name
+
+            def _node_runner() -> RunResult:
+                outcomes = execute_graph_nodes(task, connectors)
+                self._node_outcomes = outcomes  # for node_runs persistence in execute()
+                read = sum(o.records_read for o in outcomes if o.status == NODE_SUCCEEDED)
+                written = sum(o.records_written for o in outcomes if o.status == NODE_SUCCEEDED)
+                failures = [o for o in outcomes if o.status == NODE_FAILED]
+                if failures:
+                    f = failures[0]
+                    raise _NodeExecutionError(
+                        f"node {f.node_id!r} failed: {f.error_class}: {f.error_message}"
+                    )
+                return RunResult(
+                    run_id=str(run_id),
+                    pipeline_name=run_name,
+                    success=True,
+                    records_read=read,
+                    records_written=written,
+                )
+
+            return _node_runner, run_name
+
         # Connect + run + close happen in a single worker thread so drivers
         # (notably sqlite3) bound to a thread don't trip on cross-thread reuse.
         return functools.partial(

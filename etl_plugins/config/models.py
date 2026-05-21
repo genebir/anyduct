@@ -378,6 +378,11 @@ class PipelineConfig(BaseModel):
     # string fields; resolved at load time (see config.variables). Workspace-wide
     # globals merge underneath these (locals win) at the service layer (V2).
     variables: dict[str, Any] = Field(default_factory=dict)
+    # Node-level execution (ADR-0041, H2, service-only). When true *and* this is a
+    # graph pipeline, the worker expands the graph into per-node ``node_runs`` and
+    # executes node-by-node (per-node status / retry foundation) instead of one
+    # whole-graph pass. Opt-in; the core ignores it.
+    node_level: bool = False
     # Asset-driven orchestration (ADR-0037). When true, the service auto-enqueues
     # a run of this pipeline whenever an upstream run materializes one of its
     # input assets (Dagster auto-materialize / Airflow Dataset trigger). Opt-in

@@ -32,6 +32,7 @@ from etlx_server.assets.repository import AssetRepository
 from etlx_server.db.enums import RunStatus
 from etlx_server.db.models import (
     Connection,
+    NodeRun,
     Pipeline,
     PipelineTrigger,
     PipelineVersion,
@@ -366,6 +367,116 @@ async def test_executor_fails_on_undefined_variable(session: AsyncSession, tmp_p
     refreshed = (await session.execute(select(Run).where(Run.id == run.id))).scalar_one()
     assert refreshed.status == RunStatus.FAILED
     assert "variable" in (refreshed.error_message or "").lower()
+
+
+async def _node_runs_for(session: AsyncSession, run_id: object) -> dict[str, NodeRun]:
+    rows = (await session.execute(select(NodeRun).where(NodeRun.run_id == run_id))).scalars().all()
+    return {r.node_id: r for r in rows}
+
+
+async def test_node_level_graph_records_node_runs(session: AsyncSession, tmp_path: Path) -> None:
+    """node_level graph run executes node-by-node and records a node_run per node."""
+    db_path = _prepare_sqlite_fixture(tmp_path)
+    ws = await _seed_workspace(session, slug="we-nodelevel")
+    await _seed_connection(session, workspace_id=ws.id, name="src", config={"database": db_path})
+    await _seed_connection(session, workspace_id=ws.id, name="dst", config={"database": db_path})
+    cfg = {
+        "name": "p",
+        "node_level": True,
+        "graph": {
+            "nodes": [
+                {
+                    "id": "s",
+                    "type": "source",
+                    "connection": "src",
+                    "query": "SELECT id, name FROM seed",
+                },
+                {
+                    "id": "f",
+                    "type": "transform",
+                    "transform": {"type": "filter", "expr": "data['id'] > 1"},
+                },
+                {"id": "k", "type": "sink", "connection": "dst", "table": "out", "mode": "append"},
+            ],
+            "edges": [
+                {"from_node": "s", "to_node": "f"},
+                {"from_node": "f", "to_node": "k"},
+            ],
+        },
+    }
+    p, pv = await _seed_pipeline(session, workspace_id=ws.id, name="p", config=cfg)
+    run = await _seed_pending_run(
+        session, workspace_id=ws.id, pipeline_id=p.id, pipeline_version_id=pv.id
+    )
+    claimed = await claim_pending_run(session, worker_id="worker-A")
+    assert claimed is not None
+    await session.commit()
+
+    await RunExecutor(
+        _SessionFactoryAdapter(session), StaticSecretBackend(), worker_id="worker-A"
+    ).execute(run.id)
+
+    refreshed = (await session.execute(select(Run).where(Run.id == run.id))).scalar_one()
+    assert refreshed.status == RunStatus.SUCCEEDED, (refreshed.error_class, refreshed.error_message)
+    assert refreshed.records_read == 3
+    assert refreshed.records_written == 2  # id > 1
+
+    nodes = await _node_runs_for(session, run.id)
+    assert set(nodes) == {"s", "f", "k"}
+    assert all(n.status == RunStatus.SUCCEEDED for n in nodes.values())
+    assert nodes["s"].records_read == 3
+    assert nodes["k"].records_written == 2
+    assert nodes["f"].depends_on == ["s"]
+    assert nodes["k"].depends_on == ["f"]
+
+
+async def test_node_level_failed_node_skips_downstream(
+    session: AsyncSession, tmp_path: Path
+) -> None:
+    db_path = _prepare_sqlite_fixture(tmp_path)
+    ws = await _seed_workspace(session, slug="we-nodefail")
+    await _seed_connection(session, workspace_id=ws.id, name="src", config={"database": db_path})
+    await _seed_connection(session, workspace_id=ws.id, name="dst", config={"database": db_path})
+    cfg = {
+        "name": "p",
+        "node_level": True,
+        "graph": {
+            "nodes": [
+                {"id": "s", "type": "source", "connection": "src", "query": "SELECT id FROM seed"},
+                # references a missing column → the transform raises → node fails
+                {
+                    "id": "f",
+                    "type": "transform",
+                    "transform": {"type": "filter", "expr": "data['nope'] > 1"},
+                },
+                {"id": "k", "type": "sink", "connection": "dst", "table": "out", "mode": "append"},
+            ],
+            "edges": [
+                {"from_node": "s", "to_node": "f"},
+                {"from_node": "f", "to_node": "k"},
+            ],
+        },
+    }
+    p, pv = await _seed_pipeline(session, workspace_id=ws.id, name="p", config=cfg)
+    run = await _seed_pending_run(
+        session, workspace_id=ws.id, pipeline_id=p.id, pipeline_version_id=pv.id
+    )
+    claimed = await claim_pending_run(session, worker_id="worker-A")
+    assert claimed is not None
+    await session.commit()
+
+    await RunExecutor(
+        _SessionFactoryAdapter(session), StaticSecretBackend(), worker_id="worker-A"
+    ).execute(run.id)
+
+    refreshed = (await session.execute(select(Run).where(Run.id == run.id))).scalar_one()
+    assert refreshed.status == RunStatus.FAILED
+
+    nodes = await _node_runs_for(session, run.id)
+    assert nodes["s"].status == RunStatus.SUCCEEDED
+    assert nodes["f"].status == RunStatus.FAILED
+    assert nodes["f"].error_class is not None
+    assert nodes["k"].status == RunStatus.CANCELLED  # skipped — upstream failed
 
 
 async def test_executor_persists_lineage(session: AsyncSession, tmp_path: Path) -> None:

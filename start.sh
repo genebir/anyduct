@@ -92,6 +92,9 @@ export DATABASE_URL
 # resolve identically in the worker. Override by exporting before running.
 export SECRET_BACKEND="${SECRET_BACKEND:-file}"
 export SECRET_BACKEND_FILE_PATH="${SECRET_BACKEND_FILE_PATH:-$SCRIPT_DIR/$RUN_DIR/secrets.json}"
+# Allow the local web dev origin to call the API (empty = CORS middleware off,
+# which the browser treats as blocked for cross-origin requests).
+export CORS_ORIGINS="${CORS_ORIGINS:-[\"http://localhost:$WEB_PORT\",\"http://127.0.0.1:$WEB_PORT\"]}"
 
 mkdir -p "$LOG_DIR" "$KEY_DIR"
 
@@ -211,6 +214,11 @@ fi
 # =============================================================================
 JWT_PRIVATE="$KEY_DIR/jwt-private.pem"
 JWT_PUBLIC="$KEY_DIR/jwt-public.pem"
+# Fallback to the flat .run/jwt_*.pem layout some setups use.
+if [ ! -f "$JWT_PRIVATE" ] && [ -f "$RUN_DIR/jwt_private.pem" ]; then
+    JWT_PRIVATE="$RUN_DIR/jwt_private.pem"
+    JWT_PUBLIC="$RUN_DIR/jwt_public.pem"
+fi
 if [ ! -f "$JWT_PRIVATE" ] || [ ! -f "$JWT_PUBLIC" ]; then
     log_warn "JWT keypair missing under $KEY_DIR/ — auth endpoints will be unconfigured"
     log_warn "  run ./install.sh to generate one"

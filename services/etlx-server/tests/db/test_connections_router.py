@@ -9,6 +9,7 @@ service required.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from pathlib import Path
 from uuid import UUID, uuid4
 
 import httpx
@@ -594,6 +595,102 @@ async def test_test_endpoint_viewer_forbidden(session: AsyncSession) -> None:
         token = await _login(client, email=user.email)
         resp = await client.post(
             f"/workspaces/{ws.id}/connections/{conn.id}/test",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    assert resp.status_code == 403
+
+
+# --- GET /tables + /columns (introspection, ADR-0033) -----------------------
+
+
+async def test_introspection_tables_and_columns_sqlite(
+    session: AsyncSession, tmp_path: Path
+) -> None:
+    import sqlite3
+
+    db = tmp_path / "introspect.db"
+    with sqlite3.connect(db) as raw:
+        raw.execute("CREATE TABLE orders (id INTEGER PRIMARY KEY, amount REAL)")
+        raw.execute("CREATE TABLE customers (id INTEGER, name TEXT)")
+        raw.commit()
+
+    user = await _seed_user(session, email="introspect-ok@example.com")
+    ws = await _seed_workspace_with_role(
+        session, slug="conn-introspect", user=user, role=WorkspaceRole.RUNNER
+    )
+    conn = Connection(
+        workspace_id=ws.id,
+        name="filedb",
+        type="sqlite",
+        config_json={"database": str(db)},
+        secret_refs=[],
+    )
+    session.add(conn)
+    await session.flush()
+    app, _ = _build_app(session)
+    async with _client(app) as client:
+        token = await _login(client, email=user.email)
+        headers = {"Authorization": f"Bearer {token}"}
+        tables_resp = await client.get(
+            f"/workspaces/{ws.id}/connections/{conn.id}/tables", headers=headers
+        )
+        cols_resp = await client.get(
+            f"/workspaces/{ws.id}/connections/{conn.id}/columns",
+            params={"table": "orders"},
+            headers=headers,
+        )
+    assert tables_resp.status_code == 200, tables_resp.text
+    assert set(tables_resp.json()["tables"]) == {"orders", "customers"}
+    assert cols_resp.status_code == 200, cols_resp.text
+    body = cols_resp.json()
+    assert body["table"] == "orders"
+    assert [c["name"] for c in body["columns"]] == ["id", "amount"]
+
+
+async def test_introspection_unsupported_connector_returns_422(session: AsyncSession) -> None:
+    user = await _seed_user(session, email="introspect-unsup@example.com")
+    ws = await _seed_workspace_with_role(
+        session, slug="conn-introspect-u", user=user, role=WorkspaceRole.RUNNER
+    )
+    # kafka connector has no SchemaInspector capability.
+    conn = Connection(
+        workspace_id=ws.id,
+        name="stream",
+        type="kafka",
+        config_json={},
+        secret_refs=[],
+    )
+    session.add(conn)
+    await session.flush()
+    app, _ = _build_app(session)
+    async with _client(app) as client:
+        token = await _login(client, email=user.email)
+        resp = await client.get(
+            f"/workspaces/{ws.id}/connections/{conn.id}/tables",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    assert resp.status_code == 422, resp.text
+
+
+async def test_introspection_viewer_forbidden(session: AsyncSession) -> None:
+    user = await _seed_user(session, email="introspect-viewer@example.com")
+    ws = await _seed_workspace_with_role(
+        session, slug="conn-introspect-v", user=user, role=WorkspaceRole.VIEWER
+    )
+    conn = Connection(
+        workspace_id=ws.id,
+        name="mem",
+        type="sqlite",
+        config_json={"database": ":memory:"},
+        secret_refs=[],
+    )
+    session.add(conn)
+    await session.flush()
+    app, _ = _build_app(session)
+    async with _client(app) as client:
+        token = await _login(client, email=user.email)
+        resp = await client.get(
+            f"/workspaces/{ws.id}/connections/{conn.id}/tables",
             headers={"Authorization": f"Bearer {token}"},
         )
     assert resp.status_code == 403

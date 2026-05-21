@@ -27,21 +27,29 @@ import uuid
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from etl_plugins.config.secrets import SecretBackend
 from etlx_server.audit.dependencies import get_audit_service
 from etlx_server.audit.service import AuditService
 from etlx_server.auth.schemas import (
+    ColumnEntry,
+    ConnectionColumnsResult,
     ConnectionCreateRequest,
     ConnectionSummary,
+    ConnectionTablesResult,
     ConnectionTestResult,
     ConnectionUpdateRequest,
 )
 from etlx_server.auth.workspace_context import (
     WorkspaceContext,
     require_workspace_role,
+)
+from etlx_server.connections.inspect import (
+    ConnectionInspector,
+    InspectionUnsupportedError,
+    SecretResolutionError,
 )
 from etlx_server.connections.repository import (
     ConnectionNameTakenError,
@@ -322,3 +330,68 @@ async def test_connection(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="connection not found")
     outcome = await ConnectionTester(backend).run(connection)
     return ConnectionTestResult(ok=outcome.ok, error=outcome.error)
+
+
+async def _resolve_connection_or_404(
+    session: AsyncSession, *, workspace_id: UUID, connection_id: UUID
+) -> Connection:
+    connection = await ConnectionRepository(session).get(
+        workspace_id=workspace_id, connection_id=connection_id
+    )
+    if connection is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="connection not found")
+    return connection
+
+
+@router.get("/{connection_id}/tables", response_model=ConnectionTablesResult)
+async def list_connection_tables(
+    connection_id: UUID,
+    ctx: WorkspaceContext = _require_runner,
+    session: AsyncSession = Depends(get_session),  # noqa: B008
+    backend: SecretBackend = Depends(get_secret_backend_dep),  # noqa: B008
+) -> ConnectionTablesResult:
+    """Introspect the connection's tables for the builder's picker (ADR-0033)."""
+    connection = await _resolve_connection_or_404(
+        session, workspace_id=ctx.workspace.id, connection_id=connection_id
+    )
+    try:
+        tables = await ConnectionInspector(backend).list_tables(connection)
+    except InspectionUnsupportedError as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(e)) from e
+    except SecretResolutionError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"introspection failed: {type(e).__name__}: {e}",
+        ) from e
+    return ConnectionTablesResult(tables=tables)
+
+
+@router.get("/{connection_id}/columns", response_model=ConnectionColumnsResult)
+async def list_connection_columns(
+    connection_id: UUID,
+    table: str = Query(min_length=1),
+    ctx: WorkspaceContext = _require_runner,
+    session: AsyncSession = Depends(get_session),  # noqa: B008
+    backend: SecretBackend = Depends(get_secret_backend_dep),  # noqa: B008
+) -> ConnectionColumnsResult:
+    """Introspect a table's columns so downstream transforms can "click" them (ADR-0033)."""
+    connection = await _resolve_connection_or_404(
+        session, workspace_id=ctx.workspace.id, connection_id=connection_id
+    )
+    try:
+        columns = await ConnectionInspector(backend).list_columns(connection, table)
+    except InspectionUnsupportedError as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(e)) from e
+    except SecretResolutionError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"introspection failed: {type(e).__name__}: {e}",
+        ) from e
+    return ConnectionColumnsResult(
+        table=table,
+        columns=[ColumnEntry(name=c.name, type=c.type) for c in columns],
+    )

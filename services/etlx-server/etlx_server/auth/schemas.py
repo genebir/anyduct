@@ -164,6 +164,26 @@ class ConnectionTestResult(BaseModel):
     error: str | None = None
 
 
+class ConnectionTablesResult(BaseModel):
+    """Response from ``GET /connections/{id}/tables`` (ADR-0033)."""
+
+    tables: list[str]
+
+
+class ColumnEntry(BaseModel):
+    """One column in a ``GET /connections/{id}/columns`` response."""
+
+    name: str
+    type: str
+
+
+class ConnectionColumnsResult(BaseModel):
+    """Response from ``GET /connections/{id}/columns?table=...`` (ADR-0033)."""
+
+    table: str
+    columns: list[ColumnEntry]
+
+
 class PipelineVersionEntry(BaseModel):
     """One row of ``GET /workspaces/{ws}/pipelines/{pid}/versions``."""
 

@@ -608,6 +608,74 @@ export const variablesApi = {
     }),
 };
 
+// --- Sensors (ADR-0041 K3c) ------------------------------------------------
+
+export interface SensorSummary {
+  id: string;
+  workspace_id: string;
+  name: string;
+  type: string;
+  config_json: Record<string, unknown>;
+  target_pipeline_id: string | null;
+  poll_interval_seconds: number;
+  is_active: boolean;
+  last_check_at: string | null;
+  last_triggered_at: string | null;
+  last_result_json: {
+    triggered?: boolean;
+    message?: string | null;
+    metadata?: Record<string, unknown>;
+  } | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SensorCreateBody {
+  name: string;
+  type: string;
+  config_json: Record<string, unknown>;
+  target_pipeline_id?: string | null;
+  poll_interval_seconds?: number;
+  is_active?: boolean;
+}
+
+export interface SensorUpdateBody {
+  name?: string;
+  config_json?: Record<string, unknown>;
+  target_pipeline_id?: string | null;
+  poll_interval_seconds?: number;
+  is_active?: boolean;
+}
+
+export interface SensorCheckResponse {
+  triggered: boolean;
+  message: string | null;
+  metadata: Record<string, unknown>;
+}
+
+export const sensorsApi = {
+  list: (workspaceId: string) =>
+    api<SensorSummary[]>(`/workspaces/${workspaceId}/sensors`),
+  get: (workspaceId: string, id: string) =>
+    api<SensorSummary>(`/workspaces/${workspaceId}/sensors/${id}`),
+  create: (workspaceId: string, body: SensorCreateBody) =>
+    api<SensorSummary>(`/workspaces/${workspaceId}/sensors`, {
+      method: "POST",
+      json: body,
+    }),
+  update: (workspaceId: string, id: string, body: SensorUpdateBody) =>
+    api<SensorSummary>(`/workspaces/${workspaceId}/sensors/${id}`, {
+      method: "PATCH",
+      json: body,
+    }),
+  delete: (workspaceId: string, id: string) =>
+    api<void>(`/workspaces/${workspaceId}/sensors/${id}`, { method: "DELETE" }),
+  check: (workspaceId: string, id: string) =>
+    api<SensorCheckResponse>(`/workspaces/${workspaceId}/sensors/${id}/check`, {
+      method: "POST",
+    }),
+};
+
 export const assetsApi = {
   list: (workspaceId: string) =>
     api<AssetSummary[]>(`/workspaces/${workspaceId}/assets`),

@@ -14,6 +14,7 @@ import {
   GitBranchIcon,
   HomeIcon,
   LayersIcon,
+  RadarIcon,
   ScrollTextIcon,
   SettingsIcon,
   SlidersHorizontalIcon,
@@ -64,6 +65,12 @@ const NAV: NavEntry[] = [
     href: (s) => `/w/${s}/schedules`,
     labelKey: "nav.schedules",
     icon: <CalendarClockIcon size={18} />,
+  },
+  {
+    id: "sensors",
+    href: (s) => `/w/${s}/sensors`,
+    labelKey: "nav.sensors",
+    icon: <RadarIcon size={18} />,
   },
   {
     id: "runs",

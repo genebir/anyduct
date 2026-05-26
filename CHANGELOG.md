@@ -14,6 +14,22 @@
 
 ### Added
 - **빌더 지역 변수 UI — V2c** [ADR-0041] — 파이프라인 빌더의 PipelineSettingsPanel(노드 미선택 시 우측 패널)에 `VariablesEditor`: 파이프라인 지역 `variables`(name/value 추가·삭제, value JSON 파싱, 실패 시 평문). `PipelineConfigJson.variables` 타입 + `serialize`/`serializeGraph` meta가 비어있지 않을 때 emit + 빌더 load/save/deps 배선(round-trip). 기존 primitive 재사용, i18n en/ko, 웹 tsc 통과. **이로써 변수 기능(V1 코어 + V2a 서버 전역 + V2b 전역 UI + V2c 지역 UI) 완료 — 전역·지역 변수 모두 UI에서 설정 가능.**
+- **Sensor 웹 UI — K3c (Phase K3 sensor framework 완료)** [ADR-0041 K3c] — K3a 코어 + K3b 서비스를 비로소 사용자 흐름으로 닫음. 운영자가 SQL/CLI 없이 브라우저에서 sensor CRUD + 즉시 결과 디버그.
+  - **`lib/api.ts`**: `sensorsApi`(list/get/create/update/delete/check) + 4 신규 타입(`SensorSummary`/`SensorCreateBody`/`SensorUpdateBody`/`SensorCheckResponse`) — 서버 6 엔드포인트와 정확히 매핑.
+  - **`/w/[slug]/sensors` 페이지**: schedules 패턴 미러. list `DataTable`(이름·타입 칩·target pipeline 이름·interval·status active/paused·마지막 check icon[CheckCircle/XCircle]+timestamp+message tooltip·actions[지금확인/편집/삭제]) + create/edit `Card` form(이름/타입 select[v1=http]/**JSON config textarea + inline parse-error**/target pipeline picker/poll_interval input[5~86400]/active toggle). 빈 상태는 `RadarIcon` + 설명. delete는 `ConfirmDialog(destructive)`.
+  - **"Check now" per-row 버튼**: `POST .../check` 호출 → `triggered=true`면 toast success(triggered+message), 아니면 toast info("not triggered: msg"). **트리거 run은 enqueue 안 함**(서버 K3b 동일 시맨틱 — manual 디버그 용도). 사용자가 sensor 설정 직후 "잘 되나?" 즉시 확인 가능.
+  - **사이드바**: top-level "Sensors" 항목(`RadarIcon`, schedules 직후 — 활성 트리거 패밀리 위계 일관, 수동적 settings 분류와 분리).
+  - **i18n**: 50+ 신규 키 en/ko(`nav.sensors`, `sensors.*` 전체 UI 문자열).
+  - **신규 시각 컴포넌트 0**: 기존 primitives(Card/DataTable/Input/Button/EmptyState/ConfirmDialog) + 인라인 form만. JsonInput 추출은 별 슬라이스(현 textarea + parse-error로 충분).
+  - **orphan 처리**: `target_pipeline_id=null` 센서는 list에서 `no target` 워닝 표시, form에서 명시적으로 "— none (orphaned) —" 옵션 제공해 정책 의도 노출.
+  - **검증**: 웹 tsc green. 서버/코어 변화 0.
+  - **사용 흐름**:
+    1. 사이드바 Sensors → "New sensor"
+    2. 이름 `wait-for-upstream`, 타입 http, config `{"url":"https://upstream/healthz","contains":"ready"}`, target=원하는 파이프라인, poll 30s
+    3. 저장 후 list의 "지금 확인" 버튼으로 즉시 검증 → toast로 결과
+    4. `etlx-server sensor-scheduler run`이 백그라운드 폴링 시작
+  - **→ Phase K의 sensor framework 완료**(K3a 코어 + K3b 서비스+REST + K3c 웹 UI). Airflow의 hallmark "wait-for-the-world-to-be-ready" 패턴이 코어→서비스→UI 풀스택으로 구현됨.
+  - **남은 K**: 추가 빌트인 sensor(file-landed via S3 / asset-freshness via 카탈로그) / K4 graph 백필 / 운영 강화(샌드박스·로그 redaction·Monaco self-host).
 - **Sensor 서비스 영속화 + tick + REST — K3b** [ADR-0041 K3b] — K3a 코어 ABC를 서비스가 비로소 폴링·트리거 가능. 외부 이벤트(HTTP healthz, file landed, asset freshness 등)가 데이터 파이프라인 트리거의 1급 시민이 됨.
   - **Alembic 0008 `sensors` 테이블**: id/workspace_id/name/type/config_json(JSONB)/target_pipeline_id(SET NULL — pipeline 삭제 시 sensor 히스토리 보존 + scheduler skip+log)/poll_interval_seconds(default 60)/is_active/last_check_at/last_triggered_at/last_result_json + UNIQUE(workspace_id, name) + active-only partial index on (last_check_at) WHERE is_active=true(tick 쿼리 비용 감소).
   - **ORM `Sensor`** + **`SensorRepository`** (CRUD + `record_check` for tick + `_UNSET` sentinel으로 PATCH의 omitted-vs-explicit-null 구분 — `target_pipeline_id=null` = orphan 의도, 미지정 = unchanged). 도메인 예외: `SensorNameTakenError` → 409, `UnknownSensorTypeError` → 422.

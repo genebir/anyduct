@@ -14,6 +14,14 @@
 
 ### Added
 - **빌더 지역 변수 UI — V2c** [ADR-0041] — 파이프라인 빌더의 PipelineSettingsPanel(노드 미선택 시 우측 패널)에 `VariablesEditor`: 파이프라인 지역 `variables`(name/value 추가·삭제, value JSON 파싱, 실패 시 평문). `PipelineConfigJson.variables` 타입 + `serialize`/`serializeGraph` meta가 비어있지 않을 때 emit + 빌더 load/save/deps 배선(round-trip). 기존 primitive 재사용, i18n en/ko, 웹 tsc 통과. **이로써 변수 기능(V1 코어 + V2a 서버 전역 + V2b 전역 UI + V2c 지역 UI) 완료 — 전역·지역 변수 모두 UI에서 설정 가능.**
+- **Multi-replica scheduler 락 — K2** [ADR-0041 K2] — 스케줄러 SPOF 해소. 그 동안 batch scheduler는 single-replica 가정 — 프로세스가 죽으면 모든 cron firing 멈춤(real outage). 이제 두 replica가 active-active로 안전.
+  - **`etlx_server/scheduler/scheduler.py`**: `_load_due_schedules`에 SQLAlchemy `with_for_update(skip_locked=True)` 추가 → 두 replica가 `tick_once()`를 동시 호출해도 schedule row가 한 replica의 트랜잭션에 락걸려 다른 replica는 빈 set을 받음. 락은 caller의 트랜잭션 commit/close 시 해제. 한 tick 내에서 disjoint partition으로 처리되고, 다른 replica의 다음 tick에서 같은 schedule을 재발견하더라도 첫 fire가 이미 cron 베이스를 미래로 밀어뒀으므로 중복 fire 없음(no-catchup 정책 + 베이스 = `MAX(runs.scheduled_at)`).
+  - **테스트** (2 신규 it):
+    - `test_skip_locked_hides_schedule_from_concurrent_loader` — **deterministic**: A의 txn 보유 중 B의 `_load_due_schedules` 빈 결과 확인, A commit 후 C가 row 재발견. event-loop scheduling 의존 0.
+    - `test_two_parallel_ticks_fire_due_schedule_at_most_once` — **e2e**: `asyncio.gather`로 두 `Scheduler` 인스턴스 동시 `tick_once`, 정확히 1 PENDING run 검증.
+    - 신규 `isolated_factory` pytest fixture가 outer-transaction `session` fixture를 우회해 testcontainer engine에서 독립 connection 두 개 확보(SKIP LOCKED를 진짜 PG 레벨에서 검증, mock 아님). 테스트는 commit 사용 후 `finally`에서 명시적 cleanup.
+  - **미커버**: Freshness ticker(`_tick_freshness`)는 SLA 쿨다운으로 harm bounded라 락 미적용 — 후속 슬라이스에서 분산 락 추가 가능. Stream worker 다중 replica는 in-flight `asyncio.Task` dict + per-process state까지 얽혀 별도 설계(K2b로 deferred — consistent hashing or per-schedule "owner" claim).
+  - **검증**: scheduler it 16/16 green(기존 14 + 신규 2), 코어/서버 전체 회귀 영향 0. **다음 후보: K3 sensor framework / K4 graph 백필 / K5 OpenLineage export / stream worker multi-replica(K2b).**
 - **빌더 graph-only 전환 (사용자 요청)** [ADR-0041] — 사용자 명시 요청 *"파이프라인 구성하는 게 그냥 그래프형태로만 되게 해줘"*에 따라 빌더에서 linear 모드 **전면 제거**. 그 동안 빌더는 linear 기본 + "그래프로 전환" 토글 + 별도 GraphEditor 두 갈래로 살아 있었음. graph 캔버스가 Phase G/H/I로 자유 DAG + join/aggregate + custom_python + multi-source를 다 표현하게 되면서 linear는 사실상 표현력이 하위 셋 → UX 분기를 정리.
   - **빌더 진입**: `GraphEditor` 단일 경로. 신규 파이프라인은 `blankGraph()`로 시작. 기존 linear config는 로드 시 `linearToGraph` 자동 적용 → 동일 DAG로 보임(마이그레이션 프롬프트 없음).
   - **serializer**: `serializeGraph`가 retry/dlq 포함 emit(이전엔 graph 모드에서 retry/dlq가 조용히 사라짐), 신규 `extractPipelineMeta(cfg)` helper가 저장 config에서 retry/dlq/variables/auto_materialize/freshness를 일관 추출.

@@ -12,12 +12,14 @@ enqueued. Backfilling 30 runs at once is a thundering-herd footgun;
 operators who actually want backfills should compose explicit Run rows
 via the API.
 
-Concurrency: the row-level claim semantics for runs are SKIP-LOCKED
-(Step 9.3a), but the *scheduler* itself uses simple "INSERT if next
-firing &lt;= now" — running two scheduler replicas would risk duplicate
-enqueues. For multi-replica HA, lock the schedule row with
-``FOR UPDATE SKIP LOCKED`` before deciding to fire; the current
-single-replica deployment is fine without.
+Concurrency (ADR-0041 K2): multi-replica safe. ``_load_due_schedules``
+locks each schedule row with ``FOR UPDATE SKIP LOCKED`` for the
+duration of the tick's transaction — two replicas calling
+``tick_once`` concurrently see disjoint sets of schedules, so no
+double-fire on the same row. Freshness ticking (``_tick_freshness``)
+isn't locked yet; its per-pipeline cooldown bounds the harm of an
+occasional double-fire (a follow-up slice can add proper distributed
+locking there).
 """
 
 from __future__ import annotations
@@ -205,12 +207,21 @@ class Scheduler:
 
 
 async def _load_due_schedules(session: AsyncSession) -> list[Schedule]:
-    """Active batch schedules with a cron expression. Stream schedules pass."""
+    """Active batch schedules with a cron expression. Stream schedules pass.
+
+    Each row is loaded with ``FOR UPDATE SKIP LOCKED`` (ADR-0041 K2) so
+    two scheduler replicas running ``tick_once`` concurrently see
+    disjoint partitions of the active set — the second replica's rows
+    are silently skipped during the first replica's tick and picked up
+    on the next pass. Locks release when the caller's transaction
+    commits (or its session closes).
+    """
     stmt = (
         select(Schedule)
         .where(Schedule.is_active.is_(True))
         .where(Schedule.mode == PipelineMode.BATCH)
         .where(Schedule.cron_expr.is_not(None))
+        .with_for_update(skip_locked=True)
     )
     result = await session.execute(stmt)
     return list(result.scalars().all())

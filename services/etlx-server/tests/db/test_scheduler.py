@@ -1,4 +1,4 @@
-"""Cron scheduler tick semantics (Step 9.2).
+"""Cron scheduler tick semantics (Step 9.2, ADR-0041 K2).
 
 Verifies:
 
@@ -10,20 +10,24 @@ Verifies:
   ``scheduled_at`` becomes the new base for cron's next-firing calc).
 * Pipelines with no ``is_current`` version are skipped, not crashed.
 * The main loop honors :meth:`Scheduler.stop`.
+* **Multi-replica safety (ADR-0041 K2)**: two ``tick_once`` calls
+  against independent connections fire the same due schedule at most
+  once thanks to ``FOR UPDATE SKIP LOCKED``.
 """
 
 from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime, timedelta
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
+import pytest_asyncio
 from etlx_server.db.enums import PipelineMode, RunStatus
 from etlx_server.db.models import Asset, Pipeline, PipelineVersion, Run, Schedule, Workspace
 from etlx_server.scheduler import Scheduler
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import delete, select
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 pytestmark = pytest.mark.asyncio
 
@@ -429,3 +433,152 @@ async def test_freshness_cooldown_after_recent_attempt(session: AsyncSession) ->
     await session.flush()
     fired = await Scheduler(_SessionFactoryAdapter(session)).tick_once()
     assert fired == 0  # cooldown: attempted 2m ago, SLA 30m
+
+
+# --- multi-replica (ADR-0041 K2) -------------------------------------------
+
+
+@pytest_asyncio.fixture
+async def isolated_factory(metadata_engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
+    """``async_sessionmaker`` that opens fresh connections directly on the
+    testcontainer engine — sidesteps the outer-transaction ``session``
+    fixture so two replicas can hold *independent* PG connections.
+
+    Tests using this fixture commit real rows and are responsible for
+    deleting whatever they seed (a teardown ``finally`` block).
+    """
+    return async_sessionmaker(metadata_engine, expire_on_commit=False, autoflush=False)
+
+
+async def test_skip_locked_hides_schedule_from_concurrent_loader(
+    isolated_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Multi-replica safety: while replica A's transaction holds the
+    schedule row's lock, replica B's ``_load_due_schedules`` skips it.
+
+    Deterministic by construction — A's session is left uncommitted across
+    B's query, so the SKIP-LOCKED behaviour is observable without relying
+    on event-loop scheduling. Lock releases on A's commit (or close).
+    """
+    from etlx_server.scheduler.scheduler import _load_due_schedules
+
+    slug = f"k2-skip-{uuid4().hex[:8]}"
+    ws_id: UUID
+    p_id: UUID
+    pv_id: UUID
+    sched_id: UUID
+    # --- seed (committed so both connections see it) -----------------------
+    async with isolated_factory() as s:
+        ws = Workspace(name=slug, slug=slug, color_hex="#FF3D8B")
+        s.add(ws)
+        await s.flush()
+        p = Pipeline(workspace_id=ws.id, name=f"p-{slug}")
+        s.add(p)
+        await s.flush()
+        pv = PipelineVersion(
+            pipeline_id=p.id, version=1, config_json={"name": p.name}, is_current=True
+        )
+        s.add(pv)
+        await s.flush()
+        sched = Schedule(
+            pipeline_id=p.id,
+            name=f"sched-{slug}",
+            cron_expr="* * * * *",
+            mode=PipelineMode.BATCH,
+            is_active=True,
+            config_overrides={},
+        )
+        s.add(sched)
+        await s.flush()
+        sched.created_at = datetime.now(UTC) - timedelta(hours=1)
+        await s.commit()
+        ws_id, p_id, pv_id, sched_id = ws.id, p.id, pv.id, sched.id
+    try:
+        # Replica A holds the lock for the lifetime of its session.
+        async with isolated_factory() as session_a:
+            schedules_a = await _load_due_schedules(session_a)
+            assert {s.id for s in schedules_a} == {sched_id}
+
+            # Replica B, on an independent connection, sees an empty set
+            # because the row is locked by A's open transaction.
+            async with isolated_factory() as session_b:
+                schedules_b = await _load_due_schedules(session_b)
+                assert (
+                    schedules_b == []
+                ), f"replica B should skip the row locked by A (got {[x.id for x in schedules_b]})"
+            # A's commit releases the lock — a *subsequent* load on a fresh
+            # connection sees the row again.
+            await session_a.commit()
+        async with isolated_factory() as session_c:
+            schedules_c = await _load_due_schedules(session_c)
+            assert {s.id for s in schedules_c} == {sched_id}
+    finally:
+        async with isolated_factory() as s:
+            await s.execute(delete(Run).where(Run.schedule_id == sched_id))
+            await s.execute(delete(Schedule).where(Schedule.id == sched_id))
+            await s.execute(delete(PipelineVersion).where(PipelineVersion.id == pv_id))
+            await s.execute(delete(Pipeline).where(Pipeline.id == p_id))
+            await s.execute(delete(Workspace).where(Workspace.id == ws_id))
+            await s.commit()
+
+
+async def test_two_parallel_ticks_fire_due_schedule_at_most_once(
+    isolated_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """End-to-end: even with two ``tick_once`` calls racing on independent
+    connections, the schedule fires exactly once. Combines lock contention
+    (one replica claims) with the existing "scheduled_at >= cron base"
+    check (the other replica's subsequent tick sees the row again but the
+    just-inserted run pushes the next firing into the future, so it
+    doesn't double-fire either).
+    """
+    slug = f"k2-mr-{uuid4().hex[:8]}"
+    ws_id: UUID
+    p_id: UUID
+    pv_id: UUID
+    sched_id: UUID
+    async with isolated_factory() as s:
+        ws = Workspace(name=slug, slug=slug, color_hex="#FF3D8B")
+        s.add(ws)
+        await s.flush()
+        p = Pipeline(workspace_id=ws.id, name=f"p-{slug}")
+        s.add(p)
+        await s.flush()
+        pv = PipelineVersion(
+            pipeline_id=p.id, version=1, config_json={"name": p.name}, is_current=True
+        )
+        s.add(pv)
+        await s.flush()
+        sched = Schedule(
+            pipeline_id=p.id,
+            name=f"sched-{slug}",
+            cron_expr="* * * * *",
+            mode=PipelineMode.BATCH,
+            is_active=True,
+            config_overrides={},
+        )
+        s.add(sched)
+        await s.flush()
+        sched.created_at = datetime.now(UTC) - timedelta(hours=1)
+        await s.commit()
+        ws_id, p_id, pv_id, sched_id = ws.id, p.id, pv.id, sched.id
+    try:
+        await asyncio.gather(
+            Scheduler(isolated_factory).tick_once(),
+            Scheduler(isolated_factory).tick_once(),
+        )
+        async with isolated_factory() as s:
+            rows = list(
+                (await s.execute(select(Run).where(Run.schedule_id == sched_id))).scalars().all()
+            )
+        assert len(rows) == 1, f"expected exactly one run, got {len(rows)}"
+        assert rows[0].status == RunStatus.PENDING
+        assert rows[0].pipeline_version_id == pv_id
+    finally:
+        async with isolated_factory() as s:
+            await s.execute(delete(Run).where(Run.schedule_id == sched_id))
+            await s.execute(delete(Schedule).where(Schedule.id == sched_id))
+            await s.execute(delete(PipelineVersion).where(PipelineVersion.id == pv_id))
+            await s.execute(delete(Pipeline).where(Pipeline.id == p_id))
+            await s.execute(delete(Workspace).where(Workspace.id == ws_id))
+            await s.commit()

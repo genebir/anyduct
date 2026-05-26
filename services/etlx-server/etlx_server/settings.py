@@ -138,6 +138,26 @@ class Settings(BaseSettings):
         description="Path argument forwarded when ``secret_backend=file``.",
     )
 
+    # --- OpenLineage export (ADR-0041 K5) ----------------------------------
+    openlineage_url: str | None = Field(
+        default=None,
+        description="OpenLineage backend base URL (e.g. ``http://marquez:5000``). "
+        "When set, the batch + stream workers install ``OpenLineageEmitter`` as "
+        "the process-wide lineage emitter; START/COMPLETE/FAIL run events POST "
+        "to ``{url}/api/v1/lineage``. Unset = OpenLineage export disabled "
+        "(internal asset/lineage catalog still works).",
+    )
+    openlineage_namespace: str = Field(
+        default="etl-plugins",
+        description="Job ``namespace`` stamped on every emitted OL RunEvent. "
+        "Typically a deployment / environment id (``prod``, ``warehouse-team``).",
+    )
+    openlineage_api_key: str | None = Field(
+        default=None,
+        description="Optional bearer token added as ``Authorization: Bearer "
+        "<key>`` on every OL request (Marquez auth, Datahub auth, …).",
+    )
+
     @property
     def docs_enabled(self) -> bool:
         """Hide /docs and /redoc in production by default."""

@@ -14,6 +14,31 @@
 
 ### Added
 - **빌더 지역 변수 UI — V2c** [ADR-0041] — 파이프라인 빌더의 PipelineSettingsPanel(노드 미선택 시 우측 패널)에 `VariablesEditor`: 파이프라인 지역 `variables`(name/value 추가·삭제, value JSON 파싱, 실패 시 평문). `PipelineConfigJson.variables` 타입 + `serialize`/`serializeGraph` meta가 비어있지 않을 때 emit + 빌더 load/save/deps 배선(round-trip). 기존 primitive 재사용, i18n en/ko, 웹 tsc 통과. **이로써 변수 기능(V1 코어 + V2a 서버 전역 + V2b 전역 UI + V2c 지역 UI) 완료 — 전역·지역 변수 모두 UI에서 설정 가능.**
+- **OpenLineage export — K5** [ADR-0041 K5] — 내부 asset/lineage 카탈로그를 OpenLineage 표준 이벤트로 외부 송출 → Marquez/DataHub/Astro 등 표준 consumer가 곧바로 받음. **ultimate-vision의 "Dagster lineage" 측 마지막 한 발** — 그 동안 lineage가 내부 DB에만 머물렀는데, 이제 표준 프로토콜로 외부 데이터 카탈로그와 통합 가능.
+  - **`etl_plugins/observability/openlineage.py`**: `OpenLineageEmitter(LineageEmitter)` + 순수 변환 함수 `build_run_event(event, namespace=...)`. 매핑:
+    - `event_type` ↔ `eventType` (START/COMPLETE/FAIL/ABORT 문자열 일치)
+    - `run_id` → `run.runId` — UUID는 그대로 통과, 비-UUID(YAML/CLI `"local-run-1"` 같은 합성 id)는 `uuid5(STABLE_NS, run_id)`로 결정론적 매핑 → 같은 string이 항상 같은 OL run, consumer의 UUID 검증기 거치기
+    - `AssetKey "conn/target"` → `{namespace: "<configured>:conn", name: "target"}` — connection을 namespace에 prefix해 workspace 분리 보존(같은 table 이름이 다른 connection에 있어도 OL 측에서 구분)
+    - `records_read/written` → custom `metrics` runFacet
+    - `error` → 표준 `errorMessage` facet (FAIL 이벤트에서 자연스럽게 routing)
+    - producer/schemaURL 모두 OL 2.0.2 spec 준수
+  - **Best-effort**: HTTP 4xx/5xx, network/DNS/connect/timeout 실패 모두 catch + structlog warning, run에 영향 0. 기존 service-side persistence(`AssetRepository.persist_run_lineage`)의 best-effort 자세와 동일. lineage backend outage가 production run을 죽이는 일 없음.
+  - **`Settings`**: `openlineage_url` / `openlineage_namespace` / `openlineage_api_key` 환경변수 추가(`OPENLINEAGE_*`). URL unset = 기능 disabled, 기본 `NoOpLineageEmitter` 유지(내부 카탈로그 영향 0).
+  - **`cli.py`**: `_install_openlineage_emitter()` helper가 `worker run` + `stream-worker run` 시작 시 settings 읽어 URL configured면 emitter 설치, 종료 시 close. `set_lineage_emitter`로 process-wide 교체.
+  - **테스트** (코어 14 + 서버 4 = 18 신규):
+    - 코어: 이벤트 shape pinning(top-level keys / dataset namespace 분리 / metrics facet on/off / error facet / UUID passthrough vs uuid5 coerce) + HTTP `_StubTransport`로 wire bytes 검증 + 네트워크 에러 흡수 + non-2xx 흡수 + bearer auth header + URL trailing-slash 정규화 + 멱등 close
+    - 서버: disabled-by-default / env reads / install no-op when unset / install installs when set
+  - **검증**: 코어 637+3skip green, 서버 settings 10/10 green, mypy(89 서버 / 56 코어)/ruff OK.
+  - **미커버 (K5b follow-up)**: 컬럼 리니지 facet — `LineageEvent`에 `ColumnLineage`가 수반되지 않아 OL `columnLineage` facet으로 ship 안 됨. J1 derive_column_lineage를 emitter 안에서 호출하거나 LineageEvent 확장으로 추가 가능. 내부 카탈로그는 컬럼까지 다 보임(J2/J3).
+  - **사용 방법**:
+    ```bash
+    export OPENLINEAGE_URL=http://marquez:5000
+    export OPENLINEAGE_NAMESPACE=prod-warehouse  # optional, default 'etl-plugins'
+    export OPENLINEAGE_API_KEY=sk-...            # optional bearer
+    etlx-server worker run
+    # 모든 run 의 START/COMPLETE/FAIL 이 Marquez 로 POST 됨
+    ```
+  - **다음 후보**: K5b 컬럼 lineage facet | K3 sensor framework | K4 graph 백필 | 운영 강화(샌드박스·로그 redaction·Monaco self-host).
 - **Multi-replica stream worker 락 — K2b** [ADR-0041 K2b] — **Production HA 완성**. K2가 batch scheduler 단계를 안전하게 했다면 K2b는 stream worker 단계까지 닫음. 이제 batch + stream 모두 active-active 다중 replica 가능.
   - **`etlx_server/worker/stream.py` `_start_schedule`**: 두 단계 가드.
     - ① **`FOR UPDATE SKIP LOCKED`로 schedule row 락** — replica A의 `_start_schedule`이 진행 중이면 동시에 들어온 replica B의 select가 즉시 None 반환 → spawn 안 함.

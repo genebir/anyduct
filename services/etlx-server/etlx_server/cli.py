@@ -30,7 +30,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from etl_plugins.config.secrets import get_secret_backend
+from etl_plugins.observability.lineage import set_lineage_emitter
 from etl_plugins.observability.logging import configure_logging
+from etl_plugins.observability.openlineage import OpenLineageEmitter
 from etlx_server.auth.password_service import PasswordService
 from etlx_server.connections import (
     ConnectionNameTakenError,
@@ -46,6 +48,7 @@ from etlx_server.db.models.workspace import User
 from etlx_server.db.session import make_engine, make_session_factory
 from etlx_server.io.yaml_sync import export_workspace, import_yaml_dir
 from etlx_server.scheduler import Scheduler
+from etlx_server.settings import get_settings
 from etlx_server.worker import RunWorker, StreamWorker, ZombieReaper
 from etlx_server.worker.recorder import log_processor
 
@@ -66,6 +69,26 @@ app.add_typer(admin_app, name="admin")
 app.add_typer(server_app, name="server")
 app.add_typer(db_app, name="db")
 app.add_typer(connection_app, name="connection")
+
+
+def _install_openlineage_emitter() -> OpenLineageEmitter | None:
+    """Read settings, install :class:`OpenLineageEmitter` if configured.
+
+    Returns the emitter so callers can ``.close()`` it on shutdown. Returns
+    ``None`` when ``openlineage_url`` isn't set — the default no-op emitter
+    stays installed and OL export is silently disabled (ADR-0041 K5).
+    """
+    settings = get_settings()
+    url = settings.openlineage_url
+    if not url:
+        return None
+    emitter = OpenLineageEmitter(
+        url,
+        namespace=settings.openlineage_namespace,
+        api_key=settings.openlineage_api_key,
+    )
+    set_lineage_emitter(emitter)
+    return emitter
 
 
 def _database_url() -> str:
@@ -786,6 +809,10 @@ def worker_run_cmd(
         if secret_file_path:
             backend_opts["file_path"] = secret_file_path
         backend = get_secret_backend(secret_backend, **backend_opts)
+        # ADR-0041 K5: install OpenLineage emitter if configured. None when
+        # ``openlineage_url`` is unset — runs simply don't get exported,
+        # internal catalog stays unaffected.
+        ol_emitter = _install_openlineage_emitter()
         worker = RunWorker(
             factory,
             backend,
@@ -806,6 +833,8 @@ def worker_run_cmd(
         try:
             await worker.run()
         finally:
+            if ol_emitter is not None:
+                ol_emitter.close()
             await engine.dispose()
 
     asyncio.run(_run())
@@ -968,10 +997,11 @@ def stream_worker_run_cmd(
     and its Run row is stamped ``cancelled`` so the UI doesn't show
     ghost ``running`` rows after the operator restarts the process.
 
-    **Single-replica today.** Running two instances would race —
-    they'd each try to spawn the same schedule. Multi-replica is
-    a Step 11 enhancement (``FOR UPDATE SKIP LOCKED`` on the
-    schedule row before spawn).
+    **Multi-replica safe** (ADR-0041 K2b): two stream-worker processes
+    coordinate via the schedule row's ``FOR UPDATE SKIP LOCKED`` and a
+    post-lock "RUNNING run already exists" re-check inside
+    ``_start_schedule``. Failover: the ZombieReaper reaps stale RUNNING
+    rows so a surviving replica takes over on its next tick.
     """
     logging.basicConfig(
         level=getattr(logging, log_level.upper(), logging.INFO),
@@ -987,6 +1017,9 @@ def stream_worker_run_cmd(
         if secret_file_path:
             backend_opts["file_path"] = secret_file_path
         backend = get_secret_backend(secret_backend, **backend_opts)
+        # ADR-0041 K5: install OpenLineage emitter if configured (see
+        # worker_run_cmd for the same wiring rationale).
+        ol_emitter = _install_openlineage_emitter()
         worker = StreamWorker(
             factory,
             backend,
@@ -1007,6 +1040,8 @@ def stream_worker_run_cmd(
         try:
             await worker.run()
         finally:
+            if ol_emitter is not None:
+                ol_emitter.close()
             await engine.dispose()
 
     asyncio.run(_run())

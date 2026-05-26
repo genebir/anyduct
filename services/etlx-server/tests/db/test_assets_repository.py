@@ -1,4 +1,4 @@
-"""AssetRepository persist + query (ADR-0036, Phase B). testcontainers."""
+"""AssetRepository persist + query (ADR-0036, Phase B; ADR-0041 J2). testcontainers."""
 
 from __future__ import annotations
 
@@ -8,6 +8,11 @@ from etlx_server.db.models import Workspace
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from etl_plugins.core.asset import AssetKey, AssetLineage, LineageEdge
+from etl_plugins.core.column_lineage import (
+    ColumnEdge,
+    ColumnLineage,
+    ColumnRef,
+)
 
 pytestmark = pytest.mark.asyncio
 
@@ -109,3 +114,192 @@ async def test_workspace_scoped(session: AsyncSession) -> None:
     await session.flush()
     assert len(await repo.list_for_workspace(workspace_id=ws_a.id)) == 1
     assert len(await repo.list_for_workspace(workspace_id=ws_b.id)) == 0
+
+
+# --------------- J2: column lineage persistence + query --------------------
+
+
+async def _seed_assets(session: AsyncSession, ws_id, *keys: AssetKey) -> None:
+    """Helper: create asset rows for the keys via persist_run_lineage so the
+    column-lineage tests can reference them by key (column lineage runs
+    *after* asset lineage in production)."""
+    repo = AssetRepository(session)
+    for k in keys:
+        await repo.persist_run_lineage(
+            workspace_id=ws_id,
+            run_id=None,
+            lineage=AssetLineage(outputs=[k]),
+            records_written=0,
+            kinds={k: "table"},
+        )
+    await session.flush()
+
+
+async def test_persist_column_lineage_creates_columns_and_edges(
+    session: AsyncSession,
+) -> None:
+    ws = await _ws(session, "col-lineage-1")
+    src = AssetKey.of("wh", "users")
+    dst = AssetKey.of("wh", "customers")
+    await _seed_assets(session, ws.id, src, dst)
+    repo = AssetRepository(session)
+
+    lineage = ColumnLineage(
+        edges=[
+            ColumnEdge(
+                downstream=ColumnRef(asset=dst, column="id"),
+                upstreams=(ColumnRef(asset=src, column="a"),),
+            ),
+            ColumnEdge(
+                downstream=ColumnRef(asset=dst, column="city"),
+                upstreams=(ColumnRef(asset=src, column="c"),),
+            ),
+            ColumnEdge(  # constant / opaque expression — column exists, no upstream
+                downstream=ColumnRef(asset=dst, column="tenant"),
+            ),
+        ]
+    )
+    await repo.persist_run_column_lineage(workspace_id=ws.id, lineage=lineage, output_keys=[dst])
+    await session.flush()
+
+    dst_row = next(
+        a for a in await repo.list_for_workspace(workspace_id=ws.id) if str(dst) == a.asset_key
+    )
+    assert dst_row.column_lineage_opaque is False
+
+    cols, upstream_map = await repo.column_lineage_for_asset(asset_id=dst_row.id)
+    assert [c.name for c in cols] == ["city", "id", "tenant"]
+    by_name = {c.name: c for c in cols}
+    assert [(up.name, ws_asset.asset_key) for up, ws_asset in upstream_map[by_name["id"].id]] == [
+        ("a", "wh/users")
+    ]
+    assert [(up.name, ws_asset.asset_key) for up, ws_asset in upstream_map[by_name["city"].id]] == [
+        ("c", "wh/users")
+    ]
+    assert upstream_map[by_name["tenant"].id] == []
+
+
+async def test_persist_column_lineage_marks_opaque_asset(session: AsyncSession) -> None:
+    ws = await _ws(session, "col-lineage-2")
+    dst = AssetKey.of("wh", "blob")
+    await _seed_assets(session, ws.id, dst)
+    repo = AssetRepository(session)
+
+    await repo.persist_run_column_lineage(
+        workspace_id=ws.id,
+        lineage=ColumnLineage(opaque_assets=[dst]),
+        output_keys=[dst],
+    )
+    await session.flush()
+
+    dst_row = next(
+        a for a in await repo.list_for_workspace(workspace_id=ws.id) if str(dst) == a.asset_key
+    )
+    assert dst_row.column_lineage_opaque is True
+    cols, _ = await repo.column_lineage_for_asset(asset_id=dst_row.id)
+    assert cols == []
+
+
+async def test_persist_column_lineage_replaces_on_rerun(session: AsyncSession) -> None:
+    """Each successful run overwrites the output asset's column set + edges
+    so the row set reflects the most recent materialization."""
+    ws = await _ws(session, "col-lineage-3")
+    src = AssetKey.of("wh", "src")
+    dst = AssetKey.of("wh", "dst")
+    await _seed_assets(session, ws.id, src, dst)
+    repo = AssetRepository(session)
+
+    # Run 1: id, name
+    await repo.persist_run_column_lineage(
+        workspace_id=ws.id,
+        lineage=ColumnLineage(
+            edges=[
+                ColumnEdge(ColumnRef(dst, "id"), (ColumnRef(src, "id"),)),
+                ColumnEdge(ColumnRef(dst, "name"), (ColumnRef(src, "name"),)),
+            ]
+        ),
+        output_keys=[dst],
+    )
+    await session.flush()
+
+    # Run 2: schema changed — drop name, add city
+    await repo.persist_run_column_lineage(
+        workspace_id=ws.id,
+        lineage=ColumnLineage(
+            edges=[
+                ColumnEdge(ColumnRef(dst, "id"), (ColumnRef(src, "id"),)),
+                ColumnEdge(ColumnRef(dst, "city"), (ColumnRef(src, "city"),)),
+            ]
+        ),
+        output_keys=[dst],
+    )
+    await session.flush()
+
+    dst_row = next(
+        a for a in await repo.list_for_workspace(workspace_id=ws.id) if str(dst) == a.asset_key
+    )
+    cols, _ = await repo.column_lineage_for_asset(asset_id=dst_row.id)
+    assert [c.name for c in cols] == ["city", "id"]  # no stale "name"
+
+
+async def test_persist_column_lineage_flips_opaque_back_off(session: AsyncSession) -> None:
+    """An asset that was opaque on run N becomes traceable on run N+1."""
+    ws = await _ws(session, "col-lineage-4")
+    src = AssetKey.of("wh", "src")
+    dst = AssetKey.of("wh", "dst")
+    await _seed_assets(session, ws.id, src, dst)
+    repo = AssetRepository(session)
+
+    await repo.persist_run_column_lineage(
+        workspace_id=ws.id,
+        lineage=ColumnLineage(opaque_assets=[dst]),
+        output_keys=[dst],
+    )
+    await session.flush()
+
+    await repo.persist_run_column_lineage(
+        workspace_id=ws.id,
+        lineage=ColumnLineage(edges=[ColumnEdge(ColumnRef(dst, "id"), (ColumnRef(src, "id"),))]),
+        output_keys=[dst],
+    )
+    await session.flush()
+
+    dst_row = next(
+        a for a in await repo.list_for_workspace(workspace_id=ws.id) if str(dst) == a.asset_key
+    )
+    assert dst_row.column_lineage_opaque is False
+    cols, _ = await repo.column_lineage_for_asset(asset_id=dst_row.id)
+    assert [c.name for c in cols] == ["id"]
+
+
+async def test_persist_column_lineage_n_to_one_join_shape(session: AsyncSession) -> None:
+    """Multi-upstream (join-like) downstream column persists as n rows."""
+    ws = await _ws(session, "col-lineage-5")
+    src_a = AssetKey.of("wh", "a")
+    src_b = AssetKey.of("wh", "b")
+    dst = AssetKey.of("wh", "joined")
+    await _seed_assets(session, ws.id, src_a, src_b, dst)
+    repo = AssetRepository(session)
+
+    await repo.persist_run_column_lineage(
+        workspace_id=ws.id,
+        lineage=ColumnLineage(
+            edges=[
+                ColumnEdge(
+                    ColumnRef(dst, "merged"),
+                    (ColumnRef(src_a, "x"), ColumnRef(src_b, "y")),
+                ),
+            ]
+        ),
+        output_keys=[dst],
+    )
+    await session.flush()
+
+    dst_row = next(
+        a for a in await repo.list_for_workspace(workspace_id=ws.id) if str(dst) == a.asset_key
+    )
+    cols, ups = await repo.column_lineage_for_asset(asset_id=dst_row.id)
+    assert [c.name for c in cols] == ["merged"]
+    merged = cols[0]
+    refs = [(up.name, ws_asset.asset_key) for up, ws_asset in ups[merged.id]]
+    assert sorted(refs) == [("x", "wh/a"), ("y", "wh/b")]

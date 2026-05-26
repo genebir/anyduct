@@ -699,6 +699,49 @@ async def test_executor_persists_lineage(session: AsyncSession, tmp_path: Path) 
     assert mats[0].run_id == run.id
 
 
+async def test_executor_persists_column_lineage(session: AsyncSession, tmp_path: Path) -> None:
+    """A successful run also records per-column lineage (ADR-0041 J2).
+
+    For ``SELECT id, name FROM seed`` writing to ``dst/out``, the worker
+    should derive + persist two columns on the output with their upstream
+    column refs back to the source ``seed`` table.
+    """
+    db_path = _prepare_sqlite_fixture(tmp_path)
+    ws = await _seed_workspace(session, slug="we-col-lineage")
+    await _seed_connection(session, workspace_id=ws.id, name="src", config={"database": db_path})
+    await _seed_connection(session, workspace_id=ws.id, name="dst", config={"database": db_path})
+    cfg = {
+        "name": "p",
+        "source": {"connection": "src", "query": "SELECT id, name FROM seed"},
+        "sink": {"connection": "dst", "table": "out", "mode": "append"},
+    }
+    p, pv = await _seed_pipeline(session, workspace_id=ws.id, name="p", config=cfg)
+    run = await _seed_pending_run(
+        session, workspace_id=ws.id, pipeline_id=p.id, pipeline_version_id=pv.id
+    )
+    claimed = await claim_pending_run(session, worker_id="worker-CL")
+    assert claimed is not None
+    await session.commit()
+
+    await RunExecutor(
+        _SessionFactoryAdapter(session), StaticSecretBackend(), worker_id="w"
+    ).execute(run.id)
+
+    repo = AssetRepository(session)
+    assets = await repo.list_for_workspace(workspace_id=ws.id)
+    out_asset = next(a for a in assets if a.asset_key == "dst/out")
+    assert out_asset.column_lineage_opaque is False
+
+    cols, upstream_map = await repo.column_lineage_for_asset(asset_id=out_asset.id)
+    assert {c.name for c in cols} == {"id", "name"}
+    by_name = {c.name: c for c in cols}
+    id_upstreams = [
+        (up_asset.asset_key, up_col.name) for up_col, up_asset in upstream_map[by_name["id"].id]
+    ]
+    assert id_upstreams and id_upstreams[0][1] == "id"
+    assert id_upstreams[0][0].startswith("src/")
+
+
 async def test_executor_triggers_downstream_on_success(
     session: AsyncSession, tmp_path: Path
 ) -> None:

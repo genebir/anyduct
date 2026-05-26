@@ -259,6 +259,7 @@ class RunExecutor:
                         lineage = self._lineage_for(version, log)
                         if lineage is not None:
                             await self._persist_lineage(session, run, result, lineage, log)
+                            await self._persist_column_lineage(session, run, version, lineage, log)
                             await self._trigger_asset_consumers(session, run, lineage, log)
                         # Call-pipeline (ADR-0029): enqueue downstream pipelines
                         # on success, fire-and-forget. Same transaction as the
@@ -387,6 +388,48 @@ class RunExecutor:
             )
         except Exception as e:
             log.warning("run.lineage_persist_failed", error_class=type(e).__name__, error=str(e))
+
+    async def _persist_column_lineage(
+        self,
+        session: AsyncSession,
+        run: Run,
+        version: PipelineVersion,
+        lineage: AssetLineage,
+        log: Any,
+    ) -> None:
+        """Record per-column lineage for this run's output assets (ADR-0041 J2).
+
+        Best-effort: a column-lineage glitch (parse error, unknown transform,
+        etc.) never flips a successful run to failed. Runs *after*
+        :meth:`_persist_lineage` so the asset rows exist for the repo to
+        reference by key.
+        """
+        from etl_plugins.runtime.column_lineage import derive_column_lineage
+        from etlx_server.assets.repository import AssetRepository
+
+        if not lineage.outputs:
+            return
+        try:
+            col_lineage = derive_column_lineage(PipelineConfig.model_validate(version.config_json))
+        except Exception as e:  # parse or unsupported shape — fall back silently
+            log.warning(
+                "run.column_lineage_derive_failed",
+                error_class=type(e).__name__,
+                error=str(e),
+            )
+            return
+        try:
+            await AssetRepository(session).persist_run_column_lineage(
+                workspace_id=run.workspace_id,
+                lineage=col_lineage,
+                output_keys=list(lineage.outputs),
+            )
+        except Exception as e:
+            log.warning(
+                "run.column_lineage_persist_failed",
+                error_class=type(e).__name__,
+                error=str(e),
+            )
 
     async def _trigger_asset_consumers(
         self, session: AsyncSession, run: Run, lineage: AssetLineage, log: Any

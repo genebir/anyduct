@@ -1,4 +1,4 @@
-"""Catalog REST endpoints — assets + lineage (ADR-0036, Phase B3). testcontainers."""
+"""Catalog REST endpoints — assets + lineage (ADR-0036, Phase B3; ADR-0041 J2). testcontainers."""
 
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ from httpx import ASGITransport
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from etl_plugins.core.asset import AssetKey, AssetLineage, LineageEdge
+from etl_plugins.core.column_lineage import ColumnEdge, ColumnLineage, ColumnRef
 
 pytestmark = pytest.mark.asyncio
 
@@ -157,3 +158,115 @@ async def test_asset_lineage_404_for_unknown_id(session: AsyncSession) -> None:
             headers={"Authorization": f"Bearer {token}"},
         )
     assert resp.status_code == 404
+
+
+# --------------- J2: column lineage endpoint ------------------------------
+
+
+async def _seed_column_lineage(session: AsyncSession, ws_id) -> tuple[str, str]:
+    """Returns (src_key, dst_key) — same shape as the J1 example: rename +
+    add_constant + opaque expression."""
+    repo = AssetRepository(session)
+    src = AssetKey.of("wh", "users")
+    dst = AssetKey.of("wh", "customers")
+    # Asset rows (column lineage runs after asset lineage in production).
+    await repo.persist_run_lineage(
+        workspace_id=ws_id,
+        run_id=None,
+        lineage=AssetLineage(inputs=[src], outputs=[dst], edges=[LineageEdge(src, dst)]),
+        records_written=0,
+        kinds={src: "table", dst: "table"},
+    )
+    await repo.persist_run_column_lineage(
+        workspace_id=ws_id,
+        lineage=ColumnLineage(
+            edges=[
+                ColumnEdge(ColumnRef(dst, "id"), (ColumnRef(src, "a"),)),
+                ColumnEdge(ColumnRef(dst, "city"), (ColumnRef(src, "c"),)),
+                ColumnEdge(ColumnRef(dst, "tenant")),  # add_constant → no upstream
+            ]
+        ),
+        output_keys=[dst],
+    )
+    await session.flush()
+    return str(src), str(dst)
+
+
+async def test_column_lineage_endpoint_returns_columns_and_upstreams(
+    session: AsyncSession,
+) -> None:
+    owner = await _seed_user(session, email="col-owner@example.com")
+    ws = await _seed_ws(session, slug="col-1", user=owner, role=WorkspaceRole.VIEWER)
+    _src_key, dst_key = await _seed_column_lineage(session, ws.id)
+    app = _build_app(session)
+    async with _client(app) as client:
+        token = await _login(client, email=owner.email)
+        h = {"Authorization": f"Bearer {token}"}
+        ls = await client.get(f"/workspaces/{ws.id}/assets", headers=h)
+        dst = next(r for r in ls.json() if r["asset_key"] == dst_key)
+
+        resp = await client.get(f"/workspaces/{ws.id}/assets/{dst['id']}/column-lineage", headers=h)
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["asset_key"] == dst_key
+        assert body["opaque"] is False
+        names = [c["name"] for c in body["columns"]]
+        assert names == ["city", "id", "tenant"]  # alphabetical
+        by_name = {c["name"]: c for c in body["columns"]}
+        assert [(u["asset_key"], u["column"]) for u in by_name["id"]["upstreams"]] == [
+            ("wh/users", "a")
+        ]
+        assert by_name["tenant"]["upstreams"] == []  # constant column
+
+
+async def test_column_lineage_endpoint_opaque_asset(session: AsyncSession) -> None:
+    owner = await _seed_user(session, email="col-opaque@example.com")
+    ws = await _seed_ws(session, slug="col-2", user=owner, role=WorkspaceRole.VIEWER)
+    repo = AssetRepository(session)
+    dst = AssetKey.of("wh", "blob")
+    await repo.persist_run_lineage(
+        workspace_id=ws.id,
+        run_id=None,
+        lineage=AssetLineage(outputs=[dst]),
+        records_written=0,
+        kinds={dst: "table"},
+    )
+    await repo.persist_run_column_lineage(
+        workspace_id=ws.id,
+        lineage=ColumnLineage(opaque_assets=[dst]),
+        output_keys=[dst],
+    )
+    await session.flush()
+    app = _build_app(session)
+    async with _client(app) as client:
+        token = await _login(client, email=owner.email)
+        h = {"Authorization": f"Bearer {token}"}
+        ls = await client.get(f"/workspaces/{ws.id}/assets", headers=h)
+        blob = next(r for r in ls.json() if r["asset_key"] == "wh/blob")
+        resp = await client.get(
+            f"/workspaces/{ws.id}/assets/{blob['id']}/column-lineage", headers=h
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["opaque"] is True
+        assert body["columns"] == []
+
+
+async def test_column_lineage_endpoint_non_member_forbidden(session: AsyncSession) -> None:
+    owner = await _seed_user(session, email="col-owner-3@example.com")
+    outsider = await _seed_user(session, email="col-out@example.com")
+    ws = await _seed_ws(session, slug="col-3", user=owner, role=WorkspaceRole.OWNER)
+    _src_key, dst_key = await _seed_column_lineage(session, ws.id)
+    app = _build_app(session)
+    async with _client(app) as client:
+        owner_tok = await _login(client, email=owner.email)
+        ls = await client.get(
+            f"/workspaces/{ws.id}/assets", headers={"Authorization": f"Bearer {owner_tok}"}
+        )
+        dst = next(r for r in ls.json() if r["asset_key"] == dst_key)
+        out_tok = await _login(client, email=outsider.email)
+        resp = await client.get(
+            f"/workspaces/{ws.id}/assets/{dst['id']}/column-lineage",
+            headers={"Authorization": f"Bearer {out_tok}"},
+        )
+    assert resp.status_code == 403

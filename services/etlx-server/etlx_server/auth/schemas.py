@@ -218,6 +218,38 @@ class AssetMaterializationEntry(BaseModel):
     materialized_at: datetime
 
 
+class ColumnUpstreamRef(BaseModel):
+    """One upstream column for a downstream column (ADR-0041 J2)."""
+
+    asset_id: UUID
+    asset_key: str
+    column: str
+
+
+class AssetColumnEntry(BaseModel):
+    """One column of an asset + its upstream column refs (ADR-0041 J2)."""
+
+    name: str
+    upstreams: list[ColumnUpstreamRef]
+
+
+class AssetColumnLineageResponse(BaseModel):
+    """Response from ``GET /workspaces/{ws}/assets/{id}/column-lineage``.
+
+    ``opaque`` = the worker derived this asset's column mapping as
+    untraceable (python transform, ``SELECT *``, join, direct table source).
+    When true, ``columns`` is typically empty — the UI shows a badge instead
+    of a drill-down. ``columns`` is also empty when no successful run has
+    materialized this asset yet (the two states are distinguished by
+    ``opaque``).
+    """
+
+    id: UUID
+    asset_key: str
+    opaque: bool
+    columns: list[AssetColumnEntry]
+
+
 class ConnectionTablesResult(BaseModel):
     """Response from ``GET /connections/{id}/tables`` (ADR-0033)."""
 

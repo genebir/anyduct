@@ -305,12 +305,20 @@ function FieldEditor({
   // wrapped in a <label> — a label forwards clicks from its whitespace to its
   // first control, so clicking empty space would toggle a checkbox / focus an
   // input. Single-control fields keep the <label> for click-to-focus.
+  //
+  // ``pythonCode`` (Monaco) is composite too: Monaco renders a hidden textarea
+  // plus a scroll widget, suggestion popup, and minimap (when on) — wrapping
+  // any of that in a <label> hijacks pointer events back to the textarea on
+  // every click, kicking the cursor out of the editor mid-edit (user report
+  // 2026-05-26 "커서가 자꾸 밖으로 튕겨"). Treat as composite to keep clicks
+  // inside Monaco.
   const composite =
     field.kind === "filter" ||
     field.kind === "mapping" ||
     field.kind === "columns" ||
     field.kind === "sourceQuery" ||
-    field.kind === "table";
+    field.kind === "table" ||
+    field.kind === "pythonCode";
   const Wrapper = composite ? "div" : "label";
   return (
     <Wrapper className="flex flex-col gap-1.5">

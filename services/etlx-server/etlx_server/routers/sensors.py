@@ -27,11 +27,15 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-# Import side-effect: register the built-in HttpSensor so build_sensor
-# can dispatch to it even when this router is the first thing loaded.
+# Import side-effects: register every built-in sensor so build_sensor can
+# dispatch to it even when this router is the first thing loaded.
+#  * ``etl_plugins.sensors``  — pure-core builtins (``http``)
+#  * ``etlx_server.sensors.builtins`` — service-side builtins that need
+#    DB access (``asset_freshness``)
 import etl_plugins.sensors  # noqa: F401
+import etlx_server.sensors.builtins  # noqa: F401
 from etl_plugins.core.exceptions import ConfigError
 from etl_plugins.core.sensor import build_sensor, registered_sensor_types
 from etlx_server.audit.dependencies import get_audit_service
@@ -48,7 +52,8 @@ from etlx_server.auth.workspace_context import (
 )
 from etlx_server.db.enums import WorkspaceRole
 from etlx_server.db.models import Sensor
-from etlx_server.dependencies import get_session
+from etlx_server.dependencies import get_session, get_session_factory
+from etlx_server.sensors.context import use_sensor_context
 from etlx_server.sensors.repository import (
     _UNSET,
     SensorNameTakenError,
@@ -251,15 +256,24 @@ async def delete_sensor(
 # ---- manual check ----------------------------------------------------------
 
 
+_require_viewer_session_factory = Depends(get_session_factory)
+
+
 @router.post("/{sensor_id}/check", response_model=SensorCheckResponse)
 async def check_sensor(
     sensor_id: UUID,
     ctx: WorkspaceContext = _require_viewer,
     session: AsyncSession = Depends(get_session),  # noqa: B008
+    session_factory: async_sessionmaker[AsyncSession] = _require_viewer_session_factory,
 ) -> SensorCheckResponse:
-    """Run the sensor's ``check()`` once and return the result. Does
-    NOT enqueue a trigger run — that's the scheduler's job. Useful for
-    the builder UI's "test" button before saving."""
+    """Run the sensor's check once and return the result. Does NOT enqueue
+    a trigger run — that's the scheduler's job. Useful for the builder
+    UI's "test" button before saving.
+
+    Routes through :func:`use_sensor_context` so service-aware sensors
+    (asset_freshness) can read the DB session factory + workspace id
+    from ContextVars exactly like they do in the scheduler tick — the
+    "Check now" button result matches what production would do."""
     sensor = await _resolve_or_404(session, workspace_id=ctx.workspace.id, sensor_id=sensor_id)
     try:
         instance = build_sensor(sensor.type, sensor.config_json or {})
@@ -269,7 +283,10 @@ async def check_sensor(
             detail=f"invalid sensor config: {e}",
         ) from e
     try:
-        result = instance.check()
+        async with use_sensor_context(
+            session_factory=session_factory, workspace_id=ctx.workspace.id
+        ):
+            result = await instance.check_async()
     finally:
         close = getattr(instance, "close", None)
         if callable(close):

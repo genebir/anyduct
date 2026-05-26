@@ -9,6 +9,16 @@
 
 ## [Unreleased]
 
+### Added
+- **AssetFreshnessSensor (K3 sensor framework 첫 서비스측 빌트인) + 코어 async-bridge** [ADR-0041 K3d] — 그동안 K3 sensor framework는 K3a 코어(ABC + http) + K3b 서비스(persist + tick + REST) + K3c 웹 UI까지 닫혀 있었지만 빌트인 sensor는 `http`(pure network) 하나뿐이었다. 이번 슬라이스는 **카탈로그에 적힌 자산이 stale해지면 fire하는 asset-axis sensor**를 추가 — 코어 sensor API가 서비스 DB 접근을 깔끔하게 수용하도록 확장.
+  - **`etl_plugins/core/sensor.py`**: `SensorBase`에 optional `async def check_async()` 추가. 기본 구현은 `asyncio.to_thread(self.check)`로 위임 → 기존 sync 빌트인(HttpSensor) 회귀 0. 서비스측 async 빌트인은 `check_async`만 override. 스케줄러/REST 모두 항상 `await instance.check_async()` 호출 → dispatcher 한 갈래.
+  - **`etlx_server/sensors/context.py`** (신규): `sensor_session_factory` + `sensor_workspace_id` ContextVar + `use_sensor_context(session_factory, workspace_id)` async ctx mgr. PEP 567에 따라 await + `asyncio.to_thread` 경계를 가로질러 전파되므로 sync 빌트인도 동일 ContextVar 상태를 본다. 사용처 한 곳, contract 한 곳.
+  - **`etlx_server/sensors/builtins/asset_freshness.py`** (신규): `AssetFreshnessSensor`. config `asset_key`(필수 string, 비어있으면 ConfigError) + `max_age_minutes`(필수 양수 int, **bool 거부** — `isinstance(True, int) is True` 함정 방지). check_async 분기 3종: ① **never_materialised**: 해당 asset_key가 카탈로그 미존재 → triggered=True + `reason="never_materialised"`(bootstrap 의도적 트리거, 다운스트림 첫 materialization 유도). ② **stale**: `now - last_materialized_at > max_age_minutes` → triggered=True + `reason="stale"` + `age_minutes/last_materialized_at` metadata. ③ **fresh**: 미트리거 + 동일 metadata. **ADR-0038의 pipeline-axis `freshness_sla_minutes`의 asset-axis dual** — producer pipeline마다 SLA를 박지 않고 consumer 측에서 "이 자산이 30분 안에 fresh해야 한다"고 선언.
+  - **SensorScheduler `_run_check` + REST `/check`** 모두 `use_sensor_context` 경유로 통일. "Check now" 버튼 결과가 production tick과 동일.
+  - **CLI `sensor-scheduler run` + sensors router**: `import etlx_server.sensors.builtins` side-effect import 추가(http와 동일 패턴). 첫 호출이 어디서 들어와도 dispatch 가능.
+  - **웹 `SENSOR_TYPES`**: `asset_freshness` 옵션 추가 + 타입별 sample config hint(`{"asset_key": "postgres://prod/main/users", "max_age_minutes": 30}`)를 JSON 필드 아래 노출 → 운영자가 docs 보지 않고도 shape 인지. i18n `sensors.configExamplePrefix` en/ko 추가, `fieldConfigHelp` 문구를 sample-driven으로 일반화.
+  - **검증**: 5 신규 it(builder validation / never-materialised / fresh quiet / scheduler end-to-end stale → PENDING run + sensor_result on result_json / missing-context soft-fail). 코어 sensor unit 19 green(check_async 기본 bridge 검증). 서버 sensor it 17(12→17) green. 웹 tsc clean. **다음 빌트인 후보**: file-landed via S3, lineage-arrival, dataset-row-count.
+
 ### Changed
 - **변수 UI 개편(사용자 피드백)** [ADR-0041] — ① 전역 변수를 **전용 `Variables` 탭**(`/w/[slug]/variables`)으로 분리(설정 페이지에서 이동). ② 사이드바 **설정(Settings)을 펼침형 그룹**으로 — 클릭 시 하위 메뉴 전개, 그 아래 `일반(General)`·`연결(Connections)`·`멤버(Members)`·`변수(Variables)` 정리(현재 하위 경로면 자동 펼침). ③ 빌더 지역 변수 "추가" 버튼이 좁아 텍스트가 세로로 깨지던 레이아웃 수정(grid + `whitespace-nowrap`, 풀폭 버튼). 웹 tsc 통과. (전역 변수 추가가 안 되면 `./start.sh`로 재시작 — Alembic 0006 적용 + 새 라우터 로드 필요.)
 

@@ -975,9 +975,13 @@ def sensor_scheduler_run_cmd(
     ``FOR UPDATE SKIP LOCKED`` so two replicas partition the work
     instead of double-firing the same sensor.
     """
-    # Make sure built-in sensors (http, …) register their dispatchers
-    # before the scheduler dispatches an event.
+    # Make sure built-in sensors register their dispatchers before the
+    # scheduler dispatches an event. Two packages:
+    #   * etl_plugins.sensors          — pure-core builtins (http)
+    #   * etlx_server.sensors.builtins — service-side builtins that need
+    #     metadata-DB access (asset_freshness)
     import etl_plugins.sensors  # noqa: F401 — register side-effects
+    import etlx_server.sensors.builtins  # noqa: F401 — register side-effects
 
     logging.basicConfig(
         level=getattr(logging, log_level.upper(), logging.INFO),

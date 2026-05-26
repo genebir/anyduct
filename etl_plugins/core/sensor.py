@@ -33,8 +33,9 @@ just answers the question.
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from abc import ABC, abstractmethod
+from abc import ABC
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
@@ -63,17 +64,37 @@ class SensorResult:
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
 
-class SensorBase(ABC):
+class SensorBase(ABC):  # noqa: B024 — "abstract" is one-of-two: check OR check_async
     """A pollable check. Implementations are built once at config time and
-    reused across many ``check()`` calls."""
+    reused across many ``check()`` calls.
 
-    @abstractmethod
+    Subclasses override **either** :meth:`check` (sync — for plain HTTP / file
+    polling) **or** :meth:`check_async` (for sensors that need an async DB
+    session or async client). The scheduler always calls ``check_async`` and
+    the base implementation transparently bridges sync ``check`` via
+    ``asyncio.to_thread`` so existing sync builtins keep working without
+    change. A subclass that overrides only ``check_async`` should leave the
+    default ``check`` body (raises NotImplementedError) — the scheduler will
+    never reach it."""
+
     def check(self) -> SensorResult:
-        """Evaluate the external condition. Must be idempotent — safe to call
-        many times with no side effects. Should never raise on a "soft" failure
-        (network timeout, 5xx, missing file) — return ``triggered=False`` with
-        a descriptive ``message`` instead so the scheduler can log + retry on
-        the next tick. Hard errors (misconfigured sensor) may raise."""
+        """Sync check. Override for sensors with no async I/O needs.
+        Must be idempotent. Should never raise on a "soft" failure (network
+        timeout, 5xx, missing file) — return ``triggered=False`` with a
+        descriptive ``message`` instead so the scheduler can log + retry on
+        the next tick. Hard errors (misconfigured sensor) may raise.
+
+        Default raises ``NotImplementedError`` — subclasses must override
+        this OR :meth:`check_async`."""
+        raise NotImplementedError(f"{type(self).__name__} must implement check() or check_async()")
+
+    async def check_async(self) -> SensorResult:
+        """Async check entry point — what the scheduler / REST manual-check
+        endpoint actually calls. Default bridges to :meth:`check` via
+        ``asyncio.to_thread`` so a CPU/blocking-IO sync check doesn't pin the
+        event loop. Override directly when the sensor needs an async client
+        (e.g. an :class:`AsyncSession` from SQLAlchemy)."""
+        return await asyncio.to_thread(self.check)
 
 
 # ---- registry ----------------------------------------------------------------

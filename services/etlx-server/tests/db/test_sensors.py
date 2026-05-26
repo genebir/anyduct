@@ -13,6 +13,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
+import etlx_server.sensors.builtins  # noqa: F401 — service-side (asset_freshness)
 import httpx
 import pytest
 import pytest_asyncio
@@ -21,6 +22,7 @@ from etlx_server.auth.jwt_service import JwtService, generate_rsa_keypair_pem
 from etlx_server.auth.password_service import PasswordService
 from etlx_server.db.enums import AuthMethod, RunStatus, WorkspaceRole
 from etlx_server.db.models import (
+    Asset,
     Membership,
     Pipeline,
     PipelineVersion,
@@ -29,8 +31,10 @@ from etlx_server.db.models import (
     User,
     Workspace,
 )
-from etlx_server.dependencies import get_session
+from etlx_server.dependencies import get_session, get_session_factory
 from etlx_server.sensors import SensorRepository, SensorScheduler
+from etlx_server.sensors.builtins.asset_freshness import AssetFreshnessSensor
+from etlx_server.sensors.context import use_sensor_context
 from etlx_server.settings import Settings
 from fastapi import FastAPI
 from httpx import ASGITransport
@@ -38,7 +42,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 # Built-ins must be registered before build_sensor dispatches.
-import etl_plugins.sensors  # noqa: F401
+import etl_plugins.sensors  # noqa: F401 — pure-core (http)
 from etl_plugins.core.sensor import (
     SensorBase,
     SensorResult,
@@ -381,6 +385,29 @@ def _build_app(session: AsyncSession) -> FastAPI:
         yield session
 
     app.dependency_overrides[get_session] = _override_session
+
+    # The /check endpoint depends on get_session_factory so async sensors
+    # (asset_freshness) can open their own session via the ContextVar
+    # protocol. The real factory wraps a fresh connection per call which
+    # wouldn't see this test's outer transaction. Wrap the per-test
+    # session in a single-instance "factory" so `factory()` returns the
+    # same session — sync sensors (the existing /check happy-path test)
+    # never call it; service-side ones do but see the same transaction.
+    class _SingleSessionFactory:
+        def __init__(self, s: AsyncSession) -> None:
+            self._s = s
+
+        def __call__(self) -> _SingleSessionFactory:
+            return self
+
+        async def __aenter__(self) -> AsyncSession:
+            return self._s
+
+        async def __aexit__(self, *_exc: object) -> None:
+            return None
+
+    _test_factory = _SingleSessionFactory(session)
+    app.dependency_overrides[get_session_factory] = lambda: _test_factory
     app.state.password_service = PasswordService(rounds=4)
     app.state.jwt_service = JwtService(
         private_key_pem=private,
@@ -565,3 +592,154 @@ async def test_rest_manual_check_uses_configured_sensor(session: AsyncSession) -
         # /check does NOT enqueue a trigger run.
         runs = (await session.execute(select(Run).where(Run.pipeline_id == p.id))).scalars().all()
         assert list(runs) == []
+
+
+# ---- AssetFreshnessSensor builtin -----------------------------------------
+#
+# Service-side sensor that reads ``assets.last_materialized_at`` and
+# fires when the asset is stale OR has never been materialised. Four
+# scenarios exercise builder validation + the three check branches +
+# end-to-end scheduler firing.
+
+
+async def test_asset_freshness_builder_rejects_bad_config() -> None:
+    """Bad config bounces at build time, not at the first check, so a typo
+    in the UI surfaces as a clear 4xx on POST /sensors."""
+    from etl_plugins.core.exceptions import ConfigError
+    from etl_plugins.core.sensor import build_sensor
+
+    with pytest.raises(ConfigError):
+        build_sensor("asset_freshness", {})  # missing both keys
+    with pytest.raises(ConfigError):
+        build_sensor("asset_freshness", {"asset_key": "k"})  # missing max_age
+    with pytest.raises(ConfigError):
+        build_sensor("asset_freshness", {"asset_key": "k", "max_age_minutes": 0})
+    with pytest.raises(ConfigError):
+        build_sensor("asset_freshness", {"asset_key": "k", "max_age_minutes": True})  # bool
+    with pytest.raises(ConfigError):
+        build_sensor("asset_freshness", {"asset_key": "", "max_age_minutes": 5})
+
+
+async def test_asset_freshness_triggers_when_never_materialised(
+    real_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """An asset_key not present in the catalog → triggered=True (so the
+    sensor can bootstrap a fresh workspace)."""
+    slug = f"sn-af-never-{uuid4().hex[:8]}"
+    async with real_factory() as s:
+        ws = await _seed_workspace(s, slug=slug)
+        await s.commit()
+        ws_id = ws.id
+    try:
+        sensor = AssetFreshnessSensor(asset_key="postgres://x/y", max_age_minutes=30)
+        async with use_sensor_context(session_factory=real_factory, workspace_id=ws_id):
+            result = await sensor.check_async()
+        assert result.triggered is True
+        assert "never" in (result.message or "")
+        assert result.metadata["reason"] == "never_materialised"
+        assert result.metadata["asset_key"] == "postgres://x/y"
+    finally:
+        async with real_factory() as s:
+            await s.execute(delete(Workspace).where(Workspace.id == ws_id))
+            await s.commit()
+
+
+async def test_asset_freshness_fresh_does_not_trigger(
+    real_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """An asset materialised inside the budget → triggered=False."""
+    slug = f"sn-af-fresh-{uuid4().hex[:8]}"
+    async with real_factory() as s:
+        ws = await _seed_workspace(s, slug=slug)
+        s.add(
+            Asset(
+                workspace_id=ws.id,
+                asset_key="postgres://x/y",
+                last_materialized_at=datetime.now(UTC) - timedelta(minutes=2),
+            )
+        )
+        await s.commit()
+        ws_id = ws.id
+    try:
+        sensor = AssetFreshnessSensor(asset_key="postgres://x/y", max_age_minutes=30)
+        async with use_sensor_context(session_factory=real_factory, workspace_id=ws_id):
+            result = await sensor.check_async()
+        assert result.triggered is False
+        assert result.metadata["reason"] == "fresh"
+        assert result.metadata["age_minutes"] >= 1
+    finally:
+        async with real_factory() as s:
+            await s.execute(delete(Asset).where(Asset.workspace_id == ws_id))
+            await s.execute(delete(Workspace).where(Workspace.id == ws_id))
+            await s.commit()
+
+
+async def test_asset_freshness_stale_triggers_via_scheduler(
+    real_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """End-to-end via the scheduler: stale asset → tick fires → PENDING
+    Run on the target pipeline + last_triggered_at stamped."""
+    slug = f"sn-af-stale-{uuid4().hex[:8]}"
+    ws_id: UUID
+    p_id: UUID
+    s_id: UUID
+    async with real_factory() as s:
+        ws = await _seed_workspace(s, slug=slug)
+        p, _pv = await _seed_pipeline_with_current(s, workspace_id=ws.id, name="consumer")
+        s.add(
+            Asset(
+                workspace_id=ws.id,
+                asset_key="postgres://x/orders",
+                # Stale by 2h, budget is 30m → trigger.
+                last_materialized_at=datetime.now(UTC) - timedelta(hours=2),
+            )
+        )
+        sensor = await SensorRepository(s).create(
+            workspace_id=ws.id,
+            name="orders-freshness",
+            sensor_type="asset_freshness",
+            config_json={"asset_key": "postgres://x/orders", "max_age_minutes": 30},
+            target_pipeline_id=p.id,
+            poll_interval_seconds=5,
+            is_active=True,
+            created_by_user_id=None,
+        )
+        await s.commit()
+        ws_id, p_id, s_id = ws.id, p.id, sensor.id
+    try:
+        fired = await SensorScheduler(real_factory).tick_once()
+        assert fired == 1
+        async with real_factory() as s:
+            sensor_after = (await s.execute(select(Sensor).where(Sensor.id == s_id))).scalar_one()
+            runs = list(
+                (await s.execute(select(Run).where(Run.pipeline_id == p_id))).scalars().all()
+            )
+        assert sensor_after.last_triggered_at is not None
+        assert sensor_after.last_result_json["triggered"] is True
+        assert sensor_after.last_result_json["metadata"]["reason"] == "stale"
+        assert len(runs) == 1
+        assert runs[0].status == RunStatus.PENDING
+        # Sensor result piggybacks onto the run's result_json so the
+        # consumer pipeline can see the freshness diagnosis.
+        sensor_payload = runs[0].result_json["sensor_result"]
+        assert sensor_payload["metadata"]["asset_key"] == "postgres://x/orders"
+    finally:
+        async with real_factory() as s:
+            await s.execute(delete(Run).where(Run.pipeline_id == p_id))
+            await s.execute(delete(Sensor).where(Sensor.id == s_id))
+            await s.execute(delete(Asset).where(Asset.workspace_id == ws_id))
+            await s.execute(delete(PipelineVersion).where(PipelineVersion.pipeline_id == p_id))
+            await s.execute(delete(Pipeline).where(Pipeline.id == p_id))
+            await s.execute(delete(Workspace).where(Workspace.id == ws_id))
+            await s.commit()
+
+
+async def test_asset_freshness_missing_context_soft_fails() -> None:
+    """If someone calls check_async without ``use_sensor_context``
+    (e.g. forgot to wire it in a test) we surface a precise soft-fail
+    rather than crash with a weird AttributeError."""
+    sensor = AssetFreshnessSensor(asset_key="k", max_age_minutes=10)
+    result = await sensor.check_async()
+    assert result.triggered is False
+    assert "server context" in (result.message or "")
+    assert result.metadata["error"] == "missing_context"

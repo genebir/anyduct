@@ -43,11 +43,26 @@ import { cn } from "@/lib/cn";
 
 type Translate = (key: keyof Messages, vars?: Record<string, string | number>) => string;
 
-/** UI-known sensor types. K3c v1 ships ``http`` only; file-landed /
- *  asset-freshness land alongside their core builders. The select is
- *  rendered from this list so adding a new type is one-line. */
-const SENSOR_TYPES: { value: string; label: string }[] = [
-  { value: "http", label: "HTTP (poll URL)" },
+/** UI-known sensor types. Each entry mirrors a registered core/service
+ *  builder so the select stays the dispatch SSoT.
+ *  - ``http`` (core)            : polls a URL, fires on status / contains
+ *  - ``asset_freshness`` (svc)  : fires when ``assets.last_materialized_at``
+ *                                  is older than ``max_age_minutes`` or
+ *                                  the asset has never materialised.
+ *  ``configHint`` is shown under the JSON editor so the operator has a
+ *  starting shape without leaving the page.
+ */
+const SENSOR_TYPES: { value: string; label: string; configHint: string }[] = [
+  {
+    value: "http",
+    label: "HTTP (poll URL)",
+    configHint: '{"url": "https://example.com/healthz", "expect_status": 200}',
+  },
+  {
+    value: "asset_freshness",
+    label: "Asset freshness (catalog stale-watch)",
+    configHint: '{"asset_key": "postgres://prod/main/users", "max_age_minutes": 30}',
+  },
 ];
 
 type FormState =
@@ -557,7 +572,18 @@ function SensorForm({
         />
         {configError ? (
           <p className="mt-1 text-xs text-error">{configError}</p>
-        ) : null}
+        ) : (() => {
+          // Surface the per-type sample config so the operator has the
+          // shape in front of them without leaving the page. Hidden once
+          // they start producing a parse error so the screen doesn't
+          // double-stack diagnostic text.
+          const hint = SENSOR_TYPES.find((s) => s.value === values.type)?.configHint;
+          return hint ? (
+            <p className="mt-1 font-mono text-[11px] text-text-secondary">
+              {t("sensors.configExamplePrefix")}: {hint}
+            </p>
+          ) : null;
+        })()}
       </Field>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

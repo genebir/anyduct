@@ -120,7 +120,8 @@ export const en = {
   "sensors.fieldType": "Type",
   "sensors.fieldConfig": "Config (JSON)",
   "sensors.fieldConfigHelp":
-    "Shape depends on the sensor type — for http: {\"url\": \"…\", \"expect_status\": 200, \"contains\": \"ready\"}",
+    "Shape depends on the sensor type — switch the type above and we'll show a sample.",
+  "sensors.configExamplePrefix": "Example",
   "sensors.configMustBeObject": "config must be a JSON object",
   "sensors.fieldTarget": "Target pipeline",
   "sensors.fieldTargetHelp":
@@ -802,7 +803,8 @@ export const ko: Messages = {
   "sensors.fieldType": "타입",
   "sensors.fieldConfig": "설정 (JSON)",
   "sensors.fieldConfigHelp":
-    "형식은 센서 타입에 따라 다릅니다 — http: {\"url\": \"…\", \"expect_status\": 200, \"contains\": \"ready\"}",
+    "형식은 센서 타입에 따라 다릅니다 — 타입을 변경하면 예시가 표시됩니다.",
+  "sensors.configExamplePrefix": "예시",
   "sensors.configMustBeObject": "설정은 JSON 객체여야 합니다",
   "sensors.fieldTarget": "대상 파이프라인",
   "sensors.fieldTargetHelp":

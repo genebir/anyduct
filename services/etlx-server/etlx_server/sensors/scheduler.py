@@ -36,10 +36,15 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+# Register service-side sensor builtins (asset_freshness, future
+# file_landed/lineage). Pure-core builtins (``http``) self-register on
+# their own module import — the routers/scheduler already pull them in.
+import etlx_server.sensors.builtins  # noqa: F401 — side-effect import
 from etl_plugins.core.exceptions import ConfigError
 from etl_plugins.core.sensor import build_sensor
 from etlx_server.db.enums import RunStatus
 from etlx_server.db.models import Pipeline, PipelineVersion, Run, Sensor
+from etlx_server.sensors.context import use_sensor_context
 from etlx_server.sensors.repository import SensorRepository
 
 logger = logging.getLogger(__name__)
@@ -120,10 +125,16 @@ class SensorScheduler:
                 "metadata": {"error_class": type(e).__name__},
             }
         try:
-            # check() is synchronous (sensors do their own I/O — usually
-            # short network calls). Hop to a thread so we don't block the
-            # event loop on a slow target.
-            result = await asyncio.to_thread(instance.check)
+            # check_async() is the unified entry point — sync builtins
+            # (HTTP, file-landed, …) inherit the default bridge that hops
+            # to a thread, async builtins (asset_freshness) read the
+            # ContextVar-injected session_factory + workspace_id we set
+            # via use_sensor_context.
+            async with use_sensor_context(
+                session_factory=self._factory,
+                workspace_id=sensor.workspace_id,
+            ):
+                result = await instance.check_async()
         except Exception as e:  # the soft-fail contract says this shouldn't
             # happen, but a buggy custom sensor mustn't take down the loop
             logger.warning(

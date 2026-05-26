@@ -46,7 +46,11 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       ref={ref}
       disabled={disabled || loading}
       className={cn(
-        "inline-flex items-center justify-center font-medium transition duration-200 ease-out",
+        // ``whitespace-nowrap`` prevents the row-button collapse where the
+        // spinner pushed CJK labels onto two lines (user report 2026-05-26:
+        // "실행 → 실/행"). ``relative`` so the spinner can overlay the
+        // children without affecting layout.
+        "relative inline-flex items-center justify-center whitespace-nowrap font-medium transition duration-200 ease-out",
         "disabled:cursor-not-allowed disabled:opacity-60",
         "focus-visible:outline-none",
         VARIANT_CLASSES[variant],
@@ -55,13 +59,21 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       )}
       {...rest}
     >
+      {/* Spinner overlays the centre of the button while loading; children
+          stay in the flow but get visually muted via ``invisible`` so the
+          button keeps its idle width (no jiggle when entering / leaving
+          the loading state). */}
       {loading ? (
         <span
-          className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white"
+          className="pointer-events-none absolute inset-0 inline-flex items-center justify-center"
           aria-hidden
-        />
+        >
+          <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+        </span>
       ) : null}
-      {children}
+      <span className={cn("inline-flex items-center gap-[inherit]", loading && "invisible")}>
+        {children}
+      </span>
     </button>
   ),
 );

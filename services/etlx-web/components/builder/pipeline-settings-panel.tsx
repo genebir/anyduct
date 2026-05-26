@@ -5,7 +5,7 @@ import { Trash2Icon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/cn";
-import type { ConnectionSummary } from "@/lib/api";
+import type { ConnectionSummary, PipelineSummary } from "@/lib/api";
 import type { DlqSettings, RetrySettings } from "@/lib/pipeline-config";
 import { useLocale } from "@/components/providers/locale-provider";
 
@@ -22,17 +22,27 @@ export function PipelineSettingsPanel({
   dlq,
   connections,
   variables,
+  triggers,
+  pipelines,
   onChangeRetry,
   onChangeDlq,
   onChangeVariables,
+  onChangeTriggers,
 }: {
   retry: RetrySettings;
   dlq: DlqSettings;
   connections: ConnectionSummary[];
   variables: Record<string, unknown>;
+  /** Downstream pipeline ids (ADR-0029 call-pipeline). Surfaced here instead
+   *  of as canvas nodes since they're orchestration metadata, not dataflow. */
+  triggers?: string[];
+  /** Other pipelines in the workspace (the current one is filtered out by
+   *  the caller). Used to populate the downstream-trigger dropdown. */
+  pipelines?: PipelineSummary[];
   onChangeRetry: (next: RetrySettings) => void;
   onChangeDlq: (next: DlqSettings) => void;
   onChangeVariables: (next: Record<string, unknown>) => void;
+  onChangeTriggers?: (next: string[]) => void;
 }) {
   const { t } = useLocale();
   const enableLabel = t("builder.enable");
@@ -165,7 +175,102 @@ export function PipelineSettingsPanel({
       </Section>
 
       <VariablesEditor variables={variables} onChange={onChangeVariables} />
+
+      {onChangeTriggers && pipelines ? (
+        <TriggersEditor
+          triggers={triggers ?? []}
+          pipelines={pipelines}
+          onChange={onChangeTriggers}
+        />
+      ) : null}
     </aside>
+  );
+}
+
+/** Downstream pipeline triggers — ADR-0029 call-pipeline lives here in
+ *  graph-only mode (no canvas node). Each entry queues a run of the
+ *  targeted pipeline when this one succeeds. */
+function TriggersEditor({
+  triggers,
+  pipelines,
+  onChange,
+}: {
+  triggers: string[];
+  pipelines: PipelineSummary[];
+  onChange: (next: string[]) => void;
+}) {
+  const { t } = useLocale();
+  const [pick, setPick] = useState("");
+  const byId = new Map(pipelines.map((p) => [p.id, p]));
+  const available = pipelines.filter((p) => !triggers.includes(p.id));
+
+  function add() {
+    if (!pick || triggers.includes(pick)) return;
+    onChange([...triggers, pick]);
+    setPick("");
+  }
+
+  function remove(pid: string) {
+    onChange(triggers.filter((t) => t !== pid));
+  }
+
+  return (
+    <section className="flex flex-col gap-3 rounded-md border border-border-subtle p-3">
+      <header>
+        <h3 className="text-sm font-semibold text-text">{t("triggers.title")}</h3>
+        <p className="mt-1 text-[11px] text-text-muted">{t("triggers.desc")}</p>
+      </header>
+      {triggers.length > 0 ? (
+        <ul className="flex flex-col gap-1.5">
+          {triggers.map((pid) => {
+            const p = byId.get(pid);
+            return (
+              <li key={pid} className="flex items-center gap-2 text-sm">
+                <span className="min-w-0 flex-1 truncate text-text">
+                  {p?.name ?? pid}
+                </span>
+                <button
+                  type="button"
+                  aria-label={t("triggers.removeAria", { name: p?.name ?? pid })}
+                  onClick={() => remove(pid)}
+                  className="text-text-muted hover:text-error"
+                >
+                  <Trash2Icon size={14} />
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
+      <div className="flex gap-2">
+        <select
+          value={pick}
+          onChange={(e) => setPick(e.target.value)}
+          className="h-10 min-w-0 flex-1 rounded-md border border-border-subtle bg-elevated px-2 text-sm text-text focus-visible:border-accent focus-visible:outline-none"
+        >
+          <option value="">{t("triggers.pick")}</option>
+          {available.length === 0 ? (
+            <option disabled value="">
+              {t("triggers.empty")}
+            </option>
+          ) : null}
+          {available.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </select>
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          onClick={add}
+          disabled={!pick}
+        >
+          {t("common.add")}
+        </Button>
+      </div>
+    </section>
   );
 }
 

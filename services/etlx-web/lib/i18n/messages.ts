@@ -24,6 +24,13 @@ export const en = {
   "common.search": "Search",
   "common.test": "Test",
   "common.add": "Add",
+  // Downstream triggers (ADR-0029, graph-only builder)
+  "triggers.title": "Downstream pipelines",
+  "triggers.desc":
+    "Queue a run of each picked pipeline when this one succeeds. Persisted via the pipeline_triggers API.",
+  "triggers.pick": "Pick a pipeline…",
+  "triggers.empty": "No other pipelines in this workspace yet.",
+  "triggers.removeAria": "Remove {name} from downstream triggers",
   "common.back": "Back",
   "common.retry": "Retry",
   "common.refresh": "Refresh",
@@ -617,6 +624,13 @@ export const ko: Messages = {
   "common.search": "검색",
   "common.test": "테스트",
   "common.add": "추가",
+  // 다운스트림 트리거 (ADR-0029, graph-only 빌더)
+  "triggers.title": "다운스트림 파이프라인",
+  "triggers.desc":
+    "이 파이프라인이 성공하면 선택된 각 파이프라인의 실행을 큐에 넣습니다. pipeline_triggers API로 저장됩니다.",
+  "triggers.pick": "파이프라인 선택…",
+  "triggers.empty": "이 워크스페이스에 다른 파이프라인이 없습니다.",
+  "triggers.removeAria": "다운스트림 트리거에서 {name} 제거",
   "common.back": "뒤로",
   "common.retry": "재시도",
   "common.refresh": "새로고침",

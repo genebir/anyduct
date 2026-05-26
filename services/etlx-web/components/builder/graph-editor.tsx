@@ -24,11 +24,22 @@ export function GraphEditor({
   connections,
   mode = "batch",
   onChange,
+  settingsPanel,
+  dryRunPanel,
+  workspaceId,
 }: {
   state: GraphBuilderState;
   connections: ConnectionSummary[];
   mode?: "batch" | "stream";
   onChange: (next: GraphBuilderState) => void;
+  /** Rendered in the right side when no node / edge is selected (graph-only
+   *  mode, 2026-05-26). Callers usually pass a ``PipelineSettingsPanel``
+   *  here — retry/dlq/variables/downstream triggers all live there now. */
+  settingsPanel?: React.ReactNode;
+  /** Rendered below the canvas — typically the dry-run result panel. */
+  dryRunPanel?: React.ReactNode;
+  /** Workspace id forwarded to the properties panel (column introspection). */
+  workspaceId?: string;
 }) {
   const { t } = useLocale();
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
@@ -45,8 +56,6 @@ export function GraphEditor({
 
   const addOperator = useCallback(
     (operatorId: string) => {
-      // Call-pipeline isn't a dataflow node; ignore in graph mode.
-      if (operatorId.startsWith("call:")) return;
       const node = makeGraphNode(operatorId, {
         x: 80 + (state.nodes.length % 4) * 40,
         y: 260 + (state.nodes.length % 6) * 30,
@@ -121,23 +130,26 @@ export function GraphEditor({
   return (
     <div className="flex min-h-0 flex-1 overflow-hidden">
       <Palette onAdd={addOperator} mode={mode} variant="graph" />
-      <div className="min-h-0 min-w-0 flex-1">
-        <GraphCanvas
-          nodes={state.nodes}
-          edges={state.edges}
-          selectedNodeId={selectedNodeId}
-          selectedEdgeId={selectedEdgeId}
-          onSelectNode={selectNode}
-          onSelectEdge={selectEdge}
-          onRemoveNode={removeNode}
-          onConnect={connect}
-          onRemoveEdge={removeEdge}
-          onMoveNode={moveNode}
-          onDeselect={() => {
-            setSelectedNodeId(null);
-            setSelectedEdgeId(null);
-          }}
-        />
+      <div className="flex min-w-0 flex-1 flex-col">
+        <div className="min-h-0 flex-1">
+          <GraphCanvas
+            nodes={state.nodes}
+            edges={state.edges}
+            selectedNodeId={selectedNodeId}
+            selectedEdgeId={selectedEdgeId}
+            onSelectNode={selectNode}
+            onSelectEdge={selectEdge}
+            onRemoveNode={removeNode}
+            onConnect={connect}
+            onRemoveEdge={removeEdge}
+            onMoveNode={moveNode}
+            onDeselect={() => {
+              setSelectedNodeId(null);
+              setSelectedEdgeId(null);
+            }}
+          />
+        </div>
+        {dryRunPanel}
       </div>
       {selectedEdge ? (
         <aside className="flex w-80 shrink-0 flex-col gap-4 overflow-y-auto border-l border-border-subtle bg-surface p-4">
@@ -163,8 +175,11 @@ export function GraphEditor({
         <PropertiesPanel
           node={{ id: selectedNode.id, operatorId: selectedNode.operatorId, data: selectedNode.data }}
           connections={connections}
+          workspaceId={workspaceId}
           onChange={updateNode}
         />
+      ) : settingsPanel ? (
+        settingsPanel
       ) : (
         <aside className="flex w-80 shrink-0 flex-col border-l border-border-subtle bg-surface px-4 py-6 text-sm text-text-muted">
           {t("graph.hint")}

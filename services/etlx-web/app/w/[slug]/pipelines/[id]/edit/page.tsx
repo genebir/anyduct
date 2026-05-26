@@ -2,20 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
-import {
-  CheckCircle2Icon,
-  ChevronRightIcon,
-  PlayIcon,
-  SaveIcon,
-  XCircleIcon,
-  ZapIcon,
-} from "lucide-react";
+import { PlayIcon, SaveIcon, XCircleIcon, ZapIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Header } from "@/components/shell/header";
 import { Button } from "@/components/ui/button";
-import { Palette } from "@/components/builder/palette";
-import { PropertiesPanel } from "@/components/builder/properties-panel";
-import { BuilderCanvas } from "@/components/builder/builder-canvas";
 import { PipelineSettingsPanel } from "@/components/builder/pipeline-settings-panel";
 import { GraphEditor } from "@/components/builder/graph-editor";
 import {
@@ -26,26 +16,20 @@ import {
   type DryRunResponse,
   type PipelineSummary,
 } from "@/lib/api";
-import { cn } from "@/lib/cn";
-import { findOperator, OPERATOR_KIND_ACCENT } from "@/lib/operators";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import { useLocale } from "@/components/providers/locale-provider";
 import type { Messages } from "@/lib/i18n/messages";
 import {
-  blankBuilder,
-  callTargets,
+  blankGraph,
   deserialize,
   deserializeGraph,
+  extractPipelineMeta,
   isGraphConfig,
   linearToGraph,
-  makeCallNode,
-  makeNode,
-  reorderNodes,
-  serialize,
   serializeGraph,
   validateGraph,
-  type BuilderNode,
-  type BuilderState,
+  DEFAULT_DLQ,
+  DEFAULT_RETRY,
   type DlqSettings,
   type GraphBuilderState,
   type PipelineConfigJson,
@@ -54,6 +38,20 @@ import {
 
 type Translate = (key: keyof Messages, vars?: Record<string, string | number>) => string;
 
+/**
+ * Pipeline editor — **graph-only** since 2026-05-26 (user request).
+ *
+ * Every pipeline is composed on the dataflow canvas. Loading a config that
+ * was saved by the old linear builder transparently converts to a graph
+ * (``linearToGraph``) plus extracts retry / dlq / variables / triggers as
+ * separate state. Saving always emits ``graph: { nodes, edges }`` — the
+ * linear ``source / transforms / sink`` shape isn't written back.
+ *
+ * Right-side panels are now (a) the per-node ``PropertiesPanel`` when a
+ * node is selected, (b) the per-edge branch-condition editor when an edge
+ * is selected, (c) the ``PipelineSettingsPanel`` (retry, dlq, variables,
+ * downstream triggers) when nothing is selected.
+ */
 export default function PipelineEditorPage() {
   const { slug, id } = useParams<{ slug: string; id: string }>();
   const ws = useWorkspaceFromSlug(slug);
@@ -62,20 +60,20 @@ export default function PipelineEditorPage() {
   const [pipeline, setPipeline] = useState<PipelineSummary | null>(null);
   const [connections, setConnections] = useState<ConnectionSummary[]>([]);
   const [allPipelines, setAllPipelines] = useState<PipelineSummary[]>([]);
-  const [state, setState] = useState<BuilderState>(() => blankBuilder());
-  const [mode, setMode] = useState<"linear" | "graph">("linear");
-  const [graphState, setGraphState] = useState<GraphBuilderState | null>(null);
+  const [graphState, setGraphState] = useState<GraphBuilderState>(() => blankGraph());
+  const [retry, setRetry] = useState<RetrySettings>({ ...DEFAULT_RETRY });
+  const [dlq, setDlq] = useState<DlqSettings>({ ...DEFAULT_DLQ });
+  const [variables, setVariables] = useState<Record<string, unknown>>({});
+  const [triggers, setTriggers] = useState<string[]>([]);
   const [autoMaterialize, setAutoMaterialize] = useState(false);
   const [freshnessSla, setFreshnessSla] = useState<number | null>(null);
-  const [variables, setVariables] = useState<Record<string, unknown>>({});
-  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [dryRunning, setDryRunning] = useState(false);
   const [dryRunResult, setDryRunResult] = useState<DryRunResponse | null>(null);
   const [dirty, setDirty] = useState(false);
   const loadedRef = useRef(false);
 
-  // Load pipeline + connections.
+  // Load pipeline + connections + triggers.
   useEffect(() => {
     if (!ws) return;
     let cancelled = false;
@@ -91,37 +89,30 @@ export default function PipelineEditorPage() {
         setConnections(conns);
         setAllPipelines(pipelines.filter((x) => x.id !== id));
         const cfg = p.current_config_json as PipelineConfigJson | null;
-        setAutoMaterialize(Boolean(cfg?.auto_materialize));
-        setFreshnessSla(
-          typeof cfg?.freshness_sla_minutes === "number" ? cfg.freshness_sla_minutes : null,
-        );
-        setVariables(
-          cfg?.variables && typeof cfg.variables === "object" ? cfg.variables : {},
-        );
-        // Graph pipelines (ADR-0030) open in the free-form graph editor.
+        const meta = extractPipelineMeta(cfg);
+        setVariables(meta.variables);
+        setAutoMaterialize(meta.auto_materialize);
+        setFreshnessSla(meta.freshness_sla_minutes);
+        setRetry(meta.retry);
+        setDlq(meta.dlq);
+        // Graph configs load directly; legacy linear configs convert in-place
+        // so the user sees the same DAG without a migration prompt.
         if (isGraphConfig(cfg)) {
-          if (cancelled) return;
-          setMode("graph");
           setGraphState(deserializeGraph(cfg, conns));
-          setDirty(false);
-          loadedRef.current = true;
-          return;
+        } else if (cfg) {
+          setGraphState(linearToGraph(deserialize(cfg, conns)));
+        } else {
+          setGraphState(blankGraph());
         }
-        const initial = deserialize(cfg, conns);
-        // Downstream triggers (call-pipeline, ADR-0029) are surfaced as call
-        // nodes on the canvas. Best-effort: a pending `0003` migration must not
-        // break the editor or hide the pipeline list.
-        let callNodes: BuilderNode[] = [];
+        // Downstream triggers — best-effort; a pending `0003` migration
+        // must not break the editor.
         try {
-          const triggers = await pipelinesApi.getTriggers(ws.id, id);
-          callNodes = triggers.target_pipeline_ids.map((tid) => makeCallNode(tid));
+          const t = await pipelinesApi.getTriggers(ws.id, id);
+          if (!cancelled) setTriggers(t.target_pipeline_ids);
         } catch {
           /* triggers table may not exist yet — ignore */
         }
         if (cancelled) return;
-        const withCalls = { ...initial, nodes: [...initial.nodes, ...callNodes] };
-        setState(withCalls);
-        setSelectedId(withCalls.nodes[0]?.id ?? null);
         setDirty(false);
         loadedRef.current = true;
       } catch (err) {
@@ -133,165 +124,63 @@ export default function PipelineEditorPage() {
     };
   }, [ws, id, t]);
 
-  const addOperator = useCallback((operatorId: string) => {
-    setState((prev) => {
-      const next: BuilderNode = makeNode(operatorId);
-      // A pipeline has exactly one source, so adding a source replaces the
-      // existing one. Sinks fan out (ADR-0026): adding another sink keeps the
-      // existing ones so the source can write to multiple destinations.
-      const filtered = prev.nodes.filter((n) => {
-        if (next.operatorId.startsWith("source:") && n.operatorId.startsWith("source:")) {
-          return false;
-        }
-        return true;
-      });
-      const ordered = reorderNodes([...filtered, next]);
-      return { ...prev, nodes: ordered };
-    });
-    setSelectedId(null);
-    setDirty(true);
-  }, []);
-
-  const removeOperator = useCallback((nodeId: string) => {
-    setState((prev) => ({
-      ...prev,
-      nodes: prev.nodes.filter((n) => n.id !== nodeId),
-    }));
-    setSelectedId((cur) => (cur === nodeId ? null : cur));
-    setDirty(true);
-  }, []);
-
-  const reorderTransforms = useCallback((orderedIds: string[]) => {
-    setState((prev) => {
-      const byId = new Map(prev.nodes.map((n) => [n.id, n]));
-      const newTransforms = orderedIds
-        .map((tid) => byId.get(tid))
-        .filter((n): n is BuilderNode => Boolean(n));
-      const sources = prev.nodes.filter(
-        (n) => findOperator(n.operatorId)?.kind === "source",
-      );
-      const sinks = prev.nodes.filter(
-        (n) => findOperator(n.operatorId)?.kind === "sink",
-      );
-      const existingTransforms = prev.nodes.filter(
-        (n) => findOperator(n.operatorId)?.kind === "transform",
-      );
-      if (newTransforms.length !== existingTransforms.length) return prev;
-      return { ...prev, nodes: [...sources, ...newTransforms, ...sinks] };
-    });
-    setDirty(true);
-  }, []);
-
-  const selectNode = useCallback((nodeId: string) => {
-    setSelectedId(nodeId);
-  }, []);
-
-  const moveTransform = useCallback((nodeId: string, dir: -1 | 1) => {
-    setState((prev) => {
-      const nodes = [...prev.nodes];
-      const transformPositions = nodes
-        .map((n, i) => ({ i, kind: findOperator(n.operatorId)?.kind }))
-        .filter((x) => x.kind === "transform")
-        .map((x) => x.i);
-      const pos = transformPositions.findIndex((i) => nodes[i].id === nodeId);
-      const swap = pos + dir;
-      if (pos < 0 || swap < 0 || swap >= transformPositions.length) return prev;
-      const a = transformPositions[pos];
-      const b = transformPositions[swap];
-      [nodes[a], nodes[b]] = [nodes[b], nodes[a]];
-      return { ...prev, nodes };
-    });
-    setDirty(true);
-  }, []);
-
-  const updateNode = useCallback(
-    (nodeId: string, values: Record<string, unknown>) => {
-      setState((prev) => ({
-        ...prev,
-        nodes: prev.nodes.map((n) => (n.id === nodeId ? { ...n, data: values } : n)),
-      }));
-      setDirty(true);
-    },
-    [],
-  );
-
-  const updateRetry = useCallback((next: RetrySettings) => {
-    setState((prev) => ({ ...prev, retry: next }));
-    setDirty(true);
-  }, []);
-
-  const updateDlq = useCallback((next: DlqSettings) => {
-    setState((prev) => ({ ...prev, dlq: next }));
-    setDirty(true);
-  }, []);
-
-  const selectedNode = useMemo(
-    () => state.nodes.find((n) => n.id === selectedId) ?? null,
-    [state.nodes, selectedId],
-  );
-
-  const transformOrder = useMemo(
-    () =>
-      reorderNodes(state.nodes)
-        .filter((n) => findOperator(n.operatorId)?.kind === "transform")
-        .map((n) => n.id),
-    [state.nodes],
-  );
-  const selectedTransformIndex =
-    selectedNode && findOperator(selectedNode.operatorId)?.kind === "transform"
-      ? transformOrder.indexOf(selectedNode.id)
-      : -1;
-
   const updateGraph = useCallback((next: GraphBuilderState) => {
     setGraphState(next);
     setDirty(true);
   }, []);
 
-  const switchToGraph = useCallback(() => {
-    if (!window.confirm(t("graph.convertConfirm"))) return;
-    setGraphState(linearToGraph(state));
-    setMode("graph");
+  const updateRetry = useCallback((next: RetrySettings) => {
+    setRetry(next);
     setDirty(true);
-  }, [state, t]);
+  }, []);
+  const updateDlq = useCallback((next: DlqSettings) => {
+    setDlq(next);
+    setDirty(true);
+  }, []);
+  const updateVariables = useCallback((next: Record<string, unknown>) => {
+    setVariables(next);
+    setDirty(true);
+  }, []);
+  const updateTriggers = useCallback((next: string[]) => {
+    setTriggers(next);
+    setDirty(true);
+  }, []);
+
+  // Pipeline data mode (batch | stream) drives the palette's connector
+  // filtering. The mode itself is fixed at creation time and not editable
+  // here — it lives in the saved config.
+  const dataMode: "batch" | "stream" =
+    (pipeline?.current_config_json as { mode?: string } | null)?.mode === "stream"
+      ? "stream"
+      : "batch";
+
+  // Structural problems that would make the save fail server validation,
+  // surfaced inline before the user clicks save.
+  const graphIssues = useMemo(() => validateGraph(graphState), [graphState]);
 
   const onSave = useCallback(async () => {
     if (!ws || !pipeline) return;
+    if (graphIssues.length > 0) {
+      toast.error(graphIssues[0]);
+      return;
+    }
     setSaving(true);
     try {
-      const existingMode = (pipeline.current_config_json as { mode?: string } | null)?.mode;
-      const m = existingMode === "stream" ? "stream" : "batch";
-      if (mode === "graph" && graphState) {
-        const issues = validateGraph(graphState);
-        if (issues.length > 0) {
-          toast.error(issues[0]);
-          return;
-        }
-        const config = serializeGraph(graphState, {
-          name: pipeline.name,
-          mode: m,
-          variables,
-          auto_materialize: autoMaterialize,
-          freshness_sla_minutes: freshnessSla,
-        });
-        const updated = await pipelinesApi.update(ws.id, pipeline.id, { config });
-        setPipeline(updated);
-        setDirty(false);
-        toast.success(t("builder.saved", { version: updated.current_version ?? "?" }));
-        return;
-      }
-      const config = serialize(state, {
+      const config = serializeGraph(graphState, {
         name: pipeline.name,
-        mode: m,
+        mode: dataMode,
         variables,
         auto_materialize: autoMaterialize,
         freshness_sla_minutes: freshnessSla,
+        retry,
+        dlq,
       });
       const updated = await pipelinesApi.update(ws.id, pipeline.id, { config });
-      // Call-pipeline nodes live outside config_json (ADR-0029) — persist them
-      // as downstream triggers. Best-effort so a pending `0003` migration
-      // doesn't fail the whole save.
+      // Downstream triggers live outside config_json (ADR-0029) — persist
+      // them on every save. Best-effort so a pending migration doesn't
+      // fail the whole save.
       try {
-        await pipelinesApi.setTriggers(ws.id, pipeline.id, callTargets(state.nodes));
+        await pipelinesApi.setTriggers(ws.id, pipeline.id, triggers);
       } catch {
         /* triggers table may not exist yet */
       }
@@ -303,21 +192,20 @@ export default function PipelineEditorPage() {
     } finally {
       setSaving(false);
     }
-  }, [ws, pipeline, state, mode, graphState, variables, autoMaterialize, freshnessSla, t]);
-
-  // Pipeline data mode (batch | stream) — drives palette connector filtering
-  // and gates graph mode (graphs are batch-only, ADR-0030).
-  const dataMode: "batch" | "stream" =
-    (pipeline?.current_config_json as { mode?: string } | null)?.mode === "stream"
-      ? "stream"
-      : "batch";
-
-  // Structural problems that would make a graph save fail server validation
-  // (ADR-0030 tree rules) — surfaced before save so the user gets a clear reason.
-  const graphIssues = useMemo(
-    () => (mode === "graph" && graphState ? validateGraph(graphState) : []),
-    [mode, graphState],
-  );
+  }, [
+    ws,
+    pipeline,
+    graphState,
+    graphIssues,
+    dataMode,
+    variables,
+    autoMaterialize,
+    freshnessSla,
+    retry,
+    dlq,
+    triggers,
+    t,
+  ]);
 
   const onDryRun = useCallback(async () => {
     if (!ws || !pipeline) return;
@@ -352,6 +240,21 @@ export default function PipelineEditorPage() {
       toast.error(err instanceof ApiError ? err.message : t("pipelines.triggerFailed"));
     }
   }, [ws, pipeline, dirty, t]);
+
+  const settingsPanel = (
+    <PipelineSettingsPanel
+      retry={retry}
+      dlq={dlq}
+      connections={connections}
+      variables={variables}
+      triggers={triggers}
+      pipelines={allPipelines}
+      onChangeRetry={updateRetry}
+      onChangeDlq={updateDlq}
+      onChangeVariables={updateVariables}
+      onChangeTriggers={updateTriggers}
+    />
+  );
 
   return (
     <>
@@ -406,20 +309,6 @@ export default function PipelineEditorPage() {
                 className="h-8 w-20 rounded-md border border-border-subtle bg-elevated px-2 text-sm text-text focus-visible:border-accent focus-visible:outline-none"
               />
             </label>
-            {mode === "linear" ? (
-              <Button
-                variant="ghost"
-                onClick={switchToGraph}
-                disabled={!pipeline || dataMode === "stream"}
-                title={dataMode === "stream" ? t("graph.streamNoGraph") : undefined}
-              >
-                {t("graph.switchToGraph")}
-              </Button>
-            ) : (
-              <span className="rounded-sm border border-accent/40 bg-accent/10 px-2 py-1 text-xs font-medium text-accent">
-                {t("graph.modeGraph")}
-              </span>
-            )}
             <Button
               variant="ghost"
               onClick={onDryRun}
@@ -452,180 +341,24 @@ export default function PipelineEditorPage() {
           <span>{t("graph.invalid", { issue: graphIssues[0] })}</span>
         </div>
       ) : null}
-      {mode === "graph" && graphState ? (
-        <GraphEditor
-          state={graphState}
-          connections={connections}
-          mode={dataMode}
-          onChange={updateGraph}
-        />
-      ) : (
-        <>
-          <FlowSummary nodes={state.nodes} selectedId={selectedId} onSelect={selectNode} t={t} />
-          <div className="flex min-h-0 flex-1 overflow-hidden">
-            <Palette onAdd={addOperator} mode={dataMode} />
-            <div className="flex min-w-0 flex-1 flex-col">
-              <div className="min-h-0 flex-1">
-                <BuilderCanvas
-                  nodes={state.nodes}
-                  selectedId={selectedId}
-                  onSelect={selectNode}
-                  onRemove={removeOperator}
-                  onDeselect={() => setSelectedId(null)}
-                  onReorderTransforms={reorderTransforms}
-                />
-              </div>
-              {dryRunResult ? (
-                <DryRunPanel result={dryRunResult} onDismiss={() => setDryRunResult(null)} t={t} />
-              ) : null}
-            </div>
-            {selectedNode ? (
-              <PropertiesPanel
-                node={selectedNode}
-                connections={connections}
-                workspaceId={ws?.id}
-                nodes={state.nodes}
-                pipelines={allPipelines}
-                onChange={updateNode}
-                transformIndex={selectedTransformIndex}
-                transformCount={transformOrder.length}
-                onMove={moveTransform}
-              />
-            ) : (
-              <PipelineSettingsPanel
-                retry={state.retry}
-                dlq={state.dlq}
-                connections={connections}
-                variables={variables}
-                onChangeRetry={updateRetry}
-                onChangeDlq={updateDlq}
-                onChangeVariables={setVariables}
-              />
-            )}
-          </div>
-        </>
-      )}
+      <GraphEditor
+        state={graphState}
+        connections={connections}
+        mode={dataMode}
+        onChange={updateGraph}
+        workspaceId={ws?.id}
+        settingsPanel={settingsPanel}
+        dryRunPanel={
+          dryRunResult ? (
+            <DryRunPanel result={dryRunResult} onDismiss={() => setDryRunResult(null)} t={t} />
+          ) : null
+        }
+      />
     </>
   );
 }
 
-/**
- * Plain-language read of the pipeline: source → transforms → sink(s) as
- * clickable chips, with fan-out sinks grouped and routing conditions hinted.
- */
-function FlowSummary({
-  nodes,
-  selectedId,
-  onSelect,
-  t,
-}: {
-  nodes: BuilderNode[];
-  selectedId: string | null;
-  onSelect: (id: string) => void;
-  t: Translate;
-}) {
-  const ordered = reorderNodes(nodes);
-  const toChip = (n: BuilderNode) => {
-    const op = findOperator(n.operatorId);
-    const kind = op?.kind ?? "transform";
-    const needsConnection =
-      (kind === "source" || kind === "sink") && !n.data.connection;
-    const sub =
-      kind === "source" || kind === "sink"
-        ? needsConnection
-          ? t("builder.flowNeedsConnection")
-          : String(n.data.connection)
-        : null;
-    const cond =
-      kind === "sink" && typeof n.data.when === "string" && n.data.when.trim()
-        ? n.data.when.trim()
-        : null;
-    return { id: n.id, label: op?.label ?? n.operatorId, kind, needsConnection, sub, cond };
-  };
-  const isTerminal = (n: BuilderNode) => {
-    const k = findOperator(n.operatorId)?.kind;
-    return k === "sink" || k === "call";
-  };
-  const spine = ordered.filter((n) => !isTerminal(n));
-  const sinks = ordered.filter(isTerminal);
-  const spineChips = spine.map(toChip);
-  const sinkChips = sinks.map(toChip);
-
-  const chipButton = (c: ReturnType<typeof toChip>) => (
-    <button
-      type="button"
-      onClick={() => onSelect(c.id)}
-      className={cn(
-        "flex shrink-0 items-center gap-2 rounded-md border px-2.5 py-1.5 text-left transition duration-150",
-        selectedId === c.id
-          ? "border-accent bg-overlay"
-          : c.needsConnection
-            ? "border-warning/50 hover:border-warning"
-            : "border-border-subtle hover:border-border-strong hover:bg-overlay",
-      )}
-    >
-      <span
-        aria-hidden
-        className="inline-block h-2 w-2 rounded-full"
-        style={{ background: OPERATOR_KIND_ACCENT[c.kind] }}
-      />
-      <span className="flex min-w-0 flex-col leading-tight">
-        <span className="text-sm font-medium text-text">{c.label}</span>
-        {c.sub ? (
-          <span
-            className={cn(
-              "text-[11px]",
-              c.needsConnection ? "text-warning" : "text-text-muted",
-            )}
-          >
-            {c.sub}
-          </span>
-        ) : null}
-        {c.cond ? (
-          <span
-            className="max-w-[180px] truncate font-mono text-[10px] text-accent"
-            title={c.cond}
-          >
-            {t("builder.routeIf", { cond: c.cond })}
-          </span>
-        ) : null}
-      </span>
-    </button>
-  );
-
-  return (
-    <div className="flex shrink-0 items-center gap-2 overflow-x-auto border-b border-border-subtle bg-surface px-4 py-2.5">
-      <span className="shrink-0 text-[11px] font-semibold uppercase tracking-wider text-text-muted">
-        {t("builder.flowTitle")}
-      </span>
-      <div className="flex items-center gap-1.5">
-        {spineChips.map((c, i) => (
-          <div key={c.id} className="flex items-center gap-1.5">
-            {i > 0 ? (
-              <ChevronRightIcon size={14} className="shrink-0 text-text-muted" />
-            ) : null}
-            {chipButton(c)}
-          </div>
-        ))}
-        {sinkChips.length > 0 ? (
-          <ChevronRightIcon size={14} className="shrink-0 text-text-muted" />
-        ) : null}
-        {sinkChips.length > 1 ? (
-          <div className="flex flex-col gap-1 rounded-md border border-dashed border-border-subtle p-1">
-            {sinkChips.map((c) => (
-              <div key={c.id}>{chipButton(c)}</div>
-            ))}
-          </div>
-        ) : (
-          sinkChips.map((c) => <div key={c.id}>{chipButton(c)}</div>)
-        )}
-      </div>
-      <span className="ml-auto hidden shrink-0 text-[11px] text-text-muted lg:block">
-        {t("builder.flowHint")}
-      </span>
-    </div>
-  );
-}
+// --- Dry run panel (graph-only mode reuses the same component) -------------
 
 function DryRunPanel({
   result,
@@ -636,76 +369,53 @@ function DryRunPanel({
   onDismiss: () => void;
   t: Translate;
 }) {
+  const checkedCount = result.connectors.length;
   return (
-    <div className="max-h-72 shrink-0 overflow-y-auto border-t border-border-subtle bg-surface px-4 py-3 text-sm">
-      <header className="mb-2 flex items-center justify-between">
+    <div
+      className="shrink-0 border-t border-border-subtle bg-elevated px-4 py-3 text-sm"
+      role="status"
+      aria-live="polite"
+    >
+      <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           {result.ok ? (
-            <CheckCircle2Icon size={16} className="text-success" />
+            <span className="inline-flex items-center gap-1 text-success">
+              ✓ {t("builder.dryRunPassedHeader")}
+            </span>
           ) : (
-            <XCircleIcon size={16} className="text-error" />
+            <span className="inline-flex items-center gap-1 text-error">
+              ✗ {t("builder.dryRunFailedHeader")}
+            </span>
           )}
-          <span className="font-semibold text-text">
-            {result.ok ? t("builder.dryRunPassedHeader") : t("builder.dryRunFailedHeader")}
-          </span>
-          <span className="text-xs text-text-muted">
-            {t("builder.connectorsChecked", { count: result.connectors.length })}
+          <span className="text-text-muted">
+            {t("builder.connectorsChecked", { count: checkedCount })}
           </span>
         </div>
         <button
           type="button"
+          aria-label="dismiss"
           onClick={onDismiss}
-          className="text-xs text-text-muted hover:text-text"
+          className="text-text-muted hover:text-text"
         >
-          {t("common.dismiss")}
+          ×
         </button>
-      </header>
-
+      </div>
       {result.errors.length > 0 ? (
-        <div className="mb-3 rounded-md border border-error/40 bg-error/10 p-3">
-          <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-error">
-            {t("builder.configErrors")}
-          </div>
-          <ul className="space-y-1 text-xs text-text">
-            {result.errors.map((err, i) => (
-              <li key={i} className="font-mono">
-                {err}
+        <ul className="mt-2 list-inside list-disc text-error">
+          {result.errors.map((e, i) => (
+            <li key={i}>{e}</li>
+          ))}
+        </ul>
+      ) : null}
+      {result.connectors.some((c) => !c.ok) ? (
+        <ul className="mt-2 list-inside list-disc text-error">
+          {result.connectors
+            .filter((c) => !c.ok)
+            .map((c, i) => (
+              <li key={i}>
+                <strong>{c.name}</strong>: {c.error ?? t("builder.dryRunFailedHeader")}
               </li>
             ))}
-          </ul>
-        </div>
-      ) : null}
-
-      {result.connectors.length > 0 ? (
-        <ul className="space-y-1.5">
-          {result.connectors.map((c) => (
-            <li
-              key={c.name}
-              className={cn(
-                "flex items-start gap-2 rounded-sm border px-2 py-1.5",
-                c.ok ? "border-success/30 bg-success/10" : "border-error/40 bg-error/10",
-              )}
-            >
-              {c.ok ? (
-                <CheckCircle2Icon size={14} className="mt-0.5 text-success" />
-              ) : (
-                <XCircleIcon size={14} className="mt-0.5 text-error" />
-              )}
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <span className="font-medium text-text">{c.name}</span>
-                  <span className="rounded-sm bg-overlay px-1.5 py-0.5 font-mono text-[11px] text-text-secondary">
-                    {c.type}
-                  </span>
-                </div>
-                {c.error ? (
-                  <pre className="mt-1 whitespace-pre-wrap break-words font-mono text-[11px] text-error">
-                    {c.error}
-                  </pre>
-                ) : null}
-              </div>
-            </li>
-          ))}
         </ul>
       ) : null}
     </div>

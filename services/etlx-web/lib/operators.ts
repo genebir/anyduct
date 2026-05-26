@@ -33,12 +33,14 @@ import {
   ShieldCheckIcon,
   SigmaIcon,
   TerminalIcon,
-  WorkflowIcon,
   WrenchIcon,
   type LucideProps,
 } from "lucide-react";
 
-export type OperatorKind = "source" | "transform" | "sink" | "call";
+// "call" was a linear-builder kind for fire-and-forget pipeline-to-pipeline
+// triggers (ADR-0029). Graph-only mode (2026-05-26) surfaces those in the
+// pipeline settings panel instead, so the operator kind is gone.
+export type OperatorKind = "source" | "transform" | "sink";
 
 interface FieldBase {
   key: string;
@@ -844,31 +846,10 @@ for (const s of SINKS) {
   }
 }
 
-const CALLS: OperatorSpec[] = [
-  {
-    id: "call:pipeline",
-    kind: "call",
-    label: "Call pipeline",
-    description: "On success, trigger another pipeline (fire-and-forget).",
-    icon: WorkflowIcon,
-    accent: "#A78BFA",
-    fields: [
-      {
-        key: "pipeline_id",
-        label: "Target pipeline",
-        kind: "pipeline",
-        required: true,
-        help: "Runs after this pipeline succeeds. Cycles are skipped automatically.",
-      },
-    ],
-  },
-];
-
-export const OPERATORS: OperatorSpec[] = [...SOURCES, ...TRANSFORMS, ...SINKS, ...CALLS];
+export const OPERATORS: OperatorSpec[] = [...SOURCES, ...TRANSFORMS, ...SINKS];
 
 /** Sub-category within a kind — used to group a long palette (Airflow-style). */
 export function operatorCategory(spec: OperatorSpec): string {
-  if (spec.kind === "call") return "Orchestration";
   if (spec.kind === "transform") {
     switch (spec.connectorType) {
       case "filter":
@@ -905,7 +886,6 @@ export const OPERATOR_GROUPS: { kind: OperatorKind; label: string; specs: Operat
   { kind: "source", label: "Sources", specs: SOURCES },
   { kind: "transform", label: "Transforms", specs: TRANSFORMS },
   { kind: "sink", label: "Sinks", specs: SINKS },
-  { kind: "call", label: "Orchestration", specs: CALLS },
 ];
 
 /** Operators grouped kind → category → specs, for a collapsible palette. */
@@ -942,12 +922,10 @@ export const OPERATOR_KIND_ACCENT: Record<OperatorKind, string> = {
   source: "#6366F1",
   transform: "#FBBF24",
   sink: "#4ADE80",
-  call: "#A78BFA",
 };
 
 export const KIND_ICON: Record<OperatorKind, ComponentType<LucideProps>> = {
   source: DatabaseIcon,
   transform: WrenchIcon,
   sink: FileTextIcon,
-  call: WorkflowIcon,
 };

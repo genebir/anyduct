@@ -17,7 +17,7 @@ import { ApiError, pipelinesApi, type PipelineSummary } from "@/lib/api";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import { useLocale } from "@/components/providers/locale-provider";
 import type { Messages } from "@/lib/i18n/messages";
-import { serialize } from "@/lib/pipeline-config";
+import { linearToGraph, serializeGraph } from "@/lib/pipeline-config";
 import { PIPELINE_TEMPLATES, findTemplate } from "@/lib/pipeline-templates";
 import { cn } from "@/lib/cn";
 
@@ -121,7 +121,10 @@ export default function PipelinesPage() {
     setSubmitting(true);
     try {
       const tmpl = findTemplate(templateId) ?? findTemplate("blank")!;
-      const config = serialize(tmpl.build(), {
+      // Graph-only mode (2026-05-26): templates still ship as linear
+      // `BuilderState`, but we lift them into a graph + emit graph config
+      // so the next page (the editor) opens straight into the canvas.
+      const config = serializeGraph(linearToGraph(tmpl.build()), {
         name: newName.trim(),
         mode: tmpl.mode,
       });

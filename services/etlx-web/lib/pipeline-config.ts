@@ -92,25 +92,7 @@ const KIND_ORDER: Record<OperatorSpec["kind"], number> = {
   source: 0,
   transform: 1,
   sink: 2,
-  call: 3,
 };
-
-/** Target pipeline ids from call-pipeline nodes (ADR-0029). These persist via
- *  the pipeline_triggers API, not config_json. */
-export function callTargets(nodes: BuilderNode[]): string[] {
-  const ids: string[] = [];
-  for (const n of nodes) {
-    if (findOperator(n.operatorId)?.kind !== "call") continue;
-    const id = n.data.pipeline_id;
-    if (typeof id === "string" && id) ids.push(id);
-  }
-  return [...new Set(ids)];
-}
-
-/** Build one call-pipeline node for a target pipeline id. */
-export function makeCallNode(pipelineId: string): BuilderNode {
-  return { id: nextId("call"), operatorId: "call:pipeline", data: { pipeline_id: pipelineId } };
-}
 
 export function blankBuilder(): BuilderState {
   return {
@@ -451,6 +433,8 @@ export function serializeGraph(
     variables?: Record<string, unknown>;
     auto_materialize?: boolean;
     freshness_sla_minutes?: number | null;
+    retry?: RetrySettings;
+    dlq?: DlqSettings;
   },
 ): PipelineConfigJson {
   const nodes = state.nodes.map((n) => {
@@ -483,7 +467,7 @@ export function serializeGraph(
     if (w) out.when = w;
     return out;
   });
-  return {
+  const out: PipelineConfigJson = {
     name: meta.name,
     mode: meta.mode ?? "batch",
     ...(meta.variables && Object.keys(meta.variables).length
@@ -496,6 +480,67 @@ export function serializeGraph(
     // `graph` is an extra key on PipelineConfigJson (index signature allows it).
     graph: { nodes, edges },
   } as PipelineConfigJson;
+  // Retry + DLQ pipe through unchanged — graph-mode runs honour the same
+  // policy knobs as linear (core PipelineConfig is shape-agnostic).
+  if (meta.retry?.enabled) {
+    out.retry = {
+      max_attempts: meta.retry.max_attempts,
+      backoff: meta.retry.backoff,
+      initial_delay_seconds: meta.retry.initial_delay_seconds,
+    };
+  }
+  if (meta.dlq?.enabled && meta.dlq.connection) {
+    const dlq: PipelineConfigJson["dlq"] = {
+      connection: meta.dlq.connection,
+      mode: meta.dlq.mode,
+    };
+    if (meta.dlq.table) dlq.table = meta.dlq.table;
+    if (meta.dlq.topic) dlq.topic = meta.dlq.topic;
+    out.dlq = dlq;
+  }
+  return out;
+}
+
+/** Pull policy / behaviour metadata off a stored ``PipelineConfigJson`` so
+ *  graph-mode state can carry them separately from the dataflow graph
+ *  (ADR-0030 + graph-only mode, 2026-05-26). Sensible defaults so a
+ *  pipeline saved before retry/dlq existed loads cleanly. */
+export function extractPipelineMeta(
+  config: PipelineConfigJson | null,
+): {
+  variables: Record<string, unknown>;
+  auto_materialize: boolean;
+  freshness_sla_minutes: number | null;
+  retry: RetrySettings;
+  dlq: DlqSettings;
+} {
+  return {
+    variables:
+      config?.variables && typeof config.variables === "object" ? config.variables : {},
+    auto_materialize: Boolean(config?.auto_materialize),
+    freshness_sla_minutes:
+      typeof config?.freshness_sla_minutes === "number"
+        ? config.freshness_sla_minutes
+        : null,
+    retry: config?.retry
+      ? {
+          enabled: true,
+          max_attempts: config.retry.max_attempts ?? DEFAULT_RETRY.max_attempts,
+          backoff: (config.retry.backoff ?? DEFAULT_RETRY.backoff) as RetrySettings["backoff"],
+          initial_delay_seconds:
+            config.retry.initial_delay_seconds ?? DEFAULT_RETRY.initial_delay_seconds,
+        }
+      : { ...DEFAULT_RETRY },
+    dlq: config?.dlq
+      ? {
+          enabled: true,
+          connection: config.dlq.connection ?? "",
+          mode: (config.dlq.mode ?? DEFAULT_DLQ.mode) as DlqSettings["mode"],
+          table: config.dlq.table ?? "",
+          topic: config.dlq.topic ?? "",
+        }
+      : { ...DEFAULT_DLQ },
+  };
 }
 
 export function deserializeGraph(
@@ -552,9 +597,12 @@ export function deserializeGraph(
  *  sink fan-out), so the user can switch to graph mode and add branches. */
 export function linearToGraph(state: BuilderState): GraphBuilderState {
   const sorted = reorderNodes(state.nodes);
-  const nodes: GraphBuilderNode[] = sorted
-    .filter((n) => findOperator(n.operatorId)?.kind !== "call")
-    .map((n) => ({ id: n.id, operatorId: n.operatorId, data: n.data, position: { x: 0, y: 0 } }));
+  const nodes: GraphBuilderNode[] = sorted.map((n) => ({
+    id: n.id,
+    operatorId: n.operatorId,
+    data: n.data,
+    position: { x: 0, y: 0 },
+  }));
   const spine = nodes.filter((n) => findOperator(n.operatorId)?.kind !== "sink");
   const sinks = nodes.filter((n) => findOperator(n.operatorId)?.kind === "sink");
   const edges: GraphBuilderEdge[] = [];

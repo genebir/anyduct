@@ -26,11 +26,9 @@ export function PipelineNode({ id, data }: NodeProps) {
   const Icon = op.icon;
 
   const summary = describeNode(op, d.values, t);
-  // A source/sink with no connection (or a call with no target) can't run —
-  // flag it on the canvas so the gap is visible without opening the node.
-  const incomplete =
-    ((op.kind === "source" || op.kind === "sink") && !d.values.connection) ||
-    (op.kind === "call" && !d.values.pipeline_id);
+  // A source/sink with no connection can't run — flag it on the canvas so
+  // the gap is visible without opening the node.
+  const incomplete = (op.kind === "source" || op.kind === "sink") && !d.values.connection;
 
   return (
     <div
@@ -123,10 +121,6 @@ function describeNode(
   t: Translate,
 ): string {
   if (!op) return "";
-  if (op.kind === "call") {
-    const target = values.pipeline_id as string | undefined;
-    return target ? `→ ${target.slice(0, 8)}…` : t("builder.notConfigured");
-  }
   if (op.kind === "source" || op.kind === "sink") {
     const conn = (values.connection as string) || t("builder.noConnection");
     const target =

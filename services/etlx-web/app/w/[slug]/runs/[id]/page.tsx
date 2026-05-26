@@ -3,11 +3,18 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
-import { ArrowLeftIcon, RefreshCwIcon, RotateCcwIcon } from "lucide-react";
+import {
+  ArrowLeftIcon,
+  ExternalLinkIcon,
+  RefreshCwIcon,
+  RotateCcwIcon,
+  SearchXIcon,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Header } from "@/components/shell/header";
 import { Card, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
 import { StatusBadge } from "@/components/ui/status-badge";
 import {
   ApiError,
@@ -61,6 +68,10 @@ export default function RunDetailPage() {
   const [metrics, setMetrics] = useState<RunMetricEntry[] | null>(null);
   const [nodeRuns, setNodeRuns] = useState<NodeRunEntry[] | null>(null);
   const [retrying, setRetrying] = useState(false);
+  // Tracked separately so the page can render a clear "this run doesn't
+  // exist" empty state instead of a permanent loading shimmer when the
+  // backend returns 404 (deleted / wrong workspace / stale list).
+  const [notFound, setNotFound] = useState(false);
   const logsEndRef = useRef<HTMLDivElement | null>(null);
 
   // Poll the trio (run / logs / metrics) until status is terminal. Once
@@ -84,11 +95,17 @@ export default function RunDetailPage() {
         setNodeRuns(n);
         return TERMINAL.has(r.status);
       } catch (err) {
-        if (!cancelled) {
-          toast.error(
-            err instanceof ApiError ? err.message : t("runDetail.loadFailed"),
-          );
+        if (cancelled) return true;
+        // 404 is a *terminal* state for the UI — surface the empty state
+        // instead of toasting once and stalling forever. Other errors
+        // (network / 5xx) toast like before so the user knows to refresh.
+        if (err instanceof ApiError && err.status === 404) {
+          setNotFound(true);
+          return true;
         }
+        toast.error(
+          err instanceof ApiError ? err.message : t("runDetail.loadFailed"),
+        );
         return true;
       }
     }
@@ -184,7 +201,27 @@ export default function RunDetailPage() {
       />
       <main className="flex-1 overflow-y-auto px-6 py-8">
         <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
-          {nodeRuns && nodeRuns.length > 0 ? (
+          {notFound ? (
+            <Card>
+              <EmptyState
+                icon={<SearchXIcon size={36} strokeWidth={1.5} />}
+                title={t("runDetail.notFoundTitle")}
+                description={t("runDetail.notFoundDesc")}
+                action={
+                  ws ? (
+                    <Link
+                      href={`/w/${ws.slug}/runs`}
+                      className="inline-flex items-center gap-1.5 rounded-md border border-border-subtle px-3 py-1.5 text-sm text-text-secondary transition duration-150 hover:bg-overlay hover:text-text"
+                    >
+                      <ArrowLeftIcon size={14} />
+                      {t("runDetail.backToList")}
+                    </Link>
+                  ) : null
+                }
+              />
+            </Card>
+          ) : null}
+          {!notFound && nodeRuns && nodeRuns.length > 0 ? (
             <Card>
               <CardHeader
                 title={t("runDetail.dag")}
@@ -193,6 +230,7 @@ export default function RunDetailPage() {
               <RunDagGraph nodes={nodeRuns} />
             </Card>
           ) : null}
+        {!notFound ? (
         <div className="grid w-full gap-6 lg:grid-cols-[2fr_1fr]">
           <Card>
             <CardHeader
@@ -209,7 +247,7 @@ export default function RunDetailPage() {
           <div className="flex flex-col gap-6">
             <Card>
               <CardHeader title={t("runDetail.summary")} />
-              <Summary run={run} t={t} />
+              <Summary run={run} workspaceSlug={ws?.slug} t={t} />
             </Card>
             <Card>
               <CardHeader
@@ -237,6 +275,7 @@ export default function RunDetailPage() {
             ) : null}
           </div>
         </div>
+        ) : null}
         </div>
       </main>
     </>
@@ -306,17 +345,36 @@ function LogView({
   );
 }
 
-function Summary({ run, t }: { run: RunDetail | null; t: Translate }) {
+function Summary({
+  run,
+  workspaceSlug,
+  t,
+}: {
+  run: RunDetail | null;
+  workspaceSlug: string | undefined;
+  t: Translate;
+}) {
   if (!run) {
     return <div className="text-sm text-text-muted">{t("common.loading")}</div>;
   }
+  // pipeline_id renders as a clickable link → the pipeline editor.
+  // ExternalLinkIcon hint + title so users know the row is interactive.
+  const pipelineLink = workspaceSlug ? (
+    <Link
+      href={`/w/${workspaceSlug}/pipelines/${run.pipeline_id}/edit`}
+      className="inline-flex items-center gap-1 text-accent hover:underline"
+      title={t("runDetail.openPipeline")}
+    >
+      <code>{run.pipeline_id.slice(0, 8)}…</code>
+      <ExternalLinkIcon size={12} />
+    </Link>
+  ) : (
+    <code>{run.pipeline_id.slice(0, 8)}…</code>
+  );
   return (
     <dl className="grid grid-cols-1 gap-3 text-sm">
       <Field label={t("common.status")} value={<StatusBadge status={run.status} />} />
-      <Field
-        label={t("common.pipeline")}
-        value={<code>{run.pipeline_id.slice(0, 8)}…</code>}
-      />
+      <Field label={t("common.pipeline")} value={pipelineLink} />
       <Field
         label={t("common.version")}
         value={<code>{run.pipeline_version_id.slice(0, 8)}…</code>}

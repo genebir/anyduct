@@ -321,6 +321,10 @@ export const en = {
   "tpl.streamLoadDesc": "Continuously load Kafka events into a table (stream mode).",
   "pipelines.openBuilder": "Open builder",
   "pipelines.deleteAria": "Delete {name}",
+  "pipelines.viewRunsAria": "View runs for {name}",
+  "pipelines.viewRunsTitle": "View this pipeline's run history",
+  "builder.viewRuns": "Runs",
+  "builder.viewRunsTitle": "Open this pipeline's run history",
   "pipelines.emptyTitle": "No pipelines yet",
   "pipelines.emptyDesc":
     "Pipelines are graphs of source → transform → sink. Use the visual builder to design one without writing YAML.",
@@ -493,10 +497,20 @@ export const en = {
   "runs.emptyTitle": "No runs yet",
   "runs.emptyDesc":
     "Trigger a pipeline manually or wait for a scheduled run. This view updates every five seconds.",
+  "runs.emptyDescForPipeline":
+    "This pipeline hasn't run yet. Trigger it manually or wait for its schedule / sensor to fire.",
+  "runs.filteredByPipeline": "Showing runs for pipeline: {name}",
+  "runs.clearFilter": "Clear filter",
+  "runs.openPipeline": "Open pipeline →",
   "runs.loadFailed": "Couldn't load runs.",
 
   // run detail
   "runDetail.backAria": "Back to runs",
+  "runDetail.backToList": "Back to runs",
+  "runDetail.notFoundTitle": "Run not found",
+  "runDetail.notFoundDesc":
+    "This run doesn't exist in this workspace. It may have been deleted, belong to a different workspace, or you may have followed an old link.",
+  "runDetail.openPipeline": "Open this run's pipeline",
   "runDetail.title": "Run {id}…",
   "runDetail.final": "Final",
   "runDetail.live": "Live · refreshing every 2 s",
@@ -955,6 +969,10 @@ export const ko: Messages = {
   "tpl.streamLoadDesc": "Kafka 이벤트를 테이블에 연속 적재합니다 (스트림 모드).",
   "pipelines.openBuilder": "빌더 열기",
   "pipelines.deleteAria": "{name} 삭제",
+  "pipelines.viewRunsAria": "{name} 실행 기록 보기",
+  "pipelines.viewRunsTitle": "이 파이프라인의 실행 기록 보기",
+  "builder.viewRuns": "실행 기록",
+  "builder.viewRunsTitle": "이 파이프라인의 실행 기록 열기",
   "pipelines.emptyTitle": "아직 파이프라인이 없습니다",
   "pipelines.emptyDesc":
     "파이프라인은 소스 → 변환 → 싱크 그래프입니다. 비주얼 빌더로 YAML 없이 설계하세요.",
@@ -1124,9 +1142,19 @@ export const ko: Messages = {
   "runs.emptyTitle": "아직 실행이 없습니다",
   "runs.emptyDesc":
     "파이프라인을 수동으로 실행하거나 예약된 실행을 기다리세요. 이 화면은 5초마다 갱신됩니다.",
+  "runs.emptyDescForPipeline":
+    "이 파이프라인은 아직 실행된 적이 없습니다. 수동으로 트리거하거나 스케줄·센서가 발동하길 기다리세요.",
+  "runs.filteredByPipeline": "{name} 파이프라인의 실행 기록만 표시 중",
+  "runs.clearFilter": "필터 해제",
+  "runs.openPipeline": "파이프라인 열기 →",
   "runs.loadFailed": "실행 기록을 불러올 수 없습니다.",
 
   "runDetail.backAria": "실행 목록으로",
+  "runDetail.backToList": "실행 목록으로 돌아가기",
+  "runDetail.notFoundTitle": "실행을 찾을 수 없습니다",
+  "runDetail.notFoundDesc":
+    "이 워크스페이스에 해당 실행이 없습니다. 삭제됐거나 다른 워크스페이스의 실행이거나 오래된 링크를 따라왔을 수 있습니다.",
+  "runDetail.openPipeline": "이 실행의 파이프라인 열기",
   "runDetail.title": "실행 {id}…",
   "runDetail.final": "완료",
   "runDetail.live": "실시간 · 2초마다 새로고침",

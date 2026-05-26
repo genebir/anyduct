@@ -517,8 +517,15 @@ export interface NodeRunEntry {
 }
 
 export const runsApi = {
-  list: (workspaceId: string, query: { limit?: number; status?: RunStatus } = {}) =>
-    api<RunSummary[]>(`/workspaces/${workspaceId}/runs`, { query }),
+  list: (
+    workspaceId: string,
+    query: {
+      limit?: number;
+      status?: RunStatus;
+      pipeline_id?: string;
+      schedule_id?: string;
+    } = {},
+  ) => api<RunSummary[]>(`/workspaces/${workspaceId}/runs`, { query }),
   get: (workspaceId: string, runId: string) =>
     api<RunDetail>(`/workspaces/${workspaceId}/runs/${runId}`),
   logs: (

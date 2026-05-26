@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { PlusIcon, Trash2Icon, WorkflowIcon } from "lucide-react";
+import { ActivityIcon, PlusIcon, Trash2Icon, WorkflowIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Header } from "@/components/shell/header";
 import { Card } from "@/components/ui/card";
@@ -312,6 +312,18 @@ export default function PipelinesPage() {
                       >
                         {t("backfill.action")}
                       </Button>
+                      {/* Quick jump to this pipeline's runs (filtered) —
+                          mirrors the editor-header link so users can drill
+                          to history straight from the list. */}
+                      <Link
+                        href={ws ? `/w/${ws.slug}/runs?pipeline=${row.id}` : "#"}
+                        onClick={(e) => e.stopPropagation()}
+                        aria-label={t("pipelines.viewRunsAria", { name: row.name })}
+                      >
+                        <Button size="sm" variant="ghost" title={t("pipelines.viewRunsTitle")}>
+                          <ActivityIcon size={14} />
+                        </Button>
+                      </Link>
                       <Button
                         size="sm"
                         variant="ghost"

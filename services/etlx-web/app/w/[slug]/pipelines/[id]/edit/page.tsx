@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
-import { PlayIcon, SaveIcon, XCircleIcon, ZapIcon } from "lucide-react";
+import Link from "next/link";
+import { ActivityIcon, PlayIcon, SaveIcon, XCircleIcon, ZapIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Header } from "@/components/shell/header";
 import { Button } from "@/components/ui/button";
@@ -328,6 +329,20 @@ export default function PipelineEditorPage() {
               <PlayIcon size={16} />
               {t("common.trigger")}
             </Button>
+            {/* Quick nav to the runs list pre-filtered to THIS pipeline.
+                The runs page reads ``?pipeline=<id>`` and shows a banner
+                so the user can tell they're not seeing the workspace-wide
+                list. */}
+            {pipeline ? (
+              <Link
+                href={`/w/${slug}/runs?pipeline=${pipeline.id}`}
+                className="inline-flex h-9 items-center gap-1.5 rounded-md px-3 text-sm text-text-secondary transition duration-150 hover:bg-overlay hover:text-text"
+                title={t("builder.viewRunsTitle")}
+              >
+                <ActivityIcon size={16} />
+                {t("builder.viewRuns")}
+              </Link>
+            ) : null}
             <Button onClick={onSave} loading={saving} disabled={!pipeline}>
               <SaveIcon size={16} />
               {t("common.save")}

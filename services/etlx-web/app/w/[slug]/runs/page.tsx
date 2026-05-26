@@ -1,15 +1,22 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
-import { ActivityIcon } from "lucide-react";
+import Link from "next/link";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { ActivityIcon, XIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Header } from "@/components/shell/header";
 import { Card } from "@/components/ui/card";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { EmptyState } from "@/components/ui/empty-state";
-import { ApiError, runsApi, type RunSummary } from "@/lib/api";
+import {
+  ApiError,
+  pipelinesApi,
+  runsApi,
+  type PipelineSummary,
+  type RunSummary,
+} from "@/lib/api";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import { useLocale } from "@/components/providers/locale-provider";
 import type { Messages } from "@/lib/i18n/messages";
@@ -29,7 +36,10 @@ function formatDuration(s: number | null): string {
   return `${Math.floor(s / 60)}m ${Math.round(s % 60)}s`;
 }
 
-function buildColumns(t: Translate): Column<RunSummary>[] {
+function buildColumns(
+  t: Translate,
+  pipelineNameById: Map<string, string>,
+): Column<RunSummary>[] {
   return [
     {
       key: "status",
@@ -40,11 +50,16 @@ function buildColumns(t: Translate): Column<RunSummary>[] {
     {
       key: "pipeline",
       header: t("common.pipeline"),
-      cell: (r) => (
-        <span className="font-mono text-xs text-text-secondary">
-          {r.pipeline_id.slice(0, 8)}…
-        </span>
-      ),
+      cell: (r) => {
+        const name = pipelineNameById.get(r.pipeline_id);
+        return name ? (
+          <span className="text-text-secondary">{name}</span>
+        ) : (
+          <span className="font-mono text-xs text-text-secondary">
+            {r.pipeline_id.slice(0, 8)}…
+          </span>
+        );
+      },
     },
     {
       key: "scheduled",
@@ -92,9 +107,25 @@ function buildColumns(t: Translate): Column<RunSummary>[] {
 export default function RunsPage() {
   const router = useRouter();
   const { slug } = useParams<{ slug: string }>();
+  const search = useSearchParams();
+  const pipelineFilter = search.get("pipeline");
   const ws = useWorkspaceFromSlug(slug);
   const { t } = useLocale();
   const [rows, setRows] = useState<RunSummary[] | null>(null);
+  const [pipelines, setPipelines] = useState<PipelineSummary[]>([]);
+
+  // Pipeline list is a one-shot — used to render readable names in the
+  // table and the filter banner instead of bare UUIDs.
+  useEffect(() => {
+    if (!ws) return;
+    let cancelled = false;
+    void pipelinesApi.list(ws.id).then((ps) => {
+      if (!cancelled) setPipelines(ps);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [ws]);
 
   useEffect(() => {
     if (!ws) return;
@@ -102,7 +133,11 @@ export default function RunsPage() {
 
     async function fetchOnce(workspaceId: string) {
       try {
-        const list = await runsApi.list(workspaceId, { limit: 100 });
+        // ``?pipeline=<id>`` URL query → server-side filter, so we don't
+        // shovel hundreds of unrelated runs to the client.
+        const query: Parameters<typeof runsApi.list>[1] = { limit: 100 };
+        if (pipelineFilter) query.pipeline_id = pipelineFilter;
+        const list = await runsApi.list(workspaceId, query);
         if (!cancelled) setRows(list);
       } catch (err) {
         if (!cancelled) {
@@ -123,7 +158,12 @@ export default function RunsPage() {
       cancelled = true;
       window.clearInterval(id);
     };
-  }, [ws, t]);
+  }, [ws, t, pipelineFilter]);
+
+  const pipelineNameById = new Map(pipelines.map((p) => [p.id, p.name]));
+  const filteredPipelineName = pipelineFilter
+    ? pipelineNameById.get(pipelineFilter) ?? pipelineFilter.slice(0, 8) + "…"
+    : null;
 
   return (
     <>
@@ -135,6 +175,34 @@ export default function RunsPage() {
             : t("common.loadingWorkspace")
         }
       />
+      {/* Pipeline filter banner — shown when arriving from the pipeline
+          editor's "View runs" link. One-click clear returns to the unfiltered
+          workspace-wide list. */}
+      {pipelineFilter && filteredPipelineName ? (
+        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-accent/40 bg-accent/10 px-6 py-2 text-sm">
+          <span className="text-text">
+            {t("runs.filteredByPipeline", { name: filteredPipelineName })}
+          </span>
+          <div className="flex items-center gap-2">
+            {ws && pipelineFilter ? (
+              <Link
+                href={`/w/${ws.slug}/pipelines/${pipelineFilter}/edit`}
+                className="text-xs text-accent hover:underline"
+              >
+                {t("runs.openPipeline")}
+              </Link>
+            ) : null}
+            <Link
+              href={ws ? `/w/${ws.slug}/runs` : "#"}
+              className="inline-flex items-center gap-1 rounded-sm px-2 py-1 text-xs text-text-secondary hover:bg-overlay hover:text-text"
+              aria-label={t("runs.clearFilter")}
+            >
+              <XIcon size={12} />
+              {t("runs.clearFilter")}
+            </Link>
+          </div>
+        </div>
+      ) : null}
       <main className="mx-auto w-full max-w-6xl flex-1 space-y-6 overflow-y-auto px-6 py-8">
         <Card>
           {rows === null ? (
@@ -143,7 +211,7 @@ export default function RunsPage() {
             </div>
           ) : (
             <DataTable
-              columns={buildColumns(t)}
+              columns={buildColumns(t, pipelineNameById)}
               rows={rows}
               onRowClick={(row) => {
                 if (ws) router.push(`/w/${ws.slug}/runs/${row.id}`);
@@ -152,7 +220,11 @@ export default function RunsPage() {
                 <EmptyState
                   icon={<ActivityIcon size={36} strokeWidth={1.5} />}
                   title={t("runs.emptyTitle")}
-                  description={t("runs.emptyDesc")}
+                  description={
+                    pipelineFilter
+                      ? t("runs.emptyDescForPipeline")
+                      : t("runs.emptyDesc")
+                  }
                 />
               }
             />

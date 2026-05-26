@@ -30,6 +30,7 @@ import {
   LeafIcon,
   RadioTowerIcon,
   ReplaceIcon,
+  ShieldCheckIcon,
   SigmaIcon,
   TerminalIcon,
   WorkflowIcon,
@@ -581,6 +582,44 @@ const TRANSFORMS: OperatorSpec[] = [
         required: true,
         placeholder: '[{"op":"sum","column":"amount","name":"total"},{"op":"count","name":"n"}]',
         help: "Array of {op, column?, name}. op = count | sum | min | max | avg. count may omit column.",
+      },
+    ],
+  },
+  {
+    // Data-quality gate (ADR-0041 K1). Same expression contract as filter,
+    // but a falsy outcome fails the run (default) or silently drops the
+    // record — no silent bad data.
+    id: "transform:assert",
+    kind: "transform",
+    connectorType: "assert",
+    label: "Assertion",
+    description: "Fail the run (or drop the row) when a data-quality condition isn't met.",
+    icon: ShieldCheckIcon,
+    accent: "#FBBF24",
+    fields: [
+      {
+        key: "condition",
+        label: "Condition",
+        kind: "filter",
+        required: true,
+        help: "Records must satisfy every condition. Switch to Advanced for a raw Python expression (locals: data, metadata; no builtins).",
+      },
+      {
+        key: "on_fail",
+        label: "On failure",
+        kind: "select",
+        options: [
+          { label: "Fail the run", value: "fail" },
+          { label: "Drop the record", value: "drop" },
+        ],
+        help: "Fail = stop the run with this row's error. Drop = silently filter the offending row and keep going.",
+      },
+      {
+        key: "message",
+        label: "Failure message",
+        kind: "string",
+        placeholder: "amount must be non-negative",
+        help: "Optional. Rendered into the run's error message when the assertion fails. Defaults to the condition text.",
       },
     ],
   },

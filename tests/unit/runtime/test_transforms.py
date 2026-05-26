@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 import pytest
 
 from etl_plugins.config.models import TransformConfig
-from etl_plugins.core.exceptions import ConfigError, TransformError
+from etl_plugins.core.exceptions import AssertionFailedError, ConfigError, TransformError
 from etl_plugins.core.record import Record
 from etl_plugins.runtime.transforms import build_transform, register_transform
 
@@ -347,3 +347,90 @@ def test_custom_python_import_time_error_raises_configerror() -> None:
     code = "raise RuntimeError('boom at import')\n"
     with pytest.raises(ConfigError, match="raised during import"):
         build_transform(TransformConfig.model_validate({"type": "custom_python", "code": code}))
+
+
+# ---------- assert (ADR-0041 K1) ----------
+
+
+def test_assert_passes_truthy_record() -> None:
+    fn = build_transform(
+        TransformConfig.model_validate({"type": "assert", "condition": "data['amount'] >= 0"})
+    )
+    out = fn(Record(data={"amount": 10}))
+    assert out is not None and out.data["amount"] == 10
+
+
+def test_assert_fail_default_raises_with_message() -> None:
+    fn = build_transform(
+        TransformConfig.model_validate(
+            {
+                "type": "assert",
+                "condition": "data['amount'] >= 0",
+                "message": "amount must be non-negative",
+            }
+        )
+    )
+    with pytest.raises(AssertionFailedError, match="amount must be non-negative") as exc:
+        fn(Record(data={"amount": -5}))
+    # offending row is included in the rendered message for debugging
+    assert "amount" in str(exc.value) and "-5" in str(exc.value)
+
+
+def test_assert_fail_default_uses_condition_when_no_message() -> None:
+    fn = build_transform(
+        TransformConfig.model_validate({"type": "assert", "condition": "data['x'] > 0"})
+    )
+    with pytest.raises(AssertionFailedError, match="data\\['x'\\] > 0"):
+        fn(Record(data={"x": -1}))
+
+
+def test_assert_drop_mode_filters_silently() -> None:
+    fn = build_transform(
+        TransformConfig.model_validate(
+            {
+                "type": "assert",
+                "condition": "data['amount'] >= 0",
+                "on_fail": "drop",
+            }
+        )
+    )
+    assert fn(Record(data={"amount": 10})) is not None
+    assert fn(Record(data={"amount": -1})) is None
+
+
+def test_assert_unknown_on_fail_raises_configerror() -> None:
+    with pytest.raises(ConfigError, match="on_fail"):
+        build_transform(
+            TransformConfig.model_validate(
+                {"type": "assert", "condition": "True", "on_fail": "warn"}
+            )
+        )
+
+
+def test_assert_empty_condition_raises_configerror() -> None:
+    with pytest.raises(ConfigError, match="non-empty"):
+        build_transform(TransformConfig.model_validate({"type": "assert", "condition": "  "}))
+
+
+def test_assert_invalid_syntax_raises_configerror() -> None:
+    with pytest.raises(ConfigError, match="cannot compile"):
+        build_transform(TransformConfig.model_validate({"type": "assert", "condition": "data['"}))
+
+
+def test_assert_blocks_builtins() -> None:
+    fn = build_transform(
+        TransformConfig.model_validate({"type": "assert", "condition": "open('/etc/passwd')"})
+    )
+    with pytest.raises(TransformError, match="condition raised"):
+        fn(Record(data={}))
+
+
+def test_assert_long_record_repr_is_truncated() -> None:
+    """error_message stays bounded so the runs.error_message column doesn't bloat."""
+    fn = build_transform(
+        TransformConfig.model_validate({"type": "assert", "condition": "data['ok']"})
+    )
+    big_payload = {"junk": "x" * 5000, "ok": False}
+    with pytest.raises(AssertionFailedError) as exc:
+        fn(Record(data=big_payload))
+    assert "…" in str(exc.value) or len(str(exc.value)) < 600

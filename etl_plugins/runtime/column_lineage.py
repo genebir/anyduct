@@ -126,8 +126,9 @@ def _apply_transform(mapping: _Mapping, tc: TransformConfig) -> _Mapping | None:
         if not col:
             return mapping
         return {**mapping, col: None}  # new column, no upstream
-    if tc.type in {"cast", "filter", "dedupe"}:
-        # cast = type only; filter/dedupe = row-level — none touch the column set.
+    if tc.type in {"cast", "filter", "dedupe", "assert"}:
+        # cast = type only; filter/dedupe/assert = row-level decisions
+        # (assert may fail the run, but it never reshapes the columns).
         return mapping
     # python / sql_exec / anything we don't recognize → opaque.
     return None

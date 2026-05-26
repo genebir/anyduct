@@ -11,6 +11,8 @@ Built-ins (SPEC.md §5.4):
     * ``python`` — apply a user callable (``callable: "module:function"``)
     * ``custom_python`` — apply an inline Python ``transform(record)`` function
       (``code: <source>``); ADR-0041 I2.
+    * ``assert`` — fail the run (or drop the row) when a data-quality
+      condition isn't met; ADR-0041 K1.
 
 External packages can add their own via :func:`register_transform`.
 """
@@ -23,7 +25,7 @@ from datetime import datetime
 from typing import Any
 
 from etl_plugins.config.models import TransformConfig
-from etl_plugins.core.exceptions import ConfigError, TransformError
+from etl_plugins.core.exceptions import AssertionFailedError, ConfigError, TransformError
 from etl_plugins.core.pipeline import TransformFn
 from etl_plugins.core.record import Record
 
@@ -336,6 +338,74 @@ def _build_custom_python(config: TransformConfig) -> TransformFn:
             raise TransformError(f"custom_python: code raised: {exc}") from exc
 
     return _custom_python
+
+
+# ---------- assert (data-quality gate, ADR-0041 K1) ----------------------
+
+_ASSERT_ACTIONS = {"fail", "drop"}
+
+
+@register_transform("assert")
+def _build_assert(config: TransformConfig) -> TransformFn:
+    """Fail (or drop) records that don't satisfy a sandboxed condition.
+
+    A data-quality gate that the pipeline trips automatically — no silent
+    bad data. Same expression contract as ``filter``: ``data`` /
+    ``metadata`` in scope, builtins blocked.
+
+    Config::
+
+        transform:
+          type: assert
+          condition: "data['amount'] >= 0"   # truthy = pass
+          on_fail: fail                      # fail | drop  (default: fail)
+          message: "amount must be non-negative"
+
+    ``on_fail=fail`` (default) raises :class:`AssertionFailedError`, which
+    propagates to the worker → run row status flips to ``failed`` with the
+    rendered message in ``error_message``. ``on_fail=drop`` silently filters
+    the offending record (handy when bad rows are expected occasionally and
+    the run shouldn't die for them — the row count delta still tells you).
+    """
+    expr = _config_field(config, "condition")
+    if not isinstance(expr, str) or not expr.strip():
+        raise ConfigError("assert: 'condition' must be a non-empty string")
+    on_fail = _config_field(config, "on_fail", required=False) or "fail"
+    if on_fail not in _ASSERT_ACTIONS:
+        raise ConfigError(
+            f"assert: 'on_fail' must be one of {sorted(_ASSERT_ACTIONS)}, got {on_fail!r}"
+        )
+    message_template = _config_field(config, "message", required=False)
+    if message_template is not None and not isinstance(message_template, str):
+        raise ConfigError("assert: 'message' must be a string when set")
+
+    try:
+        compiled = compile(expr, "<assert:condition>", "eval")
+    except SyntaxError as exc:
+        raise ConfigError(f"assert: cannot compile 'condition': {exc}") from exc
+
+    def _assert(record: Record) -> Record | None:
+        try:
+            passed = eval(
+                compiled,
+                {"__builtins__": {}},
+                {"data": record.data, "metadata": record.metadata},
+            )
+        except Exception as exc:
+            raise TransformError(f"assert: condition raised: {exc}") from exc
+        if passed:
+            return record
+        if on_fail == "drop":
+            return None
+        # fail mode — short repr of the offending row helps debugging
+        # without dumping unbounded payloads into the error message.
+        snippet = repr(record.data)
+        if len(snippet) > 200:
+            snippet = snippet[:200] + "…"
+        msg = message_template or f"assertion failed: {expr}"
+        raise AssertionFailedError(f"{msg}\n  record: {snippet}")
+
+    return _assert
 
 
 __all__ = [

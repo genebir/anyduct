@@ -50,5 +50,14 @@ class TransformError(PipelineError):
     """A transform callable raised."""
 
 
+class AssertionFailedError(TransformError):
+    """A data-quality assertion (``assert`` transform, ADR-0041 K1) failed.
+
+    Carries the rendered assertion message + a short repr of the offending
+    record's data so the run row's ``error_message`` lands something
+    actionable instead of a stack frame.
+    """
+
+
 class SecretError(ETLError):
     """Failed to resolve a secret via the configured secret backend."""

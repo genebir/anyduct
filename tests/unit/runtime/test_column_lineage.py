@@ -106,6 +106,20 @@ def test_python_transform_marks_sink_opaque() -> None:
     assert AssetKey.of("wh", "t2") in lineage.opaque_assets
 
 
+def test_assert_transform_preserves_mapping() -> None:
+    """ADR-0041 K1 — assert is a row-level gate (pass-through or fail/drop),
+    so the column mapping is unchanged. Column lineage should resolve like
+    a plain SELECT of the source's projected columns."""
+    cfg = _cfg(
+        source={"connection": "wh", "query": "SELECT id, amount FROM orders"},
+        transforms=[{"type": "assert", "condition": "data['amount'] >= 0"}],
+    )
+    lineage = derive_column_lineage(cfg)
+    edge_names = {(e.downstream.column, e.upstreams[0].column) for e in lineage.edges}
+    assert edge_names == {("id", "id"), ("amount", "amount")}
+    assert AssetKey.of("wh", "t2") not in lineage.opaque_assets
+
+
 def test_custom_python_transform_marks_sink_opaque() -> None:
     """ADR-0041 I2 — inline custom_python user code can do anything to a
     record, so its downstream sink mapping is opaque (same posture as

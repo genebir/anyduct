@@ -153,11 +153,24 @@ export function GraphCanvas({
           proOptions={{ hideAttribution: true }}
           onPaneClick={() => onDeselect?.()}
         >
+          {/* Two-layer 'graph paper' grid (2026-05-26 user request — '노드
+              있는 부분에 격자배경 넣어줘'). Fine 20 px cells give a sense of
+              snap-distance during drag; the coarser 100 px overlay keeps the
+              canvas from looking too busy. Both layers use the same subtle
+              border token so theme switching just works. */}
           <Background
-            variant={BackgroundVariant.Dots}
+            id="grid-fine"
+            variant={BackgroundVariant.Lines}
             gap={20}
-            size={1}
-            color="rgb(var(--border-subtle) / 0.6)"
+            lineWidth={1}
+            color="rgb(var(--border-subtle) / 0.35)"
+          />
+          <Background
+            id="grid-coarse"
+            variant={BackgroundVariant.Lines}
+            gap={100}
+            lineWidth={1}
+            color="rgb(var(--border-subtle) / 0.65)"
           />
           <MiniMap
             zoomable

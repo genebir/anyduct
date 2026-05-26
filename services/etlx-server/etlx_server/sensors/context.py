@@ -38,6 +38,8 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from etl_plugins.config.secrets import SecretBackend
+
 # ``None`` is the unset sentinel — service-side sensors that need DB access
 # must defend against it and return a soft-fail ``SensorResult`` rather
 # than crash, so a user instantiating the sensor outside the scheduler
@@ -53,6 +55,15 @@ sensor_workspace_id: ContextVar[UUID | None] = ContextVar("sensor_workspace_id",
 sensor_last_triggered_at: ContextVar[datetime | None] = ContextVar(
     "sensor_last_triggered_at", default=None
 )
+# Active :class:`SecretBackend` instance, surfaced so sensors that need
+# to resolve ``${SECRET:<path>}`` placeholders inside a Connection's
+# ``config_json`` (``file_landed``, future ``dataset_row_count``) don't
+# have to spin up their own backend. ``None`` only when the sensor
+# scheduler / REST endpoint wasn't configured with one — sensors that
+# need it must defend with a soft-fail message.
+sensor_secret_backend: ContextVar[SecretBackend | None] = ContextVar(
+    "sensor_secret_backend", default=None
+)
 
 
 @contextlib.asynccontextmanager
@@ -61,6 +72,7 @@ async def use_sensor_context(
     session_factory: async_sessionmaker[AsyncSession],
     workspace_id: UUID,
     last_triggered_at: datetime | None = None,
+    secret_backend: SecretBackend | None = None,
 ) -> AsyncIterator[None]:
     """Bind the per-check ContextVars for the duration of ``async with``.
 
@@ -70,23 +82,27 @@ async def use_sensor_context(
     intact if anything above us also bound the vars (the scheduler
     doesn't, but tests sometimes do).
 
-    ``last_triggered_at`` defaults to ``None`` so callers that don't
-    care (existing pure builtins) don't have to pass it. Sensors that
-    care read it through :data:`sensor_last_triggered_at` and treat
-    ``None`` as "never fired"."""
+    ``last_triggered_at`` / ``secret_backend`` default to ``None`` so
+    callers that don't care (existing pure builtins) don't have to
+    pass them. Sensors that care read them through the matching
+    ContextVar and treat ``None`` as their respective "unset" state.
+    """
     sf_token = sensor_session_factory.set(session_factory)
     ws_token = sensor_workspace_id.set(workspace_id)
     lt_token = sensor_last_triggered_at.set(last_triggered_at)
+    sb_token = sensor_secret_backend.set(secret_backend)
     try:
         yield
     finally:
         sensor_session_factory.reset(sf_token)
         sensor_workspace_id.reset(ws_token)
         sensor_last_triggered_at.reset(lt_token)
+        sensor_secret_backend.reset(sb_token)
 
 
 __all__ = [
     "sensor_last_triggered_at",
+    "sensor_secret_backend",
     "sensor_session_factory",
     "sensor_workspace_id",
     "use_sensor_context",

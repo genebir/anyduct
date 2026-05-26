@@ -36,6 +36,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 #    DB access (``asset_freshness``)
 import etl_plugins.sensors  # noqa: F401
 import etlx_server.sensors.builtins  # noqa: F401
+from etl_plugins.config.secrets import SecretBackend
 from etl_plugins.core.exceptions import ConfigError
 from etl_plugins.core.sensor import build_sensor, registered_sensor_types
 from etlx_server.audit.dependencies import get_audit_service
@@ -52,7 +53,7 @@ from etlx_server.auth.workspace_context import (
 )
 from etlx_server.db.enums import WorkspaceRole
 from etlx_server.db.models import Sensor
-from etlx_server.dependencies import get_session, get_session_factory
+from etlx_server.dependencies import get_secret_backend_dep, get_session, get_session_factory
 from etlx_server.sensors.context import use_sensor_context
 from etlx_server.sensors.repository import (
     _UNSET,
@@ -257,6 +258,7 @@ async def delete_sensor(
 
 
 _require_viewer_session_factory = Depends(get_session_factory)
+_require_viewer_secret_backend = Depends(get_secret_backend_dep)
 
 
 @router.post("/{sensor_id}/check", response_model=SensorCheckResponse)
@@ -265,6 +267,7 @@ async def check_sensor(
     ctx: WorkspaceContext = _require_viewer,
     session: AsyncSession = Depends(get_session),  # noqa: B008
     session_factory: async_sessionmaker[AsyncSession] = _require_viewer_session_factory,
+    secret_backend: SecretBackend = _require_viewer_secret_backend,
 ) -> SensorCheckResponse:
     """Run the sensor's check once and return the result. Does NOT enqueue
     a trigger run — that's the scheduler's job. Useful for the builder
@@ -290,6 +293,10 @@ async def check_sensor(
             # (lineage_arrival) return the same answer in the "Check now"
             # button that they would on the next production tick.
             last_triggered_at=sensor.last_triggered_at,
+            # SecretBackend so connection-referencing sensors (file_landed)
+            # can resolve placeholders inside the linked Connection's
+            # config the same way the scheduler does.
+            secret_backend=secret_backend,
         ):
             result = await instance.check_async()
     finally:

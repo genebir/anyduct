@@ -10,6 +10,18 @@
 ## [Unreleased]
 
 ### Added
+- **FileLandedSensor (K3 sensor framework 네 번째 빌트인, external-axis: S3 object polling)** [ADR-0041 K3f] — K3d(asset-axis pull "is stale?")·K3e(asset-axis push "upstream delivered?")는 카탈로그 내부 이벤트만 봤지만, K3f는 **외부 시스템(S3/MinIO)의 이벤트**에 react. Airflow `S3KeySensor` 패턴을 워크스페이스 `Connection` 시크릿 인프라 위에 구현. **이제 sensor 3축 완료**: asset-pull(freshness) / asset-push(arrival) / external(landed).
+  - **`etlx_server/sensors/context.py`**: 4번째 ContextVar `sensor_secret_backend` 추가. K3d~K3e의 ContextVar 패턴 자연 확장 — connection-referencing sensor(file_landed, 향후 dataset_row_count)가 워커처럼 `${SECRET:<path>}` 풀이 가능.
+  - **CLI `sensor-scheduler run`**: `--secret-backend` + `--secret-file-path` 옵션 추가 (worker CLI와 동일, SECRET_BACKEND env fallback로 API 서버 설정과 자동 매칭). 시크릿 미사용 deployment는 `env`(기본) 그대로.
+  - **`etlx_server/sensors/builtins/file_landed.py`**: `FileLandedSensor`. config `connection_id`(필수 UUID, workspace 내 type='s3' Connection 참조) + `prefix`(필수, 빈 문자열 허용) + `pattern`(기본 `*`, fnmatch glob) + `min_size_bytes`(기본 0). Connection lookup → `resolve_placeholders`로 시크릿 풀이 → `S3Connector(**resolved)`로 boto3 client 빌드 → `list_objects_v2` paginator를 `asyncio.to_thread` → basename fnmatch + size + `LastModified > last_triggered_at` 필터링.
+  - **Dedupe via `last_triggered_at`** (K3e 패턴 재사용): 같은 파일 landing이 매 tick 반복 트리거되는 함정 방지. 첫 fire(last_triggered_at=None) 시 cutoff 없음 → 기존 파일도 트리거(bootstrap 모드).
+  - **Soft-fail 5분기**: missing context / connection not found / wrong type (s3 외) / secret resolution failure / S3 call raised — 모두 metadata에 `error_class` 명시. **Scheduler crash 절대 발생 안 함**.
+  - **Hard config error는 build time**: prefix/pattern/min_size_bytes/connection_id UUID 검증 → POST /sensors에서 4xx 명확.
+  - **결과 metadata**: matched 객체 최대 50개(`key/size/last_modified`) + `match_count` + `match_count_truncated` 플래그 — 10k+ 객체 버킷에서 result_json 행 폭주 방지하면서 consumer 디버그 즉시 가능.
+  - **Web SENSOR_TYPES**: `file_landed` 옵션 + sample config hint(connection UUID placeholder). **4종 빌트인 완성**: http(core) / asset_freshness / lineage_arrival / file_landed.
+  - **검증**: 6 신규 it (builder validation 5분기 / missing context soft-fail / unknown connection soft-fail / wrong connection type soft-fail / S3 stub 매칭 happy + min_size/pattern 필터 검증 / dedupe via last_triggered_at — 첫 fire, 두 번째 quiet). 서버 sensor it 23→29 green. 코어 sensor unit 19 회귀 0. mypy 99 src OK, ruff/web tsc clean.
+  - **K3 sensor framework v1 종료**: 코어(K3a) + 서비스(K3b) + 웹(K3c) + 4 builtins(K3d/e/f) — Airflow의 "wait-for-the-world-to-be-ready" 패턴이 풀스택 + 3축으로 완성.
+
 - **LineageArrivalSensor (K3 sensor framework 세 번째 빌트인, asset-axis event-driven DAG)** [ADR-0041 K3e] — K3d(asset_freshness, consumer-side pull "is this stale?")의 producer-side dual: **"upstream이 materialise되면 fire"**. Airflow의 ExternalTaskSensor + Dagster의 asset-of-asset 의존성 패턴을 카탈로그 위에서 구현 — consumer pipeline이 스케줄 없이 upstream materialisation 이벤트에 react. 변수→센서→오케스트레이션의 다음 한 발.
   - **`etlx_server/sensors/builtins/lineage_arrival.py`**: `LineageArrivalSensor`. config `upstream_asset_keys: list[str]`(필수 non-empty, 자동 dedupe) + `window_minutes: int`(필수 양수, bool 거부) + `require_all: bool`(기본 true; true=AND(graph join), false=OR(fan-out)).
   - **De-dupe via `last_triggered_at`**: 코어 `use_sensor_context`에 3번째 ContextVar (`sensor_last_triggered_at`) 추가. since 컷오프 = `max(window_threshold, last_triggered_at)` — 같은 materialisation 이벤트가 window 안에 머무는 동안 매 tick 반복 트리거되는 함정 방지 (예: window=60m, last_fire 5m 전 → cutoff 5m 전). scheduler tick + REST `/check` 둘 다 sensor row의 last_triggered_at 전달 → "Check now"가 production tick과 동일 결과.

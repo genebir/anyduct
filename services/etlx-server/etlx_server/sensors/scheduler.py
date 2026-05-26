@@ -40,6 +40,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 # file_landed/lineage). Pure-core builtins (``http``) self-register on
 # their own module import — the routers/scheduler already pull them in.
 import etlx_server.sensors.builtins  # noqa: F401 — side-effect import
+from etl_plugins.config.secrets import SecretBackend
 from etl_plugins.core.exceptions import ConfigError
 from etl_plugins.core.sensor import build_sensor
 from etlx_server.db.enums import RunStatus
@@ -63,9 +64,15 @@ class SensorScheduler:
         factory: async_sessionmaker[AsyncSession],
         *,
         tick_interval_seconds: float = 5.0,
+        secret_backend: SecretBackend | None = None,
     ) -> None:
         self._factory = factory
         self._tick_interval = tick_interval_seconds
+        # Optional — surfaced to sensors via ContextVar so service-side
+        # builtins (file_landed) can resolve ``${SECRET:<path>}`` inside
+        # a referenced Connection's config. Pure builtins (http) don't
+        # care; pass ``None`` if the deployment doesn't use secrets.
+        self._secret_backend = secret_backend
         self._stop_event = asyncio.Event()
 
     async def run(self) -> None:
@@ -134,6 +141,7 @@ class SensorScheduler:
                 session_factory=self._factory,
                 workspace_id=sensor.workspace_id,
                 last_triggered_at=sensor.last_triggered_at,
+                secret_backend=self._secret_backend,
             ):
                 result = await instance.check_async()
         except Exception as e:  # the soft-fail contract says this shouldn't

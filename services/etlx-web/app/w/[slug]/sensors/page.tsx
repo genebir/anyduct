@@ -69,6 +69,12 @@ const SENSOR_TYPES: { value: string; label: string; configHint: string }[] = [
     configHint:
       '{"upstream_asset_keys": ["postgres://prod/main/orders","postgres://prod/main/users"], "window_minutes": 60, "require_all": true}',
   },
+  {
+    value: "file_landed",
+    label: "File landed (S3 object polling)",
+    configHint:
+      '{"connection_id": "<workspace s3 connection UUID>", "prefix": "incoming/orders/", "pattern": "*.parquet", "min_size_bytes": 1}',
+  },
 ];
 
 type FormState =

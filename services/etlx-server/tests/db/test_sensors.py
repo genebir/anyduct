@@ -23,6 +23,7 @@ from etlx_server.auth.password_service import PasswordService
 from etlx_server.db.enums import AuthMethod, RunStatus, WorkspaceRole
 from etlx_server.db.models import (
     Asset,
+    Connection,
     Membership,
     Pipeline,
     PipelineVersion,
@@ -31,9 +32,10 @@ from etlx_server.db.models import (
     User,
     Workspace,
 )
-from etlx_server.dependencies import get_session, get_session_factory
+from etlx_server.dependencies import get_secret_backend_dep, get_session, get_session_factory
 from etlx_server.sensors import SensorRepository, SensorScheduler
 from etlx_server.sensors.builtins.asset_freshness import AssetFreshnessSensor
+from etlx_server.sensors.builtins.file_landed import FileLandedSensor
 from etlx_server.sensors.builtins.lineage_arrival import LineageArrivalSensor
 from etlx_server.sensors.context import use_sensor_context
 from etlx_server.settings import Settings
@@ -409,6 +411,15 @@ def _build_app(session: AsyncSession) -> FastAPI:
 
     _test_factory = _SingleSessionFactory(session)
     app.dependency_overrides[get_session_factory] = lambda: _test_factory
+
+    # /check now also depends on the secret backend (file_landed needs
+    # it to resolve a Connection's ``${SECRET:..}`` placeholders). The
+    # other REST tests use synthetic sensor types that never touch
+    # secrets, so a static-config no-op backend is enough.
+    from etl_plugins.config.secrets import get_secret_backend
+
+    _test_backend = get_secret_backend("static")
+    app.dependency_overrides[get_secret_backend_dep] = lambda: _test_backend
     app.state.password_service = PasswordService(rounds=4)
     app.state.jwt_service = JwtService(
         private_key_pem=private,
@@ -986,5 +997,298 @@ async def test_lineage_arrival_marks_uncatalogued_keys_as_missing(
     finally:
         async with real_factory() as s:
             await s.execute(delete(Asset).where(Asset.workspace_id == ws_id))
+            await s.execute(delete(Workspace).where(Workspace.id == ws_id))
+            await s.commit()
+
+
+# ---- FileLandedSensor builtin ---------------------------------------------
+#
+# Polls a workspace S3 connection's bucket+prefix; fires when a matching
+# object lands. Tests cover builder validation + the soft-fail paths
+# (missing connection, wrong type, secret resolution OK with no bucket)
+# + end-to-end with a stubbed S3 client (monkey-patched to avoid spinning
+# up LocalStack just for one sensor).
+
+
+def _seed_s3_connection(
+    session: AsyncSession,
+    *,
+    workspace_id: UUID,
+    bucket: str,
+    name: str = "s3-data-lake",
+    type_: str = "s3",
+) -> Connection:
+    conn = Connection(
+        workspace_id=workspace_id,
+        type=type_,
+        name=name,
+        # No secret placeholders in the test fixture — the resolver is
+        # exercised by a dedicated secret-walker test; we cover the
+        # connection-lookup + S3-client path here. Embedding plaintext
+        # creds in a TEST is fine (no real bucket); production code is
+        # what the !secret hard rule applies to.
+        config_json={"bucket": bucket, "region": "us-east-1"},
+        secret_refs=[],
+    )
+    session.add(conn)
+    return conn
+
+
+class _NoopBackend:
+    """SecretBackend stub — file_landed doesn't actually walk secrets in
+    these tests (config has no ``${SECRET:..}`` markers) but the sensor
+    refuses to run without ``backend is not None`` in the ContextVar."""
+
+    def get(self, path: str) -> str:  # pragma: no cover — never reached
+        raise AssertionError(f"unexpected secret backend lookup: {path!r}")
+
+    def set(self, path: str, value: str) -> None:  # pragma: no cover
+        raise AssertionError("read-only")
+
+    def delete(self, path: str) -> None:  # pragma: no cover
+        raise AssertionError("read-only")
+
+
+async def test_file_landed_builder_rejects_bad_config() -> None:
+    from etl_plugins.core.exceptions import ConfigError
+    from etl_plugins.core.sensor import build_sensor
+
+    # Missing connection_id
+    with pytest.raises(ConfigError):
+        build_sensor("file_landed", {"prefix": "x/"})
+    # connection_id not a UUID
+    with pytest.raises(ConfigError):
+        build_sensor("file_landed", {"connection_id": "not-a-uuid", "prefix": "x/"})
+    # Missing prefix
+    with pytest.raises(ConfigError):
+        build_sensor("file_landed", {"connection_id": str(uuid4())})
+    # Negative min_size_bytes
+    with pytest.raises(ConfigError):
+        build_sensor(
+            "file_landed",
+            {"connection_id": str(uuid4()), "prefix": "x/", "min_size_bytes": -1},
+        )
+    # bool min_size_bytes (isinstance(True, int) trap)
+    with pytest.raises(ConfigError):
+        build_sensor(
+            "file_landed",
+            {"connection_id": str(uuid4()), "prefix": "x/", "min_size_bytes": True},
+        )
+
+
+async def test_file_landed_missing_context_soft_fails() -> None:
+    sensor = FileLandedSensor(
+        connection_id=uuid4(), prefix="x/", pattern="*.parquet", min_size_bytes=0
+    )
+    result = await sensor.check_async()
+    assert result.triggered is False
+    assert result.metadata["error"] == "missing_context"
+
+
+async def test_file_landed_unknown_connection_soft_fails(
+    real_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """connection_id pointing at a non-existent row: triggered=False with
+    a clear ``connection_not_found`` reason. No S3 call attempted."""
+    slug = f"sn-fl-noconn-{uuid4().hex[:8]}"
+    async with real_factory() as s:
+        ws = await _seed_workspace(s, slug=slug)
+        await s.commit()
+        ws_id = ws.id
+    try:
+        sensor = FileLandedSensor(connection_id=uuid4(), prefix="x/")
+        async with use_sensor_context(
+            session_factory=real_factory,
+            workspace_id=ws_id,
+            secret_backend=_NoopBackend(),  # type: ignore[arg-type]
+        ):
+            result = await sensor.check_async()
+        assert result.triggered is False
+        assert result.metadata["error"] == "connection_not_found"
+    finally:
+        async with real_factory() as s:
+            await s.execute(delete(Workspace).where(Workspace.id == ws_id))
+            await s.commit()
+
+
+async def test_file_landed_wrong_connection_type_soft_fails(
+    real_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """If the user picked a postgres connection by mistake, we report
+    'wrong_connection_type' rather than crashing on a missing 'bucket'."""
+    slug = f"sn-fl-wrong-{uuid4().hex[:8]}"
+    async with real_factory() as s:
+        ws = await _seed_workspace(s, slug=slug)
+        conn = Connection(
+            workspace_id=ws.id,
+            type="postgres",
+            name="oops-not-s3",
+            config_json={"host": "x", "port": 5432, "database": "d"},
+            secret_refs=[],
+        )
+        s.add(conn)
+        await s.commit()
+        ws_id, conn_id = ws.id, conn.id
+    try:
+        sensor = FileLandedSensor(connection_id=conn_id, prefix="x/")
+        async with use_sensor_context(
+            session_factory=real_factory,
+            workspace_id=ws_id,
+            secret_backend=_NoopBackend(),  # type: ignore[arg-type]
+        ):
+            result = await sensor.check_async()
+        assert result.triggered is False
+        assert result.metadata["error"] == "wrong_connection_type"
+        assert result.metadata["connection_type"] == "postgres"
+    finally:
+        async with real_factory() as s:
+            await s.execute(delete(Connection).where(Connection.workspace_id == ws_id))
+            await s.execute(delete(Workspace).where(Workspace.id == ws_id))
+            await s.commit()
+
+
+async def test_file_landed_fires_when_matching_object_lands(
+    real_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """End-to-end happy path with a stubbed S3 client: prefix has 2 keys,
+    one matches the pattern + size threshold, one doesn't → triggered."""
+    slug = f"sn-fl-fire-{uuid4().hex[:8]}"
+    async with real_factory() as s:
+        ws = await _seed_workspace(s, slug=slug)
+        conn = _seed_s3_connection(s, workspace_id=ws.id, bucket="data-lake")
+        await s.commit()
+        ws_id, conn_id = ws.id, conn.id
+
+    class _StubPaginator:
+        def paginate(self, *, Bucket: str, Prefix: str) -> list[dict[str, Any]]:  # noqa: N803 — mirrors boto3 list_objects_v2 kwargs
+            assert Bucket == "data-lake"
+            assert Prefix == "incoming/orders/"
+            now = datetime.now(UTC)
+            return [
+                {
+                    "Contents": [
+                        {
+                            "Key": "incoming/orders/2026-05-26.parquet",
+                            "Size": 12_345,
+                            "LastModified": now,
+                        },
+                        {
+                            "Key": "incoming/orders/2026-05-26.crc",  # wrong pattern
+                            "Size": 4,
+                            "LastModified": now,
+                        },
+                        {
+                            "Key": "incoming/orders/.placeholder.parquet",
+                            "Size": 0,  # below min_size_bytes
+                            "LastModified": now,
+                        },
+                    ]
+                }
+            ]
+
+    class _StubS3Client:
+        def get_paginator(self, name: str) -> _StubPaginator:
+            assert name == "list_objects_v2"
+            return _StubPaginator()
+
+    monkeypatch.setattr(
+        "etlx_server.sensors.builtins.file_landed._build_s3_client",
+        lambda _cfg: _StubS3Client(),
+    )
+
+    try:
+        sensor = FileLandedSensor(
+            connection_id=conn_id,
+            prefix="incoming/orders/",
+            pattern="*.parquet",
+            min_size_bytes=1,
+        )
+        async with use_sensor_context(
+            session_factory=real_factory,
+            workspace_id=ws_id,
+            secret_backend=_NoopBackend(),  # type: ignore[arg-type]
+        ):
+            result = await sensor.check_async()
+        assert result.triggered is True
+        assert result.metadata["bucket"] == "data-lake"
+        assert result.metadata["match_count"] == 1
+        # The .crc (wrong pattern) and the 0-byte placeholder must NOT
+        # leak into matched.
+        assert [m["key"] for m in result.metadata["matched"]] == [
+            "incoming/orders/2026-05-26.parquet"
+        ]
+    finally:
+        async with real_factory() as s:
+            await s.execute(delete(Connection).where(Connection.workspace_id == ws_id))
+            await s.execute(delete(Workspace).where(Workspace.id == ws_id))
+            await s.commit()
+
+
+async def test_file_landed_dedupes_via_last_triggered_at(
+    real_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Same object landing must not refire after the sensor has already
+    fired on it: ``last_triggered_at`` raises the cutoff above the
+    object's LastModified so the next check is quiet."""
+    slug = f"sn-fl-dedup-{uuid4().hex[:8]}"
+    async with real_factory() as s:
+        ws = await _seed_workspace(s, slug=slug)
+        conn = _seed_s3_connection(s, workspace_id=ws.id, bucket="bkt")
+        await s.commit()
+        ws_id, conn_id = ws.id, conn.id
+
+    object_landed_at = datetime.now(UTC) - timedelta(minutes=10)
+
+    class _StubPaginator:
+        def paginate(self, *, Bucket: str, Prefix: str) -> list[dict[str, Any]]:  # noqa: N803 — mirrors boto3 list_objects_v2 kwargs
+            return [
+                {
+                    "Contents": [
+                        {
+                            "Key": "x/file.json",
+                            "Size": 100,
+                            "LastModified": object_landed_at,
+                        }
+                    ]
+                }
+            ]
+
+    class _StubS3Client:
+        def get_paginator(self, _name: str) -> _StubPaginator:
+            return _StubPaginator()
+
+    monkeypatch.setattr(
+        "etlx_server.sensors.builtins.file_landed._build_s3_client",
+        lambda _cfg: _StubS3Client(),
+    )
+
+    try:
+        sensor = FileLandedSensor(connection_id=conn_id, prefix="x/", pattern="*.json")
+        # First check (no prior fire) → triggered.
+        async with use_sensor_context(
+            session_factory=real_factory,
+            workspace_id=ws_id,
+            last_triggered_at=None,
+            secret_backend=_NoopBackend(),  # type: ignore[arg-type]
+        ):
+            first = await sensor.check_async()
+        assert first.triggered is True
+        # Pretend the scheduler stamped last_triggered_at = NOW (after
+        # the object landed). Same file is still present in the listing
+        # but its LastModified is older than the cutoff → quiet.
+        async with use_sensor_context(
+            session_factory=real_factory,
+            workspace_id=ws_id,
+            last_triggered_at=datetime.now(UTC),
+            secret_backend=_NoopBackend(),  # type: ignore[arg-type]
+        ):
+            second = await sensor.check_async()
+        assert second.triggered is False
+        assert second.metadata["match_count"] == 0
+    finally:
+        async with real_factory() as s:
+            await s.execute(delete(Connection).where(Connection.workspace_id == ws_id))
             await s.execute(delete(Workspace).where(Workspace.id == ws_id))
             await s.commit()

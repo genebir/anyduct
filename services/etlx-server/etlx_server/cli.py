@@ -962,6 +962,24 @@ def sensor_scheduler_run_cmd(
         min=1.0,
         max=600.0,
     ),
+    secret_backend: str = typer.Option(
+        "env",
+        "--secret-backend",
+        envvar="SECRET_BACKEND",
+        help=(
+            "One of: env, static, file, vault, aws_sm, gcp_sm. Required for "
+            "sensors that reference a Connection with secret_refs "
+            "(file_landed, future dataset_row_count). Falls back to the "
+            "SECRET_BACKEND env var so it matches the API server's "
+            "configuration."
+        ),
+    ),
+    secret_file_path: str = typer.Option(
+        "",
+        "--secret-file-path",
+        envvar="SECRET_BACKEND_FILE_PATH",
+        help="Used only when --secret-backend=file. Falls back to SECRET_BACKEND_FILE_PATH.",
+    ),
     log_level: str = typer.Option("INFO", "--log-level"),
 ) -> None:
     """Run the sensor scheduler until SIGTERM/SIGINT (ADR-0041 K3b).
@@ -991,7 +1009,13 @@ def sensor_scheduler_run_cmd(
     async def _run() -> None:
         engine = make_engine(_database_url())
         factory = make_session_factory(engine)
-        scheduler = SensorScheduler(factory, tick_interval_seconds=tick_interval)
+        backend_opts: dict[str, str] = {}
+        if secret_file_path:
+            backend_opts["file_path"] = secret_file_path
+        backend = get_secret_backend(secret_backend, **backend_opts)
+        scheduler = SensorScheduler(
+            factory, tick_interval_seconds=tick_interval, secret_backend=backend
+        )
 
         loop = asyncio.get_running_loop()
 

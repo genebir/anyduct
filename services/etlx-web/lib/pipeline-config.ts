@@ -398,25 +398,45 @@ export function nextEdgeId(): string {
 }
 
 /** Client-side graph validation mirroring the server's GraphConfig rules
- *  (ADR-0030 v1 tree). Returns human-readable problems; empty = valid to save. */
+ *  (ADR-0030 + ADR-0041 G2/I1). Returns human-readable problems; empty =
+ *  valid to save.
+ *
+ *  Shape rules:
+ *  * ≥1 source (multi-source allowed since the materialize engine merges
+ *    them via explicit `join` nodes);
+ *  * ≥1 sink;
+ *  * non-source non-join nodes (transform / sink / aggregate) take exactly
+ *    one incoming edge;
+ *  * join nodes need ≥2 incoming edges (fan-in is the whole point).
+ */
 export function validateGraph(state: GraphBuilderState): string[] {
   const issues: string[] = [];
   const sources = state.nodes.filter((n) => findOperator(n.operatorId)?.kind === "source");
   const sinks = state.nodes.filter((n) => findOperator(n.operatorId)?.kind === "sink");
-  if (sources.length === 0) issues.push("graph needs exactly one source (it has none)");
-  if (sources.length > 1) issues.push("graph must have exactly one source");
+  if (sources.length === 0) issues.push("graph needs at least one source");
   if (sinks.length === 0) issues.push("graph needs at least one sink");
   const indeg = new Map<string, number>();
   for (const e of state.edges) indeg.set(e.target, (indeg.get(e.target) ?? 0) + 1);
   for (const n of state.nodes) {
-    if (findOperator(n.operatorId)?.kind === "source") continue;
+    const op = findOperator(n.operatorId);
+    if (op?.kind === "source") continue;
     const d = indeg.get(n.id) ?? 0;
+    const label = op?.label ?? n.operatorId;
+    if (op?.multiInput) {
+      if (d < 2) {
+        issues.push(
+          d === 0
+            ? `"${label}" isn't connected — join needs at least two incoming edges`
+            : `"${label}" only has ${d} incoming edge — join needs at least two`,
+        );
+      }
+      continue;
+    }
     if (d !== 1) {
-      const label = findOperator(n.operatorId)?.label ?? n.operatorId;
       issues.push(
         d === 0
           ? `"${label}" isn't connected — every node needs one incoming edge`
-          : `"${label}" has ${d} incoming edges (fan-in isn't supported yet)`,
+          : `"${label}" has ${d} incoming edges — use a join node to merge`,
       );
     }
   }
@@ -437,6 +457,14 @@ export function serializeGraph(
     const op = findOperator(n.operatorId);
     const kind = op?.kind ?? "transform";
     if (kind === "transform") {
+      // ADR-0041 I1: join + aggregate are first-class graph node types
+      // (not transform wrappers) so the core router can fan-in / group
+      // by node.type === "join" / "aggregate". Their fields live flat on
+      // the node, matching ``GraphNodeConfig``'s top-level ``on``/``how``
+      // / ``group_by``/``aggregations`` columns.
+      if (op?.connectorType === "join" || op?.connectorType === "aggregate") {
+        return { id: n.id, type: op.connectorType, ...n.data };
+      }
       return {
         id: n.id,
         type: "transform",
@@ -488,6 +516,15 @@ export function deserializeGraph(
       );
       operatorId = spec?.id ?? "transform:filter";
       data = stripType({ ...tcfg });
+    } else if (n.type === "join" || n.type === "aggregate") {
+      // ADR-0041 I1: first-class graph node types with their fields stored
+      // flat on the node. Lift them back into the matching operator + data.
+      const spec = OPERATORS.find(
+        (op) => op.kind === "transform" && op.connectorType === n.type,
+      );
+      operatorId = spec?.id ?? "transform:filter";
+      data = stripType({ ...n });
+      delete (data as Record<string, unknown>).id;
     } else {
       const conn = (n as { connection?: string }).connection;
       const spec = OPERATORS.find(

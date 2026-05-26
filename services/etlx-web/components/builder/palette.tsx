@@ -14,10 +14,15 @@ import { useLocale } from "@/components/providers/locale-provider";
 export function Palette({
   onAdd,
   mode = "batch",
+  variant = "linear",
 }: {
   onAdd: (operatorId: string) => void;
   /** Pipeline data mode — restricts which source/sink connectors are offered. */
   mode?: "batch" | "stream";
+  /** Builder variant: linear hides graph-only operators (join / aggregate)
+   *  because they don't fit the `source → transform* → sink` linear shape;
+   *  graph shows them. (ADR-0041 I1.) */
+  variant?: "linear" | "graph";
 }) {
   const { t } = useLocale();
   const [query, setQuery] = useState("");
@@ -26,6 +31,7 @@ export function Palette({
   const q = query.trim().toLowerCase();
   const matches = (spec: OperatorSpec) =>
     operatorAllowedForMode(spec, mode) &&
+    (variant === "graph" || !spec.graphOnly) &&
     (!q ||
       spec.label.toLowerCase().includes(q) ||
       spec.description.toLowerCase().includes(q) ||
@@ -41,7 +47,7 @@ export function Palette({
           .filter((c) => c.specs.length > 0),
       })).filter((g) => g.categories.length > 0),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [q, mode],
+    [q, mode, variant],
   );
 
   const toggle = (key: string) =>

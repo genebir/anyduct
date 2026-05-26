@@ -23,8 +23,10 @@ import {
   EraserIcon,
   FileTextIcon,
   FilterIcon,
+  GitMergeIcon,
   GlobeIcon,
   HardDriveIcon,
+  LayersIcon,
   LeafIcon,
   RadioTowerIcon,
   ReplaceIcon,
@@ -125,6 +127,14 @@ export interface OperatorSpec {
    *  pipeline only allows non-streaming ones. Transforms/orchestration apply
    *  to both, so they leave this undefined. */
   streaming?: boolean;
+  /** Accepts 2+ incoming edges in the graph builder (ADR-0041 G2/I1, Phase I).
+   *  The "fan-in" guard in the graph canvas's edge validator is relaxed for
+   *  these — join is the only node kind that takes ≥2 inputs today. */
+  multiInput?: boolean;
+  /** Graph-only operator (skipped by the linear-mode palette filter). Join
+   *  and aggregate emit dedicated graph-node types, not transform wrappers,
+   *  so they don't fit the linear `source → transform* → sink` shape. */
+  graphOnly?: boolean;
   fields: FieldDef[];
 }
 
@@ -477,6 +487,68 @@ const TRANSFORMS: OperatorSpec[] = [
         required: true,
         placeholder: "my_pkg.transforms:dedupe",
         help: "module:function — must be importable in the worker environment.",
+      },
+    ],
+  },
+  {
+    // Fan-in operator (ADR-0041 G2/I1). Accepts 2+ incoming edges; merges
+    // records on the named key columns. Input order = edge creation order
+    // (first edge in = left input).
+    id: "transform:join",
+    kind: "transform",
+    connectorType: "join",
+    label: "Join",
+    description: "Merge two or more inputs on matching key columns (inner / left / right / outer).",
+    icon: GitMergeIcon,
+    accent: "#FBBF24",
+    multiInput: true,
+    graphOnly: true,
+    fields: [
+      {
+        key: "on",
+        label: "Key columns",
+        kind: "columns",
+        required: true,
+        help: "Join keys — each input must have all of these columns. First edge drawn = left input.",
+      },
+      {
+        key: "how",
+        label: "How",
+        kind: "select",
+        options: [
+          { label: "inner", value: "inner" },
+          { label: "left", value: "left" },
+          { label: "right", value: "right" },
+          { label: "outer", value: "outer" },
+        ],
+      },
+    ],
+  },
+  {
+    // Group-by + per-group aggregation (ADR-0041 G3). Takes one input, emits
+    // one record per (group_by) tuple with the configured aggregations.
+    id: "transform:aggregate",
+    kind: "transform",
+    connectorType: "aggregate",
+    label: "Aggregate",
+    description: "Group records by columns and compute count / sum / min / max / avg per group.",
+    icon: LayersIcon,
+    accent: "#FBBF24",
+    graphOnly: true,
+    fields: [
+      {
+        key: "group_by",
+        label: "Group by",
+        kind: "columns",
+        help: "Group records by these column values; omit for a single global group.",
+      },
+      {
+        key: "aggregations",
+        label: "Aggregations (JSON)",
+        kind: "json",
+        required: true,
+        placeholder: '[{"op":"sum","column":"amount","name":"total"},{"op":"count","name":"n"}]',
+        help: "Array of {op, column?, name}. op = count | sum | min | max | avg. count may omit column.",
       },
     ],
   },

@@ -413,7 +413,8 @@ export const en = {
   "graph.branchConditionHelp":
     "Records take this edge only when the condition matches. Leave empty for an unconditional edge. Add a condition on each outgoing edge to branch.",
   "graph.removeEdge": "Remove edge",
-  "graph.hint": "Drag from a node's right edge to another node to connect. Click an edge to set a branch condition.",
+  "graph.hint":
+    "Drag from a node's right edge to another node to connect. Click an edge to set a branch condition. Use a Join node to merge two or more inputs.",
   "graph.modeGraph": "Graph mode",
   "graph.modeLinear": "Linear mode",
   "graph.switchToGraph": "Switch to graph",
@@ -987,7 +988,8 @@ export const ko: Messages = {
   "graph.branchConditionHelp":
     "조건이 맞는 레코드만 이 엣지를 따라갑니다. 비우면 무조건 통과. 노드의 각 나가는 엣지에 조건을 걸어 분기하세요.",
   "graph.removeEdge": "엣지 제거",
-  "graph.hint": "노드 오른쪽 끝에서 다른 노드로 드래그하면 연결됩니다. 엣지를 클릭해 분기 조건을 설정하세요.",
+  "graph.hint":
+    "노드 오른쪽 끝에서 다른 노드로 드래그하면 연결됩니다. 엣지를 클릭해 분기 조건을 설정하세요. 두 개 이상의 입력을 합치려면 Join 노드를 사용하세요.",
   "graph.modeGraph": "그래프 모드",
   "graph.modeLinear": "선형 모드",
   "graph.switchToGraph": "그래프로 전환",

@@ -21,8 +21,15 @@ import type { GraphBuilderEdge, GraphBuilderNode } from "@/lib/pipeline-config";
 
 const NODE_TYPES = { pipelineNode: PipelineNode };
 
-/** Adding source→target keeps the source-rooted tree (ADR-0030 v1): no edge
- *  into the source, ≤1 incoming edge per node, no cycles. */
+/** Adding source→target keeps the graph well-formed (ADR-0030 v1 + ADR-0041
+ *  G2/I1 multi-source + join fan-in):
+ *
+ *  * no edge into a source node;
+ *  * non-join nodes take ≤1 incoming edge (transform / sink semantics);
+ *  * join nodes (``multiInput`` operators) accept ≥2 inputs, so fan-in is OK;
+ *  * no duplicate edge between the same pair;
+ *  * no cycles.
+ */
 function connectionAllowed(
   nodes: GraphBuilderNode[],
   edges: GraphBuilderEdge[],
@@ -31,8 +38,12 @@ function connectionAllowed(
 ): boolean {
   if (source === target) return false;
   const tgt = nodes.find((n) => n.id === target);
-  if (findOperator(tgt?.operatorId ?? "")?.kind === "source") return false; // no edge into a source
-  if (edges.some((e) => e.target === target)) return false; // tree: one incoming edge
+  const tgtOp = findOperator(tgt?.operatorId ?? "");
+  if (tgtOp?.kind === "source") return false; // no edge into a source
+  // Fan-in: only join (multiInput) nodes accept ≥2 incoming edges. For every
+  // other kind, we still enforce the "one incoming edge" rule so semantics
+  // stay unambiguous (single-input stream per transform/sink).
+  if (!tgtOp?.multiInput && edges.some((e) => e.target === target)) return false;
   if (edges.some((e) => e.source === source && e.target === target)) return false; // dup
   // cycle: is `source` reachable from `target`?
   const adj = new Map<string, string[]>();

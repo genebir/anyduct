@@ -120,7 +120,7 @@ export function GraphEditor({
 
   return (
     <div className="flex min-h-0 flex-1 overflow-hidden">
-      <Palette onAdd={addOperator} mode={mode} />
+      <Palette onAdd={addOperator} mode={mode} variant="graph" />
       <div className="min-h-0 min-w-0 flex-1">
         <GraphCanvas
           nodes={state.nodes}

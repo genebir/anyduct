@@ -22,6 +22,7 @@ from etl_plugins.core.asset import (
     asset_kind,
     derive_asset_key,
 )
+from etl_plugins.core.column_lineage import ColumnLineage
 from etl_plugins.core.connector import (
     BatchSink,
     BatchSource,
@@ -509,6 +510,12 @@ class Pipeline:
     commit_strategy: str = "after_sink_flush"  # used by stream runtime; see SPEC.md §5.5
     retry: RetryConfig | None = None  # if set, wrap each task with @retryable
     dlq: DlqConfig | None = None  # if set, route TransformError records to this sink
+    # ADR-0041 K5b: static column lineage derived at build time from the
+    # source ``PipelineConfig`` so emitters (e.g. OpenLineage) can attach a
+    # ``columnLineage`` facet to output datasets without re-parsing the
+    # config. None ⇒ not derived (Pipeline constructed manually in tests
+    # / older builds) — emitters fall back to table-level lineage only.
+    column_lineage: ColumnLineage | None = None
     _hooks: dict[str, list[Hook]] = field(default_factory=dict)
 
     def add(self, task: Task) -> Pipeline:
@@ -696,6 +703,11 @@ class Pipeline:
         lin = self.lineage()
         lin_inputs = tuple(lin.inputs)
         lin_outputs = tuple(lin.outputs)
+        # ADR-0041 K5b: column lineage piggybacks on the same event so OL
+        # emitters can attach a ``columnLineage`` facet without re-deriving.
+        # Built by ``runtime/builder.build_pipeline``; ``None`` for Pipelines
+        # constructed by hand (tests / older callers).
+        col_lin = self.column_lineage
         emitter.emit(
             LineageEvent(
                 event_type=START,
@@ -703,6 +715,7 @@ class Pipeline:
                 job_name=self.name,
                 inputs=lin_inputs,
                 outputs=lin_outputs,
+                column_lineage=col_lin,
             )
         )
 
@@ -764,6 +777,7 @@ class Pipeline:
                     outputs=lin_outputs,
                     records_read=result.records_read,
                     records_written=result.records_written,
+                    column_lineage=col_lin,
                 )
             )
         except Exception as exc:

@@ -14,6 +14,25 @@
 
 ### Added
 - **빌더 지역 변수 UI — V2c** [ADR-0041] — 파이프라인 빌더의 PipelineSettingsPanel(노드 미선택 시 우측 패널)에 `VariablesEditor`: 파이프라인 지역 `variables`(name/value 추가·삭제, value JSON 파싱, 실패 시 평문). `PipelineConfigJson.variables` 타입 + `serialize`/`serializeGraph` meta가 비어있지 않을 때 emit + 빌더 load/save/deps 배선(round-trip). 기존 primitive 재사용, i18n en/ko, 웹 tsc 통과. **이로써 변수 기능(V1 코어 + V2a 서버 전역 + V2b 전역 UI + V2c 지역 UI) 완료 — 전역·지역 변수 모두 UI에서 설정 가능.**
+- **OpenLineage column-lineage facet — K5b (Phase J + K5 모두 닫힘)** [ADR-0041 K5b] — K5가 자산 단위 OL 송출을 닫았다면, K5b는 J1/J2/J3로 만든 **컬럼 단위 리니지**를 OL `ColumnLineageDatasetFacet`(spec 1.0.2)으로 함께 송출. 이제 Marquez/DataHub/Astro 같은 consumer는 별도 채널 없이도 출력 데이터셋의 매 컬럼이 어느 입력 컬럼에서 왔는지를 표준 facet 한 번에 받음.
+  - **`Pipeline.column_lineage` 필드** (`core/pipeline.py`): build 시점 static derivation을 Pipeline 인스턴스에 stash. `None` = 미 derive(수동 생성 Pipeline / 구버전 caller) — emitter는 facet 없이 그냥 table-level만 송출(backward compat).
+  - **`build_pipeline` `_attach_column_lineage(pipeline, cfg)` helper** (`runtime/builder.py`): cfg에서 `derive_column_lineage(cfg)` 호출해 attach. **Best-effort** — 미지원 transform shape / unparseable SQL은 silent `None` fallback, build 안 깨짐. linear + task-DAG + graph 모든 경로(`return pipeline, connectors` 두 군데)에서 호출.
+  - **`LineageEvent.column_lineage` 필드** (`observability/lineage.py`): optional `ColumnLineage`, 기본 `None`(기존 caller 호환). `Pipeline.run`이 START/COMPLETE에 자동 attach. **FAIL은 미수반** — output 미materialize 상황에서 컬럼 매핑 emit하는 게 misleading.
+  - **OL emitter** (`observability/openlineage.py`): 신규 `_column_lineage_facets()` — `column_lineage.edges`를 downstream asset별로 group해 facet 한 개씩 생성. `_dataset_namespace_and_name()` helper로 dataset ref와 inputField ref가 동일 namespace 분리 규칙 공유. **Opaque assets은 facet 미attach** — consumer가 "traced + empty"(facet 있고 fields 비어있음)와 "untraceable"(facet 자체 없음)를 구분 가능. 상수/opaque-expression 컬럼(no upstream)도 fields에 entry로 포함 — 출력 schema 가시성 보존.
+  - **Facet shape** (OL spec 1.0.2 정합):
+    ```json
+    {"facets": {"columnLineage": {
+      "_producer": "...", "_schemaURL": ".../ColumnLineageDatasetFacet.json",
+      "fields": {
+        "id":     {"inputFields": [{"namespace": "prod:wh", "name": "users", "field": "a"}]},
+        "city":   {"inputFields": [{"namespace": "prod:wh", "name": "users", "field": "c"}]},
+        "tenant": {"inputFields": []}
+      }
+    }}}
+    ```
+  - **검증**: 8 신규 unit(OL 6: 정상/메타/None 무효(백워드 호환)/opaque/multi-output 분리/multi-upstream join + builder 2: SQL source attach / python opaque). 코어 645+3skip green, mypy 56/ruff OK.
+  - **→ Phase K 의 OpenLineage 묶음 완료**(K5 table-level + K5b column facet). vision의 *Dagster lineage 외부 송출* 측면이 컬럼 단위까지 닫힘.
+  - **다음 후보**: K3 sensor framework / K4 graph 백필 / 운영 강화(샌드박스·로그 redaction·Monaco self-host).
 - **OpenLineage export — K5** [ADR-0041 K5] — 내부 asset/lineage 카탈로그를 OpenLineage 표준 이벤트로 외부 송출 → Marquez/DataHub/Astro 등 표준 consumer가 곧바로 받음. **ultimate-vision의 "Dagster lineage" 측 마지막 한 발** — 그 동안 lineage가 내부 DB에만 머물렀는데, 이제 표준 프로토콜로 외부 데이터 카탈로그와 통합 가능.
   - **`etl_plugins/observability/openlineage.py`**: `OpenLineageEmitter(LineageEmitter)` + 순수 변환 함수 `build_run_event(event, namespace=...)`. 매핑:
     - `event_type` ↔ `eventType` (START/COMPLETE/FAIL/ABORT 문자열 일치)

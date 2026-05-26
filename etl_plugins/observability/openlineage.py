@@ -33,10 +33,15 @@ swallowed. A lineage hiccup must never flip a successful run to failed,
 mirroring the posture of the existing service-side persistence
 (:class:`etlx_server.assets.repository.AssetRepository.persist_run_lineage`).
 
-Column lineage (J1/J2/J3) is not yet shipped as an OL facet — see
-ADR-0041 K5 for the v1 scope; column facet follow-up is tracked under
-K5b. The same ``persist_run_lineage`` payload covers it today via the
-catalog REST API.
+Column lineage (J1/J2/J3) ships as the standard OL ``columnLineage``
+dataset facet (ADR-0041 K5b) when the event carries it — the
+``runtime/builder.build_pipeline`` flow derives it once and attaches
+to the ``Pipeline``; ``Pipeline.run`` then threads it through every
+START/COMPLETE event. The facet attaches to each downstream output
+dataset that actually has traced columns; opaque outputs (python
+transform / SELECT * / join not yet supported by derivation) carry
+no facet so the consumer can tell "untraceable" from "traced and
+empty" by its absence.
 """
 
 from __future__ import annotations
@@ -50,6 +55,7 @@ from uuid import NAMESPACE_URL, UUID, uuid5
 import httpx
 
 from etl_plugins.core.asset import AssetKey
+from etl_plugins.core.column_lineage import ColumnLineage
 from etl_plugins.observability.lineage import LineageEmitter, LineageEvent
 
 logger = logging.getLogger(__name__)
@@ -60,6 +66,9 @@ _PRODUCER = "https://github.com/etl-plugins/etl-plugins"
 # Schema URLs the consumer can use to validate against the right spec
 # version. Kept aligned with OpenLineage 2.x.
 _RUN_EVENT_SCHEMA = "https://openlineage.io/spec/2-0-2/OpenLineage.json#/$defs/RunEvent"
+_COLUMN_LINEAGE_FACET_SCHEMA = (
+    "https://openlineage.io/spec/facets/1-0-2/ColumnLineageDatasetFacet.json"
+)
 # Stable namespace for coercing non-UUID run ids to deterministic UUIDs
 # (UL5 keeps the mapping stable across emitter invocations for the same
 # run id string).
@@ -88,6 +97,18 @@ def _now_iso() -> str:
     )
 
 
+def _dataset_namespace_and_name(key: AssetKey, namespace_prefix: str) -> tuple[str, str]:
+    """``AssetKey "conn/target"`` → ``("<prefix>:conn", "target")``. The
+    OL ``columnLineage`` facet references ``inputFields`` by the same
+    ``{namespace, name, field}`` shape, so this helper is shared
+    between :func:`_dataset_ref` and the column-facet builder."""
+    rendered = str(key)
+    if "/" in rendered:
+        conn, _, name = rendered.partition("/")
+        return f"{namespace_prefix}:{conn}", name
+    return namespace_prefix, rendered
+
+
 def _dataset_ref(key: AssetKey, namespace_prefix: str) -> dict[str, Any]:
     """Render one input/output dataset reference.
 
@@ -97,13 +118,59 @@ def _dataset_ref(key: AssetKey, namespace_prefix: str) -> dict[str, Any]:
     target name (e.g. ``"public.users"``) distinct in the OL store —
     same separation we use internally via ``Asset.workspace_id``.
     """
-    rendered = str(key)
-    if "/" in rendered:
-        conn, _, name = rendered.partition("/")
-        return {"namespace": f"{namespace_prefix}:{conn}", "name": name}
-    # Fallback: no `/` in the rendered key (shouldn't happen for derived
-    # keys, but tolerate it instead of crashing the emitter).
-    return {"namespace": namespace_prefix, "name": rendered}
+    ns, name = _dataset_namespace_and_name(key, namespace_prefix)
+    return {"namespace": ns, "name": name}
+
+
+def _column_lineage_facets(
+    column_lineage: ColumnLineage,
+    *,
+    namespace_prefix: str,
+    producer: str,
+) -> dict[str, dict[str, Any]]:
+    """Group ``column_lineage.edges`` by downstream asset and render the OL
+    ``ColumnLineageDatasetFacet`` for each. Returns ``{rendered_key:
+    facet_dict}`` so callers can attach to matching outputs.
+
+    Edges with at least one upstream produce ``inputFields``. Edges with
+    no upstreams (constants / opaque expressions where the column exists
+    but its source is undecidable) are *included* with an empty
+    ``inputFields`` list — the consumer sees the column is part of the
+    schema even though its origin is opaque.
+
+    Opaque output assets (``column_lineage.opaque_assets``) get NO facet
+    so the OL consumer can distinguish "traced" (facet present) from
+    "untraceable" (facet absent).
+    """
+    opaque = {str(k) for k in column_lineage.opaque_assets}
+    by_output: dict[str, dict[str, dict[str, Any]]] = {}
+    for edge in column_lineage.edges:
+        out_key = str(edge.downstream.asset)
+        if out_key in opaque:
+            continue
+        fields = by_output.setdefault(out_key, {})
+        input_fields = [
+            {
+                **dict(
+                    zip(
+                        ("namespace", "name"),
+                        _dataset_namespace_and_name(up.asset, namespace_prefix),
+                        strict=True,
+                    )
+                ),
+                "field": up.column,
+            }
+            for up in edge.upstreams
+        ]
+        fields[edge.downstream.column] = {"inputFields": input_fields}
+    return {
+        key: {
+            "_producer": producer,
+            "_schemaURL": _COLUMN_LINEAGE_FACET_SCHEMA,
+            "fields": fields,
+        }
+        for key, fields in by_output.items()
+    }
 
 
 def build_run_event(
@@ -134,6 +201,22 @@ def build_run_event(
             "message": event.error,
             "programmingLanguage": "PYTHON",
         }
+    # Column-lineage dataset facet (ADR-0041 K5b). Built once, attached to
+    # each downstream output dataset that has traced columns. Opaque outputs
+    # carry no facet so consumers can distinguish "traced" from
+    # "untraceable" by its presence/absence.
+    col_facets: dict[str, dict[str, Any]] = {}
+    if event.column_lineage is not None:
+        col_facets = _column_lineage_facets(
+            event.column_lineage, namespace_prefix=namespace, producer=producer
+        )
+    outputs: list[dict[str, Any]] = []
+    for k in event.outputs:
+        ref = _dataset_ref(k, namespace)
+        facet = col_facets.get(str(k))
+        if facet is not None:
+            ref["facets"] = {"columnLineage": facet}
+        outputs.append(ref)
     payload: dict[str, Any] = {
         "eventType": event.event_type,
         "eventTime": _now_iso(),
@@ -142,7 +225,7 @@ def build_run_event(
         "run": {"runId": _coerce_uuid(event.run_id), "facets": run_facets},
         "job": {"namespace": namespace, "name": event.job_name, "facets": {}},
         "inputs": [_dataset_ref(k, namespace) for k in event.inputs],
-        "outputs": [_dataset_ref(k, namespace) for k in event.outputs],
+        "outputs": outputs,
     }
     return payload
 

@@ -692,6 +692,51 @@ def _passthrough(_records: Iterable[Record]) -> Iterator[Record]:
     yield from _records
 
 
+# --- column lineage attached at build time (ADR-0041 K5b) ------------------
+
+
+def test_build_pipeline_attaches_column_lineage_for_sql_source() -> None:
+    """Builder derives static column lineage from the config + stashes on the
+    Pipeline so emitters (OpenLineage K5) can attach a ``columnLineage``
+    facet without re-parsing the config."""
+    pc = PipelineConfig.model_validate(
+        {
+            "name": "p",
+            "source": {"connection": "s", "query": "SELECT a AS id, c AS city FROM users"},
+            "sink": {"connection": "k", "table": "customers", "mode": "append"},
+        }
+    )
+    src = InMemoryBatchSource()
+    snk = InMemoryBatchSink()
+    pipeline, _ = build_pipeline(pc, {"s": src, "k": snk})
+    assert pipeline.column_lineage is not None
+    edges = {(e.downstream.column, e.upstreams[0].column) for e in pipeline.column_lineage.edges}
+    assert ("id", "a") in edges and ("city", "c") in edges
+
+
+def test_build_pipeline_column_lineage_opaque_for_python_transform() -> None:
+    """``python`` transforms are opaque — the column-lineage derivation
+    marks the output asset opaque rather than producing wrong edges. The
+    Pipeline still builds (best-effort attach)."""
+    pc = PipelineConfig.model_validate(
+        {
+            "name": "p",
+            "source": {"connection": "s", "query": "SELECT id FROM users"},
+            "transforms": [
+                {"type": "python", "callable": "tests.unit.runtime.test_builder:_passthrough"}
+            ],
+            "sink": {"connection": "k", "table": "customers", "mode": "append"},
+        }
+    )
+    src = InMemoryBatchSource()
+    snk = InMemoryBatchSink()
+    pipeline, _ = build_pipeline(pc, {"s": src, "k": snk})
+    assert pipeline.column_lineage is not None
+    assert pipeline.column_lineage.edges == []
+    opaque_keys = {str(k) for k in pipeline.column_lineage.opaque_assets}
+    assert "k/customers" in opaque_keys
+
+
 def _ignore_types(_: Any) -> None:
     """Suppress unused-import lint on Iterable type used only as default Iterable[Record]."""
     pass

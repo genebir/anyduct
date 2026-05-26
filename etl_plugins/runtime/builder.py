@@ -39,6 +39,7 @@ from etl_plugins.core.pipeline import (
     Task,
 )
 from etl_plugins.core.registry import ConnectorRegistry
+from etl_plugins.runtime.column_lineage import derive_column_lineage
 from etl_plugins.runtime.transforms import build_transform
 
 
@@ -360,6 +361,7 @@ def build_pipeline(
             dlq=pipeline_config.dlq,
         )
         pipeline.add(graph_task)
+        _attach_column_lineage(pipeline, pipeline_config)
         return pipeline, connectors
 
     task_cfgs = pipeline_config.effective_tasks()
@@ -424,7 +426,23 @@ def build_pipeline(
         pipeline.add(task)
     # Surface cycles / duplicate names now (dry-run) rather than at run time.
     pipeline._ordered_tasks()
+    _attach_column_lineage(pipeline, pipeline_config)
     return pipeline, connectors
+
+
+def _attach_column_lineage(pipeline: Pipeline, cfg: PipelineConfig) -> None:
+    """Compute static column lineage from ``cfg`` and stash on the Pipeline
+    so emitters (e.g. OpenLineage, ADR-0041 K5b) can attach a
+    ``columnLineage`` facet to output datasets without re-deriving.
+
+    Best-effort — any derivation failure (unsupported transform shape,
+    unparseable SQL, …) leaves ``column_lineage`` unset and the run still
+    builds. Table-level lineage emission stays unaffected.
+    """
+    try:
+        pipeline.column_lineage = derive_column_lineage(cfg)
+    except Exception:
+        pipeline.column_lineage = None
 
 
 def build_pipeline_from_yaml(

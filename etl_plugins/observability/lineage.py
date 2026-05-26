@@ -16,6 +16,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
 from etl_plugins.core.asset import AssetKey
+from etl_plugins.core.column_lineage import ColumnLineage
 
 # Event lifecycle states, mirroring OpenLineage RunEvent eventType.
 START = "START"
@@ -27,7 +28,10 @@ ABORT = "ABORT"
 @dataclass(frozen=True)
 class LineageEvent:
     """One lineage run event. Inputs/outputs are the assets the run reads/writes
-    (derived-first, ADR-0036)."""
+    (derived-first, ADR-0036). ``column_lineage`` (ADR-0041 K5b) carries the
+    static per-column wiring so OL-style emitters can attach a
+    ``columnLineage`` facet to output datasets. Optional — the no-op + DB
+    emitters ignore it; OL emitter consumes it on START/COMPLETE."""
 
     event_type: str  # START | COMPLETE | FAIL | ABORT
     run_id: str
@@ -37,6 +41,7 @@ class LineageEvent:
     records_read: int | None = None
     records_written: int | None = None
     error: str | None = None
+    column_lineage: ColumnLineage | None = None
 
 
 class LineageEmitter(ABC):

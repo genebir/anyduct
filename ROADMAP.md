@@ -496,7 +496,10 @@
   - [x] **H3b REST `GET /workspaces/{ws}/runs/{run_id}/node-runs`** ✅ (2026-05-26) — Viewer+, `NodeRunEntry` 스키마. 비어있으면 non-node_level run.
   - [x] **H3c 웹 Run 상세 DAG 진행 뷰** ✅ (2026-05-26) — `RunDagGraph`(@xyflow/react, BFS-depth 레이어 레이아웃, 상태별 카드 색 + pending/running edge 애니메이션) + `runsApi.nodeRuns` + run 상세 페이지 폴링에 통합(2s, run terminal까지). non-node_level run은 자동 숨김(빈 응답). Storybook 3 스토리(MidRun/AllSucceeded/PartialFailure) + i18n en/ko, 웹 tsc green. → **Phase H 완료**(노드 레벨 PG 스케줄링 + 진짜 병렬 + 라이브 진행 + DAG 뷰).
 - **Phase I — 빌더 UX + 커스텀 op**: I1 자유구성 캔버스(트리 제약 해제·join UI) → I2 커스텀 operator + Python IDE(Monaco) + 서버 `custom_python` + RBAC/audit.
-- **Phase J — 컬럼 리니지**: J1 sqlglot + `derive_column_lineage`(하이브리드) + 코어 모델 → J2 `asset_columns`/`column_lineage_edges` 스키마+API → J3 웹 drill-down.
+- **Phase J — 컬럼 리니지**:
+  - [x] **J1 코어 컬럼 리니지** ✅ (2026-05-26) — `core/column_lineage.py`(ColumnRef/ColumnEdge/ColumnLineage 모델, config 무의존 leaf) + `runtime/column_lineage.py` `derive_column_lineage(cfg)` 하이브리드: **SQL source → sqlglot**으로 출력 컬럼·출처 추출, **선언적 transform**(rename/select/drop/cast/add_constant/filter/dedupe) 매핑 갱신, **python/sql_exec/SELECT * /JOIN/직접 table 읽기 → opaque** 마킹. single-task / task-DAG / linear graph 지원(join graph는 v1 opaque). sqlglot>=25 코어 deps. 18 신규 unit + 코어 604 green, mypy/ruff OK.
+  - [ ] **J2 서비스 영속화 + API** — `asset_columns`/`column_lineage_edges` 테이블(Alembic) + 워커가 run 성공 시 컬럼 리니지 기록 + REST.
+  - [ ] **J3 웹 컬럼 drill-down** — 자산 상세에서 컬럼 노드로 확장(@xyflow/react), upstream/downstream 컬럼 추적.
 - **Phase K — 부가(#6)**: graph 백필(다중source cursor) · OpenLineage export · 데이터 품질/assertion operator · 센서.
 - **변수(Variables) feature track** (전역 + 파이프라인별 지역, 사용자 요청 2026-05-21):
   - [x] **V1 코어 지역 변수** ✅ (2026-05-21) — `PipelineConfig.variables` + `config/variables.py` `resolve_variables`/`resolve_config_variables`. `${var.name}` 치환(전체매칭=타입보존, 부분=문자열보간), env(`${UPPER}`)·secret(`!secret`)와 별도 네임스페이스. `load_pipeline`이 env→secret→variables 순 해석. 미정의 변수는 ConfigError. v1 한계: 변수 간 참조 불가. 코어 582 unit green.

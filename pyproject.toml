@@ -29,6 +29,11 @@ dependencies = [
     # dep) and the http connector (production dep). Promoting it here keeps
     # the http connector zero-extras to install.
     "httpx>=0.27",
+    # sqlglot is a pure-Python SQL parser/transpiler with a built-in column
+    # lineage utility — used by ``runtime.column_lineage`` to trace output
+    # columns back to source columns for warehouse-to-warehouse SQL pipelines
+    # (ADR-0041 Phase J). Adds ~3MB; no compiled deps.
+    "sqlglot>=25.0",
 ]
 
 # 커넥터별 드라이버는 extras로 분리. 사용자는 필요한 것만 설치.
@@ -170,6 +175,13 @@ disallow_untyped_defs = false
 
 [[tool.mypy.overrides]]
 module = ["boto3", "boto3.*", "botocore", "botocore.*"]
+ignore_missing_imports = true
+
+# sqlglot is a core dep (column lineage, ADR-0041 J1) but pre-commit's isolated
+# mypy venv doesn't install it. Silence the missing-stub error there; runtime
+# mypy on a synced uv env sees the real package.
+[[tool.mypy.overrides]]
+module = ["sqlglot", "sqlglot.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

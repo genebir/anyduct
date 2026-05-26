@@ -7,6 +7,7 @@ from etl_plugins.core.asset import (
     AssetSpec,
     LineageEdge,
 )
+from etl_plugins.core.column_lineage import ColumnEdge, ColumnLineage, ColumnRef
 from etl_plugins.core.connector import (
     BatchSink,
     BatchSource,
@@ -63,7 +64,10 @@ __all__ = [
     "BatchSink",
     "BatchSource",
     "BranchRule",
+    "ColumnEdge",
     "ColumnInfo",
+    "ColumnLineage",
+    "ColumnRef",
     "ConfigError",
     "ConnectError",
     "Connector",

@@ -126,82 +126,17 @@ export function reorderNodes(nodes: BuilderNode[]): BuilderNode[] {
   });
 }
 
-export function serialize(
-  state: BuilderState,
-  meta: {
-    name: string;
-    mode?: "batch" | "stream";
-    variables?: Record<string, unknown>;
-    auto_materialize?: boolean;
-    freshness_sla_minutes?: number | null;
-  },
-): PipelineConfigJson {
-  const sorted = reorderNodes(state.nodes);
-  const source = sorted.find(
-    (n) => findOperator(n.operatorId)?.kind === "source",
-  );
-  const sinks = sorted.filter((n) => findOperator(n.operatorId)?.kind === "sink");
-  const transforms = sorted.filter(
-    (n) => findOperator(n.operatorId)?.kind === "transform",
-  );
-
-  if (!source) throw new Error("Pipeline needs a source operator.");
-  if (sinks.length === 0) throw new Error("Pipeline needs a sink operator.");
-
-  const config: PipelineConfigJson = {
-    name: meta.name,
-    mode: meta.mode ?? "batch",
-    ...(meta.variables && Object.keys(meta.variables).length
-      ? { variables: meta.variables }
-      : {}),
-    ...(meta.auto_materialize ? { auto_materialize: true } : {}),
-    ...(meta.freshness_sla_minutes
-      ? { freshness_sla_minutes: meta.freshness_sla_minutes }
-      : {}),
-    source: {
-      connection: "",
-      ...source.data,
-    } as PipelineConfigJson["source"],
-    transforms: transforms.map((t) => ({
-      type: findOperator(t.operatorId)?.connectorType ?? "unknown",
-      ...t.data,
-    })),
-  };
-
-  // One sink → `sink` (legacy/linear), many → `sinks[]` (fan-out, ADR-0026).
-  if (sinks.length === 1) {
-    config.sink = {
-      connection: "",
-      ...sinks[0].data,
-    } as NonNullable<PipelineConfigJson["sink"]>;
-  } else {
-    config.sinks = sinks.map(
-      (s) => ({ connection: "", ...s.data }) as { connection: string },
-    );
-  }
-
-  if (state.retry.enabled) {
-    config.retry = {
-      max_attempts: state.retry.max_attempts,
-      backoff: state.retry.backoff,
-      initial_delay_seconds: state.retry.initial_delay_seconds,
-    };
-  }
-  if (state.dlq.enabled && state.dlq.connection) {
-    const dlq: PipelineConfigJson["dlq"] = {
-      connection: state.dlq.connection,
-      mode: state.dlq.mode,
-    };
-    // Core DlqConfig stores either `table` (batch sink) or `topic` (stream
-    // sink). Send whichever the user filled; both populated is unusual but
-    // harmless — the core's runtime picks the relevant one per sink kind.
-    if (state.dlq.table) dlq.table = state.dlq.table;
-    if (state.dlq.topic) dlq.topic = state.dlq.topic;
-    config.dlq = dlq;
-  }
-
-  return config;
-}
+// NOTE: ``serialize()`` (linear-shape config emitter) was removed
+// 2026-05-26 as part of the L2 cleanup. Graph-only mode (since the
+// May 18 builder overhaul) routes every save through ``serializeGraph``
+// — and after L2 dropped the source/sink requirement the dead
+// function's old "Pipeline needs a sink operator" throw was the ONLY
+// thing in the entire bundle that could still produce that user-visible
+// message, which was firing for users on stale Next dev chunks. Removed
+// outright so the misleading text can no longer be served from any
+// cached chunk on the next rebuild. ``deserialize()`` below stays —
+// it's the load-side reader that migrates legacy linear configs into
+// the graph editor.
 
 /**
  * Rebuild a BuilderState from a stored PipelineConfig JSON.

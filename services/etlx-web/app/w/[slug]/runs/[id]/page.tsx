@@ -70,8 +70,15 @@ export default function RunDetailPage() {
   const [retrying, setRetrying] = useState(false);
   // Tracked separately so the page can render a clear "this run doesn't
   // exist" empty state instead of a permanent loading shimmer when the
-  // backend returns 404 (deleted / wrong workspace / stale list).
-  const [notFound, setNotFound] = useState(false);
+  // backend returns 404 (deleted / wrong workspace / stale list). Carries
+  // the server's ``detail`` + the URL pieces we sent so the empty state
+  // can show *why* — invaluable when the row was right there in the list
+  // and the user is staring at the page asking "but it exists?".
+  const [notFound, setNotFound] = useState<{
+    status: number;
+    detail: string;
+    url: string;
+  } | null>(null);
   const logsEndRef = useRef<HTMLDivElement | null>(null);
 
   // Poll the trio (run / logs / metrics) until status is terminal. Once
@@ -81,9 +88,33 @@ export default function RunDetailPage() {
     let cancelled = false;
 
     async function tick(workspaceId: string): Promise<boolean> {
+      // Fetch the run FIRST and on its own — Promise.all conflated 404s
+      // from any of the four sub-resources with "run missing" before, but
+      // they have independent shapes (logs / metrics / node-runs may be
+      // empty for a valid run; only get() is the existence check).
+      let r: RunDetail;
       try {
-        const [r, l, m, n] = await Promise.all([
-          runsApi.get(workspaceId, id),
+        r = await runsApi.get(workspaceId, id);
+      } catch (err) {
+        if (cancelled) return true;
+        if (err instanceof ApiError && err.status === 404) {
+          setNotFound({
+            status: err.status,
+            detail: err.message || "run not found",
+            url: `/workspaces/${workspaceId}/runs/${id}`,
+          });
+          return true;
+        }
+        toast.error(
+          err instanceof ApiError ? err.message : t("runDetail.loadFailed"),
+        );
+        return true;
+      }
+      // Run exists — fetch the rest in parallel. Failures here log but
+      // don't poison the page (worst case logs/metrics/node-runs stay
+      // null and the panels show their own "no entries" copy).
+      try {
+        const [l, m, n] = await Promise.all([
           runsApi.logs(workspaceId, id, { limit: 1000 }),
           runsApi.metrics(workspaceId, id),
           runsApi.nodeRuns(workspaceId, id),
@@ -96,17 +127,14 @@ export default function RunDetailPage() {
         return TERMINAL.has(r.status);
       } catch (err) {
         if (cancelled) return true;
-        // 404 is a *terminal* state for the UI — surface the empty state
-        // instead of toasting once and stalling forever. Other errors
-        // (network / 5xx) toast like before so the user knows to refresh.
-        if (err instanceof ApiError && err.status === 404) {
-          setNotFound(true);
-          return true;
+        // Log/metric/node-run side resource failed but the run itself is
+        // fine — surface the data we got, toast the partial failure.
+        setRun(r);
+        if (err instanceof ApiError) {
+          // eslint-disable-next-line no-console
+          console.warn("runDetail subresource failed", err.status, err.message);
         }
-        toast.error(
-          err instanceof ApiError ? err.message : t("runDetail.loadFailed"),
-        );
-        return true;
+        return TERMINAL.has(r.status);
       }
     }
 
@@ -206,7 +234,20 @@ export default function RunDetailPage() {
               <EmptyState
                 icon={<SearchXIcon size={36} strokeWidth={1.5} />}
                 title={t("runDetail.notFoundTitle")}
-                description={t("runDetail.notFoundDesc")}
+                description={
+                  <>
+                    <div>{t("runDetail.notFoundDesc")}</div>
+                    {/* Server diagnostic — without this an operator can't
+                        tell "row was deleted" from "wrong workspace" from
+                        "the API itself is broken". Copy-pasteable so a
+                        bug report has the URL the page actually called. */}
+                    <pre className="mt-3 overflow-x-auto rounded-md border border-border-subtle bg-elevated px-3 py-2 text-left font-mono text-[11px] text-text-muted">
+                      {notFound.status} {notFound.detail}
+                      {"\n"}
+                      {notFound.url}
+                    </pre>
+                  </>
+                }
                 action={
                   ws ? (
                     <Link

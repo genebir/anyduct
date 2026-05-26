@@ -14,6 +14,16 @@
 
 ### Added
 - **빌더 지역 변수 UI — V2c** [ADR-0041] — 파이프라인 빌더의 PipelineSettingsPanel(노드 미선택 시 우측 패널)에 `VariablesEditor`: 파이프라인 지역 `variables`(name/value 추가·삭제, value JSON 파싱, 실패 시 평문). `PipelineConfigJson.variables` 타입 + `serialize`/`serializeGraph` meta가 비어있지 않을 때 emit + 빌더 load/save/deps 배선(round-trip). 기존 primitive 재사용, i18n en/ko, 웹 tsc 통과. **이로써 변수 기능(V1 코어 + V2a 서버 전역 + V2b 전역 UI + V2c 지역 UI) 완료 — 전역·지역 변수 모두 UI에서 설정 가능.**
+- **Multi-replica stream worker 락 — K2b** [ADR-0041 K2b] — **Production HA 완성**. K2가 batch scheduler 단계를 안전하게 했다면 K2b는 stream worker 단계까지 닫음. 이제 batch + stream 모두 active-active 다중 replica 가능.
+  - **`etlx_server/worker/stream.py` `_start_schedule`**: 두 단계 가드.
+    - ① **`FOR UPDATE SKIP LOCKED`로 schedule row 락** — replica A의 `_start_schedule`이 진행 중이면 동시에 들어온 replica B의 select가 즉시 None 반환 → spawn 안 함.
+    - ② **post-lock "RUNNING run 이미 존재" 재확인** — A가 commit하고 lock 해제한 직후 들어온 B는 lock 자체는 잡지만, 활성 `RUNNING` Run row(A가 막 insert)를 보고 peer 소유 신호로 해석 → skip. 이게 두 단계 가드가 필요한 이유: 첫 번째는 동시-진입 차단, 두 번째는 순차-진입 차단.
+  - **Failover**: 소유 replica process crash 시 RUNNING Run row의 heartbeat 가 stale → `ZombieReaper`(Step 9.3b)가 FAILED로 flip → 그 schedule이 자유로워져 다음 tick에서 살아남은 replica가 자연스럽게 인수. 진정한 HA — single replica failure가 stream pipeline outage 안 일으킴.
+  - **모듈 docstring** 갱신: *"single-replica today, multi-replica needs FOR UPDATE SKIP LOCKED"* → *"multi-replica safe"* (in-flight `_inflight` dict는 within-process 중복 방지, 두 단계 lock은 cross-process 중복 방지).
+  - **테스트** (2 신규):
+    - `test_two_stream_workers_spawn_one_run_for_same_schedule` — 두 `StreamWorker` 인스턴스의 `_start_schedule`을 `asyncio.gather`로 동시 호출, 정확히 한 개의 RUNNING run 검증. 후속 호출도 reject(post-lock 가드).
+    - `test_stream_worker_skips_when_peer_holds_running_run` — peer의 RUNNING run을 pre-seed해놓고 다른 worker의 `_start_schedule` 호출 → None 반환 + 신규 row 없음 검증.
+  - **검증**: stream worker it 8/8 green(6 기존 + 2 신규), scheduler + worker-lifecycle 회귀 48/48 통과, mypy(89)/ruff OK. **batch + stream 모두 HA로 K2 묶음 완료** — 이제 `etlx-server scheduler run --replicas N`(가상의 운영 구성)으로 active-active 배포 가능. **다음 후보**: K3 sensor framework / K4 graph 백필 / K5 OpenLineage / 운영(샌드박스·로그 redaction·Monaco self-host).
 - **Multi-replica scheduler 락 — K2** [ADR-0041 K2] — 스케줄러 SPOF 해소. 그 동안 batch scheduler는 single-replica 가정 — 프로세스가 죽으면 모든 cron firing 멈춤(real outage). 이제 두 replica가 active-active로 안전.
   - **`etlx_server/scheduler/scheduler.py`**: `_load_due_schedules`에 SQLAlchemy `with_for_update(skip_locked=True)` 추가 → 두 replica가 `tick_once()`를 동시 호출해도 schedule row가 한 replica의 트랜잭션에 락걸려 다른 replica는 빈 set을 받음. 락은 caller의 트랜잭션 commit/close 시 해제. 한 tick 내에서 disjoint partition으로 처리되고, 다른 replica의 다음 tick에서 같은 schedule을 재발견하더라도 첫 fire가 이미 cron 베이스를 미래로 밀어뒀으므로 중복 fire 없음(no-catchup 정책 + 베이스 = `MAX(runs.scheduled_at)`).
   - **테스트** (2 신규 it):

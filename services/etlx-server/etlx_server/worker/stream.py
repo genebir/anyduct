@@ -17,12 +17,17 @@ and:
 4. On schedule deactivation / deletion or worker shutdown, cancels the
    task and stamps the Run row terminal.
 
-Concurrency: a single stream worker process owns the streams it spawned.
-Running two stream-worker processes would race — they'd each try to
-start the same schedule. Step 11 operator strengthening will add a
-``FOR UPDATE SKIP LOCKED`` claim on the schedule row before spawning
-to support multi-replica deployments; for now the single-replica
-contract is documented and enforced by deployment.
+Concurrency (ADR-0041 K2b): multi-replica safe. Within a single
+process the in-flight ``_inflight`` dict prevents one worker from
+double-spawning. Across replicas, :meth:`_start_schedule` opens a
+transaction that ① locks the schedule row with
+``FOR UPDATE SKIP LOCKED`` and ② re-checks no ``RUNNING`` Run already
+exists for the schedule. The lock keeps two replicas from inserting
+concurrent Run rows; the second check covers the post-commit window
+where the lock has released but a Run is still active on another
+replica. Failover: if the owning replica crashes, the
+:class:`ZombieReaper` (Step 9.3b) flips the stale Run to ``failed``,
+freeing the schedule for the next tick on a surviving replica.
 
 What the stream worker does NOT do:
 
@@ -164,8 +169,52 @@ class StreamWorker:
                 )
 
     async def _start_schedule(self, schedule: Schedule) -> UUID | None:
-        """Insert a Run row in ``running`` status and spawn its asyncio task."""
+        """Insert a Run row in ``running`` status and spawn its asyncio task.
+
+        Multi-replica safe (ADR-0041 K2b): the schedule row is locked with
+        ``FOR UPDATE SKIP LOCKED`` and we re-check that no ``RUNNING`` Run
+        already exists for this schedule before inserting. If either check
+        rejects (row is locked by another replica, or another replica
+        already owns a live Run), this call returns ``None`` and the next
+        tick will retry.
+        """
         async with self._factory() as session:
+            # ① Lock the schedule row. SKIP LOCKED returns None if another
+            #    replica's _start_schedule is mid-flight for the same row.
+            locked = (
+                await session.execute(
+                    select(Schedule)
+                    .where(Schedule.id == schedule.id, Schedule.is_active.is_(True))
+                    .with_for_update(skip_locked=True)
+                )
+            ).scalar_one_or_none()
+            if locked is None:
+                logger.debug(
+                    "stream-worker %s: schedule %s locked by another replica — skipping",
+                    self._worker_id,
+                    schedule.id,
+                )
+                return None
+            # ② Cover the post-commit handoff: another replica may have
+            #    already spawned + released the lock. A RUNNING Run for this
+            #    schedule means a peer is hosting it; don't fight.
+            existing = (
+                await session.execute(
+                    select(Run.id)
+                    .where(
+                        Run.schedule_id == schedule.id,
+                        Run.status == RunStatus.RUNNING,
+                    )
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if existing is not None:
+                logger.debug(
+                    "stream-worker %s: schedule %s already running on a peer — skipping",
+                    self._worker_id,
+                    schedule.id,
+                )
+                return None
             pipeline = (
                 await session.execute(select(Pipeline).where(Pipeline.id == schedule.pipeline_id))
             ).scalar_one_or_none()

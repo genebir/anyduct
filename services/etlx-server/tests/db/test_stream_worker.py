@@ -464,3 +464,148 @@ async def test_stream_worker_skips_schedule_without_current_version(
             await s.execute(delete(Pipeline).where(Pipeline.id == p_id))
             await s.execute(delete(Workspace).where(Workspace.id == ws_id))
             await s.commit()
+
+
+# --- K2b: multi-replica safety (ADR-0041) ----------------------------------
+
+
+async def test_two_stream_workers_spawn_one_run_for_same_schedule(
+    real_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Multi-replica safety (ADR-0041 K2b): two stream workers calling
+    ``_start_schedule`` concurrently for the same row should produce
+    exactly one ``RUNNING`` Run — the schedule's ``FOR UPDATE SKIP
+    LOCKED`` claim + post-lock "RUNNING run already exists" re-check
+    keep the second replica from double-spawning.
+
+    Calls ``_start_schedule`` directly (rather than ``run()``) so the
+    test owns the lifecycle — no need to spin two ``asyncio.Task``
+    streams just to assert the gate behaviour.
+    """
+    _patch_build(monkeypatch, ttl_seconds=30.0)
+    seed = await _seed_workspace_with_pipeline(
+        real_factory,
+        slug="sw-mr",
+        config=_stream_config("p-mr"),
+        schedule_mode=PipelineMode.STREAM,
+    )
+    # Fetch the Schedule row both workers will act on.
+    async with real_factory() as s:
+        schedule = (
+            await s.execute(select(Schedule).where(Schedule.id == seed["schedule_id"]))
+        ).scalar_one()
+    worker_a = StreamWorker(
+        real_factory,
+        StaticSecretBackend(),
+        worker_id="stream-A",
+        tick_interval_seconds=10.0,  # we drive _start_schedule directly
+        log_flush_interval_seconds=None,
+    )
+    worker_b = StreamWorker(
+        real_factory,
+        StaticSecretBackend(),
+        worker_id="stream-B",
+        tick_interval_seconds=10.0,
+        log_flush_interval_seconds=None,
+    )
+    try:
+        # ① Concurrent start: exactly one of (a, b) gets a run_id; the other
+        #    returns None because the schedule row is locked, or — on the
+        #    rare race where both serialize but only the late one sees the
+        #    existing RUNNING row — the re-check rejects it.
+        a, b = await asyncio.gather(
+            worker_a._start_schedule(schedule),
+            worker_b._start_schedule(schedule),
+        )
+        spawned = [x for x in (a, b) if x is not None]
+        assert len(spawned) == 1, f"expected one spawn, got {(a, b)}"
+        async with real_factory() as s:
+            rows = list(
+                (await s.execute(select(Run).where(Run.schedule_id == seed["schedule_id"])))
+                .scalars()
+                .all()
+            )
+        assert len(rows) == 1
+        assert rows[0].status == RunStatus.RUNNING
+
+        # ② A *subsequent* _start_schedule on the same schedule (after the
+        #    winner committed and released the lock) is rejected by the
+        #    "RUNNING run already exists" re-check — failover only happens
+        #    once the active replica's run terminates (or zombie-reaped).
+        c = await worker_b._start_schedule(schedule)
+        assert c is None
+        async with real_factory() as s:
+            rows_after = list(
+                (await s.execute(select(Run).where(Run.schedule_id == seed["schedule_id"])))
+                .scalars()
+                .all()
+            )
+        assert len(rows_after) == 1
+    finally:
+        # Cancel any in-flight asyncio tasks the workers spawned so the
+        # event loop doesn't yell about pending tasks at teardown.
+        for w in (worker_a, worker_b):
+            for sid in list(w._inflight):
+                await w._stop_schedule(sid, reason="test teardown")
+        await _cleanup(real_factory, seed)
+
+
+async def test_stream_worker_skips_when_peer_holds_running_run(
+    real_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ADR-0041 K2b: if a RUNNING Run row already exists for the schedule
+    (because a peer replica is hosting it), ``_start_schedule`` returns
+    ``None`` even though the schedule row itself is unlocked."""
+    _patch_build(monkeypatch, ttl_seconds=30.0)
+    seed = await _seed_workspace_with_pipeline(
+        real_factory,
+        slug="sw-peer-running",
+        config=_stream_config("p-pr"),
+        schedule_mode=PipelineMode.STREAM,
+    )
+    # Pre-seed a RUNNING Run as if another replica had already started it.
+    from datetime import UTC
+    from datetime import datetime as _dt
+
+    async with real_factory() as s:
+        now = _dt.now(UTC)
+        s.add(
+            Run(
+                workspace_id=seed["workspace_id"],
+                pipeline_id=seed["pipeline_id"],
+                pipeline_version_id=seed["version_id"],
+                schedule_id=seed["schedule_id"],
+                status=RunStatus.RUNNING,
+                worker_id="peer-replica",
+                scheduled_at=now,
+                started_at=now,
+                heartbeat_at=now,
+            )
+        )
+        await s.commit()
+        schedule = (
+            await s.execute(select(Schedule).where(Schedule.id == seed["schedule_id"]))
+        ).scalar_one()
+    worker = StreamWorker(
+        real_factory,
+        StaticSecretBackend(),
+        worker_id="stream-mine",
+        tick_interval_seconds=10.0,
+        log_flush_interval_seconds=None,
+    )
+    try:
+        result = await worker._start_schedule(schedule)
+        assert result is None
+        async with real_factory() as s:
+            rows = list(
+                (await s.execute(select(Run).where(Run.schedule_id == seed["schedule_id"])))
+                .scalars()
+                .all()
+            )
+        # No new Run inserted — the peer's stays the only one.
+        assert len(rows) == 1
+        assert rows[0].worker_id == "peer-replica"
+    finally:
+        await _cleanup(real_factory, seed)

@@ -348,6 +348,7 @@ export const en = {
   "builder.enable": "Enable",
   "builder.selectNode":
     "Select a node to configure it. Click any operator on the canvas to edit its fields here.",
+  "builder.resizeDrawer": "Drag to resize the properties panel",
   "builder.noConnectionsOfType": "No connections of this type",
   "builder.tableSelectConnFirst": "Select a connection to load tables.",
   "builder.tableLoading": "Loading tables…",
@@ -930,6 +931,7 @@ export const ko: Messages = {
   "builder.enable": "활성화",
   "builder.selectNode":
     "구성할 노드를 선택하세요. 캔버스에서 오퍼레이터를 클릭하면 여기서 필드를 편집할 수 있습니다.",
+  "builder.resizeDrawer": "드래그해서 속성 패널 너비 조절",
   "builder.noConnectionsOfType": "이 유형의 연결이 없습니다",
   "builder.tableSelectConnFirst": "연결을 선택하면 테이블 목록을 불러옵니다.",
   "builder.tableLoading": "테이블 불러오는 중…",

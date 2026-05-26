@@ -57,6 +57,15 @@
     - 신규 `isolated_factory` pytest fixture가 outer-transaction `session` fixture를 우회해 testcontainer engine에서 독립 connection 두 개 확보(SKIP LOCKED를 진짜 PG 레벨에서 검증, mock 아님). 테스트는 commit 사용 후 `finally`에서 명시적 cleanup.
   - **미커버**: Freshness ticker(`_tick_freshness`)는 SLA 쿨다운으로 harm bounded라 락 미적용 — 후속 슬라이스에서 분산 락 추가 가능. Stream worker 다중 replica는 in-flight `asyncio.Task` dict + per-process state까지 얽혀 별도 설계(K2b로 deferred — consistent hashing or per-schedule "owner" claim).
   - **검증**: scheduler it 16/16 green(기존 14 + 신규 2), 코어/서버 전체 회귀 영향 0. **다음 후보: K3 sensor framework / K4 graph 백필 / K5 OpenLineage export / stream worker multi-replica(K2b).**
+- **빌더 drawer 너비 조절 가능(사용자 요청)** — 사용자가 *"Transform 영역 너비 조절 가능하도록 추가해줘"*. PropertiesPanel(drawer) 너비를 마우스 드래그로 조절 + 사용자 선택 폭을 localStorage에 영속해 다음 세션에도 유지.
+  - **`components/builder/properties-panel.tsx`**:
+    - drawer 좌측 엣지에 `col-resize` 커서 핸들(`<div role="separator" aria-orientation="vertical">`). 핸들은 1.5px 폭, 평소엔 투명, hover 시 `bg-accent/40`으로 미세하게 강조.
+    - `pointer-events`(pointerdown/move/up/cancel) 사용 — 마우스/터치/펜 공통, `setPointerCapture`로 드래그 중 캔버스 벗어나도 추적 유지.
+    - **clamp 380~880px** (Monaco 편안한 폭 ~ 캔버스가 너무 좁아지지 않는 한계). 기본 520px(이전 drawer 너비와 동일).
+    - 드래그 중 `document.body.style.cursor = "col-resize"` + `userSelect = "none"`으로 글로벌 cursor 일관성 + 텍스트 선택 방지, pointerup 시 복원.
+  - **localStorage 영속**: `etlx.builder.drawerWidth` key. `_readStoredWidth()` helper가 SSR/private 모드/quota/NaN 모두 안전 fallback → 어떤 환경에서도 기본값으로 떨어지지 않고 깨지지 않음.
+  - **i18n**: `builder.resizeDrawer` 신규 key("Drag to resize the properties panel" / "드래그해서 속성 패널 너비 조절") — aria-label + title.
+  - **검증**: 웹 tsc green. PropertiesPanel API 변화 없음(외부 caller는 무영향).
 - **빌더 노드 편집 drawer (사용자 제안)** — 사용자가 *"노드를 선택했을 때 모달형태로 띄우는 형태로 바꾸는 건 어떨까?"* 라고 제안. 옵션(full modal / drawer / 현재 + Expand) 중 **drawer**를 선택(권장안). 핵심 통증은 "320×320 PropertiesPanel이 Monaco/columns/mapping/JSON 필드에 너무 좁다"였는데, 그 통증만 외과적으로 해결.
   - **너비**: `w-80` (320px) → `w-[520px]`. ColumnsField 체크리스트·MappingEditor row·FilterEditor 조건·JSON placeholder·**Monaco editor** 모두 즉시 호흡 공간 확보. settings 패널(retry/dlq/variables/triggers)은 노드 비선택 시 그 자리에 그대로(영향 0).
   - **Monaco 높이**: `python-code-editor.tsx` `DEFAULT_HEIGHT` 320 → 480px. drawer 폭 확대와 합쳐 ~25 줄 가시.

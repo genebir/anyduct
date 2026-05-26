@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { PlusIcon, XCircleIcon, XIcon } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { findOperator, type FieldDef, type OperatorSpec } from "@/lib/operators";
@@ -23,6 +23,27 @@ import { useLocale } from "@/components/providers/locale-provider";
 import type { Messages } from "@/lib/i18n/messages";
 
 type Translate = (key: keyof Messages, vars?: Record<string, string | number>) => string;
+
+// Drawer width is user-resizable (2026-05-26 user request — "Transform 영역
+// 너비 조절 가능하도록"). Sane defaults sit around the Monaco-comfortable mark,
+// bounds keep the canvas usable.
+const DRAWER_DEFAULT_WIDTH = 520;
+const DRAWER_MIN_WIDTH = 380;
+const DRAWER_MAX_WIDTH = 880;
+const DRAWER_WIDTH_STORAGE_KEY = "etlx.builder.drawerWidth";
+
+function _readStoredWidth(): number {
+  if (typeof window === "undefined") return DRAWER_DEFAULT_WIDTH;
+  try {
+    const raw = window.localStorage.getItem(DRAWER_WIDTH_STORAGE_KEY);
+    if (!raw) return DRAWER_DEFAULT_WIDTH;
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return DRAWER_DEFAULT_WIDTH;
+    return Math.max(DRAWER_MIN_WIDTH, Math.min(DRAWER_MAX_WIDTH, n));
+  } catch {
+    return DRAWER_DEFAULT_WIDTH;
+  }
+}
 
 const FILTER_OP_LABEL: Record<FilterOp, keyof Messages> = {
   eq: "builder.opEq",
@@ -109,6 +130,51 @@ export function PropertiesPanel({
   onMove?: (id: string, dir: -1 | 1) => void;
 }) {
   const { t } = useLocale();
+  // Persisted drawer width (mouse-drag resizable, ADR-0041 — user request).
+  const [drawerWidth, setDrawerWidth] = useState<number>(_readStoredWidth);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(DRAWER_WIDTH_STORAGE_KEY, String(drawerWidth));
+    } catch {
+      /* private mode / quota — ignore */
+    }
+  }, [drawerWidth]);
+
+  const startResize = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      const target = e.currentTarget;
+      target.setPointerCapture(e.pointerId);
+      const startX = e.clientX;
+      const startWidth = drawerWidth;
+      const onMove = (ev: PointerEvent) => {
+        // Dragging the handle *left* widens the drawer (the handle lives on
+        // the left edge of the right-side aside).
+        const delta = startX - ev.clientX;
+        const next = Math.max(
+          DRAWER_MIN_WIDTH,
+          Math.min(DRAWER_MAX_WIDTH, startWidth + delta),
+        );
+        setDrawerWidth(next);
+      };
+      const onUp = () => {
+        target.removeEventListener("pointermove", onMove);
+        target.removeEventListener("pointerup", onUp);
+        target.removeEventListener("pointercancel", onUp);
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+      };
+      target.addEventListener("pointermove", onMove);
+      target.addEventListener("pointerup", onUp);
+      target.addEventListener("pointercancel", onUp);
+      document.body.style.cursor = "col-resize";
+      // Stop accidental text selection during the drag.
+      document.body.style.userSelect = "none";
+    },
+    [drawerWidth],
+  );
+
   if (!node) {
     return (
       <aside className="flex w-80 shrink-0 flex-col border-l border-border-subtle bg-surface px-4 py-6 text-sm text-text-muted">
@@ -145,15 +211,26 @@ export function PropertiesPanel({
   );
 
   return (
-    // Drawer — wider than the prior 320px panel (2026-05-26) so the Monaco
-    // editor, columns picker, mapping table, and JSON fields have room to
-    // breathe. Click another node and the content swaps in place. Settings
-    // (retry/dlq/variables/triggers) sit behind it and become visible again
-    // when the node is deselected (× button or click empty canvas).
+    // Drawer — width is mouse-drag resizable via the left-edge handle
+    // (default 520, user request 2026-05-26). The Monaco editor, columns
+    // picker, mapping table, and JSON fields all benefit from extra
+    // horizontal room. Persisted in localStorage so the preference survives
+    // navigation + reload. Click another node and the content swaps in
+    // place at the user's chosen width. Settings (retry/dlq/variables/
+    // triggers) sit behind and reappear when the node is deselected.
     <aside
       key={node.id}
-      className="flex w-[520px] shrink-0 flex-col gap-4 overflow-y-auto border-l border-border-subtle bg-surface px-4 py-5"
+      className="relative flex shrink-0 flex-col gap-4 overflow-y-auto border-l border-border-subtle bg-surface px-4 py-5"
+      style={{ width: drawerWidth }}
     >
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label={t("builder.resizeDrawer")}
+        title={t("builder.resizeDrawer")}
+        onPointerDown={startResize}
+        className="absolute inset-y-0 left-0 z-10 w-1.5 cursor-col-resize bg-transparent transition-colors duration-150 hover:bg-accent/40"
+      />
       <header className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <div className="text-[11px] font-semibold uppercase tracking-widest text-text-muted">

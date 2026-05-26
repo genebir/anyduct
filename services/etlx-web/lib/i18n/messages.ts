@@ -19,6 +19,8 @@ export const en = {
   "common.edit": "Edit",
   "common.create": "Create",
   "common.close": "Close",
+  "common.showLess": "Show less",
+  "common.showMore": "Show more",
   "common.confirm": "Confirm",
   "common.loading": "Loading…",
   "common.search": "Search",
@@ -434,6 +436,11 @@ export const en = {
   "builder.jsonError": "JSON: {error}",
   "builder.required": "Required",
   "builder.fieldRequired": "This field is required.",
+  "builder.needsFields": "Needs: {fields}",
+  "builder.nextStep": "Next: {field}",
+  "builder.nodeIncomplete": "This node is incomplete",
+  "builder.nodeIncompleteHelp":
+    "Required fields are highlighted in red below. Fill them in to clear the warning.",
   "builder.mapFrom": "Column",
   "builder.mapTo": "New name",
   "builder.castColumn": "Column",
@@ -506,6 +513,42 @@ export const en = {
     "Freshness SLA: the scheduler re-runs this pipeline if its output tables go staler than this many minutes (or were never built). Blank = off.",
   "graph.streamNoGraph": "Graph mode is batch-only; stream pipelines stay linear.",
   "graph.invalid": "Graph can't be saved yet: {issue}",
+  "graph.invalidCount": "{n} structural issues — review before saving:",
+  "graph.invalidSingle": "1 structural issue — review before saving:",
+  "graph.edgeAll": "All records",
+  "graph.edgeIf": "if {cond}",
+  "graph.deletedConnectionBanner":
+    "{count} node(s) reference a deleted connection. Click each one to pick a replacement.",
+
+  // Keyboard shortcuts (Phase L1, 2026-05-26)
+  "shortcuts.title": "Keyboard shortcuts",
+  "shortcuts.intro": "Power-user shortcuts for the pipeline builder.",
+  "shortcuts.undo": "Undo",
+  "shortcuts.redo": "Redo",
+  "shortcuts.save": "Save pipeline",
+  "shortcuts.duplicate": "Duplicate selected node(s)",
+  "shortcuts.delete": "Delete selected node(s) / edge(s)",
+  "shortcuts.multiSelect": "Add to selection",
+  "shortcuts.contextMenu": "Open context menu",
+  "shortcuts.addNode": "Add a node (drag from the palette)",
+  "shortcuts.openHelp": "Open this cheat-sheet",
+  "shortcuts.deselect": "Deselect / close panel",
+  "shortcuts.click": "click",
+  "shortcuts.rightClick": "Right-click",
+  "shortcuts.drag": "Drag",
+
+  // Glossary — plain-language definitions surfaced via tooltips on jargon.
+  "glossary.source": "Source — where the data is read FROM (a database, file, API…).",
+  "glossary.sink": "Sink — where the data is written TO (the destination DB, file, etc.).",
+  "glossary.transform":
+    "Transform — modifies data on the way through (filter, rename columns, run SQL…).",
+  "glossary.dag":
+    "DAG (Directed Acyclic Graph) — a graph where data flows one direction with no loops.",
+  "glossary.cursor":
+    "Cursor — bookmark column for incremental reads. Each run picks up where the last left off (no duplicates).",
+  "glossary.connection":
+    "Connection — saved credentials + URL for one data system (one Postgres database, one S3 bucket…).",
+  "glossary.required": "This field is required to run the pipeline.",
 
   // runs list
   "runs.colReadWritten": "Read / Written",
@@ -674,6 +717,10 @@ export const en = {
   "variables.empty": "No variables yet.",
   "variables.name": "Name",
   "variables.value": "Value",
+  "variables.type": "Type",
+  "variables.typeBadge": "{type}",
+  "variables.nameError":
+    "Variable name must start with a letter or underscore and use only letters, numbers, or underscores.",
   "variables.valueHelp": "JSON value (number, boolean, list) or plain text.",
   "variables.description": "Description (optional)",
   "variables.save": "Save variable",
@@ -705,6 +752,8 @@ export const ko: Messages = {
   "common.edit": "편집",
   "common.create": "생성",
   "common.close": "닫기",
+  "common.showLess": "접기",
+  "common.showMore": "더 보기",
   "common.confirm": "확인",
   "common.loading": "불러오는 중…",
   "common.search": "검색",
@@ -1103,6 +1152,11 @@ export const ko: Messages = {
   "builder.jsonError": "JSON: {error}",
   "builder.required": "필수",
   "builder.fieldRequired": "필수 항목입니다.",
+  "builder.needsFields": "필요: {fields}",
+  "builder.nextStep": "다음 단계: {field}",
+  "builder.nodeIncomplete": "이 노드는 아직 완성되지 않았습니다",
+  "builder.nodeIncompleteHelp":
+    "아래 빨간색으로 표시된 필수 항목을 채우면 경고가 사라집니다.",
   "builder.mapFrom": "컬럼",
   "builder.mapTo": "새 이름",
   "builder.castColumn": "컬럼",
@@ -1175,6 +1229,42 @@ export const ko: Messages = {
     "신선도 SLA: 출력 테이블이 이 분 수보다 오래되면(또는 한 번도 생성 안 됐으면) 스케줄러가 이 파이프라인을 재실행합니다. 비우면 off.",
   "graph.streamNoGraph": "그래프 모드는 배치 전용입니다. 스트림 파이프라인은 선형으로 유지됩니다.",
   "graph.invalid": "아직 저장할 수 없습니다: {issue}",
+  "graph.invalidCount": "{n}개의 구조 문제 — 저장 전에 확인하세요:",
+  "graph.invalidSingle": "1개의 구조 문제 — 저장 전에 확인하세요:",
+  "graph.edgeAll": "모든 레코드",
+  "graph.edgeIf": "조건: {cond}",
+  "graph.deletedConnectionBanner":
+    "{count}개 노드가 삭제된 connection을 참조 중입니다. 각 노드를 클릭해서 다른 connection으로 교체하세요.",
+
+  // 키보드 단축키 (Phase L1, 2026-05-26)
+  "shortcuts.title": "키보드 단축키",
+  "shortcuts.intro": "파이프라인 빌더용 단축키 모음입니다.",
+  "shortcuts.undo": "실행 취소",
+  "shortcuts.redo": "다시 실행",
+  "shortcuts.save": "파이프라인 저장",
+  "shortcuts.duplicate": "선택한 노드 복제",
+  "shortcuts.delete": "선택한 노드/엣지 삭제",
+  "shortcuts.multiSelect": "선택에 추가",
+  "shortcuts.contextMenu": "컨텍스트 메뉴 열기",
+  "shortcuts.addNode": "노드 추가 (팔레트에서 드래그)",
+  "shortcuts.openHelp": "이 화면 열기",
+  "shortcuts.deselect": "선택 해제 / 패널 닫기",
+  "shortcuts.click": "클릭",
+  "shortcuts.rightClick": "우클릭",
+  "shortcuts.drag": "드래그",
+
+  // 용어 사전 — jargon에 plain-language 정의를 tooltip으로 노출.
+  "glossary.source": "Source — 데이터를 읽어올 곳 (DB, 파일, API 등).",
+  "glossary.sink": "Sink — 데이터를 저장할 곳 (목적지 DB, 파일 등).",
+  "glossary.transform":
+    "Transform — 데이터가 통과하면서 가공되는 단계 (필터, 컬럼 이름 변경, SQL 실행 등).",
+  "glossary.dag":
+    "DAG (방향성 비순환 그래프) — 데이터가 한 방향으로 흐르고 순환이 없는 그래프.",
+  "glossary.cursor":
+    "Cursor — 증분 읽기용 북마크 컬럼. 매 실행이 직전에 멈춘 위치부터 이어 읽음 (중복 없음).",
+  "glossary.connection":
+    "Connection — 한 데이터 시스템(예: Postgres DB 1개, S3 버킷 1개)에 대한 저장된 자격증명 + URL.",
+  "glossary.required": "파이프라인 실행에 필수 항목입니다.",
 
   "runs.colReadWritten": "읽음 / 기록",
   "runs.emptyTitle": "아직 실행이 없습니다",
@@ -1333,6 +1423,10 @@ export const ko: Messages = {
   "variables.empty": "아직 변수가 없습니다.",
   "variables.name": "이름",
   "variables.value": "값",
+  "variables.type": "타입",
+  "variables.typeBadge": "{type}",
+  "variables.nameError":
+    "변수 이름은 문자/언더스코어로 시작하고 문자·숫자·언더스코어만 사용할 수 있습니다.",
   "variables.valueHelp": "JSON 값(숫자·불리언·리스트) 또는 일반 텍스트.",
   "variables.description": "설명(선택)",
   "variables.save": "변수 저장",

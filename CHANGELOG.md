@@ -10,6 +10,24 @@
 ## [Unreleased]
 
 ### Added
+- **빌더 UX 풀스택 보강 — 두 페르소나(데이터 엔지니어 + 비개발 분석가) 양쪽 만족** [ADR-0041 L1, ADR-0042] — 사용자 요청: "3년차 데이터 엔지니어"와 "비개발 데이터 분석가" 두 시점에서 파이프라인 영역을 전수 감사하고 둘 다 만족하도록 보강. Explore 에이전트가 produce한 풍부한 감사 결과를 9-슬라이스 한 묶음으로 구현. 신규 시각 컴포넌트는 ShortcutsDialog 하나(ConfirmDialog 토큰 재사용), 신규 라이브러리 1개(`use-graph-history`).
+  - **신규 모듈**:
+    - `lib/use-graph-history.ts` — `useGraphHistory(capacity=100)` + `useGraphHistoryShortcuts()`. 단일 useState 기반 스택, identity short-circuit, capacity overflow 시 front-slice. **Editable element guard** — input/textarea/contenteditable/role=textbox에서 Cmd+Z 가로채지 않음.
+    - `components/builder/shortcuts-dialog.tsx` — ? 키로 cheat-sheet 모달. mac/win UA 감지로 ⌘/Ctrl 글리프 자동, 10개 키 매핑.
+    - `lib/pipeline-config.ts` `validateGraphStructured()` — `{kind, message, nodeId}` 구조 반환. missing_connection도 감지(source/sink). 기존 string[] API는 backwards compat로 보존.
+  - **9가지 개선**:
+    1. **Undo/Redo + 글로벌 단축키**: Cmd+Z / Cmd+Shift+Z / Ctrl+Y / Cmd+S(저장) / Cmd+D(duplicate) / ?(help). 헤더에 ↶/↷/⌨ 버튼. 100-snapshot capacity.
+    2. **실시간 validation 배너**: edit마다 자동 (저장 시점 X). multi-issue 리스트, 노드 단위 issue는 클릭 → 노드 포커스(`focusRequest: {nodeId, nonce}` 패턴으로 같은 노드 재포커스 허용). 4개+ 접기.
+    3. **Edge 라벨 always-visible**: 무조건부="All records"(점선/회색), 조건부="if X"(실선/강조). 분기 기능 발견율 100%.
+    4. **노드 incomplete UX 강화**: 노드 카드 summary="Needs: connection, table" (요구되는 필드 명시), properties panel 헤더에 "Next: <field>" 배지 + 빈 required 입력에 빨간 ring.
+    5. **다중선택 + bulk delete + duplicate-with-edges**: React Flow native multi-select(Shift/Meta marquee 포함), 단일 commit으로 N-node 삭제도 1 undo 스냅샷. Cmd+D = selection 내부 edge까지 복제 + id remap.
+    6. **키보드 단축키 다이얼로그**: 10개 키 매핑(undo/redo/save/duplicate/delete/multiselect/contextmenu/addnode/help/deselect). mac=⌘, win=Ctrl 자동.
+    7. **Variables 타입 인지 에디터**: silent JSON fallback 폐기. type select(string/number/boolean/JSON) + 검증 실패 시 명시적 error ("\"abc\" is not a number"). 저장된 변수마다 inferred type 배지.
+    8. **Deleted-connection 배너**: load 시 `node.data.connection` 중 카탈로그에 없는 이름 감지 → 빨간 배너 + "Edit →" 으로 첫 affected 노드 포커스.
+    9. **Glossary tooltips + Empty-canvas 안내**: 노드/properties panel의 SOURCE/SINK/TRANSFORM 라벨에 점선 underline + title 정의. 노드 0개일 때 중앙에 비-interactive "Drag a Source from the left palette" overlay.
+  - **i18n**: 30+ 신규 키 en/ko (`shortcuts.*` 14개 / `glossary.*` 7개 / `graph.edgeAll`/`edgeIf`/`deletedConnectionBanner`/`invalidCount`/`invalidSingle` / `builder.needsFields`/`nextStep`/`nodeIncomplete` 등 / `variables.type`/`typeBadge`/`nameError` / `common.showLess`/`showMore`).
+  - **검증**: 웹 tsc clean. 코어/서버 변화 0. 신규 시각 컴포넌트 1개(ShortcutsDialog) — Storybook 별 슬라이스(DESIGN.md 토큰 100% 재사용, 임의값 0). ADR-0042로 두 페르소나 audit + sweet-spot 결정 기록.
+
 - **FileLandedSensor (K3 sensor framework 네 번째 빌트인, external-axis: S3 object polling)** [ADR-0041 K3f] — K3d(asset-axis pull "is stale?")·K3e(asset-axis push "upstream delivered?")는 카탈로그 내부 이벤트만 봤지만, K3f는 **외부 시스템(S3/MinIO)의 이벤트**에 react. Airflow `S3KeySensor` 패턴을 워크스페이스 `Connection` 시크릿 인프라 위에 구현. **이제 sensor 3축 완료**: asset-pull(freshness) / asset-push(arrival) / external(landed).
   - **`etlx_server/sensors/context.py`**: 4번째 ContextVar `sensor_secret_backend` 추가. K3d~K3e의 ContextVar 패턴 자연 확장 — connection-referencing sensor(file_landed, 향후 dataset_row_count)가 워커처럼 `${SECRET:<path>}` 풀이 가능.
   - **CLI `sensor-scheduler run`**: `--secret-backend` + `--secret-file-path` 옵션 추가 (worker CLI와 동일, SECRET_BACKEND env fallback로 API 서버 설정과 자동 매칭). 시크릿 미사용 deployment는 `env`(기본) 그대로.

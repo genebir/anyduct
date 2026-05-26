@@ -233,7 +233,18 @@ export function PropertiesPanel({
       />
       <header className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
-          <div className="text-[11px] font-semibold uppercase tracking-widest text-text-muted">
+          <div
+            className="text-[11px] font-semibold uppercase tracking-widest text-text-muted underline decoration-dotted decoration-text-muted/40 underline-offset-2"
+            title={
+              op.kind === "source"
+                ? t("glossary.source")
+                : op.kind === "sink"
+                  ? t("glossary.sink")
+                  : op.kind === "transform"
+                    ? t("glossary.transform")
+                    : ""
+            }
+          >
             {op.kind}
           </div>
           <div className="mt-1 text-base font-semibold text-text">{op.label}</div>
@@ -251,6 +262,33 @@ export function PropertiesPanel({
           </button>
         ) : null}
       </header>
+
+      {/* Incomplete badge: the audit found that "Not configured" wasn't
+          enough — analysts didn't know which field was missing or what
+          to do about it. Compute the first empty required field, name
+          it explicitly, and tell the user where to look (the form
+          field below has a red border to match). */}
+      {(() => {
+        const firstMissing = op.fields.find(
+          (f) =>
+            f.required &&
+            (node.data[f.key] === undefined ||
+              node.data[f.key] === null ||
+              node.data[f.key] === ""),
+        );
+        if (!firstMissing) return null;
+        return (
+          <div className="rounded-md border border-warning/40 bg-warning/10 p-3 text-xs text-warning">
+            <div className="flex items-center gap-1.5 font-semibold">
+              <span aria-hidden>⚠</span>
+              {t("builder.nodeIncomplete")}
+            </div>
+            <div className="mt-1 text-warning/90">
+              {t("builder.nextStep", { field: firstMissing.label })}
+            </div>
+          </div>
+        );
+      })()}
 
       <div className="flex flex-col gap-4">
         {op.fields.map((field) => (
@@ -320,13 +358,28 @@ function FieldEditor({
     field.kind === "table" ||
     field.kind === "pythonCode";
   const Wrapper = composite ? "div" : "label";
+  // When a required field is empty, paint the closest interactive
+  // descendant (select / input / textarea) with a red border via a
+  // descendant selector. Cheaper + safer than threading a prop into
+  // every branch of FieldInput. The ring stays even on focus so the
+  // visual feedback survives until the user fills the value in.
+  const requiredEmptyOutline = showRequired
+    ? "[&_select]:border-error [&_input:not([type='checkbox'])]:border-error [&_textarea]:border-error"
+    : "";
   return (
-    <Wrapper className="flex flex-col gap-1.5">
-      <span className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider text-text-secondary">
+    <Wrapper className={`flex flex-col gap-1.5 ${requiredEmptyOutline}`}>
+      <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-text-secondary">
         {field.label}
         {field.required ? (
-          <span className="text-accent" title={t("builder.required")} aria-hidden>
-            *
+          <span
+            className={
+              showRequired
+                ? "inline-flex h-4 items-center rounded-sm bg-warning/15 px-1 text-[10px] font-semibold uppercase text-warning"
+                : "inline-flex h-4 items-center rounded-sm bg-overlay px-1 text-[10px] font-semibold uppercase text-text-muted"
+            }
+            title={t("builder.required")}
+          >
+            {t("builder.required")}
           </span>
         ) : null}
       </span>

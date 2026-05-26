@@ -71,9 +71,16 @@ export interface GraphCanvasProps {
   onSelectNode: (id: string) => void;
   onSelectEdge: (id: string) => void;
   onRemoveNode: (id: string) => void;
+  /** Bulk delete from React Flow's built-in Delete/Backspace handler.
+   *  Called once per delete with all selected node ids — keeps the
+   *  undo stack to a single snapshot for a 10-node bulk delete. */
+  onRemoveNodes?: (ids: string[]) => void;
   onConnect: (source: string, target: string) => void;
   onRemoveEdge: (id: string) => void;
   onMoveNode: (id: string, pos: { x: number; y: number }) => void;
+  /** Reports the current multi-selection back up so the editor can
+   *  service Cmd+D (duplicate) / Backspace (bulk delete) globally. */
+  onSelectionChange?: (selection: { nodeIds: string[]; edgeIds: string[] }) => void;
   onDeselect?: () => void;
   /** Called when a palette item is dropped onto the canvas. ``position`` is
    *  the React-Flow coordinate under the cursor (already converted from
@@ -115,9 +122,11 @@ function GraphCanvasInner({
   onSelectNode,
   onSelectEdge,
   onRemoveNode,
+  onRemoveNodes,
   onConnect,
   onRemoveEdge,
   onMoveNode,
+  onSelectionChange,
   onDeselect,
   onDropOperator,
   onPaneContextMenu,
@@ -144,20 +153,43 @@ function GraphCanvasInner({
     };
   });
 
-  const layoutEdges: Edge[] = edges.map((e) => ({
-    id: e.id,
-    source: e.source,
-    target: e.target,
-    animated: true,
-    label: e.when ? `if ${e.when}` : undefined,
-    labelStyle: { fill: "rgb(var(--accent))", fontSize: 10 },
-    labelBgStyle: { fill: "rgb(var(--bg-surface))" },
-    selected: selectedEdgeId === e.id,
-    style: {
-      stroke: selectedEdgeId === e.id ? "rgb(var(--accent))" : "rgb(var(--accent) / 0.6)",
-      strokeWidth: selectedEdgeId === e.id ? 2.5 : 1.5,
-    },
-  }));
+  // Edge labels are ALWAYS visible (Phase L1 audit finding 2026-05-26):
+  // branch conditions were buried — analysts thought every edge passed
+  // every record. Now an unconditional edge reads "All records" and a
+  // conditional edge reads "if <expr>", so the branching capability is
+  // discoverable at a glance and the active condition is right there.
+  // Conditional edges also get a slightly different accent so they
+  // stand out against the default `All records` ones.
+  const layoutEdges: Edge[] = edges.map((e) => {
+    const conditional = Boolean(e.when);
+    return {
+      id: e.id,
+      source: e.source,
+      target: e.target,
+      animated: true,
+      label: conditional ? `if ${e.when}` : "All records",
+      labelStyle: {
+        fill: conditional ? "rgb(var(--accent))" : "rgb(var(--text-muted))",
+        fontSize: 11,
+        fontWeight: conditional ? 600 : 400,
+        cursor: "pointer",
+      },
+      labelBgPadding: [4, 2] as [number, number],
+      labelBgBorderRadius: 4,
+      labelBgStyle: { fill: "rgb(var(--bg-surface))" },
+      selected: selectedEdgeId === e.id,
+      style: {
+        stroke:
+          selectedEdgeId === e.id
+            ? "rgb(var(--accent))"
+            : conditional
+              ? "rgb(var(--accent) / 0.7)"
+              : "rgb(var(--text-muted) / 0.5)",
+        strokeWidth: selectedEdgeId === e.id ? 2.5 : conditional ? 2 : 1.5,
+        strokeDasharray: conditional ? undefined : "4 4",
+      },
+    };
+  });
 
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState(layoutNodes);
   const [rfEdges, setRfEdges, onEdgesChange] = useEdgesState(layoutEdges);
@@ -174,9 +206,15 @@ function GraphCanvasInner({
     onConnect(c.source, c.target);
   };
 
+  // Empty-canvas guidance overlay (Phase L1 audit fix): a brand-new
+  // pipeline starts with zero nodes — the previous empty canvas looked
+  // broken. A non-interactive hint pinned to the centre tells the user
+  // exactly what to do next, hides itself the moment the first node
+  // lands. ``pointer-events-none`` so it never intercepts drag-drop.
+  const empty = nodes.length === 0;
   return (
     <div
-      className="h-full w-full bg-bg"
+      className="relative h-full w-full bg-bg"
       // Drag-and-drop palette → canvas (2026-05-26 user request). The
       // dataTransfer carries the operator id under our custom MIME; ignore
       // any drag that doesn't (file drops, text selections, …).
@@ -202,10 +240,32 @@ function GraphCanvasInner({
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={handleConnect}
+        // Bulk delete: when React Flow fires onNodesDelete for a
+        // multi-select, route through the single-commit ``onRemoveNodes``
+        // so the undo stack only grows by one. Fall back to per-node
+        // removal if the editor didn't wire the bulk callback.
+        onNodesDelete={(deleted) => {
+          const ids = deleted.map((n) => n.id);
+          if (onRemoveNodes) onRemoveNodes(ids);
+          else ids.forEach((id) => onRemoveNode(id));
+        }}
         onEdgesDelete={(deleted) => deleted.forEach((e) => onRemoveEdge(e.id))}
         onNodeDragStop={(_e, node) => onMoveNode(node.id, node.position)}
         onNodeClick={(_e, node) => onSelectNode(node.id)}
         onEdgeClick={(_e, edge) => onSelectEdge(edge.id)}
+        // Cmd/Ctrl held: tells React Flow to treat clicks as additive.
+        // Default in current xyflow is already Meta on Mac, but pinning
+        // both keys makes the behaviour explicit + portable.
+        multiSelectionKeyCode={["Meta", "Control"]}
+        // Shift-drag opens a marquee selection box — classic
+        // canvas-app pattern, both personas expect it.
+        selectionKeyCode="Shift"
+        onSelectionChange={(sel) => {
+          onSelectionChange?.({
+            nodeIds: sel.nodes.map((n) => n.id),
+            edgeIds: sel.edges.map((e) => e.id),
+          });
+        }}
         // Right-click handlers: React Flow gives us the event + the
         // node/edge; we forward to the caller with the screen coords +
         // (for the pane) the flow position so the menu's "Add here" works.
@@ -267,6 +327,22 @@ function GraphCanvasInner({
           className="!rounded-md !border !border-border-subtle !bg-elevated"
         />
       </ReactFlow>
+      {empty ? (
+        <div
+          className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 text-center"
+          aria-hidden
+        >
+          <div className="rounded-full border border-border-subtle bg-elevated/90 px-3 py-1 text-xs uppercase tracking-widest text-text-muted shadow-sm">
+            Empty canvas
+          </div>
+          <div className="max-w-md text-sm text-text-secondary">
+            Drag a <strong className="text-text">Source</strong> from the
+            left palette to start. Add a <strong className="text-text">Sink</strong>{" "}
+            and connect them by dragging from one node's right edge to the
+            next.
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

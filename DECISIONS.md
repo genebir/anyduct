@@ -1341,4 +1341,34 @@ ADR 본문이 P1.3에 남겨둔 미해결 포인트 "record-task 시스템에서
 
 ---
 
+## ADR-0042: 파이프라인 빌더 UX — 두 페르소나(데이터 엔지니어 + 비개발 분석가) 동시 만족
+
+- **Status**: Accepted (2026-05-26)
+- **Context**: 사용자 요청 — "3년차 데이터 엔지니어가 보는 UX 와 비개발 데이터 분석가가 보는 UX 양쪽에서 만족스럽게 보완해줘. 둘 다 만족이어야 함." K3 sensor framework + 4 빌트인까지 닫힌 직후, 빌더 본체의 UX 깊이가 두 페르소나 어느 쪽에도 충분하지 않은 상태. Explore 에이전트로 두 페르소나 별 잘된점/HIGH/MEDIUM 페인포인트/Nice-to-have + 공통/충돌 영역까지 분류해 transparent audit 결과 확보.
+- **Decision**: 두 페르소나의 페인이 *대부분 중첩*된다는 audit 발견에 따라 **둘 다 만족시키는 9개 슬라이스 한 묶음** 구현. 충돌 영역 3개(빠른 액션 vs 안내 wizard / 에러 상세도 / default 노드 채움)는 **각각 sweet-spot 선택**으로 해결.
+- **9 슬라이스 (모두 한 슬라이스로 묶음)**:
+  1. **Undo/Redo** — `useGraphHistory` hook(100-snapshot, identity short-circuit) + Cmd+Z/Cmd+Shift+Z/Ctrl+Y. 헤더 ↶/↷ 버튼. 양 페르소나 공통 페인 — 실수 복구 불능.
+  2. **실시간 validation 배너** — 저장 시점 → 매 edit. multi-issue 리스트, 노드 단위 issue 클릭 시 노드 포커스(`focusRequest: {nodeId, nonce}`). 분석가는 누락 즉시 알고, 엔지니어는 한 번에 모두 본다.
+  3. **Edge 라벨 always-visible** — "All records" vs "if X" 항상 표시. 분기 기능 발견율 100%.
+  4. **노드 incomplete UX 강화** — "Needs: connection, table"로 노드 카드에 누락 필드 명시, properties panel에 "Next: <field>" 배지 + 빈 required에 빨간 ring. 분석가가 "뭐 채워야 하나?" 즉시 인지.
+  5. **다중선택 + bulk delete + duplicate-with-edges** — React Flow native multi-select(Shift/Meta marquee), 단일 commit으로 undo 폭주 방지, Cmd+D는 selection 내부 edge까지 함께 복제 + id remap. 엔지니어 power-user 핵심.
+  6. **키보드 단축키 다이얼로그** — `?` 키로 cheat-sheet(mac=⌘, win=Ctrl 자동). 엔지니어=속도, 분석가=발견성.
+  7. **Variables 타입 인지 에디터** — silent JSON fallback 폐기, type select + 명시적 검증 에러. 양쪽 공통 페인(`42`가 number인지 string인지 헷갈림).
+  8. **Deleted-connection 배너** — load 시 참조 깨진 노드 감지 → 빨간 배너. 양쪽 공통 — 저장 직전에야 알게 되던 문제.
+  9. **Glossary tooltips + Empty-canvas 안내** — SOURCE/SINK/TRANSFORM에 점선 underline + title 정의. 빈 캔버스 중앙에 "Drag a Source from the left palette". 분석가 핵심.
+- **충돌 영역 sweet-spot**:
+  - **빠른 액션 vs 안내**: 우클릭 컨텍스트 메뉴(엔지니어 power) + properties panel의 "Next: X" 배지/empty canvas hint(분석가 wizard)를 *동시 제공*. 분석가가 wizard만 따라가도 완성, 엔지니어는 우클릭/단축키로 즉시.
+  - **에러 상세도**: 짧은 toast("2 issues to fix — see banner above") + 풍부한 inline 배너(클릭 가능 노드 포커스). 한 곳에 모든 정보 X, 두 layer로 정보 위계.
+  - **default 노드 채움**: 적용 안 함 — 분석가가 "기본값으로 저장하면 잘못된 connection을 가리키게 됨" 위험이 더 큼. 대신 ④의 "Next: <field>" 배지로 안내.
+- **Consequences**:
+  - (+) 양 페르소나 페인 9개 동시 해소. 충돌 영역에서도 합의 가능한 sweet-spot.
+  - (+) 신규 시각 컴포넌트 1개(ShortcutsDialog) — ConfirmDialog 토큰 재사용으로 DESIGN 부담 0.
+  - (+) `validateGraphStructured` 분리로 server 검증 contract는 string[] 그대로 유지(backwards compat).
+  - (−) 코드량 증가(`use-graph-history` 130 LOC + shortcuts-dialog 90 LOC + page 분기 +200 LOC). 빌더 페이지가 커지므로 향후 추출 후보(P10 잠재 슬라이스).
+  - (−) Cmd+S / Cmd+D / Cmd+Z 같은 글로벌 단축키가 다른 페이지에 마운트되면 영향 줄 수 있음 — 모두 builder edit 페이지 컴포넌트 unmount 시 listener 해제(useEffect cleanup), guard로 editable element 보호.
+- **결정 보류 (다음 슬라이스)**: 노드 그룹화(subgraph) · auto-layout(Cmd+L) · 노드 annotation · operator description의 video link.
+- **관련**: [[ux-preferences]] · [[autonomous-progression]] · ADR-0018(DESIGN tokens)
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

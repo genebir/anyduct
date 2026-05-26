@@ -3,7 +3,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { ActivityIcon, PlayIcon, SaveIcon, XCircleIcon, ZapIcon } from "lucide-react";
+import {
+  ActivityIcon,
+  KeyboardIcon,
+  PlayIcon,
+  RedoIcon,
+  SaveIcon,
+  UndoIcon,
+  XCircleIcon,
+  ZapIcon,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Header } from "@/components/shell/header";
 import { Button } from "@/components/ui/button";
@@ -31,7 +40,9 @@ import {
   type PipelineSummary,
 } from "@/lib/api";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
+import { useGraphHistory, useGraphHistoryShortcuts } from "@/lib/use-graph-history";
 import { useLocale } from "@/components/providers/locale-provider";
+import { ShortcutsDialog } from "@/components/builder/shortcuts-dialog";
 import type { Messages } from "@/lib/i18n/messages";
 import {
   blankGraph,
@@ -42,10 +53,12 @@ import {
   linearToGraph,
   serializeGraph,
   validateGraph,
+  validateGraphStructured,
   DEFAULT_DLQ,
   DEFAULT_RETRY,
   type DlqSettings,
   type GraphBuilderState,
+  type GraphIssue,
   type PipelineConfigJson,
   type RetrySettings,
 } from "@/lib/pipeline-config";
@@ -74,11 +87,49 @@ export default function PipelineEditorPage() {
   const [pipeline, setPipeline] = useState<PipelineSummary | null>(null);
   const [connections, setConnections] = useState<ConnectionSummary[]>([]);
   const [allPipelines, setAllPipelines] = useState<PipelineSummary[]>([]);
-  // ``null`` while the pipeline is fetching: lets the page render a
-  // loading skeleton instead of flashing the default source→sink graph
-  // (user report 2026-05-26 — '기본 파이프라인 형태의 노드들이 보였다가
-  // 해당 파이프라인에 맞는 노드들로 변경되는 걸로 보이거든').
-  const [graphState, setGraphState] = useState<GraphBuilderState | null>(null);
+  // Graph state lives in a history-tracking hook (Phase L1, 2026-05-26):
+  // every commit pushes onto an undo stack capped at 100 snapshots so
+  // Cmd+Z / Cmd+Shift+Z work from anywhere in the builder. ``null``
+  // while the pipeline is fetching — lets the page render a loading
+  // skeleton instead of flashing the default source→sink graph (user
+  // report — '기본 파이프라인 형태의 노드들이 보였다가 해당 파이프
+  // 라인에 맞는 노드들로 변경되는 걸로 보이거든').
+  const history = useGraphHistory();
+  useGraphHistoryShortcuts(history);
+  const graphState = history.state;
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  // Saving — ``onSave`` is defined below; declare a stable wrapper so
+  // the Cmd+S keyboard binding doesn't have to wait for the function
+  // identity each render.
+  const onSaveRef = useRef<() => void>(() => {});
+  // Global keyboard bindings: '?' opens the cheat-sheet, Cmd+S / Ctrl+S
+  // saves. Both bail when the user is typing into an editable surface
+  // so we don't hijack browser-native input behaviour.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const target = e.target;
+      const inEditable =
+        target instanceof HTMLElement &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable ||
+          target.getAttribute("role") === "textbox");
+      if (e.key === "?" && !inEditable) {
+        e.preventDefault();
+        setShortcutsOpen(true);
+        return;
+      }
+      // Cmd+S / Ctrl+S — let it fire even inside form fields (analysts
+      // expect to save mid-type without clicking out first); browser's
+      // default "save page" must always lose to our save.
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s" && !e.shiftKey) {
+        e.preventDefault();
+        onSaveRef.current();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   const [retry, setRetry] = useState<RetrySettings>({ ...DEFAULT_RETRY });
   const [dlq, setDlq] = useState<DlqSettings>({ ...DEFAULT_DLQ });
   const [variables, setVariables] = useState<Record<string, unknown>>({});
@@ -115,12 +166,15 @@ export default function PipelineEditorPage() {
         setDlq(meta.dlq);
         // Graph configs load directly; legacy linear configs convert in-place
         // so the user sees the same DAG without a migration prompt.
+        // ``setInitial`` resets the undo stack so the load itself is
+        // never an undo target — the first thing the user can undo is
+        // their first edit, not the network fetch.
         if (isGraphConfig(cfg)) {
-          setGraphState(deserializeGraph(cfg, conns));
+          history.setInitial(deserializeGraph(cfg, conns));
         } else if (cfg) {
-          setGraphState(linearToGraph(deserialize(cfg, conns)));
+          history.setInitial(linearToGraph(deserialize(cfg, conns)));
         } else {
-          setGraphState(blankGraph());
+          history.setInitial(blankGraph());
         }
         // Downstream triggers — best-effort; a pending `0003` migration
         // must not break the editor.
@@ -142,12 +196,15 @@ export default function PipelineEditorPage() {
     };
   }, [ws, id, t]);
 
-  const updateGraph = useCallback((next: GraphBuilderState) => {
-    setGraphState(next);
-    // Only flag dirty for edits that arrive *after* the initial load —
-    // otherwise the load itself would mark the pipeline dirty.
-    if (loadedRef.current) setDirty(true);
-  }, []);
+  const updateGraph = useCallback(
+    (next: GraphBuilderState) => {
+      history.commit(next);
+      // Only flag dirty for edits that arrive *after* the initial load —
+      // otherwise the load itself would mark the pipeline dirty.
+      if (loadedRef.current) setDirty(true);
+    },
+    [history],
+  );
 
   const updateRetry = useCallback((next: RetrySettings) => {
     setRetry(next);
@@ -175,17 +232,55 @@ export default function PipelineEditorPage() {
       : "batch";
 
   // Structural problems that would make the save fail server validation,
-  // surfaced inline before the user clicks save. Empty list while the
-  // graph is still loading — nothing to validate yet.
-  const graphIssues = useMemo(
-    () => (graphState ? validateGraph(graphState) : []),
+  // surfaced inline as the user edits (live, not just at save time —
+  // Phase L1 audit finding: analysts complained that the previous "first
+  // issue only at save" UX let problems pile up invisibly).
+  const graphIssues = useMemo<GraphIssue[]>(
+    () => (graphState ? validateGraphStructured(graphState) : []),
     [graphState],
   );
+  // Banner row click → focus the offending node inside the editor. The
+  // ``nonce`` lets the user click the SAME row twice in a row and still
+  // re-trigger focus (the editor's effect dep is the whole object).
+  const [focusRequest, setFocusRequest] = useState<{ nodeId: string; nonce: number } | null>(
+    null,
+  );
+  const focusNode = useCallback((nodeId: string) => {
+    setFocusRequest((cur) => ({ nodeId, nonce: (cur?.nonce ?? 0) + 1 }));
+  }, []);
+
+  // Deleted-connection detection (Phase L1 audit fix 2026-05-26): a
+  // source/sink/transform may still reference a connection name that
+  // got deleted in /connections after the pipeline was last saved.
+  // We catch that on load + every edit so the analyst sees a banner
+  // *before* clicking save and getting a generic 'Connection X not
+  // found' from the server.
+  const deletedConnectionNodes = useMemo(() => {
+    if (!graphState) return [] as { id: string; name: string }[];
+    const known = new Set(connections.map((c) => c.name));
+    const missing: { id: string; name: string }[] = [];
+    for (const node of graphState.nodes) {
+      const conn = node.data.connection;
+      if (typeof conn === "string" && conn && !known.has(conn)) {
+        missing.push({ id: node.id, name: conn });
+      }
+    }
+    return missing;
+  }, [graphState, connections]);
 
   const onSave = useCallback(async () => {
-    if (!ws || !pipeline || !graphState) return;
+    if (!ws || !pipeline || !graphState) {
+      return;
+    }
     if (graphIssues.length > 0) {
-      toast.error(graphIssues[0]);
+      // Banner is already showing every issue; surface a summary in the
+      // toast so the user notices the failure but isn't told the same
+      // thing twice in two different places.
+      toast.error(
+        graphIssues.length === 1
+          ? graphIssues[0].message
+          : `${graphIssues.length} issues to fix — see banner above the canvas`,
+      );
       return;
     }
     setSaving(true);
@@ -230,6 +325,12 @@ export default function PipelineEditorPage() {
     triggers,
     t,
   ]);
+
+  // Keep the Cmd+S binding pointing at the latest onSave without
+  // re-attaching the global listener on every render.
+  useEffect(() => {
+    onSaveRef.current = onSave;
+  }, [onSave]);
 
   const onDryRun = useCallback(async () => {
     if (!ws || !pipeline) return;
@@ -291,6 +392,41 @@ export default function PipelineEditorPage() {
         }
         actions={
           <div className="flex items-center gap-2">
+            {/* Undo / Redo / Shortcuts — leftmost so they form a tight
+                'editor controls' cluster, separate from the action
+                buttons (Save / Trigger) on the right. ``title`` doubles
+                as a tooltip + screen-reader label; the keyboard shortcut
+                lives in :class:`ShortcutsDialog`. */}
+            <button
+              type="button"
+              onClick={history.undo}
+              disabled={!history.canUndo}
+              aria-label={t("shortcuts.undo")}
+              title={`${t("shortcuts.undo")} (Cmd+Z)`}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-text-secondary transition duration-150 hover:bg-overlay hover:text-text disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+            >
+              <UndoIcon size={15} />
+            </button>
+            <button
+              type="button"
+              onClick={history.redo}
+              disabled={!history.canRedo}
+              aria-label={t("shortcuts.redo")}
+              title={`${t("shortcuts.redo")} (Cmd+Shift+Z)`}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-text-secondary transition duration-150 hover:bg-overlay hover:text-text disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+            >
+              <RedoIcon size={15} />
+            </button>
+            <button
+              type="button"
+              onClick={() => setShortcutsOpen(true)}
+              aria-label={t("shortcuts.title")}
+              title={`${t("shortcuts.title")} (?)`}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-text-secondary transition duration-150 hover:bg-overlay hover:text-text"
+            >
+              <KeyboardIcon size={15} />
+            </button>
+            <div className="mx-1 h-5 w-px bg-border-subtle" aria-hidden />
             {dirty ? (
               <span
                 className="inline-flex items-center gap-1.5 rounded-sm border border-warning/40 bg-warning/10 px-2 py-1 text-xs font-medium text-warning"
@@ -373,11 +509,28 @@ export default function PipelineEditorPage() {
           </div>
         }
       />
-      {graphIssues.length > 0 ? (
-        <div className="flex shrink-0 items-center gap-2 border-b border-warning/40 bg-warning/10 px-4 py-2 text-sm text-warning">
+      {deletedConnectionNodes.length > 0 ? (
+        <div
+          className="flex shrink-0 items-center gap-2 border-b border-error/40 bg-error/10 px-4 py-2 text-sm text-error"
+          role="alert"
+        >
           <XCircleIcon size={16} className="shrink-0" />
-          <span>{t("graph.invalid", { issue: graphIssues[0] })}</span>
+          <span>
+            {t("graph.deletedConnectionBanner", {
+              count: deletedConnectionNodes.length,
+            })}
+          </span>
+          <button
+            type="button"
+            onClick={() => focusNode(deletedConnectionNodes[0].id)}
+            className="ml-auto text-xs underline-offset-2 hover:underline"
+          >
+            {t("graph.menuEdit")} →
+          </button>
         </div>
+      ) : null}
+      {graphIssues.length > 0 ? (
+        <ValidationBanner issues={graphIssues} onFocus={focusNode} t={t} />
       ) : null}
       {/* Until the pipeline is fetched + materialised into graphState,
           render a quiet placeholder. The previous code initialised
@@ -387,6 +540,7 @@ export default function PipelineEditorPage() {
           해당 파이프라인에 맞는 노드들로 변경되는 걸로 보이거든").
           The placeholder fills the same flex slot so the layout
           doesn't jump when the editor swaps in. */}
+      <ShortcutsDialog open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
       {graphState ? (
         <GraphEditor
           state={graphState}
@@ -394,6 +548,7 @@ export default function PipelineEditorPage() {
           mode={dataMode}
           onChange={updateGraph}
           workspaceId={ws?.id}
+          focusRequest={focusRequest}
           settingsPanel={settingsPanel}
           dryRunPanel={
             dryRunResult ? (
@@ -411,6 +566,78 @@ export default function PipelineEditorPage() {
         </div>
       )}
     </>
+  );
+}
+
+// --- Validation banner ------------------------------------------------------
+//
+// Replaces the old single-line "first issue" banner with a collapsible
+// rich list. Two design goals from the L1 audit:
+//   * Analysts see every blocker in one place (so they don't fix one,
+//     re-save, and discover the next).
+//   * Engineers can jump to the offending node in one click, no hunting.
+//
+// Collapsed by default once the list passes 3 items so the banner
+// stays out of the canvas's way; the header summary always tells the
+// user how many blockers remain.
+
+function ValidationBanner({
+  issues,
+  onFocus,
+  t,
+}: {
+  issues: GraphIssue[];
+  onFocus: (nodeId: string) => void;
+  t: Translate;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const visible = expanded || issues.length <= 3 ? issues : issues.slice(0, 3);
+  const hidden = issues.length - visible.length;
+  const summary =
+    issues.length === 1
+      ? t("graph.invalidSingle")
+      : t("graph.invalidCount", { n: issues.length });
+  return (
+    <div
+      className="shrink-0 border-b border-warning/40 bg-warning/10 px-4 py-2 text-sm text-warning"
+      role="alert"
+      aria-live="polite"
+    >
+      <div className="flex items-center gap-2">
+        <XCircleIcon size={16} className="shrink-0" />
+        <span className="font-medium">{summary}</span>
+        {issues.length > 3 ? (
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            className="ml-auto text-xs underline-offset-2 hover:underline"
+          >
+            {expanded
+              ? t("common.showLess") ?? "Show less"
+              : `+${hidden} more`}
+          </button>
+        ) : null}
+      </div>
+      <ul className="ml-6 mt-1 space-y-0.5 text-xs">
+        {visible.map((issue, i) => (
+          <li key={i} className="flex items-baseline gap-1">
+            <span aria-hidden>•</span>
+            {issue.nodeId ? (
+              <button
+                type="button"
+                onClick={() => onFocus(issue.nodeId!)}
+                className="text-left text-warning underline-offset-2 hover:underline focus-visible:underline focus-visible:outline-none"
+                title={t("graph.menuEdit")}
+              >
+                {issue.message}
+              </button>
+            ) : (
+              <span>{issue.message}</span>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 

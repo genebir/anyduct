@@ -391,35 +391,106 @@ export function nextEdgeId(): string {
  *    one incoming edge;
  *  * join nodes need ≥2 incoming edges (fan-in is the whole point).
  */
+/** Structured shape of one validation finding (Phase L1).
+ *  Carries an optional ``nodeId`` so the UI banner can scroll to + select
+ *  the offending node when clicked — without an id (e.g. "needs a source")
+ *  the issue is global and gets a non-clickable bullet. ``kind`` lets
+ *  the renderer pick an icon / colour without parsing the message. */
+export type GraphIssueKind =
+  | "missing_source"
+  | "missing_sink"
+  | "missing_input"
+  | "wrong_fanin"
+  | "join_needs_two"
+  | "missing_connection";
+
+export interface GraphIssue {
+  kind: GraphIssueKind;
+  message: string;
+  /** ``null`` for graph-wide issues (missing source / sink). */
+  nodeId: string | null;
+}
+
 export function validateGraph(state: GraphBuilderState): string[] {
-  const issues: string[] = [];
+  // Backwards-compatible string view — call sites that only need the
+  // headline messages keep working. New UI consumers should use
+  // :func:`validateGraphStructured` for the clickable banner.
+  return validateGraphStructured(state).map((i) => i.message);
+}
+
+/** Same rules as :func:`validateGraph` but returns rich objects.
+ *
+ *  Phase L1 expansion (2026-05-26): the banner needs more than the
+ *  first message — it lists all issues, each clickable to focus the
+ *  offending node. Adding the structured shape next to the legacy one
+ *  keeps yaml_sync / server contracts untouched (they use the string
+ *  shape) while letting the new banner render rich rows.
+ */
+export function validateGraphStructured(state: GraphBuilderState): GraphIssue[] {
+  const issues: GraphIssue[] = [];
   const sources = state.nodes.filter((n) => findOperator(n.operatorId)?.kind === "source");
   const sinks = state.nodes.filter((n) => findOperator(n.operatorId)?.kind === "sink");
-  if (sources.length === 0) issues.push("graph needs at least one source");
-  if (sinks.length === 0) issues.push("graph needs at least one sink");
+  if (sources.length === 0) {
+    issues.push({
+      kind: "missing_source",
+      message: "graph needs at least one source",
+      nodeId: null,
+    });
+  }
+  if (sinks.length === 0) {
+    issues.push({
+      kind: "missing_sink",
+      message: "graph needs at least one sink",
+      nodeId: null,
+    });
+  }
   const indeg = new Map<string, number>();
   for (const e of state.edges) indeg.set(e.target, (indeg.get(e.target) ?? 0) + 1);
   for (const n of state.nodes) {
     const op = findOperator(n.operatorId);
-    if (op?.kind === "source") continue;
+    if (op?.kind === "source") {
+      // Source/sink with no connection — caught the moment the user
+      // drops it. Cheaper to flag here than to wait for the dry-run.
+      if (!n.data.connection) {
+        issues.push({
+          kind: "missing_connection",
+          message: `"${op?.label ?? n.operatorId}" needs a connection`,
+          nodeId: n.id,
+        });
+      }
+      continue;
+    }
+    if (op?.kind === "sink" && !n.data.connection) {
+      issues.push({
+        kind: "missing_connection",
+        message: `"${op?.label ?? n.operatorId}" needs a connection`,
+        nodeId: n.id,
+      });
+    }
     const d = indeg.get(n.id) ?? 0;
     const label = op?.label ?? n.operatorId;
     if (op?.multiInput) {
       if (d < 2) {
-        issues.push(
-          d === 0
-            ? `"${label}" isn't connected — join needs at least two incoming edges`
-            : `"${label}" only has ${d} incoming edge — join needs at least two`,
-        );
+        issues.push({
+          kind: "join_needs_two",
+          nodeId: n.id,
+          message:
+            d === 0
+              ? `"${label}" isn't connected — join needs at least two incoming edges`
+              : `"${label}" only has ${d} incoming edge — join needs at least two`,
+        });
       }
       continue;
     }
     if (d !== 1) {
-      issues.push(
-        d === 0
-          ? `"${label}" isn't connected — every node needs one incoming edge`
-          : `"${label}" has ${d} incoming edges — use a join node to merge`,
-      );
+      issues.push({
+        kind: d === 0 ? "missing_input" : "wrong_fanin",
+        nodeId: n.id,
+        message:
+          d === 0
+            ? `"${label}" isn't connected — every node needs one incoming edge`
+            : `"${label}" has ${d} incoming edges — use a join node to merge`,
+      });
     }
   }
   return issues;

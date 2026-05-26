@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   CopyIcon,
   EditIcon,
@@ -42,6 +42,7 @@ export function GraphEditor({
   settingsPanel,
   dryRunPanel,
   workspaceId,
+  focusRequest,
 }: {
   state: GraphBuilderState;
   connections: ConnectionSummary[];
@@ -55,15 +56,37 @@ export function GraphEditor({
   dryRunPanel?: React.ReactNode;
   /** Workspace id forwarded to the properties panel (column introspection). */
   workspaceId?: string;
+  /** Imperative "select this node" trigger from a parent (e.g. the
+   *  validation banner). The shape ``{nodeId, nonce}`` lets the parent
+   *  re-focus the same node twice in a row by bumping ``nonce`` — a
+   *  bare nodeId wouldn't fire React's identity check the second time.
+   *  Phase L1, 2026-05-26. */
+  focusRequest?: { nodeId: string; nonce: number } | null;
 }) {
   const { t } = useLocale();
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+  // Multi-selection mirror (Phase L1, 2026-05-26). React Flow handles
+  // the visual selection itself; we shadow it here so global shortcuts
+  // (Cmd+D duplicate) know what to act on without a child→parent ref.
+  const selectedIdsRef = useRef<{ nodeIds: string[]; edgeIds: string[] }>({
+    nodeIds: [],
+    edgeIds: [],
+  });
 
   const selectNode = useCallback((id: string) => {
     setSelectedNodeId(id);
     setSelectedEdgeId(null);
   }, []);
+
+  // Honour an external focus request (validation banner click etc.).
+  // Re-runs whenever the parent bumps ``nonce`` so the same node can
+  // be re-focused after the user has clicked away.
+  useEffect(() => {
+    if (focusRequest && focusRequest.nodeId) {
+      selectNode(focusRequest.nodeId);
+    }
+  }, [focusRequest, selectNode]);
   const selectEdge = useCallback((id: string) => {
     setSelectedEdgeId(id);
     setSelectedNodeId(null);
@@ -93,6 +116,23 @@ export function GraphEditor({
         edges: state.edges.filter((e) => e.source !== id && e.target !== id),
       });
       setSelectedNodeId((cur) => (cur === id ? null : cur));
+    },
+    [state, onChange],
+  );
+
+  /** Single-commit bulk delete used by Delete/Backspace + React Flow's
+   *  built-in selection delete. Without this each node-removal would
+   *  push its own undo snapshot, blowing the stack on a 10-node bulk
+   *  delete (Phase L1 audit). One commit → one Cmd+Z restore. */
+  const removeNodes = useCallback(
+    (ids: string[]) => {
+      if (ids.length === 0) return;
+      const set = new Set(ids);
+      onChange({
+        nodes: state.nodes.filter((n) => !set.has(n.id)),
+        edges: state.edges.filter((e) => !set.has(e.source) && !set.has(e.target)),
+      });
+      setSelectedNodeId((cur) => (cur && set.has(cur) ? null : cur));
     },
     [state, onChange],
   );
@@ -160,6 +200,52 @@ export function GraphEditor({
     [state, onChange],
   );
 
+  /** Duplicate every node in ``ids`` AND any edges that live entirely
+   *  inside the selection (so Cmd+D on a 3-node sub-graph genuinely
+   *  copies a 3-node sub-graph, not three orphans the user has to
+   *  re-wire). New ids are minted via :func:`makeGraphNode`; old→new
+   *  id mapping is used to translate the kept edges. Positions are
+   *  offset by (40, 40) like the single-node duplicate so the copies
+   *  don't sit on top of the originals. Phase L1, 2026-05-26. */
+  const duplicateNodes = useCallback(
+    (ids: string[]) => {
+      if (ids.length === 0) return;
+      const idSet = new Set(ids);
+      const oldToNew = new Map<string, string>();
+      const copies = state.nodes
+        .filter((n) => idSet.has(n.id))
+        .map((src) => {
+          const copy = makeGraphNode(src.operatorId, {
+            x: src.position.x + 40,
+            y: src.position.y + 40,
+          });
+          copy.data = { ...src.data };
+          oldToNew.set(src.id, copy.id);
+          return copy;
+        });
+      const internalEdges = state.edges
+        .filter((e) => idSet.has(e.source) && idSet.has(e.target))
+        .map((e) => ({
+          id: nextEdgeId(),
+          source: oldToNew.get(e.source)!,
+          target: oldToNew.get(e.target)!,
+          when: e.when,
+        }));
+      onChange({
+        nodes: [...state.nodes, ...copies],
+        edges: [...state.edges, ...internalEdges],
+      });
+      // Single-copy case: focus the new node so the user can keep editing.
+      // Multi-copy: leave selection as-is; React Flow keeps the originals
+      // selected so the user can iterate on the same group.
+      if (copies.length === 1) {
+        setSelectedNodeId(copies[0].id);
+        setSelectedEdgeId(null);
+      }
+    },
+    [state, onChange],
+  );
+
   const disconnectNode = useCallback(
     (id: string) => {
       // Strip every edge that touches the node — common ask when re-wiring
@@ -192,6 +278,32 @@ export function GraphEditor({
     ? state.nodes.find((n) => n.id === nodeTargetRef.current)
     : null;
 
+  // Cmd+D anywhere in the builder duplicates the current multi-selection.
+  // Uses the same "skip when typing into an editable" guard as the undo
+  // shortcut so the keystroke doesn't fight browser-native input behaviour.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const mod = e.metaKey || e.ctrlKey;
+      if (!mod || e.key.toLowerCase() !== "d") return;
+      const target = e.target;
+      if (target instanceof HTMLElement) {
+        if (
+          target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable ||
+          target.getAttribute("role") === "textbox"
+        )
+          return;
+      }
+      const ids = selectedIdsRef.current.nodeIds;
+      if (ids.length === 0) return;
+      e.preventDefault();
+      duplicateNodes(ids);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [duplicateNodes]);
+
   return (
     <div className="flex min-h-0 flex-1 overflow-hidden">
       <Palette mode={mode} variant="graph" />
@@ -205,6 +317,10 @@ export function GraphEditor({
             onSelectNode={selectNode}
             onSelectEdge={selectEdge}
             onRemoveNode={removeNode}
+            onRemoveNodes={removeNodes}
+            onSelectionChange={(sel) => {
+              selectedIdsRef.current = sel;
+            }}
             onConnect={connect}
             onRemoveEdge={removeEdge}
             onMoveNode={moveNode}

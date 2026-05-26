@@ -274,6 +274,56 @@ function TriggersEditor({
   );
 }
 
+/** Variable value types — drives validation, placeholder, badge.
+ *  Audit finding (Phase L1, 2026-05-26): the old "guess JSON, fallback
+ *  to string" silently saved the wrong type when the user typed e.g.
+ *  ``42`` meaning the string "42". Explicit type → no surprises. */
+type VarType = "string" | "number" | "boolean" | "json";
+
+const VAR_TYPE_OPTIONS: { value: VarType; label: string; placeholder: string }[] = [
+  { value: "string", label: "string", placeholder: "hello" },
+  { value: "number", label: "number", placeholder: "100" },
+  { value: "boolean", label: "boolean", placeholder: "true" },
+  { value: "json", label: "JSON", placeholder: '{"key":"value"}' },
+];
+
+function inferType(value: unknown): VarType {
+  if (typeof value === "string") return "string";
+  if (typeof value === "number") return "number";
+  if (typeof value === "boolean") return "boolean";
+  return "json";
+}
+
+/** Convert the user's raw text into the declared type. Returns
+ *  ``{ ok: false, error }`` so the caller can surface a real error
+ *  instead of silently coercing — the silent-fallback behaviour was
+ *  the audit finding being fixed. */
+function parseTyped(
+  text: string,
+  type: VarType,
+): { ok: true; value: unknown } | { ok: false; error: string } {
+  if (type === "string") return { ok: true, value: text };
+  if (type === "number") {
+    if (text.trim() === "") return { ok: false, error: "enter a number" };
+    const n = Number(text);
+    if (Number.isNaN(n)) return { ok: false, error: `"${text}" is not a number` };
+    return { ok: true, value: n };
+  }
+  if (type === "boolean") {
+    const t = text.trim().toLowerCase();
+    if (t === "true") return { ok: true, value: true };
+    if (t === "false") return { ok: true, value: false };
+    return { ok: false, error: 'enter "true" or "false"' };
+  }
+  // json
+  try {
+    return { ok: true, value: JSON.parse(text) };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "invalid JSON";
+    return { ok: false, error: msg };
+  }
+}
+
 function VariablesEditor({
   variables,
   onChange,
@@ -283,21 +333,26 @@ function VariablesEditor({
 }) {
   const { t } = useLocale();
   const [name, setName] = useState("");
+  const [type, setType] = useState<VarType>("string");
   const [valueText, setValueText] = useState("");
+  const [error, setError] = useState<string | null>(null);
   const entries = Object.entries(variables);
 
   function add() {
     const key = name.trim();
-    if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key)) return;
-    let value: unknown;
-    try {
-      value = JSON.parse(valueText);
-    } catch {
-      value = valueText;
+    if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key)) {
+      setError(t("variables.nameError"));
+      return;
     }
-    onChange({ ...variables, [key]: value });
+    const parsed = parseTyped(valueText, type);
+    if (!parsed.ok) {
+      setError(parsed.error);
+      return;
+    }
+    onChange({ ...variables, [key]: parsed.value });
     setName("");
     setValueText("");
+    setError(null);
   }
 
   function remove(key: string) {
@@ -305,6 +360,9 @@ function VariablesEditor({
     delete next[key];
     onChange(next);
   }
+
+  const placeholder =
+    VAR_TYPE_OPTIONS.find((o) => o.value === type)?.placeholder ?? "";
 
   return (
     <section className="flex flex-col gap-3 rounded-md border border-border-subtle p-3">
@@ -314,37 +372,77 @@ function VariablesEditor({
       </header>
       {entries.length > 0 ? (
         <ul className="flex flex-col gap-1.5">
-          {entries.map(([key, value]) => (
-            <li key={key} className="flex items-center gap-2 text-sm">
-              <code className="text-text">{`\${var.${key}}`}</code>
-              <span className="min-w-0 flex-1 truncate text-text-secondary">
-                {JSON.stringify(value)}
-              </span>
-              <button
-                type="button"
-                aria-label={t("variables.deleteAria", { name: key })}
-                onClick={() => remove(key)}
-                className="text-text-muted hover:text-error"
-              >
-                <Trash2Icon size={14} />
-              </button>
-            </li>
-          ))}
+          {entries.map(([key, value]) => {
+            const inferred = inferType(value);
+            return (
+              <li key={key} className="flex items-center gap-2 text-sm">
+                <code className="text-text">{`\${var.${key}}`}</code>
+                <span
+                  className="inline-flex h-4 items-center rounded-sm bg-overlay px-1 text-[10px] font-semibold uppercase text-text-muted"
+                  title={t("variables.typeBadge", { type: inferred })}
+                >
+                  {inferred}
+                </span>
+                <span className="min-w-0 flex-1 truncate text-text-secondary">
+                  {JSON.stringify(value)}
+                </span>
+                <button
+                  type="button"
+                  aria-label={t("variables.deleteAria", { name: key })}
+                  onClick={() => remove(key)}
+                  className="text-text-muted hover:text-error"
+                >
+                  <Trash2Icon size={14} />
+                </button>
+              </li>
+            );
+          })}
         </ul>
       ) : null}
       <div className="flex flex-col gap-2">
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-[1fr_auto] gap-2">
           <FieldRow label={t("variables.name")}>
-            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="min_id" />
-          </FieldRow>
-          <FieldRow label={t("variables.value")}>
             <Input
-              value={valueText}
-              onChange={(e) => setValueText(e.target.value)}
-              placeholder="100"
+              value={name}
+              onChange={(e) => {
+                setName(e.target.value);
+                setError(null);
+              }}
+              placeholder="min_id"
             />
           </FieldRow>
+          <FieldRow label={t("variables.type")}>
+            <select
+              value={type}
+              onChange={(e) => {
+                setType(e.target.value as VarType);
+                setError(null);
+              }}
+              className="h-10 rounded-md border border-border-subtle bg-elevated px-2 text-sm text-text focus-visible:border-accent focus-visible:outline-none"
+            >
+              {VAR_TYPE_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </FieldRow>
         </div>
+        <FieldRow label={t("variables.value")}>
+          <Input
+            value={valueText}
+            onChange={(e) => {
+              setValueText(e.target.value);
+              setError(null);
+            }}
+            placeholder={placeholder}
+          />
+        </FieldRow>
+        {error ? (
+          <p className="text-[11px] text-error" role="alert">
+            {error}
+          </p>
+        ) : null}
         <Button
           type="button"
           variant="secondary"

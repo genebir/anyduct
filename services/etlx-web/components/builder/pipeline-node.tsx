@@ -25,10 +25,23 @@ export function PipelineNode({ id, data }: NodeProps) {
   if (!op) return null;
   const Icon = op.icon;
 
-  const summary = describeNode(op, d.values, t);
-  // A source/sink with no connection can't run — flag it on the canvas so
-  // the gap is visible without opening the node.
-  const incomplete = (op.kind === "source" || op.kind === "sink") && !d.values.connection;
+  // Compute missing-required-fields up-front: drives both the node-card
+  // summary text ("Set: connection, table") AND the warning chrome, so
+  // the analyst sees exactly what's blocking the node without opening
+  // the properties drawer (Phase L1 audit fix 2026-05-26).
+  const missingRequired = op.fields
+    .filter((f) => f.required)
+    .filter((f) => {
+      const v = d.values[f.key];
+      return v === undefined || v === null || v === "";
+    })
+    .map((f) => f.label);
+  const summary = describeNode(op, d.values, t, missingRequired);
+  // A node is "incomplete" iff a required field is empty. Source/sink
+  // ``connection`` always counts as required so legacy nodes still
+  // render the warning; transforms inherit the same rule via
+  // ``required: true`` in their FieldDef catalogue.
+  const incomplete = missingRequired.length > 0;
 
   return (
     <div
@@ -74,7 +87,10 @@ export function PipelineNode({ id, data }: NodeProps) {
           <Icon size={14} />
         </span>
         <div className="min-w-0 flex-1">
-          <div className="truncate text-xs uppercase tracking-wider text-text-muted">
+          <div
+            className="truncate text-xs uppercase tracking-wider text-text-muted underline decoration-dotted decoration-text-muted/40 underline-offset-2"
+            title={glossaryTooltip(op.kind, t)}
+          >
             {op.kind}
           </div>
           <div className="truncate text-sm font-semibold text-text">
@@ -115,12 +131,37 @@ export function PipelineNode({ id, data }: NodeProps) {
   );
 }
 
+/** Map an operator ``kind`` to a plain-language definition for the
+ *  dotted-underline tooltip on the node card / properties drawer.
+ *  Phase L1 audit: analysts didn't know "source / sink / transform"
+ *  meant — giving them a one-line definition on hover removes that
+ *  bar with no new screen real estate. */
+function glossaryTooltip(
+  kind: string,
+  t: Translate,
+): string {
+  if (kind === "source") return t("glossary.source");
+  if (kind === "sink") return t("glossary.sink");
+  if (kind === "transform") return t("glossary.transform");
+  return "";
+}
+
 function describeNode(
   op: ReturnType<typeof findOperator>,
   values: Record<string, unknown>,
   t: Translate,
+  missingRequired: string[],
 ): string {
   if (!op) return "";
+  // If anything required is missing, lead with that — it's the most
+  // important thing the user can act on. Truncate the list at two so
+  // the card doesn't overflow; the property drawer shows the rest.
+  if (missingRequired.length > 0) {
+    const head = missingRequired.slice(0, 2).join(", ");
+    const tail =
+      missingRequired.length > 2 ? ` +${missingRequired.length - 2}` : "";
+    return t("builder.needsFields", { fields: head + tail });
+  }
   if (op.kind === "source" || op.kind === "sink") {
     const conn = (values.connection as string) || t("builder.noConnection");
     const target =

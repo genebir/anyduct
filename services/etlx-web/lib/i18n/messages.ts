@@ -487,6 +487,12 @@ export const en = {
   "assets.colWhen": "When",
   "assets.detailLoadFailed": "Couldn't load asset.",
   "assets.openRun": "Open run →",
+  // column lineage (J3)
+  "assets.columnLineage": "Column lineage",
+  "assets.columnLineageEmpty": "No column-level lineage recorded yet.",
+  "assets.columnLineageOpaqueTitle": "Column lineage is opaque",
+  "assets.columnLineageOpaqueDesc":
+    "This asset's column mapping couldn't be derived — typically a SELECT *, JOIN, or python transform. Make the source query explicit (project named columns) to enable the drill-down.",
 
   // schedules list
   "schedules.new": "New schedule",
@@ -1051,6 +1057,12 @@ export const ko: Messages = {
   "assets.colWhen": "시각",
   "assets.detailLoadFailed": "자산을 불러올 수 없습니다.",
   "assets.openRun": "실행 열기 →",
+  // 컬럼 리니지 (J3)
+  "assets.columnLineage": "컬럼 리니지",
+  "assets.columnLineageEmpty": "아직 컬럼 단위 리니지가 기록되지 않았습니다.",
+  "assets.columnLineageOpaqueTitle": "컬럼 리니지가 불투명합니다",
+  "assets.columnLineageOpaqueDesc":
+    "이 자산의 컬럼 매핑을 추적할 수 없습니다 — 보통 SELECT *, JOIN, 또는 python transform 때문입니다. source 쿼리에서 컬럼을 명시적으로 나열하면 drill-down이 활성화됩니다.",
 
   "schedules.new": "새 스케줄",
   "schedules.selectPipeline": "파이프라인 선택",

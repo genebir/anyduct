@@ -8,9 +8,11 @@ import { toast } from "sonner";
 import { Header } from "@/components/shell/header";
 import { Card } from "@/components/ui/card";
 import { LineageGraph } from "@/components/assets/lineage-graph";
+import { ColumnLineageGraph } from "@/components/assets/column-lineage-graph";
 import {
   ApiError,
   assetsApi,
+  type AssetColumnLineageResponse,
   type AssetLineageResponse,
   type AssetMaterializationEntry,
 } from "@/lib/api";
@@ -24,15 +26,21 @@ export default function AssetDetailPage() {
   const { t } = useLocale();
   const [lineage, setLineage] = useState<AssetLineageResponse | null>(null);
   const [mats, setMats] = useState<AssetMaterializationEntry[] | null>(null);
+  const [columnLineage, setColumnLineage] = useState<AssetColumnLineageResponse | null>(null);
 
   useEffect(() => {
     if (!ws) return;
     let cancelled = false;
-    Promise.all([assetsApi.lineage(ws.id, id), assetsApi.materializations(ws.id, id)])
-      .then(([lin, m]) => {
+    Promise.all([
+      assetsApi.lineage(ws.id, id),
+      assetsApi.materializations(ws.id, id),
+      assetsApi.columnLineage(ws.id, id),
+    ])
+      .then(([lin, m, col]) => {
         if (cancelled) return;
         setLineage(lin);
         setMats(m);
+        setColumnLineage(col);
       })
       .catch((err: unknown) => {
         if (cancelled) return;
@@ -71,6 +79,40 @@ export default function AssetDetailPage() {
                 downstream={lineage.downstream}
                 onSelect={(assetId) => router.push(`/w/${slug}/assets/${assetId}`)}
               />
+            </Card>
+
+            <Card className="p-0">
+              <div className="border-b border-border-subtle px-4 py-3 text-sm font-semibold text-text">
+                {t("assets.columnLineage")}
+              </div>
+              {columnLineage === null ? (
+                <div className="px-4 py-8 text-center text-sm text-text-muted">
+                  {t("common.loading")}
+                </div>
+              ) : columnLineage.opaque ? (
+                <div
+                  className="m-4 rounded-md border border-border-subtle bg-overlay/40 px-4 py-3 text-sm text-text-secondary"
+                  role="status"
+                >
+                  <div className="font-medium text-text">
+                    {t("assets.columnLineageOpaqueTitle")}
+                  </div>
+                  <div className="mt-1 text-xs text-text-muted">
+                    {t("assets.columnLineageOpaqueDesc")}
+                  </div>
+                </div>
+              ) : columnLineage.columns.length === 0 ? (
+                <div className="px-4 py-8 text-center text-sm text-text-muted">
+                  {t("assets.columnLineageEmpty")}
+                </div>
+              ) : (
+                <div className="p-2">
+                  <ColumnLineageGraph
+                    columns={columnLineage.columns}
+                    onSelectAsset={(assetId) => router.push(`/w/${slug}/assets/${assetId}`)}
+                  />
+                </div>
+              )}
             </Card>
 
             <Card>

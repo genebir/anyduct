@@ -570,6 +570,26 @@ export interface AssetMaterializationEntry {
   materialized_at: string;
 }
 
+// --- Column lineage (ADR-0041 J2/J3) ---------------------------------------
+
+export interface ColumnUpstreamRef {
+  asset_id: string;
+  asset_key: string;
+  column: string;
+}
+
+export interface AssetColumnEntry {
+  name: string;
+  upstreams: ColumnUpstreamRef[];
+}
+
+export interface AssetColumnLineageResponse {
+  id: string;
+  asset_key: string;
+  opaque: boolean;
+  columns: AssetColumnEntry[];
+}
+
 export const variablesApi = {
   list: (workspaceId: string) =>
     api<WorkspaceVariableEntry[]>(`/workspaces/${workspaceId}/variables`),
@@ -596,5 +616,9 @@ export const assetsApi = {
   materializations: (workspaceId: string, assetId: string) =>
     api<AssetMaterializationEntry[]>(
       `/workspaces/${workspaceId}/assets/${assetId}/materializations`,
+    ),
+  columnLineage: (workspaceId: string, assetId: string) =>
+    api<AssetColumnLineageResponse>(
+      `/workspaces/${workspaceId}/assets/${assetId}/column-lineage`,
     ),
 };

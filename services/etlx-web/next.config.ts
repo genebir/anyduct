@@ -15,6 +15,17 @@ const config: NextConfig = {
   // standalone bundle. Without this, the trace warns about ambiguous
   // workspace roots and may copy too much or too little.
   outputFileTracingRoot: path.join(__dirname, "..", ".."),
+  experimental: {
+    // Tree-shakes barrel imports from heavy libraries so we only pay the
+    // bundle cost for what we actually use. lucide-react alone is the
+    // big win (we import 50+ icons but the lib has 1000+). xyflow +
+    // monaco optimisations are smaller but free.
+    optimizePackageImports: [
+      "lucide-react",
+      "@xyflow/react",
+      "@monaco-editor/react",
+    ],
+  },
 };
 
 export default config;

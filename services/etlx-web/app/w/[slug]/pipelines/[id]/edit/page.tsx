@@ -7,8 +7,21 @@ import { ActivityIcon, PlayIcon, SaveIcon, XCircleIcon, ZapIcon } from "lucide-r
 import { toast } from "sonner";
 import { Header } from "@/components/shell/header";
 import { Button } from "@/components/ui/button";
+import dynamic from "next/dynamic";
 import { PipelineSettingsPanel } from "@/components/builder/pipeline-settings-panel";
-import { GraphEditor } from "@/components/builder/graph-editor";
+
+// Lazy-load the entire GraphEditor subtree so @xyflow/react (~200 KB) is
+// requested *after* the editor's loading.tsx skeleton renders, not before
+// the page is even shown. ssr: false because xyflow accesses ``window`` at
+// import time and would crash the server render. The fallback is null so
+// the surrounding flex layout is preserved while the chunk fetches; the
+// real skeleton is the route-level loading.tsx (instant) — by the time
+// that resolves and graphState is ready, this dynamic import is usually
+// already cached.
+const GraphEditor = dynamic(
+  () => import("@/components/builder/graph-editor").then((m) => m.GraphEditor),
+  { ssr: false, loading: () => null },
+);
 import {
   ApiError,
   connectionsApi,

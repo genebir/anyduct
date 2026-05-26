@@ -61,7 +61,11 @@ export default function PipelineEditorPage() {
   const [pipeline, setPipeline] = useState<PipelineSummary | null>(null);
   const [connections, setConnections] = useState<ConnectionSummary[]>([]);
   const [allPipelines, setAllPipelines] = useState<PipelineSummary[]>([]);
-  const [graphState, setGraphState] = useState<GraphBuilderState>(() => blankGraph());
+  // ``null`` while the pipeline is fetching: lets the page render a
+  // loading skeleton instead of flashing the default source→sink graph
+  // (user report 2026-05-26 — '기본 파이프라인 형태의 노드들이 보였다가
+  // 해당 파이프라인에 맞는 노드들로 변경되는 걸로 보이거든').
+  const [graphState, setGraphState] = useState<GraphBuilderState | null>(null);
   const [retry, setRetry] = useState<RetrySettings>({ ...DEFAULT_RETRY });
   const [dlq, setDlq] = useState<DlqSettings>({ ...DEFAULT_DLQ });
   const [variables, setVariables] = useState<Record<string, unknown>>({});
@@ -127,7 +131,9 @@ export default function PipelineEditorPage() {
 
   const updateGraph = useCallback((next: GraphBuilderState) => {
     setGraphState(next);
-    setDirty(true);
+    // Only flag dirty for edits that arrive *after* the initial load —
+    // otherwise the load itself would mark the pipeline dirty.
+    if (loadedRef.current) setDirty(true);
   }, []);
 
   const updateRetry = useCallback((next: RetrySettings) => {
@@ -156,11 +162,15 @@ export default function PipelineEditorPage() {
       : "batch";
 
   // Structural problems that would make the save fail server validation,
-  // surfaced inline before the user clicks save.
-  const graphIssues = useMemo(() => validateGraph(graphState), [graphState]);
+  // surfaced inline before the user clicks save. Empty list while the
+  // graph is still loading — nothing to validate yet.
+  const graphIssues = useMemo(
+    () => (graphState ? validateGraph(graphState) : []),
+    [graphState],
+  );
 
   const onSave = useCallback(async () => {
-    if (!ws || !pipeline) return;
+    if (!ws || !pipeline || !graphState) return;
     if (graphIssues.length > 0) {
       toast.error(graphIssues[0]);
       return;
@@ -356,19 +366,37 @@ export default function PipelineEditorPage() {
           <span>{t("graph.invalid", { issue: graphIssues[0] })}</span>
         </div>
       ) : null}
-      <GraphEditor
-        state={graphState}
-        connections={connections}
-        mode={dataMode}
-        onChange={updateGraph}
-        workspaceId={ws?.id}
-        settingsPanel={settingsPanel}
-        dryRunPanel={
-          dryRunResult ? (
-            <DryRunPanel result={dryRunResult} onDismiss={() => setDryRunResult(null)} t={t} />
-          ) : null
-        }
-      />
+      {/* Until the pipeline is fetched + materialised into graphState,
+          render a quiet placeholder. The previous code initialised
+          graphState to ``blankGraph()`` and flashed the default
+          source→sink canvas before snapping to the loaded graph
+          (user report: "기본 파이프라인 형태의 노드들이 보였다가
+          해당 파이프라인에 맞는 노드들로 변경되는 걸로 보이거든").
+          The placeholder fills the same flex slot so the layout
+          doesn't jump when the editor swaps in. */}
+      {graphState ? (
+        <GraphEditor
+          state={graphState}
+          connections={connections}
+          mode={dataMode}
+          onChange={updateGraph}
+          workspaceId={ws?.id}
+          settingsPanel={settingsPanel}
+          dryRunPanel={
+            dryRunResult ? (
+              <DryRunPanel result={dryRunResult} onDismiss={() => setDryRunResult(null)} t={t} />
+            ) : null
+          }
+        />
+      ) : (
+        <div
+          role="status"
+          aria-busy
+          className="flex min-h-0 flex-1 items-center justify-center text-sm text-text-muted"
+        >
+          {t("common.loading")}
+        </div>
+      )}
     </>
   );
 }

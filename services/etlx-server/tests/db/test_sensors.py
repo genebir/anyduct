@@ -34,6 +34,7 @@ from etlx_server.db.models import (
 from etlx_server.dependencies import get_session, get_session_factory
 from etlx_server.sensors import SensorRepository, SensorScheduler
 from etlx_server.sensors.builtins.asset_freshness import AssetFreshnessSensor
+from etlx_server.sensors.builtins.lineage_arrival import LineageArrivalSensor
 from etlx_server.sensors.context import use_sensor_context
 from etlx_server.settings import Settings
 from fastapi import FastAPI
@@ -743,3 +744,247 @@ async def test_asset_freshness_missing_context_soft_fails() -> None:
     assert result.triggered is False
     assert "server context" in (result.message or "")
     assert result.metadata["error"] == "missing_context"
+
+
+# ---- LineageArrivalSensor builtin -----------------------------------------
+#
+# Reads ``assets.last_materialized_at`` for a set of upstream keys; fires
+# when (require_all=true) every upstream OR (require_all=false) any
+# upstream has a fresh materialisation. Uses the sensor's stored
+# ``last_triggered_at`` for de-dupe so a single materialisation event
+# can't fire the sensor on every subsequent tick.
+
+
+async def test_lineage_arrival_builder_rejects_bad_config() -> None:
+    from etl_plugins.core.exceptions import ConfigError
+    from etl_plugins.core.sensor import build_sensor
+
+    # Missing keys
+    with pytest.raises(ConfigError):
+        build_sensor("lineage_arrival", {})
+    # Empty list
+    with pytest.raises(ConfigError):
+        build_sensor(
+            "lineage_arrival",
+            {"upstream_asset_keys": [], "window_minutes": 60},
+        )
+    # Non-string element
+    with pytest.raises(ConfigError):
+        build_sensor(
+            "lineage_arrival",
+            {"upstream_asset_keys": ["a", 42], "window_minutes": 60},
+        )
+    # Negative window
+    with pytest.raises(ConfigError):
+        build_sensor(
+            "lineage_arrival",
+            {"upstream_asset_keys": ["a"], "window_minutes": -1},
+        )
+    # Bool window (isinstance(True, int) is True trap)
+    with pytest.raises(ConfigError):
+        build_sensor(
+            "lineage_arrival",
+            {"upstream_asset_keys": ["a"], "window_minutes": True},
+        )
+    # Non-bool require_all
+    with pytest.raises(ConfigError):
+        build_sensor(
+            "lineage_arrival",
+            {"upstream_asset_keys": ["a"], "window_minutes": 60, "require_all": "yes"},
+        )
+
+
+async def test_lineage_arrival_fires_when_all_upstreams_fresh_require_all(
+    real_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """require_all=True: every upstream materialised within window → trigger."""
+    slug = f"sn-la-all-{uuid4().hex[:8]}"
+    async with real_factory() as s:
+        ws = await _seed_workspace(s, slug=slug)
+        now = datetime.now(UTC)
+        s.add(Asset(workspace_id=ws.id, asset_key="postgres://x/a", last_materialized_at=now))
+        s.add(Asset(workspace_id=ws.id, asset_key="postgres://x/b", last_materialized_at=now))
+        await s.commit()
+        ws_id = ws.id
+    try:
+        sensor = LineageArrivalSensor(
+            upstream_asset_keys=["postgres://x/a", "postgres://x/b"],
+            window_minutes=60,
+            require_all=True,
+        )
+        async with use_sensor_context(session_factory=real_factory, workspace_id=ws_id):
+            result = await sensor.check_async()
+        assert result.triggered is True
+        assert "2 upstream(s) arrived" in (result.message or "")
+        assert result.metadata["require_all"] is True
+        assert {a["asset_key"] for a in result.metadata["arrived"]} == {
+            "postgres://x/a",
+            "postgres://x/b",
+        }
+        assert result.metadata["stale"] == []
+        assert result.metadata["missing"] == []
+    finally:
+        async with real_factory() as s:
+            await s.execute(delete(Asset).where(Asset.workspace_id == ws_id))
+            await s.execute(delete(Workspace).where(Workspace.id == ws_id))
+            await s.commit()
+
+
+async def test_lineage_arrival_does_not_fire_when_partial_require_all(
+    real_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """require_all=True with one stale upstream: no trigger, descriptive
+    message + ``stale`` metadata says which key held it up."""
+    slug = f"sn-la-partial-{uuid4().hex[:8]}"
+    async with real_factory() as s:
+        ws = await _seed_workspace(s, slug=slug)
+        now = datetime.now(UTC)
+        s.add(Asset(workspace_id=ws.id, asset_key="postgres://x/a", last_materialized_at=now))
+        s.add(
+            Asset(
+                workspace_id=ws.id,
+                asset_key="postgres://x/b",
+                last_materialized_at=now - timedelta(hours=2),  # outside window
+            )
+        )
+        await s.commit()
+        ws_id = ws.id
+    try:
+        sensor = LineageArrivalSensor(
+            upstream_asset_keys=["postgres://x/a", "postgres://x/b"],
+            window_minutes=60,
+            require_all=True,
+        )
+        async with use_sensor_context(session_factory=real_factory, workspace_id=ws_id):
+            result = await sensor.check_async()
+        assert result.triggered is False
+        assert "1/2" in (result.message or "")
+        assert {a["asset_key"] for a in result.metadata["arrived"]} == {"postgres://x/a"}
+        assert result.metadata["stale"] == ["postgres://x/b"]
+    finally:
+        async with real_factory() as s:
+            await s.execute(delete(Asset).where(Asset.workspace_id == ws_id))
+            await s.execute(delete(Workspace).where(Workspace.id == ws_id))
+            await s.commit()
+
+
+async def test_lineage_arrival_fires_on_any_when_require_all_false(
+    real_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """require_all=False with one fresh upstream + one stale: trigger."""
+    slug = f"sn-la-any-{uuid4().hex[:8]}"
+    async with real_factory() as s:
+        ws = await _seed_workspace(s, slug=slug)
+        now = datetime.now(UTC)
+        s.add(Asset(workspace_id=ws.id, asset_key="postgres://x/a", last_materialized_at=now))
+        s.add(
+            Asset(
+                workspace_id=ws.id,
+                asset_key="postgres://x/b",
+                last_materialized_at=now - timedelta(hours=2),
+            )
+        )
+        await s.commit()
+        ws_id = ws.id
+    try:
+        sensor = LineageArrivalSensor(
+            upstream_asset_keys=["postgres://x/a", "postgres://x/b"],
+            window_minutes=60,
+            require_all=False,
+        )
+        async with use_sensor_context(session_factory=real_factory, workspace_id=ws_id):
+            result = await sensor.check_async()
+        assert result.triggered is True
+        assert result.metadata["require_all"] is False
+        assert {a["asset_key"] for a in result.metadata["arrived"]} == {"postgres://x/a"}
+        assert result.metadata["stale"] == ["postgres://x/b"]
+    finally:
+        async with real_factory() as s:
+            await s.execute(delete(Asset).where(Asset.workspace_id == ws_id))
+            await s.execute(delete(Workspace).where(Workspace.id == ws_id))
+            await s.commit()
+
+
+async def test_lineage_arrival_dedupes_via_last_triggered_at(
+    real_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Same materialisation event must not refire after the sensor has
+    already fired on it: ``last_triggered_at`` raises the cutoff above
+    the materialisation timestamp, so the next check is quiet."""
+    slug = f"sn-la-dedup-{uuid4().hex[:8]}"
+    async with real_factory() as s:
+        ws = await _seed_workspace(s, slug=slug)
+        materialised_at = datetime.now(UTC) - timedelta(minutes=5)
+        s.add(
+            Asset(
+                workspace_id=ws.id,
+                asset_key="postgres://x/a",
+                last_materialized_at=materialised_at,
+            )
+        )
+        await s.commit()
+        ws_id = ws.id
+    try:
+        sensor = LineageArrivalSensor(
+            upstream_asset_keys=["postgres://x/a"],
+            window_minutes=60,
+            require_all=True,
+        )
+        # First check (no prior fire) → triggered.
+        async with use_sensor_context(
+            session_factory=real_factory, workspace_id=ws_id, last_triggered_at=None
+        ):
+            first = await sensor.check_async()
+        assert first.triggered is True
+        # Pretend the scheduler stamped last_triggered_at = now.
+        # The materialisation timestamp is older than this stamp → quiet.
+        async with use_sensor_context(
+            session_factory=real_factory,
+            workspace_id=ws_id,
+            last_triggered_at=datetime.now(UTC),
+        ):
+            second = await sensor.check_async()
+        assert second.triggered is False
+        assert second.metadata["stale"] == ["postgres://x/a"]
+    finally:
+        async with real_factory() as s:
+            await s.execute(delete(Asset).where(Asset.workspace_id == ws_id))
+            await s.execute(delete(Workspace).where(Workspace.id == ws_id))
+            await s.commit()
+
+
+async def test_lineage_arrival_marks_uncatalogued_keys_as_missing(
+    real_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """An asset_key absent from the catalog at all is reported as
+    ``missing``, distinct from ``stale`` (which means in-catalog but old).
+    With ``require_all=True`` this prevents trigger; consumers see WHICH
+    key isn't even being produced."""
+    slug = f"sn-la-miss-{uuid4().hex[:8]}"
+    async with real_factory() as s:
+        ws = await _seed_workspace(s, slug=slug)
+        s.add(
+            Asset(
+                workspace_id=ws.id,
+                asset_key="postgres://x/a",
+                last_materialized_at=datetime.now(UTC),
+            )
+        )
+        await s.commit()
+        ws_id = ws.id
+    try:
+        sensor = LineageArrivalSensor(
+            upstream_asset_keys=["postgres://x/a", "postgres://x/never-existed"],
+            window_minutes=60,
+            require_all=True,
+        )
+        async with use_sensor_context(session_factory=real_factory, workspace_id=ws_id):
+            result = await sensor.check_async()
+        assert result.triggered is False
+        assert result.metadata["missing"] == ["postgres://x/never-existed"]
+        assert {a["asset_key"] for a in result.metadata["arrived"]} == {"postgres://x/a"}
+    finally:
+        async with real_factory() as s:
+            await s.execute(delete(Asset).where(Asset.workspace_id == ws_id))
+            await s.execute(delete(Workspace).where(Workspace.id == ws_id))
+            await s.commit()

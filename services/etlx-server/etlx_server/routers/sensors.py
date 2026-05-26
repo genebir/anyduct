@@ -284,7 +284,12 @@ async def check_sensor(
         ) from e
     try:
         async with use_sensor_context(
-            session_factory=session_factory, workspace_id=ctx.workspace.id
+            session_factory=session_factory,
+            workspace_id=ctx.workspace.id,
+            # Pass the stored last_triggered_at so de-dupe-aware sensors
+            # (lineage_arrival) return the same answer in the "Check now"
+            # button that they would on the next production tick.
+            last_triggered_at=sensor.last_triggered_at,
         ):
             result = await instance.check_async()
     finally:

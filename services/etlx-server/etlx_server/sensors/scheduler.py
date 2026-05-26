@@ -133,6 +133,7 @@ class SensorScheduler:
             async with use_sensor_context(
                 session_factory=self._factory,
                 workspace_id=sensor.workspace_id,
+                last_triggered_at=sensor.last_triggered_at,
             ):
                 result = await instance.check_async()
         except Exception as e:  # the soft-fail contract says this shouldn't

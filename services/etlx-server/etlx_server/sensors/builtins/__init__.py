@@ -21,6 +21,6 @@ from __future__ import annotations
 
 # Side-effect imports: each module's @register_sensor decorator runs at
 # import time, populating etl_plugins.core.sensor._REGISTRY.
-from etlx_server.sensors.builtins import asset_freshness  # noqa: F401
+from etlx_server.sensors.builtins import asset_freshness, lineage_arrival  # noqa: F401
 
 __all__: list[str] = []

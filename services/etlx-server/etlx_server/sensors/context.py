@@ -33,6 +33,7 @@ from __future__ import annotations
 import contextlib
 from collections.abc import AsyncIterator
 from contextvars import ContextVar
+from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -45,6 +46,13 @@ sensor_session_factory: ContextVar[async_sessionmaker[AsyncSession] | None] = Co
     "sensor_session_factory", default=None
 )
 sensor_workspace_id: ContextVar[UUID | None] = ContextVar("sensor_workspace_id", default=None)
+# Last successful trigger time of THIS sensor row, surfaced so sensors
+# that need de-duplication can ignore upstream events older than their
+# previous fire (``lineage_arrival``: "don't refire on the same
+# materialisation"). ``None`` for a sensor that has never fired yet.
+sensor_last_triggered_at: ContextVar[datetime | None] = ContextVar(
+    "sensor_last_triggered_at", default=None
+)
 
 
 @contextlib.asynccontextmanager
@@ -52,24 +60,33 @@ async def use_sensor_context(
     *,
     session_factory: async_sessionmaker[AsyncSession],
     workspace_id: UUID,
+    last_triggered_at: datetime | None = None,
 ) -> AsyncIterator[None]:
     """Bind the per-check ContextVars for the duration of ``async with``.
 
-    Both vars are reset on exit (success *or* exception) so the next
+    All vars are reset on exit (success *or* exception) so the next
     check sees a clean slate. Using ContextVar.set's token-based reset
     rather than ``ContextVar.set(None)`` keeps the original outer value
     intact if anything above us also bound the vars (the scheduler
-    doesn't, but tests sometimes do)."""
+    doesn't, but tests sometimes do).
+
+    ``last_triggered_at`` defaults to ``None`` so callers that don't
+    care (existing pure builtins) don't have to pass it. Sensors that
+    care read it through :data:`sensor_last_triggered_at` and treat
+    ``None`` as "never fired"."""
     sf_token = sensor_session_factory.set(session_factory)
     ws_token = sensor_workspace_id.set(workspace_id)
+    lt_token = sensor_last_triggered_at.set(last_triggered_at)
     try:
         yield
     finally:
         sensor_session_factory.reset(sf_token)
         sensor_workspace_id.reset(ws_token)
+        sensor_last_triggered_at.reset(lt_token)
 
 
 __all__ = [
+    "sensor_last_triggered_at",
     "sensor_session_factory",
     "sensor_workspace_id",
     "use_sensor_context",

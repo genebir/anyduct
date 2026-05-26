@@ -10,6 +10,14 @@
 ## [Unreleased]
 
 ### Added
+- **LineageArrivalSensor (K3 sensor framework 세 번째 빌트인, asset-axis event-driven DAG)** [ADR-0041 K3e] — K3d(asset_freshness, consumer-side pull "is this stale?")의 producer-side dual: **"upstream이 materialise되면 fire"**. Airflow의 ExternalTaskSensor + Dagster의 asset-of-asset 의존성 패턴을 카탈로그 위에서 구현 — consumer pipeline이 스케줄 없이 upstream materialisation 이벤트에 react. 변수→센서→오케스트레이션의 다음 한 발.
+  - **`etlx_server/sensors/builtins/lineage_arrival.py`**: `LineageArrivalSensor`. config `upstream_asset_keys: list[str]`(필수 non-empty, 자동 dedupe) + `window_minutes: int`(필수 양수, bool 거부) + `require_all: bool`(기본 true; true=AND(graph join), false=OR(fan-out)).
+  - **De-dupe via `last_triggered_at`**: 코어 `use_sensor_context`에 3번째 ContextVar (`sensor_last_triggered_at`) 추가. since 컷오프 = `max(window_threshold, last_triggered_at)` — 같은 materialisation 이벤트가 window 안에 머무는 동안 매 tick 반복 트리거되는 함정 방지 (예: window=60m, last_fire 5m 전 → cutoff 5m 전). scheduler tick + REST `/check` 둘 다 sensor row의 last_triggered_at 전달 → "Check now"가 production tick과 동일 결과.
+  - **결과 분류 3-tier**: **arrived**(catalog 내 + since 이후 materialised) / **stale**(catalog 내 but 오래됨) / **missing**(asset_key 카탈로그에 아예 없음). consumer 디버그 시 "어느 upstream이 안 와서 안 fired됐는지" 즉시 식별 — '센서가 quiet하다'에서 멈추지 않고 정확히 누가 책임인지 metadata로 노출.
+  - **Web `SENSOR_TYPES`**: `lineage_arrival` 옵션 추가, sample config hint(`{"upstream_asset_keys": [...], "window_minutes": 60, "require_all": true}`)를 JSON 필드 아래 노출. SENSOR_TYPES는 이제 3종(http/asset_freshness/lineage_arrival).
+  - **검증**: 6 신규 it(builder validation 6분기 / require_all=true 모두 fresh→trigger / partial→quiet + stale 식별 / require_all=false→OR 트리거 / last_triggered_at dedupe (1st fires, 2nd quiet) / missing vs stale 구분). 서버 sensor it 17→23 green. 코어 sensor unit 19 회귀 0. mypy 98 src, ruff/web tsc clean.
+  - **K3 sensor framework 빌트인 카탈로그 3종 완료** — 다른 후보(file_landed via S3, dataset_row_count)는 필요 시 추가.
+
 - **AssetFreshnessSensor (K3 sensor framework 첫 서비스측 빌트인) + 코어 async-bridge** [ADR-0041 K3d] — 그동안 K3 sensor framework는 K3a 코어(ABC + http) + K3b 서비스(persist + tick + REST) + K3c 웹 UI까지 닫혀 있었지만 빌트인 sensor는 `http`(pure network) 하나뿐이었다. 이번 슬라이스는 **카탈로그에 적힌 자산이 stale해지면 fire하는 asset-axis sensor**를 추가 — 코어 sensor API가 서비스 DB 접근을 깔끔하게 수용하도록 확장.
   - **`etl_plugins/core/sensor.py`**: `SensorBase`에 optional `async def check_async()` 추가. 기본 구현은 `asyncio.to_thread(self.check)`로 위임 → 기존 sync 빌트인(HttpSensor) 회귀 0. 서비스측 async 빌트인은 `check_async`만 override. 스케줄러/REST 모두 항상 `await instance.check_async()` 호출 → dispatcher 한 갈래.
   - **`etlx_server/sensors/context.py`** (신규): `sensor_session_factory` + `sensor_workspace_id` ContextVar + `use_sensor_context(session_factory, workspace_id)` async ctx mgr. PEP 567에 따라 await + `asyncio.to_thread` 경계를 가로질러 전파되므로 sync 빌트인도 동일 ContextVar 상태를 본다. 사용처 한 곳, contract 한 곳.

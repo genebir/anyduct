@@ -63,6 +63,12 @@ const SENSOR_TYPES: { value: string; label: string; configHint: string }[] = [
     label: "Asset freshness (catalog stale-watch)",
     configHint: '{"asset_key": "postgres://prod/main/users", "max_age_minutes": 30}',
   },
+  {
+    value: "lineage_arrival",
+    label: "Lineage arrival (upstream materialisation)",
+    configHint:
+      '{"upstream_asset_keys": ["postgres://prod/main/orders","postgres://prod/main/users"], "window_minutes": 60, "require_all": true}',
+  },
 ];
 
 type FormState =

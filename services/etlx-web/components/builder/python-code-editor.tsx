@@ -30,15 +30,34 @@ const DEFAULT_HEIGHT = 480;
  * (ADR-0041 I2). Monospace + line numbers + Python syntax highlighting via
  * Monaco; falls back to a plain ``<textarea>`` during lazy-load.
  *
- * The user's source must define a top-level ``transform(record)`` function;
- * the editor seeds an empty buffer with that signature so first-time users
- * have something runnable.
+ * **Uncontrolled by design** (2026-05-26 cursor-jump fix). The wrapper
+ * accepts ``value`` as the *initial* buffer only — we hand it to Monaco
+ * as ``defaultValue`` and **never** push subsequent updates back into the
+ * editor. Why: in controlled mode every parent re-render flowed ``value``
+ * back into Monaco, and any micro-mismatch (e.g. the empty-string ↔
+ * ``PYTHON_CODE_STARTER`` flip in the caller's fallback, or a stale state
+ * arriving mid-typing) triggered ``model.setValue()`` which resets the
+ * cursor to position 0. Side-effects of going uncontrolled:
+ *
+ * - Re-keying the host component (e.g. ``PropertiesPanel key={node.id}``)
+ *   already remounts the editor when the user switches nodes, so a fresh
+ *   ``defaultValue`` flows in on that path.
+ * - External code can no longer overwrite the buffer mid-edit. We don't
+ *   need that — the parent only reads via ``onChange``.
+ *
+ * The starter ``transform(record)`` shape is seeded by the caller when
+ * the saved value is empty, so first-time users don't stare at a blank
+ * editor.
  */
 export function PythonCodeEditor({
   value,
   onChange,
   height = DEFAULT_HEIGHT,
 }: {
+  /** Initial buffer. Read once at mount and forwarded as Monaco's
+   *  ``defaultValue`` — later prop changes do NOT mutate the editor
+   *  (uncontrolled). To force a fresh buffer, remount the component
+   *  (a stable React ``key`` does it). */
   value: string;
   onChange: (next: string) => void;
   height?: number;
@@ -67,7 +86,7 @@ export function PythonCodeEditor({
       <MonacoEditor
         language="python"
         theme={theme}
-        value={value}
+        defaultValue={value}
         onChange={(v) => onChange(v ?? "")}
         options={{
           minimap: { enabled: false },

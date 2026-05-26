@@ -491,13 +491,24 @@ function FieldInput({
     return <FilterEditor value={value} onChange={onChange} t={t} />;
   }
   if (field.kind === "pythonCode") {
-    // Seed a starter ``transform(record)`` skeleton so first-time users have
-    // something runnable in the editor instead of a blank canvas.
-    const initial = (value as string) ?? "";
+    // Seed the starter ``transform(record)`` skeleton **only when the
+    // field is truly unset** (never edited). If the user explicitly
+    // cleared the editor (stored ""), respect that — re-injecting the
+    // starter on every reload would silently overwrite the user's
+    // intent. The save-side validation surfaces blank code as a clear
+    // error toast instead of papering over it.
+    const stored = value as string | undefined;
+    const initial = stored ?? PYTHON_CODE_STARTER;
+    // FieldEditor (the wrapper) already keys by ``${node.id}:${field.key}``,
+    // so switching to a different node remounts the editor with a fresh
+    // defaultValue. Within the same selected node Monaco stays mounted —
+    // that's the whole point of the uncontrolled rewrite (cursor stable).
     return (
       <PythonCodeEditor
-        value={initial || PYTHON_CODE_STARTER}
-        onChange={(next) => onChange(next || undefined)}
+        value={initial}
+        // Pass empty strings through (don't coerce to undefined) so a
+        // deliberate clear sticks across reloads.
+        onChange={(next) => onChange(next)}
       />
     );
   }

@@ -371,7 +371,7 @@ export const en = {
   "builder.saved": "Saved pipeline v{version}",
   "builder.operators": "Operators",
   "builder.operatorsHint":
-    "Click to add — pipelines run as source → transforms → sink.",
+    "Drag onto the canvas to add — pipelines run as source → transforms → sink. Right-click on empty canvas for the keyboard-friendly menu.",
   "builder.searchOperators": "Search operators…",
   "builder.noOperatorMatch": "No operators match.",
   "builder.removeAria": "Remove {label}",
@@ -1038,7 +1038,8 @@ export const ko: Messages = {
   "builder.configErrors": "구성 오류",
   "builder.saved": "파이프라인 v{version} 저장됨",
   "builder.operators": "오퍼레이터",
-  "builder.operatorsHint": "클릭해서 추가 — 파이프라인은 소스 → 변환 → 싱크 순으로 실행됩니다.",
+  "builder.operatorsHint":
+    "캔버스로 드래그해서 추가 — 파이프라인은 소스 → 변환 → 싱크 순으로 실행됩니다. 빈 캔버스에서 우클릭하면 키보드 친화적인 메뉴가 열립니다.",
   "builder.searchOperators": "오퍼레이터 검색…",
   "builder.noOperatorMatch": "일치하는 오퍼레이터가 없습니다.",
   "builder.removeAria": "{label} 제거",

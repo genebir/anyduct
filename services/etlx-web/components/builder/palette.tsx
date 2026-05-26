@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ChevronDownIcon, PlusIcon, SearchIcon } from "lucide-react";
+import { ChevronDownIcon, GripVerticalIcon, SearchIcon } from "lucide-react";
 import { cn } from "@/lib/cn";
 import {
   OPERATOR_KIND_GROUPS,
@@ -12,11 +12,9 @@ import {
 import { useLocale } from "@/components/providers/locale-provider";
 
 export function Palette({
-  onAdd,
   mode = "batch",
   variant = "linear",
 }: {
-  onAdd: (operatorId: string) => void;
   /** Pipeline data mode — restricts which source/sink connectors are offered. */
   mode?: "batch" | "stream";
   /** Builder variant: linear hides graph-only operators (join / aggregate)
@@ -107,7 +105,7 @@ export function Palette({
                   </button>
                   {!isCollapsed
                     ? cat.specs.map((spec) => (
-                        <OperatorButton key={spec.id} spec={spec} onAdd={onAdd} />
+                        <OperatorDragHandle key={spec.id} spec={spec} />
                       ))
                     : null}
                 </div>
@@ -125,21 +123,21 @@ export function Palette({
 // (files from desktop, text selections, …) without false positives.
 export const PALETTE_DND_MIME = "application/x-etlx-operator-id";
 
-function OperatorButton({
-  spec,
-  onAdd,
-}: {
-  spec: OperatorSpec;
-  onAdd: (operatorId: string) => void;
-}) {
+/**
+ * Drag-only palette item (2026-05-26 user request: '오퍼레이터가 클릭으로는
+ * 생성되지 않게 해줘. 드래그 앤 드롭만 가능하도록'). Switched from a
+ * ``<button>`` to a plain draggable ``<div>``: a focusable button that does
+ * nothing on activation reads as broken (screen readers, click-only users)
+ * — a div with an explicit ``cursor-grab`` + drag handle icon advertises
+ * the drag affordance honestly. Keyboard / touch users who can't drag fall
+ * back to the canvas right-click menu's 'Add node →' submenu, which lists
+ * the same operators.
+ */
+function OperatorDragHandle({ spec }: { spec: OperatorSpec }) {
   const Icon = spec.icon;
   return (
-    <button
-      type="button"
-      // Click still adds at a default canvas position (keyboard a11y +
-      // touch-only operators), drag does the same with a *placed*
-      // position via the canvas drop handler.
-      onClick={() => onAdd(spec.id)}
+    <div
+      role="listitem"
       draggable
       onDragStart={(e) => {
         e.dataTransfer.setData(PALETTE_DND_MIME, spec.id);
@@ -147,8 +145,9 @@ function OperatorButton({
         e.dataTransfer.setData("text/plain", spec.label);
         e.dataTransfer.effectAllowed = "copy";
       }}
+      title={spec.description}
       className={cn(
-        "group flex items-start gap-2 rounded-md border border-transparent px-2 py-2 text-left transition duration-150",
+        "group flex select-none items-start gap-2 rounded-md border border-transparent px-2 py-2 text-left transition duration-150",
         "cursor-grab hover:border-border-subtle hover:bg-overlay active:cursor-grabbing",
       )}
     >
@@ -165,11 +164,12 @@ function OperatorButton({
           {spec.description}
         </span>
       </span>
-      <PlusIcon
+      <GripVerticalIcon
         size={14}
         className="mt-1 text-text-muted opacity-0 transition duration-150 group-hover:opacity-100"
+        aria-hidden
       />
-    </button>
+    </div>
   );
 }
 

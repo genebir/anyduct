@@ -58,6 +58,7 @@ WEB_PID="$RUN_DIR/etlx-web.pid"
 WORKER_PID="$RUN_DIR/etlx-worker.pid"
 REAPER_PID="$RUN_DIR/etlx-reaper.pid"
 SCHEDULER_PID="$RUN_DIR/etlx-scheduler.pid"
+SENSOR_SCHEDULER_PID="$RUN_DIR/etlx-sensor-scheduler.pid"
 
 # ----- helpers ---------------------------------------------------------------
 stop_pid_file() {
@@ -122,6 +123,7 @@ if [ "$STOP_SERVER" -eq 1 ]; then
     stop_pid_file "etlx-worker" "$WORKER_PID"
     stop_pid_file "etlx-reaper" "$REAPER_PID"
     stop_pid_file "etlx-scheduler" "$SCHEDULER_PID"
+    stop_pid_file "etlx-sensor-scheduler" "$SENSOR_SCHEDULER_PID"
 fi
 
 # =============================================================================

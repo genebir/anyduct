@@ -87,11 +87,13 @@ WEB_PID="$RUN_DIR/etlx-web.pid"
 WORKER_PID="$RUN_DIR/etlx-worker.pid"
 REAPER_PID="$RUN_DIR/etlx-reaper.pid"
 SCHEDULER_PID="$RUN_DIR/etlx-scheduler.pid"
+SENSOR_SCHEDULER_PID="$RUN_DIR/etlx-sensor-scheduler.pid"
 SERVER_LOG="$LOG_DIR/etlx-server.log"
 WEB_LOG="$LOG_DIR/etlx-web.log"
 WORKER_LOG="$LOG_DIR/etlx-worker.log"
 REAPER_LOG="$LOG_DIR/etlx-reaper.log"
 SCHEDULER_LOG="$LOG_DIR/etlx-scheduler.log"
+SENSOR_SCHEDULER_LOG="$LOG_DIR/etlx-sensor-scheduler.log"
 
 SERVER_HOST="${ETLX_SERVER_HOST:-127.0.0.1}"
 SERVER_PORT="${ETLX_SERVER_PORT:-8000}"
@@ -299,6 +301,16 @@ else
         spawn_background "$SCHEDULER_PID" "$SCHEDULER_LOG" \
             uv run --package etlx-server etlx-server scheduler run
         log_ok "etlx-scheduler spawned (pid=$(cat "$SCHEDULER_PID"))"
+    fi
+    # Sensor scheduler: polls active sensors (HTTP / file / asset freshness),
+    # enqueues PENDING runs on trigger (ADR-0041 K3b).
+    if is_running "$SENSOR_SCHEDULER_PID"; then
+        log_skip "etlx-sensor-scheduler already running (pid=$(cat "$SENSOR_SCHEDULER_PID"))"
+    else
+        log_info "starting etlx-sensor-scheduler (log: $SENSOR_SCHEDULER_LOG)"
+        spawn_background "$SENSOR_SCHEDULER_PID" "$SENSOR_SCHEDULER_LOG" \
+            uv run --package etlx-server etlx-server sensor-scheduler run
+        log_ok "etlx-sensor-scheduler spawned (pid=$(cat "$SENSOR_SCHEDULER_PID"))"
     fi
 fi
 

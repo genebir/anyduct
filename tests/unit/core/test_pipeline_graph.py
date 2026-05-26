@@ -436,3 +436,63 @@ def test_pipeline_config_rejects_graph_with_single_or_tasks() -> None:
                 },
             }
         )
+
+
+# ---------- sql_exec standalone node (ADR-0042 follow-up) -------------------
+
+
+class _RecordingSqlExecutor:
+    """Minimal SqlExecutor stand-in for the sql_exec graph node tests.
+    Captures the statements it received so the test can verify the
+    graph executor actually called execute_statement (not e.g. read())."""
+
+    def __init__(self) -> None:
+        self.statements: list[str] = []
+
+    def execute_statement(self, statement: str) -> int:
+        self.statements.append(statement)
+        # Mirror the real connectors' contract: return affected row count.
+        return 0
+
+
+def test_execute_graph_node_sql_exec_runs_statement_and_emits_no_records() -> None:
+    target = _RecordingSqlExecutor()
+    node = GraphNode(
+        id="x",
+        kind="sql_exec",
+        source_name="db",
+        sql_statement="DELETE FROM public.orders WHERE batch = '2026-05-26'",
+    )
+    res = execute_graph_node(node, [], {"db": target})
+    assert target.statements == ["DELETE FROM public.orders WHERE batch = '2026-05-26'"]
+    assert res.output == []
+    assert res.records_read == 0
+
+
+def test_graph_standalone_sql_exec_pipeline_runs_clean() -> None:
+    """A graph made of a single sql_exec node (no source, no sink) runs
+    successfully and the statement reaches the target connector."""
+    target = _RecordingSqlExecutor()
+    nodes = [
+        GraphNode(
+            id="x",
+            kind="sql_exec",
+            source_name="db",
+            sql_statement="MERGE INTO target USING src ON ...",
+        )
+    ]
+    result = Pipeline("g").add(_graph_task(nodes, [])).run(connectors={"db": target})
+    assert result.success
+    assert result.records_read == 0
+    assert result.records_written == 0
+    assert target.statements == ["MERGE INTO target USING src ON ..."]
+
+
+def test_execute_graph_node_sql_exec_requires_sql_executor_capability() -> None:
+    """If the user mistakenly points sql_exec at a non-executor connector
+    (e.g. a plain BatchSource), surface a clear TaskError rather than
+    crashing with an AttributeError deep inside the connector call."""
+    plain = InMemoryBatchSource([])  # has no execute_statement method
+    node = GraphNode(id="x", kind="sql_exec", source_name="db", sql_statement="DELETE FROM t")
+    with pytest.raises(TaskError, match="SqlExecutor"):
+        execute_graph_node(node, [], {"db": plain})

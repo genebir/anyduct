@@ -550,6 +550,84 @@ export const en = {
     "Connection — saved credentials + URL for one data system (one Postgres database, one S3 bucket…).",
   "glossary.required": "This field is required to run the pipeline.",
 
+  // Operator labels + descriptions (Phase L2, 2026-05-26 user request).
+  // Keys follow ``op.<operator.id>.<label|description>``; the helper
+  // ``getOperatorLabel / getOperatorDescription`` in lib/operators.ts
+  // does a typed lookup and falls back to the spec's inline string
+  // when a key is missing — so adding a new operator without an i18n
+  // entry still renders (just untranslated).
+  "op.source:postgres.label": "Postgres",
+  "op.source:postgres.description":
+    "Read rows from a PostgreSQL table via a SQL query.",
+  "op.source:mysql.label": "MySQL",
+  "op.source:mysql.description": "Read rows from a MySQL table via a SQL query.",
+  "op.source:sqlite.label": "SQLite",
+  "op.source:sqlite.description": "Read rows from a local SQLite database.",
+  "op.source:mongodb.label": "MongoDB",
+  "op.source:mongodb.description":
+    "Read documents from a MongoDB collection (with filter / sort / projection).",
+  "op.source:s3.label": "S3 object",
+  "op.source:s3.description":
+    "Read parquet / CSV / JSON from an S3 (or MinIO) bucket.",
+  "op.source:kafka.label": "Kafka topic",
+  "op.source:kafka.description":
+    "Stream-source records from a Kafka topic (use a stream-mode pipeline).",
+  "op.source:http.label": "HTTP / REST",
+  "op.source:http.description":
+    "Read JSON records from a REST endpoint (paginated GET).",
+  "op.source:sql_exec.label": "Run SQL",
+  "op.source:sql_exec.description":
+    "Execute a SQL statement against a connection (DDL, DELETE, MERGE…). Stands alone — no source/sink chain needed.",
+  "op.transform:rename.label": "Rename columns",
+  "op.transform:rename.description":
+    "Rename keys on the record via a column → column mapping.",
+  "op.transform:cast.label": "Cast types",
+  "op.transform:cast.description":
+    "Coerce columns to int / float / str / bool / timestamp.",
+  "op.transform:filter.label": "Filter rows",
+  "op.transform:filter.description":
+    "Keep only rows where a sandboxed Python expression returns truthy.",
+  "op.transform:select.label": "Select columns",
+  "op.transform:select.description":
+    "Keep only the listed columns; drop the rest.",
+  "op.transform:drop.label": "Drop columns",
+  "op.transform:drop.description": "Remove the listed columns; keep the rest.",
+  "op.transform:add_constant.label": "Add constant",
+  "op.transform:add_constant.description":
+    "Set a column to a constant value on every record.",
+  "op.transform:dedupe.label": "Deduplicate",
+  "op.transform:dedupe.description":
+    "Drop records whose key columns were already seen in this run.",
+  "op.transform:python.label": "Python callable",
+  "op.transform:python.description":
+    "Apply a user-supplied 'module:function' that returns a Record or None.",
+  "op.transform:custom_python.label": "Custom Python (inline)",
+  "op.transform:custom_python.description":
+    "Write a transform(record) function in the browser; runs in the worker per record.",
+  "op.transform:join.label": "Join",
+  "op.transform:join.description":
+    "Merge two or more inputs on matching key columns (inner / left / right / outer).",
+  "op.transform:aggregate.label": "Aggregate",
+  "op.transform:aggregate.description":
+    "Group records by columns and compute count / sum / min / max / avg per group.",
+  "op.transform:assert.label": "Assertion",
+  "op.transform:assert.description":
+    "Fail the run (or drop the row) when a data-quality condition isn't met.",
+  "op.sink:postgres.label": "Postgres",
+  "op.sink:postgres.description": "Write records into a PostgreSQL table.",
+  "op.sink:mysql.label": "MySQL",
+  "op.sink:mysql.description": "Write records into a MySQL table.",
+  "op.sink:sqlite.label": "SQLite",
+  "op.sink:sqlite.description": "Write records into a local SQLite database.",
+  "op.sink:mongodb.label": "MongoDB",
+  "op.sink:mongodb.description":
+    "Write documents into a MongoDB collection (append / overwrite / upsert).",
+  "op.sink:s3.label": "S3 object",
+  "op.sink:s3.description":
+    "Write records to an S3 (or MinIO) object as parquet / CSV / JSON.",
+  "op.sink:kafka.label": "Kafka topic",
+  "op.sink:kafka.description": "Stream-sink records to a Kafka topic.",
+
   // runs list
   "runs.colReadWritten": "Read / Written",
   "runs.emptyTitle": "No runs yet",
@@ -1265,6 +1343,80 @@ export const ko: Messages = {
   "glossary.connection":
     "Connection — 한 데이터 시스템(예: Postgres DB 1개, S3 버킷 1개)에 대한 저장된 자격증명 + URL.",
   "glossary.required": "파이프라인 실행에 필수 항목입니다.",
+
+  // 운영자 라벨/설명 (Phase L2, 2026-05-26 — 한/영 전환 지원).
+  "op.source:postgres.label": "Postgres",
+  "op.source:postgres.description":
+    "PostgreSQL 테이블에서 SQL 쿼리로 행을 읽어옵니다.",
+  "op.source:mysql.label": "MySQL",
+  "op.source:mysql.description": "MySQL 테이블에서 SQL 쿼리로 행을 읽어옵니다.",
+  "op.source:sqlite.label": "SQLite",
+  "op.source:sqlite.description": "로컬 SQLite 데이터베이스에서 행을 읽어옵니다.",
+  "op.source:mongodb.label": "MongoDB",
+  "op.source:mongodb.description":
+    "MongoDB 컬렉션에서 문서를 읽어옵니다 (filter / sort / projection 지원).",
+  "op.source:s3.label": "S3 객체",
+  "op.source:s3.description":
+    "S3(또는 MinIO) 버킷에서 parquet / CSV / JSON 파일을 읽어옵니다.",
+  "op.source:kafka.label": "Kafka 토픽",
+  "op.source:kafka.description":
+    "Kafka 토픽에서 레코드를 스트림으로 읽어옵니다 (stream 모드 파이프라인 전용).",
+  "op.source:http.label": "HTTP / REST",
+  "op.source:http.description":
+    "REST 엔드포인트에서 JSON 레코드를 읽어옵니다 (페이지네이션 GET).",
+  "op.source:sql_exec.label": "Run SQL",
+  "op.source:sql_exec.description":
+    "Connection에 대해 SQL 문 1회 실행 (DDL, DELETE, MERGE 등). 단독 노드로 사용 가능 — source/sink 체인 불필요.",
+  "op.transform:rename.label": "컬럼 이름 변경",
+  "op.transform:rename.description":
+    "컬럼 → 컬럼 매핑으로 레코드 키를 다른 이름으로 변경합니다.",
+  "op.transform:cast.label": "타입 변환",
+  "op.transform:cast.description":
+    "컬럼을 int / float / str / bool / timestamp 로 강제 변환합니다.",
+  "op.transform:filter.label": "행 필터링",
+  "op.transform:filter.description":
+    "샌드박스 Python 표현식이 truthy인 행만 통과시킵니다.",
+  "op.transform:select.label": "컬럼 선택",
+  "op.transform:select.description":
+    "지정된 컬럼만 유지하고 나머지를 버립니다.",
+  "op.transform:drop.label": "컬럼 제외",
+  "op.transform:drop.description":
+    "지정된 컬럼만 제거하고 나머지를 유지합니다.",
+  "op.transform:add_constant.label": "상수 추가",
+  "op.transform:add_constant.description":
+    "모든 레코드의 한 컬럼에 동일한 상수 값을 설정합니다.",
+  "op.transform:dedupe.label": "중복 제거",
+  "op.transform:dedupe.description":
+    "이번 실행에서 키 컬럼이 이미 나왔던 레코드를 제거합니다.",
+  "op.transform:python.label": "Python 함수",
+  "op.transform:python.description":
+    "사용자 지정 'module:function'을 적용 (Record 또는 None 반환).",
+  "op.transform:custom_python.label": "커스텀 Python (인라인)",
+  "op.transform:custom_python.description":
+    "브라우저에서 transform(record) 함수를 작성. 워커가 레코드 단위로 실행합니다.",
+  "op.transform:join.label": "Join",
+  "op.transform:join.description":
+    "둘 이상의 입력을 key 컬럼 매칭으로 합칩니다 (inner / left / right / outer).",
+  "op.transform:aggregate.label": "집계",
+  "op.transform:aggregate.description":
+    "컬럼으로 그룹화하고 count / sum / min / max / avg 를 그룹별 계산합니다.",
+  "op.transform:assert.label": "Assertion",
+  "op.transform:assert.description":
+    "데이터 품질 조건 미충족 시 실행을 실패시키거나 행을 제외합니다.",
+  "op.sink:postgres.label": "Postgres",
+  "op.sink:postgres.description": "PostgreSQL 테이블에 레코드를 기록합니다.",
+  "op.sink:mysql.label": "MySQL",
+  "op.sink:mysql.description": "MySQL 테이블에 레코드를 기록합니다.",
+  "op.sink:sqlite.label": "SQLite",
+  "op.sink:sqlite.description": "로컬 SQLite 데이터베이스에 레코드를 기록합니다.",
+  "op.sink:mongodb.label": "MongoDB",
+  "op.sink:mongodb.description":
+    "MongoDB 컬렉션에 문서를 기록합니다 (append / overwrite / upsert).",
+  "op.sink:s3.label": "S3 객체",
+  "op.sink:s3.description":
+    "S3(또는 MinIO) 객체에 레코드를 parquet / CSV / JSON 으로 기록합니다.",
+  "op.sink:kafka.label": "Kafka 토픽",
+  "op.sink:kafka.description": "Kafka 토픽에 레코드를 스트림으로 기록합니다.",
 
   "runs.colReadWritten": "읽음 / 기록",
   "runs.emptyTitle": "아직 실행이 없습니다",

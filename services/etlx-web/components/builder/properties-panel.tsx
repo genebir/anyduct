@@ -3,7 +3,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { PlusIcon, XCircleIcon, XIcon } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import { findOperator, type FieldDef, type OperatorSpec } from "@/lib/operators";
+import {
+  findOperator,
+  getOperatorDescription,
+  getOperatorLabel,
+  type FieldDef,
+  type OperatorSpec,
+} from "@/lib/operators";
 import type { ConnectionSummary } from "@/lib/api";
 import { TableField } from "./table-picker";
 import { ColumnsField } from "./columns-field";
@@ -247,8 +253,8 @@ export function PropertiesPanel({
           >
             {op.kind}
           </div>
-          <div className="mt-1 text-base font-semibold text-text">{op.label}</div>
-          <p className="mt-1 text-xs text-text-secondary">{op.description}</p>
+          <div className="mt-1 text-base font-semibold text-text">{getOperatorLabel(op, t)}</div>
+          <p className="mt-1 text-xs text-text-secondary">{getOperatorDescription(op, t)}</p>
         </div>
         {onClose ? (
           <button

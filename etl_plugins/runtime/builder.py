@@ -300,6 +300,24 @@ def _build_graph_task(
                     ],
                 )
             )
+        elif n.type == "sql_exec":
+            # ADR-0042 follow-up — standalone SQL-execution node. Same
+            # connector-resolution semantics as a source so the user
+            # can target any DB connection registered in the workspace.
+            if not n.connection or n.connection not in connectors:
+                raise ConfigError(
+                    f"{label}: node {n.id!r} sql_exec connection {n.connection!r} unavailable"
+                )
+            if not n.statement:
+                raise ConfigError(f"{label}: sql_exec node {n.id!r} missing 'statement'")
+            nodes.append(
+                GraphNode(
+                    id=n.id,
+                    kind="sql_exec",
+                    source_name=n.connection,
+                    sql_statement=n.statement,
+                )
+            )
         else:
             raise ConfigError(f"{label}: node {n.id!r} has unknown type {n.type!r}")
 

@@ -2,7 +2,7 @@
 
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { AlertTriangleIcon, Trash2Icon } from "lucide-react";
-import { findOperator } from "@/lib/operators";
+import { findOperator, getOperatorLabel } from "@/lib/operators";
 import { cn } from "@/lib/cn";
 import { useLocale } from "@/components/providers/locale-provider";
 import type { Messages } from "@/lib/i18n/messages";
@@ -24,6 +24,7 @@ export function PipelineNode({ id, data }: NodeProps) {
   const op = findOperator(d.operatorId);
   if (!op) return null;
   const Icon = op.icon;
+  const label = getOperatorLabel(op, t);
 
   // Compute missing-required-fields up-front: drives both the node-card
   // summary text ("Set: connection, table") AND the warning chrome, so
@@ -94,7 +95,7 @@ export function PipelineNode({ id, data }: NodeProps) {
             {op.kind}
           </div>
           <div className="truncate text-sm font-semibold text-text">
-            {op.label}
+            {label}
           </div>
         </div>
         {incomplete ? (
@@ -107,7 +108,7 @@ export function PipelineNode({ id, data }: NodeProps) {
         {d.canRemove ? (
           <button
             type="button"
-            aria-label={t("builder.removeAria", { label: op.label })}
+            aria-label={t("builder.removeAria", { label })}
             onClick={(e) => {
               e.stopPropagation();
               d.onRemove(id);

@@ -1369,6 +1369,25 @@ ADR 본문이 P1.3에 남겨둔 미해결 포인트 "record-task 시스템에서
 - **결정 보류 (다음 슬라이스)**: 노드 그룹화(subgraph) · auto-layout(Cmd+L) · 노드 annotation · operator description의 video link.
 - **관련**: [[ux-preferences]] · [[autonomous-progression]] · ADR-0018(DESIGN tokens)
 
+### ADR-0042 follow-up (2026-05-26, 사용자 즉시 회신)
+
+L1 출시 직후 사용자가 5개 회신:
+1. 링크 라벨(All records / if X) 배경 투명 — `labelBgStyle.fillOpacity=0`로 그리드 위에 떠 있는 느낌.
+2. Undo 가능 없으면 dirty=false — `useGraphHistory.index` 노출 + `savedGraphIndex` 추적으로 `dirty = metaDirty || (savedIdx !== currentIdx)`.
+3. 각 operator 설명 i18n — `getOperatorLabel/Description(spec, t)` 헬퍼 + `op.<id>.{label,description}` 50+ 키 en/ko. caller 4개(palette, pipeline-node, properties-panel, graph-editor) 일괄 변환.
+4. **SOURCE 시작 / SINK 끝 강제 제거** — 코어 `GraphConfig._check_graph`에서 "≥1 source / ≥1 sink" 검증 삭제 + 클라이언트 동일 완화. Standalone-source-only / sink-only / single-action 파이프라인 정당화. 구조적 per-node 규칙(transform/sink indegree=1, join ≥2)은 유지 — 짝 잃은 sink는 여전히 issue.
+5. **Run SQL을 Source와 통합** — `sql_exec`를 6번째 `GRAPH_NODE_TYPE`으로 격상. 코어 `GraphNode.kind="sql_exec"` + `sql_statement` 필드 + `execute_graph_node` 분기(SqlExecutor capability 체크 + `execute_statement` 호출 + 0-record emit). 빌더 + 서버 connection resolver + 클라이언트 카탈로그(`source:sql_exec` 신설, `transform:sql_exec` 제거) + serializer/deserializer 일괄. **레거시 `transform: sql_exec` (ADR-0035 pre-load 패턴)은 코드 경로 유지** → 기존 파이프라인 무중단.
+
+**Sweet-spot 결정 (#4 + #5 조합)**: ④로 source/sink 강제를 풀고 ⑤로 sql_exec을 진짜 standalone 으로 만들면, 두 변경이 자연스럽게 합쳐져 "single-node maintenance pipeline"(예: 야간 MERGE 1번 실행)이 가능해짐. 이전엔 placeholder source/sink를 끼워 넣어야 했음.
+
+**호환성**:
+- `transform: sql_exec` 경로(레거시) — 변경 없음, builder.py:194-208 그대로.
+- `source: source` / `source: sink` 정상 그래프 — 변경 없음, validator는 이전과 동일하게 통과.
+- `GraphNodeConfig`에 `statement` 옵셔널 필드 추가 — 기존 source/sink/transform/join/aggregate에 영향 없음(Pydantic이 무시).
+- `serializeGraph`의 wireType 특별 케이스 — connectorType=="sql_exec"일 때만 발동, 나머지는 이전과 동일.
+
+6 신규 코어 unit + 회귀 (코어 671 + 서버 410) green. mypy 코어 59 + 서버 99 OK.
+
 ---
 
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

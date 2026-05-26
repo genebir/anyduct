@@ -10,6 +10,14 @@
 ## [Unreleased]
 
 ### Added
+- **빌더 UX 후속 5종 (사용자 회신 — L2)** [ADR-0041 L2, ADR-0042 follow-up] — L1 출시 후 사용자가 5개 회신: edge label 배경 / dirty 정확도 / 운영자 설명 i18n / source-sink 강제 해제 / Run SQL standalone. 한 슬라이스로 정리.
+  - **Edge 라벨 배경 투명** — graph-canvas `labelBgStyle: {fill: "transparent", fillOpacity: 0}`. "All records" / "if X" 라벨이 그리드 위에 떠 있는 듯한 클린한 인상.
+  - **Undo 가능 없으면 dirty=false** — `useGraphHistory.index` 노출 + page `savedGraphIndex` 추적. `dirty = metaDirty || (savedGraphIndex !== history.index)`. Cmd+Z로 saved baseline에 돌아오면 "저장되지 않은 변경사항" 배지 자동 해제. `loadedRef` 제거(savedGraphIndex !== null이 동일 역할).
+  - **Operator description i18n (en/ko)** — `getOperatorLabel(spec, t)` + `getOperatorDescription(spec, t)` 헬퍼 신설. 50+ i18n 키(`op.<id>.{label,description}`) en/ko. 4 caller(palette/pipeline-node/properties-panel/graph-editor) 일괄 변환. 팔레트 검색이 영/한 둘 다 매칭. 누락된 operator는 inline label/description 자동 fallback.
+  - **Source 시작 / Sink 끝 강제 제거** — 코어 `GraphConfig._check_graph`에서 "≥1 source / ≥1 sink" 검증 제거 + 클라이언트 `validateGraphStructured` 동일 완화. **Standalone source-only 파이프라인 + sink-only 파이프라인도 valid**. 구조적 per-node 규칙(transform/sink는 indegree=1, join은 ≥2)은 유지.
+  - **Run SQL을 standalone source로** — `sql_exec`를 **6번째 GRAPH_NODE_TYPE으로 격상**. `GRAPH_NODE_TYPES = {source, transform, sink, join, aggregate, sql_exec}`. 코어 `GraphNode.kind="sql_exec"` + `sql_statement` 필드. `execute_graph_node`가 SqlExecutor capability 체크 후 `execute_statement()` 실행(0 records 반환). 빌더 `_build_graph_task` + 서버 `referenced_connection_names`도 sql_exec connection 인식. 클라이언트 카탈로그에서 `transform:sql_exec`(레거시 pre-load 패턴) 제거 + `source:sql_exec` 신설(kind="source", anyConnection=true). 라벨 "Run SQL (before load)" → "Run SQL", 설명도 "stands alone — no source/sink chain needed"로 갱신. `serializeGraph`가 connectorType==sql_exec일 때 wire type="sql_exec" emit, `deserializeGraph` 역매핑. **레거시 `transform: sql_exec` (pre-load) 경로는 ADR-0035 그대로 유지** → 기존 파이프라인 무중단.
+  - **검증**: 6 신규 코어 unit(`test_graph` 3: standalone valid / required fields / no incoming edges + `test_pipeline_graph` 3: execute_graph_node sql_exec 분기 / 단독 실행 end-to-end / SqlExecutor 미구현 connector TaskError). 코어 671 unit + 410 서버 it green, mypy 코어 59 + 서버 99 OK, ruff/web tsc clean.
+
 - **빌더 UX 풀스택 보강 — 두 페르소나(데이터 엔지니어 + 비개발 분석가) 양쪽 만족** [ADR-0041 L1, ADR-0042] — 사용자 요청: "3년차 데이터 엔지니어"와 "비개발 데이터 분석가" 두 시점에서 파이프라인 영역을 전수 감사하고 둘 다 만족하도록 보강. Explore 에이전트가 produce한 풍부한 감사 결과를 9-슬라이스 한 묶음으로 구현. 신규 시각 컴포넌트는 ShortcutsDialog 하나(ConfirmDialog 토큰 재사용), 신규 라이브러리 1개(`use-graph-history`).
   - **신규 모듈**:
     - `lib/use-graph-history.ts` — `useGraphHistory(capacity=100)` + `useGraphHistoryShortcuts()`. 단일 useState 기반 스택, identity short-circuit, capacity overflow 시 front-slice. **Editable element guard** — input/textarea/contenteditable/role=textbox에서 Cmd+Z 가로채지 않음.

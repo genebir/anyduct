@@ -139,8 +139,22 @@ export default function PipelineEditorPage() {
   const [saving, setSaving] = useState(false);
   const [dryRunning, setDryRunning] = useState(false);
   const [dryRunResult, setDryRunResult] = useState<DryRunResponse | null>(null);
-  const [dirty, setDirty] = useState(false);
-  const loadedRef = useRef(false);
+  // Two-track dirty tracking (Phase L2, 2026-05-26 user request "Undo
+  // 할 게 없을 때는 사실상 변경사항이 없는 것이기 때문에 저장되지 않은
+  // 변경사항이라는 상태가 아니여야 해"):
+  //   * ``savedGraphIndex`` — the history index whose snapshot matches
+  //     what's persisted on the server. Set at load (=0) and at save
+  //     (=history.index). The graph counts as dirty iff the current
+  //     history.index differs.
+  //   * ``metaDirty`` — non-graph state (retry / dlq / variables /
+  //     triggers / autoMaterialize / freshness) doesn't live in the
+  //     undo stack, so we track it separately. Toggled true by the
+  //     meta updaters, cleared on save.
+  // The overall ``dirty`` flag is the OR — so Cmd+Z back to the saved
+  // baseline correctly drops the "unsaved" badge if no meta change is
+  // pending.
+  const [savedGraphIndex, setSavedGraphIndex] = useState<number | null>(null);
+  const [metaDirty, setMetaDirty] = useState(false);
 
   // Load pipeline + connections + triggers.
   useEffect(() => {
@@ -185,8 +199,11 @@ export default function PipelineEditorPage() {
           /* triggers table may not exist yet — ignore */
         }
         if (cancelled) return;
-        setDirty(false);
-        loadedRef.current = true;
+        // The just-loaded snapshot becomes our "saved baseline" — any
+        // edit pushes the history index past 0 and turns the graph
+        // dirty; an undo back to 0 returns to clean.
+        setSavedGraphIndex(0);
+        setMetaDirty(false);
       } catch (err) {
         toast.error(err instanceof ApiError ? err.message : t("builder.loadFailed"));
       }
@@ -198,30 +215,39 @@ export default function PipelineEditorPage() {
 
   const updateGraph = useCallback(
     (next: GraphBuilderState) => {
+      // history.commit handles dirty-tracking implicitly via index.
+      // No metaDirty flip needed — graph changes are tracked entirely
+      // through the history index vs savedGraphIndex comparison below.
       history.commit(next);
-      // Only flag dirty for edits that arrive *after* the initial load —
-      // otherwise the load itself would mark the pipeline dirty.
-      if (loadedRef.current) setDirty(true);
     },
     [history],
   );
 
   const updateRetry = useCallback((next: RetrySettings) => {
     setRetry(next);
-    setDirty(true);
+    setMetaDirty(true);
   }, []);
   const updateDlq = useCallback((next: DlqSettings) => {
     setDlq(next);
-    setDirty(true);
+    setMetaDirty(true);
   }, []);
   const updateVariables = useCallback((next: Record<string, unknown>) => {
     setVariables(next);
-    setDirty(true);
+    setMetaDirty(true);
   }, []);
   const updateTriggers = useCallback((next: string[]) => {
     setTriggers(next);
-    setDirty(true);
+    setMetaDirty(true);
   }, []);
+
+  // Effective dirty flag: meta-state changes OR graph differs from
+  // last-saved index. Memoised so the header badge / toast hint update
+  // synchronously with undo/redo.
+  const dirty = useMemo(() => {
+    if (metaDirty) return true;
+    if (savedGraphIndex === null) return false; // still loading
+    return savedGraphIndex !== history.index;
+  }, [metaDirty, savedGraphIndex, history.index]);
 
   // Pipeline data mode (batch | stream) drives the palette's connector
   // filtering. The mode itself is fixed at creation time and not editable
@@ -304,7 +330,11 @@ export default function PipelineEditorPage() {
         /* triggers table may not exist yet */
       }
       setPipeline(updated);
-      setDirty(false);
+      // Stash the current history index as the saved baseline. The next
+      // commit pushes index past this value → dirty flips back on; an
+      // undo back to this exact index returns to clean.
+      setSavedGraphIndex(history.index);
+      setMetaDirty(false);
       toast.success(t("builder.saved", { version: updated.current_version ?? "?" }));
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : t("builder.saveFailed"));
@@ -445,7 +475,7 @@ export default function PipelineEditorPage() {
                 checked={autoMaterialize}
                 onChange={(e) => {
                   setAutoMaterialize(e.target.checked);
-                  setDirty(true);
+                  setMetaDirty(true);
                 }}
                 className="accent-[rgb(var(--accent))]"
               />
@@ -464,7 +494,7 @@ export default function PipelineEditorPage() {
                 onChange={(e) => {
                   const v = e.target.value;
                   setFreshnessSla(v === "" ? null : Math.max(0, Number(v)));
-                  setDirty(true);
+                  setMetaDirty(true);
                 }}
                 className="h-8 w-20 rounded-md border border-border-subtle bg-elevated px-2 text-sm text-text focus-visible:border-accent focus-visible:outline-none"
               />

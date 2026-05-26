@@ -191,7 +191,13 @@ class TaskConfig(BaseModel):
         return [self.sink] if self.sink is not None else self.sinks
 
 
-GRAPH_NODE_TYPES = frozenset({"source", "transform", "sink", "join", "aggregate"})
+# ``sql_exec`` is a standalone side-effect node (ADR-0042 follow-up,
+# 2026-05-26 user request "Run SQL 또한 ... SOURCE와 통합한 형태로
+# 제공"): runs a SQL statement against the named connection at execution
+# time, emits zero records. Structurally it behaves like a source (indegree
+# 0 enforced below) but has its own dispatch in :func:`execute_graph_node`
+# that calls ``execute_statement`` instead of ``read()``.
+GRAPH_NODE_TYPES = frozenset({"source", "transform", "sink", "join", "aggregate", "sql_exec"})
 JOIN_HOWS = frozenset({"inner", "left", "right", "outer"})
 AGG_OPS = frozenset({"count", "sum", "min", "max", "avg"})
 
@@ -232,12 +238,14 @@ class GraphNodeConfig(BaseModel):
 
     id: str
     type: str
-    # source / sink
+    # source / sink / sql_exec
     connection: str | None = None
     query: str | None = None  # source
     table: str | None = None  # sink
     mode: str = "append"  # sink
     key_columns: list[str] | None = None  # sink
+    # sql_exec — the SQL the node runs at execution time.
+    statement: str | None = None
     # transform
     transform: TransformConfig | None = None
     # join (fan-in) — merge ≥2 inputs on ``on`` keys (ADR-0041)
@@ -260,6 +268,11 @@ class GraphNodeConfig(BaseModel):
             )
         if self.type == "aggregate" and not self.aggregations:
             raise ValueError(f"aggregate node {self.id!r}: needs at least one aggregation")
+        if self.type == "sql_exec":
+            if not self.connection:
+                raise ValueError(f"sql_exec node {self.id!r}: 'connection' is required")
+            if not self.statement:
+                raise ValueError(f"sql_exec node {self.id!r}: 'statement' is required")
         return self
 
 
@@ -306,12 +319,14 @@ class GraphConfig(BaseModel):
         if len(ids) != len(set(ids)):
             raise ValueError("graph node ids must be unique")
         id_set = set(ids)
-        sources = [n for n in self.nodes if n.type == "source"]
-        sinks = [n for n in self.nodes if n.type == "sink"]
-        if not sources:
-            raise ValueError("graph must have at least one source node")
-        if not sinks:
-            raise ValueError("graph must have at least one sink node")
+        # ADR-0042 follow-up (2026-05-26): the "must have ≥1 source AND ≥1
+        # sink" requirement is dropped. A pipeline made entirely of a
+        # standalone side-effect source (e.g. ``sql_exec`` running a
+        # MERGE) is legitimate; a pipeline made of pure-source reads
+        # with no sink (e.g. cache-warming via HTTP polling) is too.
+        # The runtime is unchanged — sources still must have 0 incoming
+        # edges and non-source non-join nodes still need exactly one,
+        # so the structural integrity of the graph is preserved.
 
         indegree: dict[str, int] = dict.fromkeys(ids, 0)
         adjacency: dict[str, list[str]] = {i: [] for i in ids}
@@ -323,9 +338,11 @@ class GraphConfig(BaseModel):
 
         for n in self.nodes:
             deg = indegree[n.id]
-            if n.type == "source":
+            if n.type == "source" or n.type == "sql_exec":
+                # sql_exec behaves like a source structurally: it produces a
+                # (zero-record) stream and accepts no upstream input.
                 if deg != 0:
-                    raise ValueError(f"source node {n.id!r} must have no incoming edges")
+                    raise ValueError(f"{n.type} node {n.id!r} must have no incoming edges")
             elif n.type == "join":
                 if deg < 2:
                     raise ValueError(

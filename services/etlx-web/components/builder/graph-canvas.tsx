@@ -174,9 +174,13 @@ function GraphCanvasInner({
         fontWeight: conditional ? 600 : 400,
         cursor: "pointer",
       },
+      // User request 2026-05-26: label background transparent so the
+      // grid + edge underneath stay visible. Drop the filled rect by
+      // setting fillOpacity 0 (React Flow still renders the rect for
+      // click hit-testing — we just hide it visually).
       labelBgPadding: [4, 2] as [number, number],
       labelBgBorderRadius: 4,
-      labelBgStyle: { fill: "rgb(var(--bg-surface))" },
+      labelBgStyle: { fill: "transparent", fillOpacity: 0 },
       selected: selectedEdgeId === e.id,
       style: {
         stroke:

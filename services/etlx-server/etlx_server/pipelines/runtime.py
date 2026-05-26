@@ -71,7 +71,11 @@ def referenced_connection_names(cfg: PipelineConfig) -> list[str]:
 
     if cfg.graph is not None:
         for node in cfg.graph.nodes:
-            if node.type in ("source", "sink"):
+            # ``sql_exec`` (ADR-0042 follow-up) carries a connection too —
+            # without listing it here the secret-resolver / connector
+            # builder wouldn't pick the right Connection row, and the
+            # node would crash at execution with "connector unavailable".
+            if node.type in ("source", "sink", "sql_exec"):
                 _add(node.connection)
     else:
         for task in cfg.effective_tasks():

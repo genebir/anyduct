@@ -119,11 +119,16 @@ class GraphNode:
     """One node in a dataflow graph (ADR-0030, join/aggregate added in ADR-0041)."""
 
     id: str
-    kind: str  # source | transform | sink | join | aggregate
-    # source
+    # source | transform | sink | join | aggregate | sql_exec.
+    # sql_exec was added in ADR-0042 follow-up (2026-05-26) — a standalone
+    # side-effect node that runs a SQL statement and emits zero records.
+    kind: str
+    # source / sql_exec
     source_name: str | None = None
     query: str | None = None
     source_options: dict[str, Any] = field(default_factory=dict)
+    # sql_exec — the SQL the node runs at execution time.
+    sql_statement: str | None = None
     # transform
     transform_fn: TransformFn | None = None
     # sink
@@ -457,6 +462,26 @@ def execute_graph_node(
             raise TaskError(f"Graph source '{node.source_name}' is not a BatchSource")
         recs = list(source.read(query=node.query, **node.source_options))
         return NodeResult(output=recs, records_read=len(recs))
+    if node.kind == "sql_exec":
+        # Standalone SQL-execution node (ADR-0042 follow-up). Runs the
+        # statement against the named connection and emits zero records;
+        # downstream nodes (if any) see an empty stream. Reuses the same
+        # ``SqlExecutor`` capability the sink ``pre_sql`` mechanism uses
+        # so behaviour is identical regardless of where the SQL runs.
+        if not node.source_name:
+            raise TaskError(f"sql_exec node {node.id!r} has no connection")
+        if not node.sql_statement:
+            raise TaskError(f"sql_exec node {node.id!r} has no statement")
+        target = connectors.get(node.source_name)
+        if target is None:
+            raise TaskError(f"No connector for sql_exec '{node.source_name}'")
+        if not isinstance(target, SqlExecutor):
+            raise TaskError(
+                f"sql_exec connection {node.source_name!r} does not support "
+                f"execute_statement (must implement SqlExecutor)"
+            )
+        target.execute_statement(node.sql_statement)
+        return NodeResult(output=[], records_read=0)
     if node.kind == "transform":
         if len(inputs) != 1:
             raise TaskError(f"transform node {node.id!r} takes exactly one input")

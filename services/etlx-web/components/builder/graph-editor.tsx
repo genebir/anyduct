@@ -20,7 +20,11 @@ import {
   ContextMenuSubmenu,
   useContextMenu,
 } from "@/components/ui/context-menu";
-import { OPERATOR_KIND_GROUPS, operatorAllowedForMode } from "@/lib/operators";
+import {
+  OPERATOR_KIND_GROUPS,
+  getOperatorLabel,
+  operatorAllowedForMode,
+} from "@/lib/operators";
 import type { ConnectionSummary } from "@/lib/api";
 import {
   makeGraphNode,
@@ -369,7 +373,7 @@ export function GraphEditor({
                       key={spec.id}
                       onSelect={() => addOperator(spec.id, paneTargetRef.current ?? undefined)}
                     >
-                      {spec.label}
+                      {getOperatorLabel(spec, t)}
                     </ContextMenuItem>
                   ))}
                 </div>

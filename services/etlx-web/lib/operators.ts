@@ -159,6 +159,35 @@ export function operatorAllowedForMode(
   return mode === "stream" ? spec.streaming === true : spec.streaming !== true;
 }
 
+/** Look up the locale-aware label / description for an operator.
+ *
+ *  Phase L2 (2026-05-26 user request "각 Operator에 대한 설명 또한 한/영
+ *  전환이 가능하도록"). Each operator declares its English label /
+ *  description inline; the i18n table at ``lib/i18n/messages.ts``
+ *  ships matching ``op.<id>.label`` / ``op.<id>.description`` keys
+ *  for both languages. The helper does a typed lookup with safe
+ *  fallback to the inline string so newly-added operators that haven't
+ *  been translated yet still render (just untranslated) — no crash,
+ *  no empty card.
+ */
+import type { Messages } from "@/lib/i18n/messages";
+
+type Translate = (key: keyof Messages, vars?: Record<string, string | number>) => string;
+
+export function getOperatorLabel(spec: OperatorSpec, t: Translate): string {
+  const key = `op.${spec.id}.label` as keyof Messages;
+  const v = t(key);
+  // ``t()`` returns the key itself when missing — fall back to the
+  // operator's inline English label in that case.
+  return v === key ? spec.label : v;
+}
+
+export function getOperatorDescription(spec: OperatorSpec, t: Translate): string {
+  const key = `op.${spec.id}.description` as keyof Messages;
+  const v = t(key);
+  return v === key ? spec.description : v;
+}
+
 // Incremental / backfill cursor (ADR-0039). Optional on RDBMS sources; enables
 // the Backfill action to read a value range via the connector's read_since.
 const CURSOR_COLUMN_FIELD: FieldDef = {
@@ -343,6 +372,35 @@ const SOURCES: OperatorSpec[] = [
         kind: "json",
         placeholder: '{"status": "active", "limit": 100}',
         help: "JSON object of query params sent on every request.",
+      },
+    ],
+  },
+  {
+    // ADR-0042 follow-up (2026-05-26 user request "Run SQL 또한 Before
+    // load가 아닌 그냥 SQL 수행을 위한 Operator로 SOURCE와 통합한 형태
+    // 로 제공"). Backed by the new GRAPH_NODE_TYPE ``sql_exec`` — the
+    // graph executor runs ``execute_statement`` on the named connection
+    // and emits zero records. ``anyConnection`` so the user can target
+    // any DB / SqlExecutor-capable connection in the workspace.
+    id: "source:sql_exec",
+    kind: "source",
+    connectorType: "sql_exec",
+    label: "Run SQL",
+    description:
+      "Execute a SQL statement against a connection (DDL, DELETE, MERGE…). Stands alone — no source/sink chain needed.",
+    icon: DatabaseZapIcon,
+    accent: "#FBBF24",
+    anyConnection: true,
+    fields: [
+      { key: "connection", label: "Connection", kind: "connection", required: true },
+      {
+        key: "statement",
+        label: "SQL statement",
+        kind: "string",
+        multiline: true,
+        required: true,
+        placeholder: "DELETE FROM public.orders WHERE batch_date = '2026-05-21'",
+        help: "Runs once when the pipeline reaches this node. Pure side effect — emits no records.",
       },
     ],
   },
@@ -622,29 +680,6 @@ const TRANSFORMS: OperatorSpec[] = [
         kind: "string",
         placeholder: "amount must be non-negative",
         help: "Optional. Rendered into the run's error message when the assertion fails. Defaults to the condition text.",
-      },
-    ],
-  },
-  {
-    id: "transform:sql_exec",
-    kind: "transform",
-    connectorType: "sql_exec",
-    label: "Run SQL (before load)",
-    description:
-      "Execute a SQL statement (e.g. DELETE) once before the load — for idempotent re-runs (delete-then-insert).",
-    icon: DatabaseZapIcon,
-    accent: "#FBBF24",
-    anyConnection: true,
-    fields: [
-      { key: "connection", label: "Connection", kind: "connection", required: true },
-      {
-        key: "statement",
-        label: "SQL statement",
-        kind: "string",
-        multiline: true,
-        required: true,
-        placeholder: "DELETE FROM public.orders WHERE batch_date = '2026-05-21'",
-        help: "Runs once before reading, against the chosen connection. Clears the rows this run re-inserts so re-running doesn't duplicate data.",
       },
     ],
   },

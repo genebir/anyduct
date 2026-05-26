@@ -428,22 +428,12 @@ export function validateGraph(state: GraphBuilderState): string[] {
  */
 export function validateGraphStructured(state: GraphBuilderState): GraphIssue[] {
   const issues: GraphIssue[] = [];
-  const sources = state.nodes.filter((n) => findOperator(n.operatorId)?.kind === "source");
-  const sinks = state.nodes.filter((n) => findOperator(n.operatorId)?.kind === "sink");
-  if (sources.length === 0) {
-    issues.push({
-      kind: "missing_source",
-      message: "graph needs at least one source",
-      nodeId: null,
-    });
-  }
-  if (sinks.length === 0) {
-    issues.push({
-      kind: "missing_sink",
-      message: "graph needs at least one sink",
-      nodeId: null,
-    });
-  }
+  // L2 2026-05-26 user request "SOURCE로 시작, SINK로 끝나야한다는
+  // 강제성 제거" — drop the "≥1 source / ≥1 sink" rules. A graph that
+  // only contains a standalone Run SQL source (side-effect only, no
+  // downstream) is now valid; structural per-node rules still apply
+  // (transforms/sinks need exactly 1 incoming edge, join needs ≥2)
+  // so a dangling sink-with-no-input still surfaces as an issue.
   const indeg = new Map<string, number>();
   for (const e of state.edges) indeg.set(e.target, (indeg.get(e.target) ?? 0) + 1);
   for (const n of state.nodes) {
@@ -527,7 +517,12 @@ export function serializeGraph(
       };
     }
     // source / sink — connector fields are stored flat on the node data.
-    return { id: n.id, type: kind, ...n.data };
+    // The standalone "Run SQL" operator (ADR-0042 follow-up) is a source
+    // kind on the client (for palette + validation reasons) but the
+    // server distinguishes it via GraphNodeConfig.type === "sql_exec",
+    // so emit that wire type instead of plain "source".
+    const wireType = op?.connectorType === "sql_exec" ? "sql_exec" : kind;
+    return { id: n.id, type: wireType, ...n.data };
   });
   const edges = state.edges.map((e) => {
     const out: { from_node: string; to_node: string; when?: string } = {
@@ -639,6 +634,12 @@ export function deserializeGraph(
         (op) => op.kind === "transform" && op.connectorType === n.type,
       );
       operatorId = spec?.id ?? "transform:filter";
+      data = stripType({ ...n });
+      delete (data as Record<string, unknown>).id;
+    } else if (n.type === "sql_exec") {
+      // ADR-0042 follow-up — standalone Run SQL node. Re-attach to the
+      // source-kind catalogue entry whose connectorType matches.
+      operatorId = "source:sql_exec";
       data = stripType({ ...n });
       delete (data as Record<string, unknown>).id;
     } else {

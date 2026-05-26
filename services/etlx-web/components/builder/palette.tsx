@@ -5,6 +5,8 @@ import { ChevronDownIcon, GripVerticalIcon, SearchIcon } from "lucide-react";
 import { cn } from "@/lib/cn";
 import {
   OPERATOR_KIND_GROUPS,
+  getOperatorDescription,
+  getOperatorLabel,
   operatorAllowedForMode,
   type OperatorKind,
   type OperatorSpec,
@@ -27,12 +29,16 @@ export function Palette({
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
   const q = query.trim().toLowerCase();
+  // Search now hits the translated label / description too — analysts
+  // typing "조인" find the join operator (Phase L2 i18n).
   const matches = (spec: OperatorSpec) =>
     operatorAllowedForMode(spec, mode) &&
     (variant === "graph" || !spec.graphOnly) &&
     (!q ||
       spec.label.toLowerCase().includes(q) ||
       spec.description.toLowerCase().includes(q) ||
+      getOperatorLabel(spec, t).toLowerCase().includes(q) ||
+      getOperatorDescription(spec, t).toLowerCase().includes(q) ||
       (spec.connectorType ?? "").toLowerCase().includes(q));
 
   // Filter the kind→category tree by the search query + pipeline mode, dropping empties.
@@ -134,7 +140,10 @@ export const PALETTE_DND_MIME = "application/x-etlx-operator-id";
  * the same operators.
  */
 function OperatorDragHandle({ spec }: { spec: OperatorSpec }) {
+  const { t } = useLocale();
   const Icon = spec.icon;
+  const label = getOperatorLabel(spec, t);
+  const description = getOperatorDescription(spec, t);
   return (
     <div
       role="listitem"
@@ -142,10 +151,10 @@ function OperatorDragHandle({ spec }: { spec: OperatorSpec }) {
       onDragStart={(e) => {
         e.dataTransfer.setData(PALETTE_DND_MIME, spec.id);
         // Plain text fallback so other apps see *something* sensible.
-        e.dataTransfer.setData("text/plain", spec.label);
+        e.dataTransfer.setData("text/plain", label);
         e.dataTransfer.effectAllowed = "copy";
       }}
-      title={spec.description}
+      title={description}
       className={cn(
         "group flex select-none items-start gap-2 rounded-md border border-transparent px-2 py-2 text-left transition duration-150",
         "cursor-grab hover:border-border-subtle hover:bg-overlay active:cursor-grabbing",
@@ -159,9 +168,9 @@ function OperatorDragHandle({ spec }: { spec: OperatorSpec }) {
         <Icon size={14} />
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block text-sm font-medium text-text">{spec.label}</span>
+        <span className="block text-sm font-medium text-text">{label}</span>
         <span className="block truncate text-[11px] text-text-muted">
-          {spec.description}
+          {description}
         </span>
       </span>
       <GripVerticalIcon

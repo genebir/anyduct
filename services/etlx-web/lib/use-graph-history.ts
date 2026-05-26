@@ -37,6 +37,12 @@ export interface GraphHistory {
   redo: () => void;
   canUndo: boolean;
   canRedo: boolean;
+  /** Position within the stack of the currently-visible snapshot. Useful
+   *  for tying "saved" state to the history — callers stash the index
+   *  at save time and compare against this on every render to decide
+   *  whether the graph differs from the last persisted version. ``-1``
+   *  while the stack is empty (no initial loaded yet). */
+  index: number;
 }
 
 const DEFAULT_CAPACITY = 100;
@@ -106,6 +112,7 @@ export function useGraphHistory(capacity = DEFAULT_CAPACITY): GraphHistory {
       redo,
       canUndo: index > 0,
       canRedo: index >= 0 && index < stack.length - 1,
+      index,
     }),
     [state, commit, setInitial, undo, redo, index, stack.length],
   );

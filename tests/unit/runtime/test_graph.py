@@ -125,11 +125,66 @@ def test_cycle_rejected() -> None:
         )
 
 
-def test_requires_source_and_sink() -> None:
-    with pytest.raises(ValueError, match="at least one source"):
+def test_source_only_graph_is_valid() -> None:
+    """ADR-0042 follow-up (2026-05-26): a graph with only a source node
+    and no sink is valid. The structural per-node rules still hold —
+    the sole source has indegree 0, no further nodes to break."""
+    cfg = GraphConfig.model_validate({"nodes": [_node("s", "source", connection="a")], "edges": []})
+    assert len(cfg.nodes) == 1
+
+
+def test_sink_only_graph_fails_on_structural_rule() -> None:
+    """A lone sink without an upstream still fails — sinks need exactly
+    one incoming edge. The error is now structural (about the sink's
+    indegree), not about a missing-source count."""
+    with pytest.raises(ValueError, match="exactly one incoming edge"):
         GraphConfig.model_validate({"nodes": [_node("k", "sink", connection="c")], "edges": []})
-    with pytest.raises(ValueError, match="at least one sink"):
-        GraphConfig.model_validate({"nodes": [_node("s", "source", connection="a")], "edges": []})
+
+
+# ---------- sql_exec standalone node (ADR-0042 follow-up) ----------
+
+
+def test_sql_exec_standalone_graph_is_valid() -> None:
+    """ADR-0042 follow-up: a graph made of a single ``sql_exec`` node
+    (no source / no sink) is valid. The node has no incoming edges and
+    no outgoing — pure side effect, like a maintenance MERGE."""
+    cfg = GraphConfig.model_validate(
+        {
+            "nodes": [
+                _node("x", "sql_exec", connection="db", statement="DELETE FROM t"),
+            ],
+            "edges": [],
+        }
+    )
+    assert cfg.nodes[0].type == "sql_exec"
+
+
+def test_sql_exec_requires_connection_and_statement() -> None:
+    """Missing connection or statement raises at validate time so the
+    POST /pipelines returns a clear 4xx rather than a generic 500."""
+    with pytest.raises(ValueError, match="connection"):
+        GraphConfig.model_validate(
+            {"nodes": [_node("x", "sql_exec", statement="DELETE FROM t")], "edges": []}
+        )
+    with pytest.raises(ValueError, match="statement"):
+        GraphConfig.model_validate(
+            {"nodes": [_node("x", "sql_exec", connection="db")], "edges": []}
+        )
+
+
+def test_sql_exec_must_have_no_incoming_edges() -> None:
+    """Structurally a sql_exec node is source-like — indegree must be 0
+    so a typo (chaining a transform into it) raises immediately."""
+    with pytest.raises(ValueError, match="must have no incoming edges"):
+        GraphConfig.model_validate(
+            {
+                "nodes": [
+                    _node("s", "source", connection="a"),
+                    _node("x", "sql_exec", connection="db", statement="DELETE"),
+                ],
+                "edges": [{"from_node": "s", "to_node": "x"}],
+            }
+        )
 
 
 # ---------- to_graph: single-task lowering ----------

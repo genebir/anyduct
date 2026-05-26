@@ -80,6 +80,10 @@ export default function RunDetailPage() {
     url: string;
   } | null>(null);
   const logsEndRef = useRef<HTMLDivElement | null>(null);
+  // Toast side-resource failures (logs / metrics / node-runs) at most once
+  // per mount — polling re-runs the tick every 2s while a run is live and
+  // a stuck 500 on logs would otherwise spam the operator every refresh.
+  const toastedSideErrorRef = useRef<Set<string>>(new Set());
 
   // Poll the trio (run / logs / metrics) until status is terminal. Once
   // terminal, fetch one more time and stop.
@@ -110,32 +114,52 @@ export default function RunDetailPage() {
         );
         return true;
       }
-      // Run exists — fetch the rest in parallel. Failures here log but
-      // don't poison the page (worst case logs/metrics/node-runs stay
-      // null and the panels show their own "no entries" copy).
-      try {
-        const [l, m, n] = await Promise.all([
-          runsApi.logs(workspaceId, id, { limit: 1000 }),
-          runsApi.metrics(workspaceId, id),
-          runsApi.nodeRuns(workspaceId, id),
-        ]);
-        if (cancelled) return true;
-        setRun(r);
-        setLogs(l);
-        setMetrics(m);
-        setNodeRuns(n);
-        return TERMINAL.has(r.status);
-      } catch (err) {
-        if (cancelled) return true;
-        // Log/metric/node-run side resource failed but the run itself is
-        // fine — surface the data we got, toast the partial failure.
-        setRun(r);
-        if (err instanceof ApiError) {
-          // eslint-disable-next-line no-console
-          console.warn("runDetail subresource failed", err.status, err.message);
+      // Run exists — fetch each side resource INDEPENDENTLY. If we bundle
+      // them in a Promise.all, one rejection drops all three (e.g., a
+      // serialization error on logs would also blank out metrics + node-
+      // runs). Settle each on its own so panels with healthy data still
+      // render. Failures land as the panel's own "empty list" + a one-
+      // time toast so the user knows it's a fetch problem, not "no data".
+      setRun(r);
+      const [logsR, metricsR, nodeRunsR] = await Promise.allSettled([
+        runsApi.logs(workspaceId, id, { limit: 1000 }),
+        runsApi.metrics(workspaceId, id),
+        runsApi.nodeRuns(workspaceId, id),
+      ]);
+      if (cancelled) return true;
+      if (logsR.status === "fulfilled") {
+        setLogs(logsR.value);
+      } else {
+        // Empty list (not null) so the LogView shows "no logs yet" instead
+        // of the indefinite loading spinner.
+        setLogs([]);
+        const e = logsR.reason;
+        if (!toastedSideErrorRef.current.has("logs")) {
+          toastedSideErrorRef.current.add("logs");
+          toast.error(
+            e instanceof ApiError
+              ? `logs: ${e.status} ${e.message}`
+              : `logs: ${String(e)}`,
+          );
         }
-        return TERMINAL.has(r.status);
+        // eslint-disable-next-line no-console
+        console.warn("runDetail logs failed", e);
       }
+      if (metricsR.status === "fulfilled") {
+        setMetrics(metricsR.value);
+      } else {
+        setMetrics([]);
+        // eslint-disable-next-line no-console
+        console.warn("runDetail metrics failed", metricsR.reason);
+      }
+      if (nodeRunsR.status === "fulfilled") {
+        setNodeRuns(nodeRunsR.value);
+      } else {
+        setNodeRuns([]);
+        // eslint-disable-next-line no-console
+        console.warn("runDetail node-runs failed", nodeRunsR.reason);
+      }
+      return TERMINAL.has(r.status);
     }
 
     let timer: number | undefined;

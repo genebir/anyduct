@@ -28,8 +28,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from collections.abc import AsyncIterator
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -53,6 +55,8 @@ from etlx_server.db.enums import RunStatus, WorkspaceRole
 from etlx_server.dependencies import get_session, get_session_factory
 from etlx_server.node_runs import NodeRunRepository
 from etlx_server.runs.repository import RunNotRetryableError, RunRepository
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/workspaces/{workspace_id}/runs", tags=["runs"])
 
@@ -118,7 +122,36 @@ async def list_run_logs(
     if run is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run not found")
     logs = await repo.list_logs(run_id=run.id, limit=limit, offset=offset)
-    return [RunLogEntry.model_validate(row) for row in logs]
+    return _validate_rows(logs, RunLogEntry, kind="log", run_id=run.id)
+
+
+def _validate_rows(
+    rows: list[Any],
+    cls: Any,
+    *,
+    kind: str,
+    run_id: UUID,
+) -> list[Any]:
+    """Per-row Pydantic validation: skip a single corrupt row instead of
+    500'ing the whole endpoint (a stuck panel hides ALL the data the user
+    came for). Bad rows log a warning so we still see them server-side."""
+    out: list[Any] = []
+    skipped = 0
+    for row in rows:
+        try:
+            out.append(cls.model_validate(row))
+        except Exception as e:
+            skipped += 1
+            logger.warning(
+                "run %s %s row %s failed validation: %s",
+                run_id,
+                kind,
+                getattr(row, "id", "<no-id>"),
+                e,
+            )
+    if skipped:
+        logger.warning("run %s: skipped %d corrupt %s row(s)", run_id, skipped, kind)
+    return out
 
 
 @router.get("/{run_id}/metrics", response_model=list[RunMetricEntry])
@@ -132,7 +165,7 @@ async def list_run_metrics(
     if run is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run not found")
     metrics = await repo.list_metrics(run_id=run.id)
-    return [RunMetricEntry.model_validate(m) for m in metrics]
+    return _validate_rows(metrics, RunMetricEntry, kind="metric", run_id=run.id)
 
 
 @router.get("/{run_id}/node-runs", response_model=list[NodeRunEntry])
@@ -152,7 +185,7 @@ async def list_run_node_runs(
     if run is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run not found")
     rows = await NodeRunRepository().list_for_run(session, run_id=run.id)
-    return [NodeRunEntry.model_validate(r) for r in rows]
+    return _validate_rows(rows, NodeRunEntry, kind="node-run", run_id=run.id)
 
 
 # --- Action endpoints (Step 8.6) -------------------------------------------

@@ -68,6 +68,18 @@ export default function RunDetailPage() {
   const [metrics, setMetrics] = useState<RunMetricEntry[] | null>(null);
   const [nodeRuns, setNodeRuns] = useState<NodeRunEntry[] | null>(null);
   const [retrying, setRetrying] = useState(false);
+  // Phase M (2026-05-26): drill-down filter for the log panel. ``null``
+  // means "all logs" — the default. Setting it to a node id (via the
+  // NODE chip in LogView or the click on a node card in RunDagGraph)
+  // appends ``?node_id=<id>`` to the next /logs poll so the server
+  // returns only that node's window. The polling effect below reads
+  // this value via a ref so changing the filter doesn't tear down the
+  // whole tick loop.
+  const [nodeFilter, setNodeFilter] = useState<string | null>(null);
+  const nodeFilterRef = useRef<string | null>(null);
+  useEffect(() => {
+    nodeFilterRef.current = nodeFilter;
+  }, [nodeFilter]);
   // Tracked separately so the page can render a clear "this run doesn't
   // exist" empty state instead of a permanent loading shimmer when the
   // backend returns 404 (deleted / wrong workspace / stale list). Carries
@@ -121,8 +133,17 @@ export default function RunDetailPage() {
       // render. Failures land as the panel's own "empty list" + a one-
       // time toast so the user knows it's a fetch problem, not "no data".
       setRun(r);
+      // Honour the active node filter on every poll — re-applying it
+      // each tick (instead of carrying client-side state) keeps the
+      // server query selective even for long runs with thousands of
+      // log lines, and means the autoscroll bottom-ref still works.
+      const logsQuery = { limit: 1000 } as {
+        limit?: number;
+        node_id?: string;
+      };
+      if (nodeFilterRef.current) logsQuery.node_id = nodeFilterRef.current;
       const [logsR, metricsR, nodeRunsR] = await Promise.allSettled([
-        runsApi.logs(workspaceId, id, { limit: 1000 }),
+        runsApi.logs(workspaceId, id, logsQuery),
         runsApi.metrics(workspaceId, id),
         runsApi.nodeRuns(workspaceId, id),
       ]);
@@ -185,6 +206,32 @@ export default function RunDetailPage() {
   useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [logs?.length]);
+
+  // Filter change → immediate refetch (don't wait up to 2s for the next
+  // polling tick). Phase M (2026-05-26). Skipped while run/ws aren't
+  // ready — the initial load + polling loop will pick up the filter on
+  // its first tick.
+  useEffect(() => {
+    if (!ws || !run) return;
+    let cancelled = false;
+    const query = nodeFilter
+      ? { limit: 1000, node_id: nodeFilter }
+      : { limit: 1000 };
+    runsApi.logs(ws.id, run.id, query).then(
+      (fresh) => {
+        if (!cancelled) setLogs(fresh);
+      },
+      () => {
+        // Filter applied to an empty/erroring window — surface as the
+        // panel's empty state. The polling loop's own error handling
+        // already covers the toast.
+        if (!cancelled) setLogs([]);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [ws, run, nodeFilter]);
 
   const grouped = useMemo(() => groupMetrics(metrics ?? []), [metrics]);
 
@@ -292,7 +339,16 @@ export default function RunDetailPage() {
                 title={t("runDetail.dag")}
                 description={t("runDetail.dagDesc", { count: nodeRuns.length })}
               />
-              <RunDagGraph nodes={nodeRuns} />
+              {/* Clicking a node card filters the log panel below to
+                  that node's window (Phase M, 2026-05-26 user request).
+                  Same node clicked twice clears the filter. */}
+              <RunDagGraph
+                nodes={nodeRuns}
+                selectedNodeId={nodeFilter}
+                onSelectNode={(id) =>
+                  setNodeFilter((cur) => (cur === id ? null : id))
+                }
+              />
             </Card>
           ) : null}
         {!notFound ? (
@@ -305,8 +361,29 @@ export default function RunDetailPage() {
                   ? t("common.loading")
                   : t("runDetail.entries", { count: logs.length })
               }
+              action={
+                nodeFilter ? (
+                  // Active filter chip — click clears the filter. Same
+                  // role as a "Clear" button in a search bar.
+                  <button
+                    type="button"
+                    onClick={() => setNodeFilter(null)}
+                    className="inline-flex items-center gap-1 rounded-sm border border-accent/40 bg-accent/10 px-2 py-1 text-xs font-medium text-accent hover:bg-accent/20"
+                    title={t("runDetail.clearNodeFilter")}
+                  >
+                    <span className="font-mono">{nodeFilter}</span>
+                    <span aria-hidden>×</span>
+                  </button>
+                ) : null
+              }
             />
-            <LogView logs={logs} bottomRef={logsEndRef} t={t} />
+            <LogView
+              logs={logs}
+              bottomRef={logsEndRef}
+              nodeFilter={nodeFilter}
+              onSelectNode={setNodeFilter}
+              t={t}
+            />
           </Card>
 
           <div className="flex flex-col gap-6">
@@ -350,10 +427,18 @@ export default function RunDetailPage() {
 function LogView({
   logs,
   bottomRef,
+  nodeFilter,
+  onSelectNode,
   t,
 }: {
   logs: RunLogEntry[] | null;
   bottomRef: React.RefObject<HTMLDivElement | null>;
+  /** Currently-applied node filter — affects which logs render + the
+   *  "X" chip near the panel header. ``null`` = show all. */
+  nodeFilter: string | null;
+  /** Clicking the NODE chip on a row sets the filter to that node;
+   *  passing ``null`` clears it. */
+  onSelectNode: (nodeId: string | null) => void;
   t: Translate;
 }) {
   if (logs === null) {
@@ -366,7 +451,7 @@ function LogView({
   if (logs.length === 0) {
     return (
       <div className="py-8 text-center text-sm text-text-muted">
-        {t("runDetail.noLogs")}
+        {nodeFilter !== null ? t("runDetail.noLogsForNode") : t("runDetail.noLogs")}
       </div>
     );
   }
@@ -389,6 +474,36 @@ function LogView({
             >
               {entry.level}
             </span>
+            {/* NODE column — sits immediately right of LEVEL per the
+                Phase M (2026-05-26) user request "LEVEL 오른쪽에 해당 NODE
+                정보 넣어서". Click filters the log panel to that node's
+                window; the chip is a button so it gets the same pointer
+                cursor + focus ring as other interactive bits. Run-level
+                logs (build / connector setup / summary) render ``—`` as
+                the placeholder so the columns stay aligned. */}
+            <button
+              type="button"
+              onClick={() =>
+                onSelectNode(entry.node_id === nodeFilter ? null : entry.node_id)
+              }
+              disabled={!entry.node_id}
+              title={
+                entry.node_id
+                  ? t("runDetail.filterByNodeTitle", { node: entry.node_id })
+                  : t("runDetail.runLevelLog")
+              }
+              className={cn(
+                "w-32 shrink-0 truncate text-left",
+                entry.node_id
+                  ? "text-accent hover:underline"
+                  : "text-text-muted/60 cursor-default",
+                entry.node_id === nodeFilter && entry.node_id
+                  ? "font-semibold underline"
+                  : "",
+              )}
+            >
+              {entry.node_id ?? "—"}
+            </button>
             <div className="min-w-0 flex-1">
               <span className="text-text">{entry.message}</span>
               {Object.keys(entry.context_json).length > 0 ? (

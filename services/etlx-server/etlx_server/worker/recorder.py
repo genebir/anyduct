@@ -126,13 +126,23 @@ def log_processor(
 
     level_str = event_dict.get("level", method_name)
     message = str(event_dict.get("event", ""))
+    # Phase M (2026-05-26): pull ``node_id`` out of the event_dict (set by
+    # the worker via ``structlog.contextvars.bind_contextvars(node_id=...)``
+    # around each node's execution and merged in by ``merge_contextvars``)
+    # so the recorder can persist it as a first-class column. Removed from
+    # the context dict to avoid duplicating it in ``context_json``.
+    raw_node_id = event_dict.get("node_id")
+    node_id = str(raw_node_id) if raw_node_id else None
     context = {
-        k: v for k, v in event_dict.items() if k not in {"event", "run_id", "level", "timestamp"}
+        k: v
+        for k, v in event_dict.items()
+        if k not in {"event", "run_id", "level", "timestamp", "node_id"}
     }
     rec.enqueue_log(
         level=_coerce_level(level_str),
         message=message,
         context=context,
+        node_id=node_id,
     )
     return event_dict
 
@@ -190,12 +200,25 @@ def _current_recorder() -> RunRecorder | None:
 
 
 class _LogEntry:
-    __slots__ = ("context", "level", "message", "ts")
+    __slots__ = ("context", "level", "message", "node_id", "ts")
 
-    def __init__(self, *, level: LogLevel, message: str, context: dict[str, Any]) -> None:
+    def __init__(
+        self,
+        *,
+        level: LogLevel,
+        message: str,
+        context: dict[str, Any],
+        node_id: str | None = None,
+    ) -> None:
         self.level = level
         self.message = message
         self.context = context
+        # Phase M (2026-05-26): captured separately from context_json so
+        # the run-detail UI can filter by node without parsing the
+        # context blob. ``None`` means "run-level log" (build, summary,
+        # connector setup — anything outside a specific node's
+        # execution window).
+        self.node_id = node_id
         self.ts = datetime.now(UTC)
 
 
@@ -266,8 +289,15 @@ class RunRecorder:
 
     # ---- producer side (thread-safe) -------------------------------------
 
-    def enqueue_log(self, *, level: LogLevel, message: str, context: dict[str, Any]) -> None:
-        self._log_q.put(_LogEntry(level=level, message=message, context=context))
+    def enqueue_log(
+        self,
+        *,
+        level: LogLevel,
+        message: str,
+        context: dict[str, Any],
+        node_id: str | None = None,
+    ) -> None:
+        self._log_q.put(_LogEntry(level=level, message=message, context=context, node_id=node_id))
 
     def enqueue_metric(self, *, name: str, value: float, attrs: dict[str, Any]) -> None:
         self._metric_q.put(_MetricEntry(name=name, value=value, attrs=attrs))
@@ -339,6 +369,7 @@ class RunRecorder:
                             ts=entry.ts,
                             level=entry.level,
                             message=entry.message,
+                            node_id=entry.node_id,
                             context_json=entry.context,
                         )
                     )

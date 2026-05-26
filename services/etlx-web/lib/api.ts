@@ -207,6 +207,10 @@ export interface RunLogEntry {
   id: string;
   ts: string;
   level: LogLevel;
+  /** Graph node that emitted this log line, or ``null`` for run-level
+   *  logs (build / connector setup / summary). Populated server-side
+   *  by the worker's structlog ContextVar bind (Phase M, 2026-05-26). */
+  node_id: string | null;
   message: string;
   context_json: Record<string, unknown>;
 }
@@ -531,9 +535,13 @@ export const runsApi = {
   logs: (
     workspaceId: string,
     runId: string,
-    query: { limit?: number; offset?: number } = {},
+    query: { limit?: number; offset?: number; node_id?: string } = {},
   ) =>
     api<RunLogEntry[]>(`/workspaces/${workspaceId}/runs/${runId}/logs`, {
+      // ``node_id`` is the filter knob added in Phase M (2026-05-26):
+      //   * undefined / omitted → all logs
+      //   * any string          → just that graph node's logs
+      //   * "__run__"           → only run-level (build / setup / summary)
       query,
     }),
   metrics: (workspaceId: string, runId: string) =>

@@ -113,6 +113,14 @@ async def list_run_logs(
     session: AsyncSession = Depends(get_session),  # noqa: B008
     limit: int = Query(default=200, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
+    node_id: str | None = Query(
+        default=None,
+        description=(
+            "Filter logs to one graph node's execution window. The special "
+            "value ``__run__`` returns only run-level logs (node_id IS NULL: "
+            "build / connector setup / summary). Omit for all logs."
+        ),
+    ),
 ) -> list[RunLogEntry]:
     repo = RunRepository(session)
     # Confirm the run belongs to this workspace before exposing its logs —
@@ -121,7 +129,7 @@ async def list_run_logs(
     run = await repo.get(workspace_id=ctx.workspace.id, run_id=run_id)
     if run is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run not found")
-    logs = await repo.list_logs(run_id=run.id, limit=limit, offset=offset)
+    logs = await repo.list_logs(run_id=run.id, limit=limit, offset=offset, node_id=node_id)
     return _validate_rows(logs, RunLogEntry, kind="log", run_id=run.id)
 
 

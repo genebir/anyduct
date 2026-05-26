@@ -663,6 +663,11 @@ export const en = {
   "runDetail.entries": "{count} entr(ies)",
   "runDetail.noLogs":
     "No logs yet. They'll appear as the worker emits structlog events.",
+  // Phase M (2026-05-26) — per-node log filtering.
+  "runDetail.noLogsForNode": "No logs from this node yet.",
+  "runDetail.filterByNodeTitle": "Show only logs from {node}",
+  "runDetail.runLevelLog": "Run-level log (build / connector setup / summary)",
+  "runDetail.clearNodeFilter": "Clear node filter",
   "runDetail.summary": "Summary",
   "runDetail.metrics": "Metrics",
   "runDetail.points": "{count} point(s)",
@@ -1450,6 +1455,11 @@ export const ko: Messages = {
   "runDetail.logs": "로그",
   "runDetail.entries": "{count}개 항목",
   "runDetail.noLogs": "아직 로그가 없습니다. 워커가 structlog 이벤트를 내보내면 표시됩니다.",
+  // Phase M (2026-05-26) — 노드별 로그 필터.
+  "runDetail.noLogsForNode": "이 노드에서 발생한 로그가 아직 없습니다.",
+  "runDetail.filterByNodeTitle": "{node} 노드의 로그만 표시",
+  "runDetail.runLevelLog": "런 레벨 로그 (build / connector setup / summary)",
+  "runDetail.clearNodeFilter": "노드 필터 해제",
   "runDetail.summary": "요약",
   "runDetail.metrics": "메트릭",
   "runDetail.points": "{count}개 포인트",

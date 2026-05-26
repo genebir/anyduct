@@ -94,11 +94,25 @@ class RunRepository:
         run_id: UUID,
         limit: int = _DEFAULT_LIMIT,
         offset: int = 0,
+        node_id: str | None = None,
     ) -> list[RunLog]:
+        """List run_logs, optionally filtered to one node's execution.
+
+        ``node_id`` semantics (Phase M, 2026-05-26):
+            * ``None``      — no filter, return all logs.
+            * ``"__run__"`` — only run-level logs (RunLog.node_id IS NULL):
+                              build / connector setup / summary.
+            * any string    — only logs from that graph node's execution.
+        Uses the ``ix_run_logs_run_node_ts`` partial-style index so the
+        filtered query is a single index range scan even on long runs.
+        """
+        stmt = select(RunLog).where(RunLog.run_id == run_id)
+        if node_id == "__run__":
+            stmt = stmt.where(RunLog.node_id.is_(None))
+        elif node_id is not None:
+            stmt = stmt.where(RunLog.node_id == node_id)
         stmt = (
-            select(RunLog)
-            .where(RunLog.run_id == run_id)
-            .order_by(RunLog.ts)
+            stmt.order_by(RunLog.ts)
             .limit(_clamp(limit, low=1, high=_MAX_LOG_LIMIT))
             .offset(max(offset, 0))
         )

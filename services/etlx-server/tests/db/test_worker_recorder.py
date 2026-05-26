@@ -23,7 +23,7 @@ from uuid import UUID
 
 import pytest
 import structlog
-from etlx_server.db.enums import RunStatus
+from etlx_server.db.enums import LogLevel, RunStatus
 from etlx_server.db.models import (
     Connection,
     Pipeline,
@@ -233,6 +233,103 @@ async def test_recorder_writes_metrics_for_active_run(session: AsyncSession) -> 
     assert by_name["my.counter"].attrs_json == {"shard": "a"}
     assert by_name["my.hist"].value == pytest.approx(0.42)
     assert by_name["my.hist"].attrs_json == {"phase": "warm"}
+
+
+async def test_recorder_captures_node_id_from_contextvars(
+    session: AsyncSession,
+) -> None:
+    """Phase M (2026-05-26): when ``node_id`` is bound via
+    structlog.contextvars (the worker does this around each node's
+    execution), the recorder pulls it out of the event_dict and
+    persists it as a first-class column — not buried inside
+    ``context_json``."""
+    from structlog.contextvars import bind_contextvars, unbind_contextvars
+
+    ws = await _seed_workspace(session, slug="rec-node")
+    p = Pipeline(workspace_id=ws.id, name="p")
+    session.add(p)
+    await session.flush()
+    pv = PipelineVersion(pipeline_id=p.id, version=1, config_json={"name": "p"}, is_current=True)
+    session.add(pv)
+    await session.flush()
+    run = Run(
+        workspace_id=ws.id,
+        pipeline_id=p.id,
+        pipeline_version_id=pv.id,
+        status=RunStatus.RUNNING,
+    )
+    session.add(run)
+    await session.flush()
+    await session.commit()
+
+    factory = _SessionFactoryAdapter(session)
+    async with RunRecorder(factory, run.id):
+        log = structlog.get_logger().bind(run_id=str(run.id))
+        # Outside any bind_contextvars — run-level log.
+        log.info("run-level event", phase="setup")
+        # Inside the bind — emulates what the worker does around each
+        # node in node_graph._run_node_in_thread.
+        bind_contextvars(node_id="node-A")
+        try:
+            log.info("hi from node A", phase="reading")
+        finally:
+            unbind_contextvars("node_id")
+        # Back to run-level after the unbind.
+        log.info("post-node summary", phase="teardown")
+
+    logs = list(
+        (await session.execute(select(RunLog).where(RunLog.run_id == run.id).order_by(RunLog.ts)))
+        .scalars()
+        .all()
+    )
+    by_msg = {row.message: row for row in logs}
+    assert by_msg["run-level event"].node_id is None
+    assert by_msg["hi from node A"].node_id == "node-A"
+    assert by_msg["post-node summary"].node_id is None
+    # node_id stripped from context_json (lives in its own column now).
+    assert "node_id" not in by_msg["hi from node A"].context_json
+
+
+async def test_repository_list_logs_filters_by_node(session: AsyncSession) -> None:
+    """``RunRepository.list_logs(node_id=...)`` returns only matching
+    rows — used by the run-detail UI when the operator clicks a node
+    card. ``__run__`` returns only run-level (NULL) rows so the user
+    can audit build / connector setup / summary logs separately."""
+    from etlx_server.runs.repository import RunRepository
+
+    ws = await _seed_workspace(session, slug="rec-flt")
+    p = Pipeline(workspace_id=ws.id, name="p")
+    session.add(p)
+    await session.flush()
+    pv = PipelineVersion(pipeline_id=p.id, version=1, config_json={"name": "p"}, is_current=True)
+    session.add(pv)
+    await session.flush()
+    run = Run(
+        workspace_id=ws.id,
+        pipeline_id=p.id,
+        pipeline_version_id=pv.id,
+        status=RunStatus.RUNNING,
+    )
+    session.add(run)
+    await session.flush()
+
+    # Seed three logs: two on different nodes + one run-level.
+    session.add_all(
+        [
+            RunLog(run_id=run.id, level=LogLevel.INFO, message="a1", node_id="A", context_json={}),
+            RunLog(run_id=run.id, level=LogLevel.INFO, message="b1", node_id="B", context_json={}),
+            RunLog(run_id=run.id, level=LogLevel.INFO, message="r1", node_id=None, context_json={}),
+        ]
+    )
+    await session.commit()
+
+    repo = RunRepository(session)
+    all_logs = await repo.list_logs(run_id=run.id)
+    assert {row.message for row in all_logs} == {"a1", "b1", "r1"}
+    node_a = await repo.list_logs(run_id=run.id, node_id="A")
+    assert [row.message for row in node_a] == ["a1"]
+    run_only = await repo.list_logs(run_id=run.id, node_id="__run__")
+    assert [row.message for row in run_only] == ["r1"]
 
 
 async def test_recorder_drops_events_after_exit(session: AsyncSession) -> None:

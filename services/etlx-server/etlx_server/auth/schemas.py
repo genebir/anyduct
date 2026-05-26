@@ -460,7 +460,12 @@ class RunDetail(RunSummary):
 
 
 class RunLogEntry(BaseModel):
-    """One row of ``GET /workspaces/{ws}/runs/{id}/logs``."""
+    """One row of ``GET /workspaces/{ws}/runs/{id}/logs``.
+
+    ``node_id`` (Phase M, 2026-05-26) is populated for logs emitted
+    inside a specific graph node's execution. ``None`` means the log
+    was emitted at run level (build / connector setup / summary etc.).
+    """
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -468,6 +473,7 @@ class RunLogEntry(BaseModel):
     ts: datetime
     level: Literal["debug", "info", "warning", "error"]
     message: str
+    node_id: str | None = None
     context_json: dict[str, Any]
 
 

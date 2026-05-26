@@ -20,6 +20,8 @@ import contextlib
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
+from structlog.contextvars import bind_contextvars, unbind_contextvars
+
 from etl_plugins.config.models import ConnectionConfig
 from etl_plugins.core.connector import Connector
 from etl_plugins.core.exceptions import TaskError
@@ -175,8 +177,21 @@ async def execute_graph_nodes_concurrent(
 
     def _run_node_in_thread(node: GraphNode, inputs: list[list[Record]]) -> object:
         """Mint per-node connector(s) in this thread, execute, close — never
-        shares connections across threads (thread-bound driver safety)."""
+        shares connections across threads (thread-bound driver safety).
+
+        Binds ``node_id`` into structlog's contextvars (Phase M,
+        2026-05-26) so every log line emitted between bind and unbind —
+        whether from connector setup, the operator itself, or its
+        teardown — automatically carries the node id. The recorder's
+        ``log_processor`` lifts it into a first-class ``run_logs.node_id``
+        column on persist; the run-detail UI uses that to filter the
+        log panel to one node when the operator clicks a card in the
+        run DAG. ``to_thread`` propagates the caller's contextvars
+        context into the worker thread, so binding here is enough — we
+        don't need to re-bind on every connector call.
+        """
         local: dict[str, Connector] = {}
+        bind_contextvars(node_id=node.id)
         try:
             for name in _connection_names_for(node):
                 if name not in conn_cfgs:
@@ -191,6 +206,7 @@ async def execute_graph_nodes_concurrent(
             for connector in local.values():
                 with contextlib.suppress(Exception):
                     connector.close()
+            unbind_contextvars("node_id")
 
     async def _run_one(nid: str) -> None:
         node = by_id[nid]

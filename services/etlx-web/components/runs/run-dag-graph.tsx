@@ -79,10 +79,19 @@ function bfsDepth(nodes: NodeRunEntry[]): Map<string, number> {
   return depth;
 }
 
-function nodeCard(n: NodeRunEntry): React.ReactNode {
+function nodeCard(n: NodeRunEntry, selected: boolean): React.ReactNode {
   const showCounters = n.records_read > 0 || n.records_written > 0;
   return (
-    <div className={cn("rounded-md border px-2 py-1.5 text-left", CARD_CLASSES[n.status])}>
+    <div
+      className={cn(
+        "rounded-md border px-2 py-1.5 text-left transition-shadow",
+        CARD_CLASSES[n.status],
+        // Selected-for-filter visual — accent ring matches the chip in
+        // the log panel header so the user sees the link between the
+        // two surfaces (Phase M, 2026-05-26).
+        selected && "ring-2 ring-accent ring-offset-1 ring-offset-bg",
+      )}
+    >
       <div className="flex items-center gap-1.5">
         <span
           className={cn("h-1.5 w-1.5 shrink-0 rounded-full", DOT_CLASSES[n.status])}
@@ -112,7 +121,18 @@ function nodeCard(n: NodeRunEntry): React.ReactNode {
   );
 }
 
-export function RunDagGraph({ nodes }: { nodes: NodeRunEntry[] }) {
+export function RunDagGraph({
+  nodes,
+  selectedNodeId,
+  onSelectNode,
+}: {
+  nodes: NodeRunEntry[];
+  /** Highlight one node card (matches the active log-panel filter). */
+  selectedNodeId?: string | null;
+  /** Clicking a node card invokes this with the node id (Phase M,
+   *  2026-05-26). Parent typically toggles the log filter to that node. */
+  onSelectNode?: (nodeId: string) => void;
+}) {
   const { rfNodes, rfEdges } = useMemo(() => {
     const depths = bfsDepth(nodes);
     // Group by depth so we can vertically center each column.
@@ -135,9 +155,17 @@ export function RunDagGraph({ nodes }: { nodes: NodeRunEntry[] }) {
       return {
         id: n.node_id,
         position: p,
-        data: { label: nodeCard(n) },
+        data: { label: nodeCard(n, selectedNodeId === n.node_id) },
         // Render our own card; clear the default xyflow node chrome.
-        style: { width: NODE_W, padding: 0, background: "transparent", border: "none" },
+        style: {
+          width: NODE_W,
+          padding: 0,
+          background: "transparent",
+          border: "none",
+          // Pointer cursor only when a click handler is wired so the
+          // affordance honestly reflects "this does something".
+          cursor: onSelectNode ? "pointer" : "default",
+        },
         sourcePosition: Position.Right,
         targetPosition: Position.Left,
       };
@@ -158,7 +186,7 @@ export function RunDagGraph({ nodes }: { nodes: NodeRunEntry[] }) {
       }
     }
     return { rfNodes, rfEdges };
-  }, [nodes]);
+  }, [nodes, selectedNodeId, onSelectNode]);
 
   return (
     <div className="h-80 w-full overflow-hidden rounded-md border border-border-subtle bg-surface">
@@ -169,7 +197,14 @@ export function RunDagGraph({ nodes }: { nodes: NodeRunEntry[] }) {
           fitView
           nodesDraggable={false}
           nodesConnectable={false}
-          elementsSelectable={false}
+          // ``elementsSelectable`` must be true for onNodeClick to fire;
+          // we still keep the node visually unselected via the custom
+          // card so the only "selection" the user sees is the accent
+          // ring we paint ourselves.
+          elementsSelectable={Boolean(onSelectNode)}
+          onNodeClick={
+            onSelectNode ? (_e, node) => onSelectNode(node.id) : undefined
+          }
           panOnDrag
           zoomOnScroll
           proOptions={{ hideAttribution: true }}

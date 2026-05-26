@@ -90,10 +90,24 @@ class Run(UUIDMixin, TimestampMixin, Base):
 
 
 class RunLog(UUIDMixin, Base):
-    """Structured log line attached to a run. 시계열 — created_at 없이 ts 직접."""
+    """Structured log line attached to a run. 시계열 — created_at 없이 ts 직접.
+
+    ``node_id`` (Phase M, 2026-05-26 user request) is populated for
+    logs emitted during node-level execution (ADR-0041 H2): the worker
+    binds ``node_id`` into a structlog ContextVar around each node, and
+    :func:`merge_contextvars` injects it into every event dict. Logs
+    with ``node_id IS NULL`` are run-level (pre-node-execution: build,
+    connectors, post-run summary, …). The UI uses this to filter the
+    log panel to one node when the user clicks a node in the run DAG.
+    """
 
     __tablename__ = "run_logs"
-    __table_args__ = (Index("ix_run_logs_run_ts", "run_id", "ts"),)
+    __table_args__ = (
+        Index("ix_run_logs_run_ts", "run_id", "ts"),
+        # Filter-by-node lookup; leading run_id keeps run-wide queries
+        # off this second index so we don't double the write cost.
+        Index("ix_run_logs_run_node_ts", "run_id", "node_id", "ts"),
+    )
 
     run_id: Mapped[UUID] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"), nullable=False)
     ts: Mapped[datetime] = mapped_column(
@@ -105,6 +119,9 @@ class RunLog(UUIDMixin, Base):
         default=LogLevel.INFO,
     )
     message: Mapped[str] = mapped_column(Text, nullable=False)
+    # NULL = run-level log; non-NULL = emitted while a specific graph
+    # node was executing. Bound by the worker via structlog ContextVar.
+    node_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     # structlog event_dict 등 추가 컨텍스트.
     context_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
 

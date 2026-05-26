@@ -10,6 +10,15 @@
 ## [Unreleased]
 
 ### Added
+- **실행 기록 — 노드별 로그 컬럼 + 필터 (Phase M, 사용자 요청 "LEVEL 오른쪽에 NODE 정보")** [ADR-0041 M] — node-level execution(ADR-0041 H2/H3) DAG 뷰는 이미 있지만 로그는 run 단위로 섞여서 어느 노드의 출력인지 알 수 없었음. 풀스택 한 슬라이스:
+  - **Alembic 0009 + RunLog.node_id 컬럼** — `(run_id, node_id, ts)` 인덱스 추가. leading run_id로 기존 run-wide 쿼리 인덱스 영향 0. 기존 행은 NULL → "run-level"(build/connector setup/summary).
+  - **워커 ContextVar bind** — `node_graph.py._run_node_in_thread`가 진입 시 `structlog.contextvars.bind_contextvars(node_id=node.id)` → `merge_contextvars` processor가 모든 event_dict에 자동 inject → `RunRecorder.log_processor`가 추출해 `RunLog.node_id`로 저장(context_json에 중복 0). `asyncio.to_thread` contextvars 전파로 워커 thread + 코어 connector 호출 모두 자동 태깅.
+  - **REST `/logs?node_id=<id>`** — 옵션 필터. 특수값 `__run__` → `node_id IS NULL`만(run-level 디버그). `RunLogEntry` DTO에 `node_id: str | None` 추가.
+  - **웹 LogView NODE 컬럼** — LEVEL 오른쪽 32-char 너비 클릭 가능 chip(accent + truncate + monospace). 클릭 = 해당 노드 로그만 필터, 같은 노드 재클릭 또는 panel 헤더 `X` chip으로 해제. run-level 로그는 `—` placeholder.
+  - **RunDagGraph 클릭 → 필터** — 노드 카드 클릭 시 해당 노드 로그만, 동일 노드에 accent ring(panel chip과 같은 색). nodeFilter 변경 즉시 재페치(2초 polling 안 기다림).
+  - **i18n**: 4 신규 키 en/ko (`runDetail.noLogsForNode`/`filterByNodeTitle`/`runLevelLog`/`clearNodeFilter`).
+  - **검증**: 2 신규 서버 it(recorder가 ContextVar bind/unbind 사이 로그만 node_id로 저장 + `RunRepository.list_logs` 필터 3분기 all/by-node/`__run__`). 서버 it 408→410 green. 코어 671 unchanged. mypy 99 src OK, ruff/web tsc clean.
+
 - **빌더 UX 후속 5종 (사용자 회신 — L2)** [ADR-0041 L2, ADR-0042 follow-up] — L1 출시 후 사용자가 5개 회신: edge label 배경 / dirty 정확도 / 운영자 설명 i18n / source-sink 강제 해제 / Run SQL standalone. 한 슬라이스로 정리.
   - **Edge 라벨 배경 투명** — graph-canvas `labelBgStyle: {fill: "transparent", fillOpacity: 0}`. "All records" / "if X" 라벨이 그리드 위에 떠 있는 듯한 클린한 인상.
   - **Undo 가능 없으면 dirty=false** — `useGraphHistory.index` 노출 + page `savedGraphIndex` 추적. `dirty = metaDirty || (savedGraphIndex !== history.index)`. Cmd+Z로 saved baseline에 돌아오면 "저장되지 않은 변경사항" 배지 자동 해제. `loadedRef` 제거(savedGraphIndex !== null이 동일 역할).

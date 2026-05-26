@@ -106,6 +106,23 @@ def test_python_transform_marks_sink_opaque() -> None:
     assert AssetKey.of("wh", "t2") in lineage.opaque_assets
 
 
+def test_custom_python_transform_marks_sink_opaque() -> None:
+    """ADR-0041 I2 — inline custom_python user code can do anything to a
+    record, so its downstream sink mapping is opaque (same posture as
+    ``python``)."""
+    cfg = _cfg(
+        transforms=[
+            {
+                "type": "custom_python",
+                "code": "def transform(record):\n    return record\n",
+            }
+        ]
+    )
+    lineage = derive_column_lineage(cfg)
+    assert lineage.edges == []
+    assert AssetKey.of("wh", "t2") in lineage.opaque_assets
+
+
 def test_select_star_marks_sink_opaque() -> None:
     cfg = _cfg(source={"connection": "wh", "query": "SELECT * FROM t1"})
     assert _is_opaque(cfg, AssetKey.of("wh", "t2"))

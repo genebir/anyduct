@@ -8,6 +8,7 @@ import type { ConnectionSummary } from "@/lib/api";
 import { TableField } from "./table-picker";
 import { ColumnsField } from "./columns-field";
 import { SourceQueryField } from "./source-query-field";
+import { PythonCodeEditor, PYTHON_CODE_STARTER } from "./python-code-editor";
 import type { BuilderNode } from "@/lib/pipeline-config";
 import {
   buildExpr,
@@ -418,6 +419,17 @@ function FieldInput({
   }
   if (field.kind === "filter") {
     return <FilterEditor value={value} onChange={onChange} t={t} />;
+  }
+  if (field.kind === "pythonCode") {
+    // Seed a starter ``transform(record)`` skeleton so first-time users have
+    // something runnable in the editor instead of a blank canvas.
+    const initial = (value as string) ?? "";
+    return (
+      <PythonCodeEditor
+        value={initial || PYTHON_CODE_STARTER}
+        onChange={(next) => onChange(next || undefined)}
+      />
+    );
   }
   if (field.kind === "string" && field.multiline) {
     return (

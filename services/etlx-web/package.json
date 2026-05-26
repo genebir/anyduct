@@ -18,6 +18,7 @@
     "test-storybook": "test-storybook"
   },
   "dependencies": {
+    "@monaco-editor/react": "^4.7.0",
     "@xyflow/react": "^12.10.2",
     "clsx": "^2.1.1",
     "cron-parser": "^5.5.0",
@@ -36,12 +37,12 @@
     "@storybook/nextjs-vite": "^9.1.0",
     "@storybook/react-vite": "^9.1.0",
     "@storybook/test-runner": "^0.23.0",
-    "axe-playwright": "^2.1.0",
     "@tailwindcss/postcss": "^4.3.0",
     "@tailwindcss/vite": "^4.3.0",
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "axe-playwright": "^2.1.0",
     "postcss": "^8.5.14",
     "storybook": "^9.1.0",
     "tailwindcss": "^4.3.0",

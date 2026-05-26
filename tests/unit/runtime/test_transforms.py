@@ -278,3 +278,72 @@ def test_dedupe_drops_repeat_keys() -> None:
 def test_dedupe_empty_key_columns_raises() -> None:
     with pytest.raises(ConfigError, match="non-empty list"):
         build_transform(TransformConfig.model_validate({"type": "dedupe", "key_columns": []}))
+
+
+# ---------- custom_python (ADR-0041 I2) ----------
+
+
+_CUSTOM_PY_HAPPY = """
+def transform(record):
+    d = dict(record.data)
+    d["upper"] = d.get("name", "").upper()
+    return record.__class__(
+        data=d,
+        metadata=record.metadata,
+        schema_version=record.schema_version,
+    )
+"""
+
+
+def test_custom_python_applies_inline_transform() -> None:
+    fn = build_transform(
+        TransformConfig.model_validate({"type": "custom_python", "code": _CUSTOM_PY_HAPPY})
+    )
+    out = fn(Record(data={"name": "ada"}))
+    assert out is not None
+    assert out.data == {"name": "ada", "upper": "ADA"}
+
+
+def test_custom_python_returning_none_filters_record() -> None:
+    code = "def transform(record):\n" "    return None if record.data.get('drop') else record\n"
+    fn = build_transform(TransformConfig.model_validate({"type": "custom_python", "code": code}))
+    assert fn(Record(data={"drop": True})) is None
+    assert fn(Record(data={"keep": 1})) is not None
+
+
+def test_custom_python_blank_code_raises() -> None:
+    with pytest.raises(ConfigError, match="non-empty string"):
+        build_transform(TransformConfig.model_validate({"type": "custom_python", "code": "   "}))
+
+
+def test_custom_python_syntax_error_raises_configerror() -> None:
+    with pytest.raises(ConfigError, match="cannot compile"):
+        build_transform(
+            TransformConfig.model_validate({"type": "custom_python", "code": "def transform(\n"})
+        )
+
+
+def test_custom_python_missing_entrypoint_raises() -> None:
+    code = "def not_transform(record):\n    return record\n"
+    with pytest.raises(ConfigError, match=r"`transform\(record\)` function"):
+        build_transform(TransformConfig.model_validate({"type": "custom_python", "code": code}))
+
+
+def test_custom_python_non_callable_entrypoint_raises() -> None:
+    code = "transform = 42\n"
+    with pytest.raises(ConfigError, match="not callable"):
+        build_transform(TransformConfig.model_validate({"type": "custom_python", "code": code}))
+
+
+def test_custom_python_runtime_error_wrapped_in_transformerror() -> None:
+    code = "def transform(record):\n    raise ValueError('nope')\n"
+    fn = build_transform(TransformConfig.model_validate({"type": "custom_python", "code": code}))
+    with pytest.raises(TransformError, match="custom_python: code raised"):
+        fn(Record(data={}))
+
+
+def test_custom_python_import_time_error_raises_configerror() -> None:
+    """Errors during module-level execution should surface at build, not runtime."""
+    code = "raise RuntimeError('boom at import')\n"
+    with pytest.raises(ConfigError, match="raised during import"):
+        build_transform(TransformConfig.model_validate({"type": "custom_python", "code": code}))

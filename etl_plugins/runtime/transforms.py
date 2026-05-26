@@ -9,6 +9,8 @@ Built-ins (SPEC.md §5.4):
     * ``cast`` — coerce values (``columns: {col: int64|float64|str|bool|timestamp, ...}``)
     * ``filter`` — keep records where a Python expression is truthy (``expr: "..."``)
     * ``python`` — apply a user callable (``callable: "module:function"``)
+    * ``custom_python`` — apply an inline Python ``transform(record)`` function
+      (``code: <source>``); ADR-0041 I2.
 
 External packages can add their own via :func:`register_transform`.
 """
@@ -255,6 +257,85 @@ def _build_python(config: TransformConfig) -> TransformFn:
             raise TransformError(f"python: {spec!r} raised: {exc}") from exc
 
     return _python
+
+
+# Single execution seam for user-authored Python (ADR-0041 I2).
+# Today this is plain ``exec`` + a function call — the same threat model as
+# the ``python`` transform (already arbitrary in-process execution). Future
+# sandboxing (RestrictedPython / subprocess / gVisor) plugs in here without
+# touching transform call sites.
+_CUSTOM_PYTHON_ENTRYPOINT = "transform"
+
+
+def _compile_custom_python(code: str) -> Callable[[Record], Record | None]:
+    """Compile inline source + return the user's ``transform(record)`` callable.
+
+    Raises :class:`ConfigError` on syntax errors or a missing/non-callable
+    entrypoint, so build/dry-run reports the problem instead of dying at
+    runtime.
+    """
+    try:
+        compiled = compile(code, "<custom_python>", "exec")
+    except SyntaxError as exc:
+        raise ConfigError(f"custom_python: cannot compile code: {exc}") from exc
+    namespace: dict[str, Any] = {}
+    try:
+        exec(compiled, namespace, namespace)
+    except Exception as exc:
+        raise ConfigError(f"custom_python: code raised during import: {exc}") from exc
+    user_fn = namespace.get(_CUSTOM_PYTHON_ENTRYPOINT)
+    if user_fn is None:
+        raise ConfigError(
+            f"custom_python: code must define a top-level "
+            f"`{_CUSTOM_PYTHON_ENTRYPOINT}(record)` function"
+        )
+    if not callable(user_fn):
+        raise ConfigError(f"custom_python: `{_CUSTOM_PYTHON_ENTRYPOINT}` is not callable")
+    return user_fn  # type: ignore[no-any-return]
+
+
+@register_transform("custom_python")
+def _build_custom_python(config: TransformConfig) -> TransformFn:
+    """Apply an inline Python ``transform(record)`` function (ADR-0041 I2).
+
+    The user-authored source must define a top-level
+    ``transform(record) -> Record | None`` function. The source is compiled
+    + executed once at build time to extract the callable, then invoked per
+    record.
+
+    Security: ``custom_python`` runs arbitrary code in the worker process,
+    the same threat model as the ``python`` transform (also unsandboxed
+    in-process execution). The write APIs that persist pipeline config are
+    Editor+ gated + audited; that is the entire trust boundary today.
+    Future sandboxing plugs into :func:`_compile_custom_python` /
+    ``_custom_python`` without touching callers.
+
+    Example config::
+
+        transform:
+          type: custom_python
+          code: |
+            def transform(record):
+                d = dict(record.data)
+                d["upper"] = d.get("name", "").upper()
+                return record.__class__(
+                    data=d,
+                    metadata=record.metadata,
+                    schema_version=record.schema_version,
+                )
+    """
+    code: str = _config_field(config, "code")
+    if not isinstance(code, str) or not code.strip():
+        raise ConfigError("custom_python: 'code' must be a non-empty string")
+    user_fn = _compile_custom_python(code)
+
+    def _custom_python(record: Record) -> Record | None:
+        try:
+            return user_fn(record)
+        except Exception as exc:
+            raise TransformError(f"custom_python: code raised: {exc}") from exc
+
+    return _custom_python
 
 
 __all__ = [

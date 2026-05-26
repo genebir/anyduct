@@ -106,6 +106,14 @@ export type FieldDef =
       // ADR-0029). Stores the target pipeline's id; persisted via the
       // pipeline_triggers API, not config_json.
       kind: "pipeline";
+    })
+  | (FieldBase & {
+      // Inline Python source for the ``custom_python`` transform
+      // (ADR-0041 I2). Lazy-loads Monaco so the bundle stays cheap. The
+      // user's code must define a top-level ``transform(record)`` function;
+      // the runtime compiles it once at build, executes it per record.
+      kind: "pythonCode";
+      placeholder?: string;
     });
 
 export interface OperatorSpec {
@@ -487,6 +495,30 @@ const TRANSFORMS: OperatorSpec[] = [
         required: true,
         placeholder: "my_pkg.transforms:dedupe",
         help: "module:function — must be importable in the worker environment.",
+      },
+    ],
+  },
+  {
+    // Inline Python source — the user writes the transform in the browser
+    // (ADR-0041 I2). Same threat model as ``python`` (arbitrary in-process
+    // execution), so Editor+ write + audit are the entire trust boundary
+    // today; sandboxing plugs into the core's single ``custom_python``
+    // execution seam without touching this UI.
+    id: "transform:custom_python",
+    kind: "transform",
+    connectorType: "custom_python",
+    label: "Custom Python (inline)",
+    description: "Write a transform(record) function in the browser; runs in the worker per record.",
+    icon: TerminalIcon,
+    accent: "#FBBF24",
+    fields: [
+      {
+        key: "code",
+        label: "Python source",
+        kind: "pythonCode",
+        required: true,
+        placeholder: "def transform(record):\n    return record",
+        help: "Must define `transform(record) -> Record | None`. Runs in the worker; same trust model as the Python callable operator.",
       },
     ],
   },

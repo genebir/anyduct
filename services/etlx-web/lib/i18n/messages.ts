@@ -442,6 +442,8 @@ export const en = {
   "runDetail.title": "Run {id}…",
   "runDetail.final": "Final",
   "runDetail.live": "Live · refreshing every 2 s",
+  "runDetail.dag": "DAG progress",
+  "runDetail.dagDesc": "Per-node status — {count} node(s); refreshes while the run is in flight.",
   "runDetail.logs": "Logs",
   "runDetail.entries": "{count} entr(ies)",
   "runDetail.noLogs":
@@ -1006,6 +1008,8 @@ export const ko: Messages = {
   "runDetail.title": "실행 {id}…",
   "runDetail.final": "완료",
   "runDetail.live": "실시간 · 2초마다 새로고침",
+  "runDetail.dag": "DAG 진행",
+  "runDetail.dagDesc": "노드별 상태 — {count}개 노드; 실행 중에는 자동 갱신.",
   "runDetail.logs": "로그",
   "runDetail.entries": "{count}개 항목",
   "runDetail.noLogs": "아직 로그가 없습니다. 워커가 structlog 이벤트를 내보내면 표시됩니다.",

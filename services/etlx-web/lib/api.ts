@@ -495,6 +495,27 @@ export const schedulesApi = {
     ),
 };
 
+export interface NodeRunEntry {
+  /** Per-node execution record for a graph run with ``node_level=true``
+   * (ADR-0041 H3b). Status evolves live: pending → running → succeeded|failed|cancelled. */
+  id: string;
+  node_id: string;
+  kind: string;
+  status: RunStatus;
+  depends_on: string[];
+  pending_deps: number;
+  started_at: string | null;
+  finished_at: string | null;
+  heartbeat_at: string | null;
+  worker_id: string | null;
+  attempt: number;
+  records_read: number;
+  records_written: number;
+  error_class: string | null;
+  error_message: string | null;
+  output_ref: string | null;
+}
+
 export const runsApi = {
   list: (workspaceId: string, query: { limit?: number; status?: RunStatus } = {}) =>
     api<RunSummary[]>(`/workspaces/${workspaceId}/runs`, { query }),
@@ -510,6 +531,8 @@ export const runsApi = {
     }),
   metrics: (workspaceId: string, runId: string) =>
     api<RunMetricEntry[]>(`/workspaces/${workspaceId}/runs/${runId}/metrics`),
+  nodeRuns: (workspaceId: string, runId: string) =>
+    api<NodeRunEntry[]>(`/workspaces/${workspaceId}/runs/${runId}/node-runs`),
   retry: (workspaceId: string, runId: string) =>
     api<RunSummary>(`/workspaces/${workspaceId}/runs/${runId}/retry`, {
       method: "POST",

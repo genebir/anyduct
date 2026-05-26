@@ -13,11 +13,13 @@ import {
   ApiError,
   runsApi,
   type LogLevel,
+  type NodeRunEntry,
   type RunDetail,
   type RunLogEntry,
   type RunMetricEntry,
   type RunStatus,
 } from "@/lib/api";
+import { RunDagGraph } from "@/components/runs/run-dag-graph";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import { useLocale } from "@/components/providers/locale-provider";
 import type { Messages } from "@/lib/i18n/messages";
@@ -57,6 +59,7 @@ export default function RunDetailPage() {
   const [run, setRun] = useState<RunDetail | null>(null);
   const [logs, setLogs] = useState<RunLogEntry[] | null>(null);
   const [metrics, setMetrics] = useState<RunMetricEntry[] | null>(null);
+  const [nodeRuns, setNodeRuns] = useState<NodeRunEntry[] | null>(null);
   const [retrying, setRetrying] = useState(false);
   const logsEndRef = useRef<HTMLDivElement | null>(null);
 
@@ -68,15 +71,17 @@ export default function RunDetailPage() {
 
     async function tick(workspaceId: string): Promise<boolean> {
       try {
-        const [r, l, m] = await Promise.all([
+        const [r, l, m, n] = await Promise.all([
           runsApi.get(workspaceId, id),
           runsApi.logs(workspaceId, id, { limit: 1000 }),
           runsApi.metrics(workspaceId, id),
+          runsApi.nodeRuns(workspaceId, id),
         ]);
         if (cancelled) return true;
         setRun(r);
         setLogs(l);
         setMetrics(m);
+        setNodeRuns(n);
         return TERMINAL.has(r.status);
       } catch (err) {
         if (!cancelled) {
@@ -178,7 +183,17 @@ export default function RunDetailPage() {
         }
       />
       <main className="flex-1 overflow-y-auto px-6 py-8">
-        <div className="mx-auto grid w-full max-w-6xl gap-6 lg:grid-cols-[2fr_1fr]">
+        <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
+          {nodeRuns && nodeRuns.length > 0 ? (
+            <Card>
+              <CardHeader
+                title={t("runDetail.dag")}
+                description={t("runDetail.dagDesc", { count: nodeRuns.length })}
+              />
+              <RunDagGraph nodes={nodeRuns} />
+            </Card>
+          ) : null}
+        <div className="grid w-full gap-6 lg:grid-cols-[2fr_1fr]">
           <Card>
             <CardHeader
               title={t("runDetail.logs")}
@@ -221,6 +236,7 @@ export default function RunDetailPage() {
               </Card>
             ) : null}
           </div>
+        </div>
         </div>
       </main>
     </>

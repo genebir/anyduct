@@ -15,12 +15,22 @@ per-node operator (:func:`execute_graph_node`) + edge filter
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 from dataclasses import dataclass
 
+from etl_plugins.config.models import ConnectionConfig
 from etl_plugins.core.connector import Connector
-from etl_plugins.core.pipeline import GraphEdge, Task, apply_edge_predicate, execute_graph_node
+from etl_plugins.core.exceptions import TaskError
+from etl_plugins.core.pipeline import (
+    GraphEdge,
+    GraphNode,
+    Task,
+    apply_edge_predicate,
+    execute_graph_node,
+)
 from etl_plugins.core.record import Record
+from etl_plugins.runtime.builder import build_connector
 
 NODE_SUCCEEDED = "succeeded"
 NODE_FAILED = "failed"
@@ -114,4 +124,118 @@ def execute_graph_nodes(task: Task, connectors: dict[str, Connector]) -> list[No
     return [outcomes[node_id] for node_id in order]
 
 
-__all__ = ["NODE_FAILED", "NODE_SKIPPED", "NODE_SUCCEEDED", "NodeOutcome", "execute_graph_nodes"]
+def _connection_names_for(node: GraphNode) -> list[str]:
+    """The connection name(s) a node needs at execution time (source/sink only)."""
+    if node.kind == "source" and node.source_name:
+        return [node.source_name]
+    if node.kind == "sink" and node.sink:
+        return [node.sink.name]
+    return []
+
+
+async def execute_graph_nodes_concurrent(
+    task: Task,
+    conn_cfgs: dict[str, ConnectionConfig],
+) -> list[NodeOutcome]:
+    """Run ``task``'s graph wave-by-wave with per-node connectors + concurrency
+    (ADR-0041, H2c — the real parallelism path).
+
+    Each node runs in its own ``asyncio.to_thread``, where it **mints + connects
+    + closes its own connector instance(s)** (thread-bound drivers like sqlite/
+    psycopg can't be safely shared across threads). Within a wave, independent
+    ready nodes run concurrently via :func:`asyncio.gather`. A node whose
+    upstream failed/skipped is itself skipped.
+
+    Returns per-node outcomes in topological order (same shape as
+    :func:`execute_graph_nodes`). The caller persists them as ``node_runs``.
+    """
+    by_id = {n.id: n for n in task.graph_nodes}
+    incoming: dict[str, list[GraphEdge]] = {n.id: [] for n in task.graph_nodes}
+    downstream: dict[str, list[str]] = {n.id: [] for n in task.graph_nodes}
+    for e in task.graph_edges:
+        incoming[e.to_id].append(e)
+        downstream[e.from_id].append(e.to_id)
+    pending_deps = {nid: len(incoming[nid]) for nid in by_id}
+    outputs: dict[str, list[Record]] = {}
+    outcomes: dict[str, NodeOutcome] = {}
+    blocked: set[str] = set()  # failed or skipped — descendants skip
+    remaining = set(by_id)
+
+    def _run_node_in_thread(node: GraphNode, inputs: list[list[Record]]) -> object:
+        """Mint per-node connector(s) in this thread, execute, close — never
+        shares connections across threads (thread-bound driver safety)."""
+        local: dict[str, Connector] = {}
+        try:
+            for name in _connection_names_for(node):
+                if name not in conn_cfgs:
+                    raise TaskError(
+                        f"node {node.id!r}: connection {name!r} not in resolved configs"
+                    )
+                connector = build_connector(name, conn_cfgs[name])
+                connector.connect()
+                local[name] = connector
+            return execute_graph_node(node, inputs, local)
+        finally:
+            for connector in local.values():
+                with contextlib.suppress(Exception):
+                    connector.close()
+
+    async def _run_one(nid: str) -> None:
+        node = by_id[nid]
+        inputs = [apply_edge_predicate(outputs[e.from_id], e.when) for e in incoming[nid]]
+        try:
+            result = await asyncio.to_thread(_run_node_in_thread, node, inputs)
+        except Exception as exc:  # record per-node failure, don't abort the wave
+            outcomes[nid] = NodeOutcome(
+                nid,
+                node.kind,
+                NODE_FAILED,
+                error_class=type(exc).__name__,
+                error_message=str(exc),
+            )
+            blocked.add(nid)
+            return
+        outputs[nid] = result.output  # type: ignore[attr-defined]
+        outcomes[nid] = NodeOutcome(
+            nid,
+            node.kind,
+            NODE_SUCCEEDED,
+            records_read=result.records_read,  # type: ignore[attr-defined]
+            records_written=result.records_written,  # type: ignore[attr-defined]
+        )
+
+    while remaining:
+        # Mark skipped any remaining node whose upstream is blocked, so they
+        # don't get claimed when pending_deps hits 0 (their dep "completed"
+        # but blocked, not succeeded).
+        for nid in list(remaining):
+            if any(e.from_id in blocked for e in incoming[nid]):
+                outcomes[nid] = NodeOutcome(nid, by_id[nid].kind, NODE_SKIPPED)
+                blocked.add(nid)
+                remaining.discard(nid)
+
+        ready = [nid for nid in remaining if pending_deps[nid] == 0]
+        if not ready:
+            break  # remaining (if any) all blocked indirectly — loop exits
+
+        # Run all ready nodes concurrently — each in its own thread + own
+        # connector instances. asyncio.gather waits for the whole wave.
+        await asyncio.gather(*[_run_one(nid) for nid in ready])
+
+        for nid in ready:
+            remaining.discard(nid)
+            for dn in downstream[nid]:
+                pending_deps[dn] = max(0, pending_deps[dn] - 1)
+
+    order = _topo_order(task)
+    return [outcomes[nid] for nid in order if nid in outcomes]
+
+
+__all__ = [
+    "NODE_FAILED",
+    "NODE_SKIPPED",
+    "NODE_SUCCEEDED",
+    "NodeOutcome",
+    "execute_graph_nodes",
+    "execute_graph_nodes_concurrent",
+]

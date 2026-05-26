@@ -22,6 +22,10 @@ from __future__ import annotations
 
 import asyncio
 import sqlite3
+
+# Module-level capture for H2c parallelism proof: a custom transform records
+# the thread it ran in. Two independent branches → two distinct thread IDs.
+import threading as _threading
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -47,6 +51,24 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from etl_plugins.config.secrets import StaticSecretBackend
+from etl_plugins.core.exceptions import ConfigError as _CoreConfigError
+from etl_plugins.core.record import Record as _Record
+from etl_plugins.runtime.transforms import register_transform
+
+_test_thread_ids: list[int] = []
+
+try:
+
+    @register_transform("_probe_thread")
+    def _build_probe_thread(config: Any) -> Any:
+        def _probe(rec: _Record) -> _Record:
+            _test_thread_ids.append(_threading.get_ident())
+            return rec
+
+        return _probe
+
+except _CoreConfigError:
+    pass  # already registered (test re-collection)
 
 pytestmark = pytest.mark.asyncio
 
@@ -477,6 +499,107 @@ async def test_node_level_failed_node_skips_downstream(
     assert nodes["f"].status == RunStatus.FAILED
     assert nodes["f"].error_class is not None
     assert nodes["k"].status == RunStatus.CANCELLED  # skipped — upstream failed
+
+
+def _seed_sqlite_db(db_path: Path) -> str:
+    """Tiny helper: seed a sqlite file with a 3-row ``seed`` table + empty ``out``."""
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.execute("CREATE TABLE seed (id INTEGER, name TEXT)")
+        conn.executemany(
+            "INSERT INTO seed (id, name) VALUES (?, ?)", [(1, "x"), (2, "y"), (3, "z")]
+        )
+        conn.execute("CREATE TABLE out (id INTEGER, name TEXT)")
+        conn.commit()
+    finally:
+        conn.close()
+    return str(db_path)
+
+
+async def test_node_level_runs_independent_branches_in_different_threads(
+    session: AsyncSession, tmp_path: Path
+) -> None:
+    """H2c: two independent branches run in distinct threads (proves wave concurrency).
+
+    Each branch's transform records ``threading.get_ident()``. With per-node
+    connectors + ``asyncio.gather`` over ready nodes, the two branches' source
+    + transform + sink each get their own to_thread → distinct thread ids.
+    """
+    _test_thread_ids.clear()
+    db_a = _seed_sqlite_db(tmp_path / "a.db")
+    db_b = _seed_sqlite_db(tmp_path / "b.db")
+    ws = await _seed_workspace(session, slug="we-h2c-par")
+    await _seed_connection(session, workspace_id=ws.id, name="srcA", config={"database": db_a})
+    await _seed_connection(session, workspace_id=ws.id, name="dstA", config={"database": db_a})
+    await _seed_connection(session, workspace_id=ws.id, name="srcB", config={"database": db_b})
+    await _seed_connection(session, workspace_id=ws.id, name="dstB", config={"database": db_b})
+    cfg = {
+        "name": "p",
+        "node_level": True,
+        "graph": {
+            "nodes": [
+                {
+                    "id": "sa",
+                    "type": "source",
+                    "connection": "srcA",
+                    "query": "SELECT id, name FROM seed",
+                },
+                {"id": "pa", "type": "transform", "transform": {"type": "_probe_thread"}},
+                {
+                    "id": "ka",
+                    "type": "sink",
+                    "connection": "dstA",
+                    "table": "out",
+                    "mode": "append",
+                },
+                {
+                    "id": "sb",
+                    "type": "source",
+                    "connection": "srcB",
+                    "query": "SELECT id, name FROM seed",
+                },
+                {"id": "pb", "type": "transform", "transform": {"type": "_probe_thread"}},
+                {
+                    "id": "kb",
+                    "type": "sink",
+                    "connection": "dstB",
+                    "table": "out",
+                    "mode": "append",
+                },
+            ],
+            "edges": [
+                {"from_node": "sa", "to_node": "pa"},
+                {"from_node": "pa", "to_node": "ka"},
+                {"from_node": "sb", "to_node": "pb"},
+                {"from_node": "pb", "to_node": "kb"},
+            ],
+        },
+    }
+    p, pv = await _seed_pipeline(session, workspace_id=ws.id, name="p", config=cfg)
+    run = await _seed_pending_run(
+        session, workspace_id=ws.id, pipeline_id=p.id, pipeline_version_id=pv.id
+    )
+    claimed = await claim_pending_run(session, worker_id="worker-A")
+    assert claimed is not None
+    await session.commit()
+
+    await RunExecutor(
+        _SessionFactoryAdapter(session), StaticSecretBackend(), worker_id="worker-A"
+    ).execute(run.id)
+
+    refreshed = (await session.execute(select(Run).where(Run.id == run.id))).scalar_one()
+    assert refreshed.status == RunStatus.SUCCEEDED, (refreshed.error_class, refreshed.error_message)
+    assert refreshed.records_read == 6  # 3 from each source
+    assert refreshed.records_written == 6  # 3 to each sink
+    nodes = await _node_runs_for(session, run.id)
+    assert {n: nodes[n].status for n in nodes} == dict.fromkeys(
+        ("sa", "pa", "ka", "sb", "pb", "kb"), RunStatus.SUCCEEDED
+    )
+    # The proof: the two branches' probes ran in distinct threads (3 records
+    # per probe x 2 branches -> 6 thread ids; at least 2 distinct values).
+    assert (
+        len(set(_test_thread_ids)) >= 2
+    ), f"expected ≥2 distinct thread ids, got {sorted(set(_test_thread_ids))}"
 
 
 async def test_executor_persists_lineage(session: AsyncSession, tmp_path: Path) -> None:

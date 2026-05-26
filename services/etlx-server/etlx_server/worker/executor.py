@@ -45,7 +45,7 @@ from etl_plugins.core.connector import Connector
 from etl_plugins.core.context import Context
 from etl_plugins.core.exceptions import ConfigError, RegistryError, SecretError
 from etl_plugins.core.pipeline import Pipeline as CorePipeline
-from etl_plugins.core.pipeline import RunResult
+from etl_plugins.core.pipeline import RunResult, Task
 from etl_plugins.runtime.builder import build_connector, build_pipeline
 from etlx_server.db.enums import PipelineMode, RunStatus
 from etlx_server.db.models import NodeRun, Pipeline, PipelineTrigger, PipelineVersion, Run
@@ -61,7 +61,7 @@ from etlx_server.worker.node_graph import (
     NODE_SKIPPED,
     NODE_SUCCEEDED,
     NodeOutcome,
-    execute_graph_nodes,
+    execute_graph_nodes_concurrent,
 )
 from etlx_server.worker.recorder import RunRecorder, current_run_id
 
@@ -140,8 +140,13 @@ class RunExecutor:
         self._backend = backend
         self._worker_id = worker_id
         self._log_flush_interval = log_flush_interval_seconds
-        # Node-level execution (ADR-0041, H2b): the runner stashes per-node outcomes
-        # here so ``execute`` can persist node_runs after the run thread finishes.
+        # Node-level execution (ADR-0041, H2b/H2c). _prepare flips ``_node_level_active``
+        # when the pipeline opts in + is a graph; ``execute`` then runs the concurrent
+        # wave executor (H2c) directly and writes node_runs from the outcomes.
+        self._node_level_active = False
+        self._node_level_task: Task | None = None
+        self._node_level_conn_cfgs: dict[str, ConnectionConfig] = {}
+        self._node_level_run_id: str = ""
         self._node_outcomes: list[NodeOutcome] | None = None
         self._node_deps: dict[str, list[str]] = {}
 
@@ -217,7 +222,37 @@ class RunExecutor:
                     )
                     try:
                         log.info("run.pipeline_started", pipeline=run_name)
-                        result = await asyncio.to_thread(runner)
+                        if self._node_level_active:
+                            # Per-node concurrent path (ADR-0041 H2c): wave-based
+                            # async, each node in its own thread with its own
+                            # connector instances. Outcomes drive node_runs
+                            # persistence + the aggregate RunResult.
+                            assert self._node_level_task is not None
+                            outcomes = await execute_graph_nodes_concurrent(
+                                self._node_level_task, self._node_level_conn_cfgs
+                            )
+                            self._node_outcomes = outcomes
+                            failures = [o for o in outcomes if o.status == NODE_FAILED]
+                            if failures:
+                                f = failures[0]
+                                raise _NodeExecutionError(
+                                    f"node {f.node_id!r} failed: {f.error_class}: {f.error_message}"
+                                )
+                            result = RunResult(
+                                run_id=self._node_level_run_id,
+                                pipeline_name=run_name,
+                                success=True,
+                                records_read=sum(
+                                    o.records_read for o in outcomes if o.status == NODE_SUCCEEDED
+                                ),
+                                records_written=sum(
+                                    o.records_written
+                                    for o in outcomes
+                                    if o.status == NODE_SUCCEEDED
+                                ),
+                            )
+                        else:
+                            result = await asyncio.to_thread(runner)
                         _record_success(run, result)
                         log.info(
                             "run.pipeline_succeeded",
@@ -495,6 +530,14 @@ class RunExecutor:
 
         conn_cfgs = await self._resolve_connection_configs(pipeline, cfg, session)
 
+        # Node-level execution (ADR-0041, H2c, opt-in): build the graph Task with
+        # **no factory** so sink.name stays a plain connection name — the
+        # concurrent executor mints + connects + closes connectors per node in
+        # its own thread (thread-bound drivers safe). Branches BEFORE the
+        # factory-based whole-graph build below.
+        if cfg.node_level and cfg.graph is not None:
+            return self._prepare_node_level(cfg, conn_cfgs, run_id)
+
         # Build connector instances + a core Pipeline (in-process execution).
         connectors: dict[str, Connector] = {}
         for name, conn_cfg in conn_cfgs.items():
@@ -517,37 +560,6 @@ class RunExecutor:
             raise _PipelineBuildError(f"pipeline build failed: {e}") from e
         ctx = Context(pipeline_name=core_pipeline.name, run_id=str(run_id))
 
-        # Node-level execution (ADR-0041, H2b, opt-in): run the graph node-by-node
-        # so each node gets a node_run record (status/counters). Sequential in one
-        # thread — intra-run parallelism (per-node connectors) lands in H2c.
-        if cfg.node_level and cfg.graph is not None:
-            task = core_pipeline.tasks[0]
-            self._node_deps = {n.id: [] for n in task.graph_nodes}
-            for edge in task.graph_edges:
-                self._node_deps[edge.to_id].append(edge.from_id)
-            run_name = core_pipeline.name
-
-            def _node_runner() -> RunResult:
-                outcomes = execute_graph_nodes(task, connectors)
-                self._node_outcomes = outcomes  # for node_runs persistence in execute()
-                read = sum(o.records_read for o in outcomes if o.status == NODE_SUCCEEDED)
-                written = sum(o.records_written for o in outcomes if o.status == NODE_SUCCEEDED)
-                failures = [o for o in outcomes if o.status == NODE_FAILED]
-                if failures:
-                    f = failures[0]
-                    raise _NodeExecutionError(
-                        f"node {f.node_id!r} failed: {f.error_class}: {f.error_message}"
-                    )
-                return RunResult(
-                    run_id=str(run_id),
-                    pipeline_name=run_name,
-                    success=True,
-                    records_read=read,
-                    records_written=written,
-                )
-
-            return _node_runner, run_name
-
         # Connect + run + close happen in a single worker thread so drivers
         # (notably sqlite3) bound to a thread don't trip on cross-thread reuse.
         return functools.partial(
@@ -558,6 +570,47 @@ class RunExecutor:
             cursor_from=cursor_from,
             cursor_to=cursor_to,
         ), core_pipeline.name
+
+    def _prepare_node_level(
+        self,
+        cfg: PipelineConfig,
+        conn_cfgs: dict[str, ConnectionConfig],
+        run_id: UUID,
+    ) -> tuple[Callable[[], RunResult], str]:
+        """Build the graph Task for per-node execution (ADR-0041 H2c).
+
+        Uses ``connector_factory=None`` so ``sink.name`` stays a plain connection
+        name (no dedicated-sink suffix) — the concurrent executor mints its own
+        connector instance per node. Stub connectors satisfy ``build_pipeline``'s
+        presence check; they're never connected. Stores task/conn_cfgs on ``self``
+        and returns a sentinel runner (``execute`` branches on ``_node_level_active``
+        and calls the async concurrent executor directly — never invokes this).
+        """
+        stub: dict[str, Connector] = {}
+        for name, conn_cfg in conn_cfgs.items():
+            try:
+                stub[name] = build_connector(name, conn_cfg)
+            except (ConfigError, RegistryError) as e:
+                raise _PipelineBuildError(f"connection {name!r}: {type(e).__name__}: {e}") from e
+        try:
+            node_pipeline, _ = build_pipeline(cfg, connectors=stub, connector_factory=None)
+        except ConfigError as e:
+            raise _PipelineBuildError(f"pipeline build failed: {e}") from e
+        task = node_pipeline.tasks[0]
+        self._node_level_active = True
+        self._node_level_task = task
+        self._node_level_conn_cfgs = conn_cfgs
+        self._node_level_run_id = str(run_id)
+        self._node_deps = {n.id: [] for n in task.graph_nodes}
+        for edge in task.graph_edges:
+            self._node_deps[edge.to_id].append(edge.from_id)
+
+        def _unused() -> RunResult:  # pragma: no cover - sentinel, execute() branches earlier
+            raise RuntimeError(
+                "node-level sentinel runner — execute() should branch on _node_level_active"
+            )
+
+        return _unused, node_pipeline.name
 
     async def _resolve_connection_configs(
         self, pipeline: Pipeline, cfg: PipelineConfig, session: AsyncSession

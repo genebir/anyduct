@@ -48,7 +48,8 @@ from etl_plugins.core.pipeline import Pipeline as CorePipeline
 from etl_plugins.core.pipeline import RunResult, Task
 from etl_plugins.runtime.builder import build_connector, build_pipeline
 from etlx_server.db.enums import PipelineMode, RunStatus
-from etlx_server.db.models import NodeRun, Pipeline, PipelineTrigger, PipelineVersion, Run
+from etlx_server.db.models import Pipeline, PipelineTrigger, PipelineVersion, Run
+from etlx_server.node_runs import NodeRunRepository, NodeSpec
 from etlx_server.pipelines.runtime import (
     load_connections_by_name,
     referenced_connection_names,
@@ -58,7 +59,6 @@ from etlx_server.variables.repository import WorkspaceVariableRepository
 from etlx_server.worker.heartbeat import heartbeat_loop
 from etlx_server.worker.node_graph import (
     NODE_FAILED,
-    NODE_SKIPPED,
     NODE_SUCCEEDED,
     NodeOutcome,
     execute_graph_nodes_concurrent,
@@ -66,12 +66,6 @@ from etlx_server.worker.node_graph import (
 from etlx_server.worker.recorder import RunRecorder, current_run_id
 
 logger = logging.getLogger(__name__)
-
-_NODE_STATUS_MAP = {
-    NODE_SUCCEEDED: RunStatus.SUCCEEDED,
-    NODE_FAILED: RunStatus.FAILED,
-    NODE_SKIPPED: RunStatus.CANCELLED,  # no SKIPPED enum; cancelled = not run
-}
 
 
 class _NodeExecutionError(Exception):
@@ -223,14 +217,12 @@ class RunExecutor:
                     try:
                         log.info("run.pipeline_started", pipeline=run_name)
                         if self._node_level_active:
-                            # Per-node concurrent path (ADR-0041 H2c): wave-based
-                            # async, each node in its own thread with its own
-                            # connector instances. Outcomes drive node_runs
-                            # persistence + the aggregate RunResult.
+                            # Per-node concurrent path (ADR-0041 H2c) + live
+                            # node_runs updates (H3a). Pre-insert PENDING rows in
+                            # a fresh session so they're visible before execution
+                            # starts; callbacks commit per-node status mid-run.
                             assert self._node_level_task is not None
-                            outcomes = await execute_graph_nodes_concurrent(
-                                self._node_level_task, self._node_level_conn_cfgs
-                            )
+                            outcomes = await self._run_node_level(run.id, run_name)
                             self._node_outcomes = outcomes
                             failures = [o for o in outcomes if o.status == NODE_FAILED]
                             if failures:
@@ -287,43 +279,78 @@ class RunExecutor:
                         heartbeat_stop.set()
                         with contextlib.suppress(asyncio.CancelledError):
                             await heartbeat_task
-                    # Node-level run: record one node_run per node (ADR-0041 H2b).
-                    if self._node_outcomes is not None:
-                        await self._record_node_runs(session, run.id)
+                    # node_runs are written live by ``_run_node_level`` (H3a) —
+                    # nothing more to record at the end.
                     await session.commit()
                     return run
                 finally:
                     current_run_id.reset(ctx_token)
 
-    async def _record_node_runs(self, session: AsyncSession, run_id: UUID) -> None:
-        """Persist one node_run per node from the run thread's outcomes (ADR-0041 H2b).
+    async def _run_node_level(self, run_id: UUID, run_name: str) -> list[NodeOutcome]:
+        """Execute the node-level path with live ``node_runs`` updates (ADR-0041 H3a).
 
-        Written post-hoc (terminal status) — the run-owning worker executed all
-        nodes itself, so this is a record, not the live claim queue (that's H2c).
+        Pre-inserts PENDING ``node_runs`` (with deps) in a fresh session so a
+        polling UI sees the DAG shape before execution starts. Then runs the
+        wave-based concurrent executor (H2c) with callbacks that commit per-node
+        status mid-run — running → succeeded/failed/cancelled — each in its own
+        session so progress is observable immediately rather than only at the
+        end of the run.
         """
-        now = datetime.now(UTC)
-        for outcome in self._node_outcomes or []:
-            session.add(
-                NodeRun(
-                    run_id=run_id,
-                    node_id=outcome.node_id,
-                    kind=outcome.kind,
-                    status=_NODE_STATUS_MAP[outcome.status],
-                    depends_on=self._node_deps.get(outcome.node_id, []),
-                    pending_deps=0,
-                    records_read=outcome.records_read,
-                    records_written=outcome.records_written,
-                    error_class=outcome.error_class,
-                    error_message=(
-                        outcome.error_message[:_MAX_ERROR_MESSAGE_LEN]
-                        if outcome.error_message
-                        else None
-                    ),
-                    finished_at=now,
-                    worker_id=self._worker_id,
-                )
+        assert self._node_level_task is not None
+        repo = NodeRunRepository()
+        specs = [
+            NodeSpec(
+                node_id=n.id,
+                kind=n.kind,
+                depends_on=self._node_deps.get(n.id, []),
             )
-        await session.flush()
+            for n in self._node_level_task.graph_nodes
+        ]
+        async with self._factory() as init_session:
+            created = await repo.create_for_run(init_session, run_id, specs)
+            await init_session.commit()
+        node_run_id_by_id = {nr.node_id: nr.id for nr in created}
+
+        worker_id = self._worker_id
+        factory = self._factory
+        # Serialize concurrent callbacks: in production fresh sessions are
+        # independent, but tests share one session across factory() calls and
+        # would hit "Session is already flushing" when two gather'd waves
+        # finish simultaneously. Lock is cheap (DB I/O fast vs to_thread work).
+        db_lock = asyncio.Lock()
+
+        async def _on_start(nid: str) -> None:
+            async with db_lock, factory() as s:
+                await repo.set_running(s, node_run_id=node_run_id_by_id[nid], worker_id=worker_id)
+                await s.commit()
+
+        async def _on_finish(outcome: NodeOutcome) -> None:
+            nr_id = node_run_id_by_id[outcome.node_id]
+            async with db_lock, factory() as s:
+                if outcome.status == NODE_SUCCEEDED:
+                    await repo.set_succeeded(
+                        s,
+                        node_run_id=nr_id,
+                        records_read=outcome.records_read,
+                        records_written=outcome.records_written,
+                    )
+                elif outcome.status == NODE_FAILED:
+                    await repo.set_failed(
+                        s,
+                        node_run_id=nr_id,
+                        error_class=outcome.error_class or "",
+                        error_message=outcome.error_message or "",
+                    )
+                else:  # NODE_SKIPPED → cancelled (no SKIPPED enum)
+                    await repo.set_cancelled(s, node_run_id=nr_id)
+                await s.commit()
+
+        return await execute_graph_nodes_concurrent(
+            self._node_level_task,
+            self._node_level_conn_cfgs,
+            on_node_start=_on_start,
+            on_node_finish=_on_finish,
+        )
 
     def _lineage_for(self, version: PipelineVersion, log: Any) -> AssetLineage | None:
         """Derive the run's static asset lineage from config. ``None`` on any

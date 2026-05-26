@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from etl_plugins.config.models import ConnectionConfig
@@ -31,6 +32,9 @@ from etl_plugins.core.pipeline import (
 )
 from etl_plugins.core.record import Record
 from etl_plugins.runtime.builder import build_connector
+
+OnNodeStart = Callable[[str], Awaitable[None]]
+OnNodeFinish = Callable[["NodeOutcome"], Awaitable[None]]
 
 NODE_SUCCEEDED = "succeeded"
 NODE_FAILED = "failed"
@@ -136,6 +140,9 @@ def _connection_names_for(node: GraphNode) -> list[str]:
 async def execute_graph_nodes_concurrent(
     task: Task,
     conn_cfgs: dict[str, ConnectionConfig],
+    *,
+    on_node_start: OnNodeStart | None = None,
+    on_node_finish: OnNodeFinish | None = None,
 ) -> list[NodeOutcome]:
     """Run ``task``'s graph wave-by-wave with per-node connectors + concurrency
     (ADR-0041, H2c — the real parallelism path).
@@ -145,6 +152,11 @@ async def execute_graph_nodes_concurrent(
     psycopg can't be safely shared across threads). Within a wave, independent
     ready nodes run concurrently via :func:`asyncio.gather`. A node whose
     upstream failed/skipped is itself skipped.
+
+    Optional ``on_node_start`` / ``on_node_finish`` callbacks fire around each
+    node (H3a live progress). They run in the event loop between waves —
+    safe to do async DB writes that commit per-node so a UI poll sees progress
+    mid-run rather than only after the whole run finishes.
 
     Returns per-node outcomes in topological order (same shape as
     :func:`execute_graph_nodes`). The caller persists them as ``node_runs``.
@@ -182,6 +194,8 @@ async def execute_graph_nodes_concurrent(
 
     async def _run_one(nid: str) -> None:
         node = by_id[nid]
+        if on_node_start is not None:
+            await on_node_start(nid)
         inputs = [apply_edge_predicate(outputs[e.from_id], e.when) for e in incoming[nid]]
         try:
             result = await asyncio.to_thread(_run_node_in_thread, node, inputs)
@@ -194,6 +208,8 @@ async def execute_graph_nodes_concurrent(
                 error_message=str(exc),
             )
             blocked.add(nid)
+            if on_node_finish is not None:
+                await on_node_finish(outcomes[nid])
             return
         outputs[nid] = result.output  # type: ignore[attr-defined]
         outcomes[nid] = NodeOutcome(
@@ -203,6 +219,8 @@ async def execute_graph_nodes_concurrent(
             records_read=result.records_read,  # type: ignore[attr-defined]
             records_written=result.records_written,  # type: ignore[attr-defined]
         )
+        if on_node_finish is not None:
+            await on_node_finish(outcomes[nid])
 
     while remaining:
         # Mark skipped any remaining node whose upstream is blocked, so they
@@ -213,6 +231,8 @@ async def execute_graph_nodes_concurrent(
                 outcomes[nid] = NodeOutcome(nid, by_id[nid].kind, NODE_SKIPPED)
                 blocked.add(nid)
                 remaining.discard(nid)
+                if on_node_finish is not None:
+                    await on_node_finish(outcomes[nid])
 
         ready = [nid for nid in remaining if pending_deps[nid] == 0]
         if not ready:

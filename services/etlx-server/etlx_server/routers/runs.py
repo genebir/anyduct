@@ -7,6 +7,7 @@
 | GET    | ``/workspaces/{ws}/runs/{rid}/logs``                  | Viewer+  |
 | GET    | ``/workspaces/{ws}/runs/{rid}/logs/stream``           | Viewer+  |
 | GET    | ``/workspaces/{ws}/runs/{rid}/metrics``               | Viewer+  |
+| GET    | ``/workspaces/{ws}/runs/{rid}/node-runs``             | Viewer+  |
 | POST   | ``/workspaces/{ws}/runs/{rid}/retry``                 | Runner+  |
 
 Status mutations on existing runs (``pending`` → ``running`` →
@@ -38,6 +39,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from etlx_server.audit.dependencies import get_audit_service
 from etlx_server.audit.service import AuditService
 from etlx_server.auth.schemas import (
+    NodeRunEntry,
     RunDetail,
     RunLogEntry,
     RunMetricEntry,
@@ -49,6 +51,7 @@ from etlx_server.auth.workspace_context import (
 )
 from etlx_server.db.enums import RunStatus, WorkspaceRole
 from etlx_server.dependencies import get_session, get_session_factory
+from etlx_server.node_runs import NodeRunRepository
 from etlx_server.runs.repository import RunNotRetryableError, RunRepository
 
 router = APIRouter(prefix="/workspaces/{workspace_id}/runs", tags=["runs"])
@@ -130,6 +133,26 @@ async def list_run_metrics(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run not found")
     metrics = await repo.list_metrics(run_id=run.id)
     return [RunMetricEntry.model_validate(m) for m in metrics]
+
+
+@router.get("/{run_id}/node-runs", response_model=list[NodeRunEntry])
+async def list_run_node_runs(
+    run_id: UUID,
+    ctx: WorkspaceContext = _require_viewer,
+    session: AsyncSession = Depends(get_session),  # noqa: B008
+) -> list[NodeRunEntry]:
+    """Per-node execution records for a graph run (ADR-0041 H3b).
+
+    Populated only for ``node_level=true`` runs; empty for whole-graph runs.
+    Status evolves live during execution — the UI polls this to draw the DAG
+    progress view.
+    """
+    runs_repo = RunRepository(session)
+    run = await runs_repo.get(workspace_id=ctx.workspace.id, run_id=run_id)
+    if run is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run not found")
+    rows = await NodeRunRepository().list_for_run(session, run_id=run.id)
+    return [NodeRunEntry.model_validate(r) for r in rows]
 
 
 # --- Action endpoints (Step 8.6) -------------------------------------------

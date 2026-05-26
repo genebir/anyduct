@@ -26,6 +26,7 @@ import sqlite3
 # Module-level capture for H2c parallelism proof: a custom transform records
 # the thread it ran in. Two independent branches → two distinct thread IDs.
 import threading as _threading
+import time as _time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -63,6 +64,10 @@ try:
     def _build_probe_thread(config: Any) -> Any:
         def _probe(rec: _Record) -> _Record:
             _test_thread_ids.append(_threading.get_ident())
+            # Brief sleep so two parallel branches' to_thread calls definitely
+            # overlap (instead of one finishing before the other starts and
+            # the pool reusing the same thread for both).
+            _time.sleep(0.05)
             return rec
 
         return _probe
@@ -600,6 +605,59 @@ async def test_node_level_runs_independent_branches_in_different_threads(
     assert (
         len(set(_test_thread_ids)) >= 2
     ), f"expected ≥2 distinct thread ids, got {sorted(set(_test_thread_ids))}"
+
+
+async def test_node_level_live_updates_started_before_finished(
+    session: AsyncSession, tmp_path: Path
+) -> None:
+    """H3a: node_runs are written live — started_at + worker_id set, < finished_at."""
+    db_path = _prepare_sqlite_fixture(tmp_path)
+    ws = await _seed_workspace(session, slug="we-h3a-live")
+    await _seed_connection(session, workspace_id=ws.id, name="src", config={"database": db_path})
+    await _seed_connection(session, workspace_id=ws.id, name="dst", config={"database": db_path})
+    cfg = {
+        "name": "p",
+        "node_level": True,
+        "graph": {
+            "nodes": [
+                {
+                    "id": "s",
+                    "type": "source",
+                    "connection": "src",
+                    "query": "SELECT id, name FROM seed",
+                },
+                {
+                    "id": "k",
+                    "type": "sink",
+                    "connection": "dst",
+                    "table": "out",
+                    "mode": "append",
+                },
+            ],
+            "edges": [{"from_node": "s", "to_node": "k"}],
+        },
+    }
+    p, pv = await _seed_pipeline(session, workspace_id=ws.id, name="p", config=cfg)
+    run = await _seed_pending_run(
+        session, workspace_id=ws.id, pipeline_id=p.id, pipeline_version_id=pv.id
+    )
+    claimed = await claim_pending_run(session, worker_id="worker-A")
+    assert claimed is not None
+    await session.commit()
+
+    await RunExecutor(
+        _SessionFactoryAdapter(session), StaticSecretBackend(), worker_id="worker-A"
+    ).execute(run.id)
+
+    nodes = await _node_runs_for(session, run.id)
+    for nr in nodes.values():
+        # set_running ran before set_succeeded → both timestamps present and ordered.
+        assert nr.started_at is not None, f"node {nr.node_id} never marked running"
+        assert nr.finished_at is not None
+        assert nr.started_at <= nr.finished_at
+        assert nr.worker_id == "worker-A"
+        # attempt was bumped from 0 → 1 by set_running
+        assert nr.attempt == 1
 
 
 async def test_executor_persists_lineage(session: AsyncSession, tmp_path: Path) -> None:

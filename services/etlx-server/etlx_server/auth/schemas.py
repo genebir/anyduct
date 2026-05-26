@@ -381,6 +381,34 @@ class RunMetricEntry(BaseModel):
     recorded_at: datetime
 
 
+class NodeRunEntry(BaseModel):
+    """One row of ``GET /workspaces/{ws}/runs/{id}/node-runs`` (ADR-0041 H3b).
+
+    Per-node execution record for a graph pipeline run with ``node_level=true`` —
+    drives the Run-detail DAG view. ``status`` evolves live during execution:
+    ``pending → running → succeeded|failed|cancelled``.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    node_id: str
+    kind: str
+    status: Literal["pending", "running", "succeeded", "failed", "cancelled"]
+    depends_on: list[str]
+    pending_deps: int
+    started_at: datetime | None
+    finished_at: datetime | None
+    heartbeat_at: datetime | None
+    worker_id: str | None
+    attempt: int
+    records_read: int
+    records_written: int
+    error_class: str | None
+    error_message: str | None
+    output_ref: str | None
+
+
 class DryRunConnectorCheck(BaseModel):
     """One row of ``DryRunResult.connectors`` — per-connection outcome."""
 
@@ -459,6 +487,7 @@ __all__ = [
     "MembershipCreateRequest",
     "MembershipSummary",
     "MembershipUpdateRequest",
+    "NodeRunEntry",
     "OidcAuthorizeResponse",
     "OidcCallbackResponse",
     "OidcProviderSummary",

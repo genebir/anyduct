@@ -22,6 +22,13 @@
     - 신규 `isolated_factory` pytest fixture가 outer-transaction `session` fixture를 우회해 testcontainer engine에서 독립 connection 두 개 확보(SKIP LOCKED를 진짜 PG 레벨에서 검증, mock 아님). 테스트는 commit 사용 후 `finally`에서 명시적 cleanup.
   - **미커버**: Freshness ticker(`_tick_freshness`)는 SLA 쿨다운으로 harm bounded라 락 미적용 — 후속 슬라이스에서 분산 락 추가 가능. Stream worker 다중 replica는 in-flight `asyncio.Task` dict + per-process state까지 얽혀 별도 설계(K2b로 deferred — consistent hashing or per-schedule "owner" claim).
   - **검증**: scheduler it 16/16 green(기존 14 + 신규 2), 코어/서버 전체 회귀 영향 0. **다음 후보: K3 sensor framework / K4 graph 백필 / K5 OpenLineage export / stream worker multi-replica(K2b).**
+- **빌더 노드 편집 drawer (사용자 제안)** — 사용자가 *"노드를 선택했을 때 모달형태로 띄우는 형태로 바꾸는 건 어떨까?"* 라고 제안. 옵션(full modal / drawer / 현재 + Expand) 중 **drawer**를 선택(권장안). 핵심 통증은 "320×320 PropertiesPanel이 Monaco/columns/mapping/JSON 필드에 너무 좁다"였는데, 그 통증만 외과적으로 해결.
+  - **너비**: `w-80` (320px) → `w-[520px]`. ColumnsField 체크리스트·MappingEditor row·FilterEditor 조건·JSON placeholder·**Monaco editor** 모두 즉시 호흡 공간 확보. settings 패널(retry/dlq/variables/triggers)은 노드 비선택 시 그 자리에 그대로(영향 0).
+  - **Monaco 높이**: `python-code-editor.tsx` `DEFAULT_HEIGHT` 320 → 480px. drawer 폭 확대와 합쳐 ~25 줄 가시.
+  - **닫기 버튼**: drawer 헤더 우상단 × 버튼(`onClose` prop, `XCircleIcon`). `GraphEditor`가 `setSelectedNodeId(null)`을 전달 → drawer 닫히면 settings 패널이 다시 노출. 빈 캔버스 클릭으로도 동일 동작(`onDeselect` 기존 경로).
+  - **drawer를 선택한 이유** (vs full modal): ① 캔버스 컨텍스트 유지(그래프 도구의 핵심 가치 — 노드 간 관계 보면서 편집), ② 클릭만으로 다른 노드 즉시 swap(modal은 close→reopen 필요), ③ Airflow/Dagster/n8n 표준 패턴과 일관(학습 부담 0), ④ 면적 통증만 핀포인트로 해결(최소 변경).
+  - **데드 코드 정리**: graph-only 전환 잔재였던 linear-mode `transformIndex`/`transformCount`/`onMove` 기반 move-left/right 버튼 제거 + ArrowLeftIcon/ArrowRightIcon import 제거. PropertiesPanel props는 호환성 위해 optional 유지(타입은 그대로).
+  - 검증: 웹 tsc green. 슬라이드-인 애니메이션은 `tailwindcss-animate` 플러그인 미설치라 생략(추후 polish).
 - **빌더 graph-only 전환 (사용자 요청)** [ADR-0041] — 사용자 명시 요청 *"파이프라인 구성하는 게 그냥 그래프형태로만 되게 해줘"*에 따라 빌더에서 linear 모드 **전면 제거**. 그 동안 빌더는 linear 기본 + "그래프로 전환" 토글 + 별도 GraphEditor 두 갈래로 살아 있었음. graph 캔버스가 Phase G/H/I로 자유 DAG + join/aggregate + custom_python + multi-source를 다 표현하게 되면서 linear는 사실상 표현력이 하위 셋 → UX 분기를 정리.
   - **빌더 진입**: `GraphEditor` 단일 경로. 신규 파이프라인은 `blankGraph()`로 시작. 기존 linear config는 로드 시 `linearToGraph` 자동 적용 → 동일 DAG로 보임(마이그레이션 프롬프트 없음).
   - **serializer**: `serializeGraph`가 retry/dlq 포함 emit(이전엔 graph 모드에서 retry/dlq가 조용히 사라짐), 신규 `extractPipelineMeta(cfg)` helper가 저장 config에서 retry/dlq/variables/auto_materialize/freshness를 일관 추출.

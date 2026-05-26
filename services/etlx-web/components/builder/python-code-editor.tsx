@@ -21,7 +21,9 @@ const MonacoEditor = dynamic(
   },
 );
 
-const DEFAULT_HEIGHT = 320;
+// Drawer (520px wide, 2026-05-26) gives Monaco real room — 480px tall keeps
+// roughly ~25 lines visible without overwhelming the rest of the panel.
+const DEFAULT_HEIGHT = 480;
 
 /**
  * Inline Python code editor for the ``custom_python`` transform

@@ -177,6 +177,7 @@ export function GraphEditor({
           connections={connections}
           workspaceId={workspaceId}
           onChange={updateNode}
+          onClose={() => setSelectedNodeId(null)}
         />
       ) : settingsPanel ? (
         settingsPanel

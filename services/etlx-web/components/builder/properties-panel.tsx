@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ArrowLeftIcon, ArrowRightIcon, PlusIcon, XIcon } from "lucide-react";
+import { PlusIcon, XCircleIcon, XIcon } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { findOperator, type FieldDef, type OperatorSpec } from "@/lib/operators";
 import type { ConnectionSummary } from "@/lib/api";
@@ -85,6 +85,7 @@ export function PropertiesPanel({
   nodes = [],
   pipelines = [],
   onChange,
+  onClose,
   transformIndex = -1,
   transformCount = 0,
   onMove,
@@ -99,6 +100,9 @@ export function PropertiesPanel({
   /** Other pipelines in the workspace — for the call-pipeline target picker. */
   pipelines?: { id: string; name: string }[];
   onChange: (id: string, values: Record<string, unknown>) => void;
+  /** Close handler — when set, a × button appears in the drawer header that
+   *  deselects the node + collapses the drawer (graph-only mode, 2026-05-26). */
+  onClose?: () => void;
   /** Index of this node within the transform run, or -1 if not a transform. */
   transformIndex?: number;
   transformCount?: number;
@@ -141,44 +145,33 @@ export function PropertiesPanel({
   );
 
   return (
-    <aside className="flex w-80 shrink-0 flex-col gap-4 overflow-y-auto border-l border-border-subtle bg-surface px-4 py-5">
-      <header>
-        <div className="text-[11px] font-semibold uppercase tracking-widest text-text-muted">
-          {op.kind}
-        </div>
-        <div className="mt-1 text-base font-semibold text-text">
-          {op.label}
-        </div>
-        <p className="mt-1 text-xs text-text-secondary">{op.description}</p>
-        {op.kind === "transform" && onMove && transformCount > 1 ? (
-          <div className="mt-3 flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => onMove(node.id, -1)}
-              disabled={transformIndex <= 0}
-              aria-label={t("builder.moveLeft")}
-              title={t("builder.moveLeft")}
-              className="inline-flex h-7 w-7 items-center justify-center rounded-sm border border-border-subtle text-text-secondary transition duration-150 hover:bg-overlay hover:text-text disabled:opacity-40"
-            >
-              <ArrowLeftIcon size={14} />
-            </button>
-            <button
-              type="button"
-              onClick={() => onMove(node.id, 1)}
-              disabled={transformIndex >= transformCount - 1}
-              aria-label={t("builder.moveRight")}
-              title={t("builder.moveRight")}
-              className="inline-flex h-7 w-7 items-center justify-center rounded-sm border border-border-subtle text-text-secondary transition duration-150 hover:bg-overlay hover:text-text disabled:opacity-40"
-            >
-              <ArrowRightIcon size={14} />
-            </button>
-            <span className="text-[11px] text-text-muted">
-              {t("builder.stepLabel", {
-                n: transformIndex + 1,
-                total: transformCount,
-              })}
-            </span>
+    // Drawer — wider than the prior 320px panel (2026-05-26) so the Monaco
+    // editor, columns picker, mapping table, and JSON fields have room to
+    // breathe. Click another node and the content swaps in place. Settings
+    // (retry/dlq/variables/triggers) sit behind it and become visible again
+    // when the node is deselected (× button or click empty canvas).
+    <aside
+      key={node.id}
+      className="flex w-[520px] shrink-0 flex-col gap-4 overflow-y-auto border-l border-border-subtle bg-surface px-4 py-5"
+    >
+      <header className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="text-[11px] font-semibold uppercase tracking-widest text-text-muted">
+            {op.kind}
           </div>
+          <div className="mt-1 text-base font-semibold text-text">{op.label}</div>
+          <p className="mt-1 text-xs text-text-secondary">{op.description}</p>
+        </div>
+        {onClose ? (
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label={t("common.close")}
+            title={t("common.close")}
+            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-sm text-text-muted transition duration-150 hover:bg-overlay hover:text-text"
+          >
+            <XCircleIcon size={16} />
+          </button>
         ) : null}
       </header>
 

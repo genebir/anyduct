@@ -318,6 +318,76 @@ class PipelineTriggersBody(BaseModel):
     target_pipeline_ids: list[UUID] = Field(default_factory=list)
 
 
+class SensorSummary(BaseModel):
+    """One row of ``GET /workspaces/{ws}/sensors`` (ADR-0041 K3b).
+
+    ``last_check_at`` / ``last_triggered_at`` / ``last_result_json`` are
+    server-maintained — the UI surfaces them so an operator can debug a
+    quiet sensor without re-running it (manual ``POST .../check``).
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    workspace_id: UUID
+    name: str
+    type: str
+    config_json: dict[str, Any]
+    target_pipeline_id: UUID | None
+    poll_interval_seconds: int
+    is_active: bool
+    last_check_at: datetime | None
+    last_triggered_at: datetime | None
+    last_result_json: dict[str, Any] | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class SensorCreateRequest(BaseModel):
+    """Body of ``POST /workspaces/{ws}/sensors``.
+
+    ``type`` must already be registered with the core's
+    :func:`etl_plugins.core.sensor.build_sensor` — the server rejects
+    unknown types with HTTP 422 + the list of valid ones so the UI can
+    surface the right help.
+    """
+
+    name: str = Field(min_length=1, max_length=255)
+    type: str = Field(min_length=1, max_length=64)
+    config_json: dict[str, Any] = Field(default_factory=dict)
+    target_pipeline_id: UUID | None = None
+    poll_interval_seconds: int = Field(default=60, ge=5, le=86400)
+    is_active: bool = True
+
+
+class SensorUpdateRequest(BaseModel):
+    """PATCH body — every field optional. ``type`` is immutable (a
+    different sensor type is structurally a different sensor). Pass
+    ``target_pipeline_id: null`` explicitly to clear it (orphan the
+    sensor)."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    config_json: dict[str, Any] | None = None
+    target_pipeline_id: UUID | None = None
+    poll_interval_seconds: int | None = Field(default=None, ge=5, le=86400)
+    is_active: bool | None = None
+
+    def as_field_dict(self) -> dict[str, Any]:
+        # ``exclude_unset`` so omitted fields stay unset (vs explicit
+        # ``null`` which means "clear").
+        return self.model_dump(exclude_unset=True)
+
+
+class SensorCheckResponse(BaseModel):
+    """Response from ``POST /workspaces/{ws}/sensors/{id}/check`` —
+    runs the configured ``check()`` once + returns the result. Does NOT
+    enqueue a trigger run (operator-controlled manual check)."""
+
+    triggered: bool
+    message: str | None
+    metadata: dict[str, Any]
+
+
 class ScheduleSummary(BaseModel):
     """One row of ``GET /workspaces/{ws}/pipelines/{pid}/schedules``."""
 

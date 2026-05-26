@@ -48,6 +48,7 @@ from etlx_server.db.models.workspace import User
 from etlx_server.db.session import make_engine, make_session_factory
 from etlx_server.io.yaml_sync import export_workspace, import_yaml_dir
 from etlx_server.scheduler import Scheduler
+from etlx_server.sensors import SensorScheduler
 from etlx_server.settings import get_settings
 from etlx_server.worker import RunWorker, StreamWorker, ZombieReaper
 from etlx_server.worker.recorder import log_processor
@@ -56,6 +57,7 @@ app = typer.Typer(help="etlx-server administration CLI (metadata DB sync, ops)."
 worker_app = typer.Typer(help="Worker process commands.")
 reaper_app = typer.Typer(help="Zombie-run reaper process commands.")
 scheduler_app = typer.Typer(help="Cron scheduler process commands.")
+sensor_scheduler_app = typer.Typer(help="Sensor scheduler process commands.")
 stream_worker_app = typer.Typer(help="Stream worker process commands.")
 admin_app = typer.Typer(help="One-shot admin / bootstrap commands.")
 server_app = typer.Typer(help="Run the FastAPI server (uvicorn wrapper).")
@@ -64,6 +66,7 @@ connection_app = typer.Typer(help="Manage workspace connections (CRUD + test).")
 app.add_typer(worker_app, name="worker")
 app.add_typer(reaper_app, name="reaper")
 app.add_typer(scheduler_app, name="scheduler")
+app.add_typer(sensor_scheduler_app, name="sensor-scheduler")
 app.add_typer(stream_worker_app, name="stream-worker")
 app.add_typer(admin_app, name="admin")
 app.add_typer(server_app, name="server")
@@ -937,6 +940,59 @@ def scheduler_run_cmd(
 
         def _shutdown(_signame: str) -> None:
             typer.echo(f"received {_signame}, shutting down scheduler")
+            scheduler.stop()
+
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            loop.add_signal_handler(sig, _shutdown, sig.name)
+
+        try:
+            await scheduler.run()
+        finally:
+            await engine.dispose()
+
+    asyncio.run(_run())
+
+
+@sensor_scheduler_app.command("run")
+def sensor_scheduler_run_cmd(
+    tick_interval: float = typer.Option(
+        5.0,
+        "--tick-interval",
+        help="Seconds between scans of active sensors.",
+        min=1.0,
+        max=600.0,
+    ),
+    log_level: str = typer.Option("INFO", "--log-level"),
+) -> None:
+    """Run the sensor scheduler until SIGTERM/SIGINT (ADR-0041 K3b).
+
+    Periodically polls active ``sensors`` rows whose ``last_check_at +
+    poll_interval_seconds`` has elapsed, calls each sensor's
+    ``check()``, and on ``triggered=True`` enqueues a PENDING Run on
+    the sensor's ``target_pipeline_id``.
+
+    **Multi-replica safe** (K2 pattern): the due-sensor query holds
+    ``FOR UPDATE SKIP LOCKED`` so two replicas partition the work
+    instead of double-firing the same sensor.
+    """
+    # Make sure built-in sensors (http, …) register their dispatchers
+    # before the scheduler dispatches an event.
+    import etl_plugins.sensors  # noqa: F401 — register side-effects
+
+    logging.basicConfig(
+        level=getattr(logging, log_level.upper(), logging.INFO),
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+
+    async def _run() -> None:
+        engine = make_engine(_database_url())
+        factory = make_session_factory(engine)
+        scheduler = SensorScheduler(factory, tick_interval_seconds=tick_interval)
+
+        loop = asyncio.get_running_loop()
+
+        def _shutdown(_signame: str) -> None:
+            typer.echo(f"received {_signame}, shutting down sensor scheduler")
             scheduler.stop()
 
         for sig in (signal.SIGTERM, signal.SIGINT):

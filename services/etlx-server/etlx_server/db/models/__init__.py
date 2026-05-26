@@ -22,6 +22,7 @@ from etlx_server.db.models.pipeline import (
     Schedule,
 )
 from etlx_server.db.models.run import Run, RunLog, RunMetric
+from etlx_server.db.models.sensor import Sensor
 from etlx_server.db.models.workspace import (
     Membership,
     PersonalAccessToken,
@@ -49,6 +50,7 @@ __all__ = [
     "RunLog",
     "RunMetric",
     "Schedule",
+    "Sensor",
     "User",
     "Workspace",
     "WorkspaceVariable",

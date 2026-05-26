@@ -14,6 +14,33 @@
 
 ### Added
 - **빌더 지역 변수 UI — V2c** [ADR-0041] — 파이프라인 빌더의 PipelineSettingsPanel(노드 미선택 시 우측 패널)에 `VariablesEditor`: 파이프라인 지역 `variables`(name/value 추가·삭제, value JSON 파싱, 실패 시 평문). `PipelineConfigJson.variables` 타입 + `serialize`/`serializeGraph` meta가 비어있지 않을 때 emit + 빌더 load/save/deps 배선(round-trip). 기존 primitive 재사용, i18n en/ko, 웹 tsc 통과. **이로써 변수 기능(V1 코어 + V2a 서버 전역 + V2b 전역 UI + V2c 지역 UI) 완료 — 전역·지역 변수 모두 UI에서 설정 가능.**
+- **Sensor 서비스 영속화 + tick + REST — K3b** [ADR-0041 K3b] — K3a 코어 ABC를 서비스가 비로소 폴링·트리거 가능. 외부 이벤트(HTTP healthz, file landed, asset freshness 등)가 데이터 파이프라인 트리거의 1급 시민이 됨.
+  - **Alembic 0008 `sensors` 테이블**: id/workspace_id/name/type/config_json(JSONB)/target_pipeline_id(SET NULL — pipeline 삭제 시 sensor 히스토리 보존 + scheduler skip+log)/poll_interval_seconds(default 60)/is_active/last_check_at/last_triggered_at/last_result_json + UNIQUE(workspace_id, name) + active-only partial index on (last_check_at) WHERE is_active=true(tick 쿼리 비용 감소).
+  - **ORM `Sensor`** + **`SensorRepository`** (CRUD + `record_check` for tick + `_UNSET` sentinel으로 PATCH의 omitted-vs-explicit-null 구분 — `target_pipeline_id=null` = orphan 의도, 미지정 = unchanged). 도메인 예외: `SensorNameTakenError` → 409, `UnknownSensorTypeError` → 422.
+  - **`SensorScheduler`** tick(K2 패턴 재사용): active 센서 `FOR UPDATE SKIP LOCKED`로 multi-replica 안전(동시 tick 두 replica가 disjoint partition 처리, 한 sensor 중복 fire 0). Python에서 poll_interval gate(5s 플로어로 typo 보호), `asyncio.to_thread`로 sync `check()` 호출(이벤트 루프 비차단). triggered → target pipeline의 current version에 PENDING Run enqueue + `result_json`에 `{triggered_by: "sensor", sensor_id, sensor_name, sensor_result}` stamp → 다운스트림 pipeline이 무엇이 fired인지 즉시 인지. `last_check_at` 매 폴링, `last_triggered_at`만 fire 시 갱신, `last_result_json`은 항상 캐시(operator가 manual re-check 없이 디버그 가능).
+  - **CLI `etlx-server sensor-scheduler run`**: scheduler/stream-worker 패턴 미러, `--tick-interval`(기본 5s) + `--log-level` + 시작 시 `etl_plugins.sensors` import로 빌트인 register side-effect.
+  - **REST 6 엔드포인트** (`/workspaces/{ws}/sensors` prefix): GET list (Viewer+) / POST create (Editor+) / GET get (Viewer+) / PATCH update (Editor+) / DELETE (Editor+) / POST `/check` (Viewer+, manual one-shot — trigger run enqueue 안 함, "did I configure right?" debug용). create/update 시 `build_sensor`로 즉시 config 검증(invalid → 422 + session rollback, **절대 unrunnable row 안 남김**). 모든 mutation은 audit pairing(`sensor.create`/`sensor.update`/`sensor.delete`).
+  - **테스트** (12 신규 it): repo 3(round trip / duplicate name 409 / unknown type 422) + scheduler 4(triggered → 1 PENDING run + `last_triggered_at` 갱신 / quiet check no enqueue / **SKIP LOCKED multi-replica `asyncio.gather` 정확히 1 fire** / poll_interval 내라면 skip) + REST 5(CRUD happy / unknown type 422 / invalid config 422 + DB 비어 있음 검증 / non-member 403 / manual `/check` 결과 반환 + run enqueue 안 함 검증).
+  - **검증**: 서버 it 324 green, mypy 94/ruff OK. 코어 회귀 영향 0.
+  - **사용 흐름**:
+    ```bash
+    # 1. CLI: 센서 스케줄러 start
+    etlx-server sensor-scheduler run --tick-interval 5
+
+    # 2. REST: 외부 healthz가 200 + body에 "ready" 보이면 ETL 파이프라인 트리거
+    POST /workspaces/{ws}/sensors
+    {
+      "name": "wait-for-upstream",
+      "type": "http",
+      "config_json": {"url": "https://upstream/healthz", "contains": "ready"},
+      "target_pipeline_id": "<pipeline id>",
+      "poll_interval_seconds": 30
+    }
+
+    # 3. UI에서 "manual check" 버튼: 한 번 폴링해보고 결과 즉시 확인
+    POST /workspaces/{ws}/sensors/{sid}/check
+    ```
+  - **다음**: K3c 웹 UI(sensor CRUD + last check 결과 + manual check 버튼) / 추가 빌트인(file-landed via S3, asset freshness via 카탈로그) / 운영 강화.
 - **Sensor framework 코어 — K3a** [ADR-0041 K3a] — 외부 이벤트 트리거의 foundation. Airflow의 hallmark "wait-for-the-world-to-be-ready, then go" 패턴을 코어에 정착. 이번 슬라이스는 ABC + 레지스트리 + 첫 빌트인(http)만 — 서비스 영속화·스케줄링·REST·UI는 K3b/K3c로 분리.
   - **`etl_plugins/core/sensor.py`**: `SensorBase` ABC(`check() -> SensorResult`) + `SensorResult(triggered, message, metadata)` 프로즌 dataclass + `@register_sensor("name")` + `build_sensor(type, cfg)` + `registered_sensor_types()`. transform/connector와 동일 레지스트리 패턴, 외부 패키지 plug-in 가능.
   - **계약 2개**: ① **idempotent** — `check()`는 부작용 0, 폴링마다 같은 답 ② **soft-fail** — 네트워크/타임아웃/조건 미충족 모두 raise 안 하고 `triggered=False + descriptive message`로 반환(Airflow `BaseSensorOperator.poke` 모방). 하드 오류(misconfigured sensor)만 raise.

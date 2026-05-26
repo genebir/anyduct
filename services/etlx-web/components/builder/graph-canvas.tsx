@@ -9,14 +9,17 @@ import {
   ReactFlowProvider,
   useEdgesState,
   useNodesState,
+  useReactFlow,
   type Connection,
   type Edge,
   type Node,
+  type ReactFlowInstance,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { useEffect } from "react";
 import { PipelineNode, type PipelineNodeData } from "./pipeline-node";
 import { findOperator } from "@/lib/operators";
+import { PALETTE_DND_MIME } from "./palette";
 import type { GraphBuilderEdge, GraphBuilderNode } from "@/lib/pipeline-config";
 
 const NODE_TYPES = { pipelineNode: PipelineNode };
@@ -60,19 +63,7 @@ function connectionAllowed(
   return true;
 }
 
-export function GraphCanvas({
-  nodes,
-  edges,
-  selectedNodeId,
-  selectedEdgeId,
-  onSelectNode,
-  onSelectEdge,
-  onRemoveNode,
-  onConnect,
-  onRemoveEdge,
-  onMoveNode,
-  onDeselect,
-}: {
+export interface GraphCanvasProps {
   nodes: GraphBuilderNode[];
   edges: GraphBuilderEdge[];
   selectedNodeId: string | null;
@@ -84,7 +75,56 @@ export function GraphCanvas({
   onRemoveEdge: (id: string) => void;
   onMoveNode: (id: string, pos: { x: number; y: number }) => void;
   onDeselect?: () => void;
-}) {
+  /** Called when a palette item is dropped onto the canvas. ``position`` is
+   *  the React-Flow coordinate under the cursor (already converted from
+   *  screen pixels via ``screenToFlowPosition``). */
+  onDropOperator?: (operatorId: string, position: { x: number; y: number }) => void;
+  /** Right-click on empty canvas. ``flowPosition`` lets the caller's menu
+   *  drop a new node at the click point. */
+  onPaneContextMenu?: (
+    event: { clientX: number; clientY: number },
+    flowPosition: { x: number; y: number },
+  ) => void;
+  onNodeContextMenu?: (
+    event: { clientX: number; clientY: number },
+    nodeId: string,
+  ) => void;
+  onEdgeContextMenu?: (
+    event: { clientX: number; clientY: number },
+    edgeId: string,
+  ) => void;
+}
+
+export function GraphCanvas(props: GraphCanvasProps) {
+  return (
+    // ReactFlowProvider stays at the *outer* wrapper because the inner
+    // component (where dnd / context menus live) uses ``useReactFlow`` to
+    // convert screen pixels into flow coordinates. The provider supplies
+    // that hook's context.
+    <ReactFlowProvider>
+      <GraphCanvasInner {...props} />
+    </ReactFlowProvider>
+  );
+}
+
+function GraphCanvasInner({
+  nodes,
+  edges,
+  selectedNodeId,
+  selectedEdgeId,
+  onSelectNode,
+  onSelectEdge,
+  onRemoveNode,
+  onConnect,
+  onRemoveEdge,
+  onMoveNode,
+  onDeselect,
+  onDropOperator,
+  onPaneContextMenu,
+  onNodeContextMenu,
+  onEdgeContextMenu,
+}: GraphCanvasProps) {
+  const rf: ReactFlowInstance = useReactFlow();
   const layoutNodes: Node<PipelineNodeData>[] = nodes.map((n) => {
     const op = findOperator(n.operatorId);
     return {
@@ -135,60 +175,98 @@ export function GraphCanvas({
   };
 
   return (
-    <ReactFlowProvider>
-      <div className="h-full w-full bg-bg">
-        <ReactFlow
-          nodes={rfNodes}
-          edges={rfEdges}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          onConnect={handleConnect}
-          onEdgesDelete={(deleted) => deleted.forEach((e) => onRemoveEdge(e.id))}
-          onNodeDragStop={(_e, node) => onMoveNode(node.id, node.position)}
-          onNodeClick={(_e, node) => onSelectNode(node.id)}
-          onEdgeClick={(_e, edge) => onSelectEdge(edge.id)}
-          nodeTypes={NODE_TYPES}
-          fitView
-          fitViewOptions={{ padding: 0.25 }}
-          proOptions={{ hideAttribution: true }}
-          onPaneClick={() => onDeselect?.()}
-        >
-          {/* Two-layer 'graph paper' grid (2026-05-26 user request — '노드
-              있는 부분에 격자배경 넣어줘'). Fine 20 px cells give a sense of
-              snap-distance during drag; the coarser 100 px overlay keeps the
-              canvas from looking too busy. Both layers use the same subtle
-              border token so theme switching just works. */}
-          <Background
-            id="grid-fine"
-            variant={BackgroundVariant.Lines}
-            gap={20}
-            lineWidth={1}
-            color="rgb(var(--border-subtle) / 0.35)"
-          />
-          <Background
-            id="grid-coarse"
-            variant={BackgroundVariant.Lines}
-            gap={100}
-            lineWidth={1}
-            color="rgb(var(--border-subtle) / 0.65)"
-          />
-          <MiniMap
-            zoomable
-            pannable
-            nodeColor={() => "rgb(var(--bg-elevated))"}
-            maskColor="rgb(var(--bg-base) / 0.6)"
-            style={{
-              backgroundColor: "rgb(var(--bg-surface))",
-              border: "1px solid rgb(var(--border-subtle))",
-              borderRadius: 8,
-            }}
-          />
-          <Controls
-            showInteractive={false}
-            className="!rounded-md !border !border-border-subtle !bg-elevated"
-          />
-        </ReactFlow>
-      </div>
-    </ReactFlowProvider>
+    <div
+      className="h-full w-full bg-bg"
+      // Drag-and-drop palette → canvas (2026-05-26 user request). The
+      // dataTransfer carries the operator id under our custom MIME; ignore
+      // any drag that doesn't (file drops, text selections, …).
+      onDragOver={(e) => {
+        if (e.dataTransfer.types.includes(PALETTE_DND_MIME)) {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "copy";
+        }
+      }}
+      onDrop={(e) => {
+        const operatorId = e.dataTransfer.getData(PALETTE_DND_MIME);
+        if (!operatorId || !onDropOperator) return;
+        e.preventDefault();
+        // Convert pointer pixels → flow coordinates so the node lands
+        // exactly under the cursor regardless of zoom / pan.
+        const position = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY });
+        onDropOperator(operatorId, position);
+      }}
+    >
+      <ReactFlow
+        nodes={rfNodes}
+        edges={rfEdges}
+        onNodesChange={onNodesChange}
+        onEdgesChange={onEdgesChange}
+        onConnect={handleConnect}
+        onEdgesDelete={(deleted) => deleted.forEach((e) => onRemoveEdge(e.id))}
+        onNodeDragStop={(_e, node) => onMoveNode(node.id, node.position)}
+        onNodeClick={(_e, node) => onSelectNode(node.id)}
+        onEdgeClick={(_e, edge) => onSelectEdge(edge.id)}
+        // Right-click handlers: React Flow gives us the event + the
+        // node/edge; we forward to the caller with the screen coords +
+        // (for the pane) the flow position so the menu's "Add here" works.
+        onPaneContextMenu={(e) => {
+          if (!onPaneContextMenu) return;
+          e.preventDefault();
+          const mouse = e as MouseEvent;
+          const flow = rf.screenToFlowPosition({ x: mouse.clientX, y: mouse.clientY });
+          onPaneContextMenu({ clientX: mouse.clientX, clientY: mouse.clientY }, flow);
+        }}
+        onNodeContextMenu={(e, node) => {
+          if (!onNodeContextMenu) return;
+          e.preventDefault();
+          onNodeContextMenu({ clientX: e.clientX, clientY: e.clientY }, node.id);
+        }}
+        onEdgeContextMenu={(e, edge) => {
+          if (!onEdgeContextMenu) return;
+          e.preventDefault();
+          onEdgeContextMenu({ clientX: e.clientX, clientY: e.clientY }, edge.id);
+        }}
+        nodeTypes={NODE_TYPES}
+        fitView
+        fitViewOptions={{ padding: 0.25 }}
+        proOptions={{ hideAttribution: true }}
+        onPaneClick={() => onDeselect?.()}
+      >
+        {/* Two-layer 'graph paper' grid (2026-05-26 user request — '노드
+            있는 부분에 격자배경 넣어줘'). Fine 20 px cells give a sense of
+            snap-distance during drag; the coarser 100 px overlay keeps the
+            canvas from looking too busy. Both layers use the same subtle
+            border token so theme switching just works. */}
+        <Background
+          id="grid-fine"
+          variant={BackgroundVariant.Lines}
+          gap={20}
+          lineWidth={1}
+          color="rgb(var(--border-subtle) / 0.35)"
+        />
+        <Background
+          id="grid-coarse"
+          variant={BackgroundVariant.Lines}
+          gap={100}
+          lineWidth={1}
+          color="rgb(var(--border-subtle) / 0.65)"
+        />
+        <MiniMap
+          zoomable
+          pannable
+          nodeColor={() => "rgb(var(--bg-elevated))"}
+          maskColor="rgb(var(--bg-base) / 0.6)"
+          style={{
+            backgroundColor: "rgb(var(--bg-surface))",
+            border: "1px solid rgb(var(--border-subtle))",
+            borderRadius: 8,
+          }}
+        />
+        <Controls
+          showInteractive={false}
+          className="!rounded-md !border !border-border-subtle !bg-elevated"
+        />
+      </ReactFlow>
+    </div>
   );
 }

@@ -323,6 +323,12 @@ export const en = {
   "pipelines.deleteAria": "Delete {name}",
   "pipelines.viewRunsAria": "View runs for {name}",
   "pipelines.viewRunsTitle": "View this pipeline's run history",
+  // Row right-click menu (2026-05-26 user request)
+  "pipelines.menuOpenBuilder": "Open in builder",
+  "pipelines.menuViewRuns": "View runs",
+  "pipelines.menuTrigger": "Trigger now",
+  "pipelines.menuBackfill": "Backfill…",
+  "pipelines.menuDelete": "Delete",
   "builder.viewRuns": "Runs",
   "builder.viewRunsTitle": "Open this pipeline's run history",
   "pipelines.emptyTitle": "No pipelines yet",
@@ -475,7 +481,15 @@ export const en = {
     "Records take this edge only when the condition matches. Leave empty for an unconditional edge. Add a condition on each outgoing edge to branch.",
   "graph.removeEdge": "Remove edge",
   "graph.hint":
-    "Drag from a node's right edge to another node to connect. Click an edge to set a branch condition. Use a Join node to merge two or more inputs.",
+    "Drag operators from the left palette onto the canvas to add them. Drag a node's right edge to another node to connect. Right-click for shortcuts. Use a Join node to merge two or more inputs.",
+  // Builder context menus (2026-05-26 user request)
+  "graph.menuAddNode": "Add node",
+  "graph.menuEdit": "Edit",
+  "graph.menuDuplicate": "Duplicate",
+  "graph.menuDisconnect": "Disconnect (remove edges)",
+  "graph.menuDelete": "Delete",
+  "graph.menuEditCondition": "Edit branch condition",
+  "graph.menuDeleteEdge": "Delete edge",
   "graph.modeGraph": "Graph mode",
   "graph.modeLinear": "Linear mode",
   "graph.switchToGraph": "Switch to graph",
@@ -502,6 +516,13 @@ export const en = {
   "runs.filteredByPipeline": "Showing runs for pipeline: {name}",
   "runs.clearFilter": "Clear filter",
   "runs.openPipeline": "Open pipeline →",
+  // Row right-click menu (2026-05-26 user request)
+  "runs.menuOpen": "Open run detail",
+  "runs.menuOpenPipeline": "Open pipeline",
+  "runs.menuFilterPipeline": "Filter runs for this pipeline",
+  "runs.menuRetry": "Retry this run",
+  "runs.menuRetried": "Queued retry as run {id}…",
+  "runs.menuRetryFailed": "Couldn't retry the run.",
   "runs.loadFailed": "Couldn't load runs.",
 
   // run detail
@@ -971,6 +992,12 @@ export const ko: Messages = {
   "pipelines.deleteAria": "{name} 삭제",
   "pipelines.viewRunsAria": "{name} 실행 기록 보기",
   "pipelines.viewRunsTitle": "이 파이프라인의 실행 기록 보기",
+  // 행 우클릭 메뉴 (2026-05-26 사용자 요청)
+  "pipelines.menuOpenBuilder": "빌더에서 열기",
+  "pipelines.menuViewRuns": "실행 기록 보기",
+  "pipelines.menuTrigger": "지금 실행",
+  "pipelines.menuBackfill": "백필…",
+  "pipelines.menuDelete": "삭제",
   "builder.viewRuns": "실행 기록",
   "builder.viewRunsTitle": "이 파이프라인의 실행 기록 열기",
   "pipelines.emptyTitle": "아직 파이프라인이 없습니다",
@@ -1121,7 +1148,15 @@ export const ko: Messages = {
     "조건이 맞는 레코드만 이 엣지를 따라갑니다. 비우면 무조건 통과. 노드의 각 나가는 엣지에 조건을 걸어 분기하세요.",
   "graph.removeEdge": "엣지 제거",
   "graph.hint":
-    "노드 오른쪽 끝에서 다른 노드로 드래그하면 연결됩니다. 엣지를 클릭해 분기 조건을 설정하세요. 두 개 이상의 입력을 합치려면 Join 노드를 사용하세요.",
+    "왼쪽 팔레트에서 오퍼레이터를 캔버스로 드래그해서 추가합니다. 노드 오른쪽 끝에서 다른 노드로 드래그하면 연결됩니다. 우클릭으로 빠른 액션. 두 개 이상의 입력을 합치려면 Join 노드를 사용하세요.",
+  // 빌더 컨텍스트 메뉴 (2026-05-26 사용자 요청)
+  "graph.menuAddNode": "노드 추가",
+  "graph.menuEdit": "편집",
+  "graph.menuDuplicate": "복제",
+  "graph.menuDisconnect": "연결 해제(엣지 제거)",
+  "graph.menuDelete": "삭제",
+  "graph.menuEditCondition": "분기 조건 편집",
+  "graph.menuDeleteEdge": "엣지 삭제",
   "graph.modeGraph": "그래프 모드",
   "graph.modeLinear": "선형 모드",
   "graph.switchToGraph": "그래프로 전환",
@@ -1147,6 +1182,13 @@ export const ko: Messages = {
   "runs.filteredByPipeline": "{name} 파이프라인의 실행 기록만 표시 중",
   "runs.clearFilter": "필터 해제",
   "runs.openPipeline": "파이프라인 열기 →",
+  // 행 우클릭 메뉴 (2026-05-26 사용자 요청)
+  "runs.menuOpen": "실행 상세 열기",
+  "runs.menuOpenPipeline": "파이프라인 열기",
+  "runs.menuFilterPipeline": "이 파이프라인의 실행만 보기",
+  "runs.menuRetry": "이 실행 재시도",
+  "runs.menuRetried": "재시도가 {id}… 실행으로 큐에 들어갔습니다",
+  "runs.menuRetryFailed": "재시도할 수 없습니다.",
   "runs.loadFailed": "실행 기록을 불러올 수 없습니다.",
 
   "runDetail.backAria": "실행 목록으로",

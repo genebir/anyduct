@@ -120,6 +120,11 @@ export function Palette({
   );
 }
 
+// DataTransfer MIME type for palette → canvas drag-and-drop (2026-05-26
+// user request). Custom MIME so the canvas can ignore non-palette drags
+// (files from desktop, text selections, …) without false positives.
+export const PALETTE_DND_MIME = "application/x-etlx-operator-id";
+
 function OperatorButton({
   spec,
   onAdd,
@@ -131,10 +136,20 @@ function OperatorButton({
   return (
     <button
       type="button"
+      // Click still adds at a default canvas position (keyboard a11y +
+      // touch-only operators), drag does the same with a *placed*
+      // position via the canvas drop handler.
       onClick={() => onAdd(spec.id)}
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData(PALETTE_DND_MIME, spec.id);
+        // Plain text fallback so other apps see *something* sensible.
+        e.dataTransfer.setData("text/plain", spec.label);
+        e.dataTransfer.effectAllowed = "copy";
+      }}
       className={cn(
         "group flex items-start gap-2 rounded-md border border-transparent px-2 py-2 text-left transition duration-150",
-        "hover:border-border-subtle hover:bg-overlay",
+        "cursor-grab hover:border-border-subtle hover:bg-overlay active:cursor-grabbing",
       )}
     >
       <span

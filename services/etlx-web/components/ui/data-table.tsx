@@ -15,11 +15,18 @@ export function DataTable<Row extends { id: string }>({
   rows,
   emptyState,
   onRowClick,
+  onRowContextMenu,
 }: {
   columns: Column<Row>[];
   rows: Row[];
   emptyState?: ReactNode;
   onRowClick?: (row: Row) => void;
+  /** Right-click handler — receives the row + the original event so callers
+   *  can open a context menu at the pointer (2026-05-26 user request). */
+  onRowContextMenu?: (
+    row: Row,
+    event: { preventDefault: () => void; clientX: number; clientY: number },
+  ) => void;
 }) {
   if (rows.length === 0 && emptyState) {
     return <div className="py-8">{emptyState}</div>;
@@ -48,6 +55,9 @@ export function DataTable<Row extends { id: string }>({
             <tr
               key={row.id}
               onClick={onRowClick ? () => onRowClick(row) : undefined}
+              onContextMenu={
+                onRowContextMenu ? (e) => onRowContextMenu(row, e) : undefined
+              }
               className={cn(
                 "border-b border-border-subtle bg-bg transition duration-150",
                 onRowClick &&

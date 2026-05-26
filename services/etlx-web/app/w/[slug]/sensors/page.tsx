@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import {
   CheckCircle2Icon,
+  EditIcon,
   PencilIcon,
   PlayIcon,
   PlusIcon,
@@ -17,6 +18,12 @@ import { Card, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { DataTable, type Column } from "@/components/ui/data-table";
+import {
+  ContextMenu,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  useContextMenu,
+} from "@/components/ui/context-menu";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
@@ -200,6 +207,8 @@ export default function SensorsPage() {
   const [pendingDelete, setPendingDelete] = useState<SensorSummary | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [checking, setChecking] = useState<string | null>(null);
+  const rowMenu = useContextMenu();
+  const rowMenuTargetRef = useRef<SensorSummary | null>(null);
 
   async function refresh(workspaceId: string) {
     try {
@@ -393,6 +402,10 @@ export default function SensorsPage() {
                 checking,
                 pipelineNameById,
               )}
+              onRowContextMenu={(row, e) => {
+                rowMenuTargetRef.current = row;
+                rowMenu.openOnEvent(e);
+              }}
             />
           )}
         </Card>
@@ -411,6 +424,39 @@ export default function SensorsPage() {
         onConfirm={onConfirmDelete}
         onCancel={() => setPendingDelete(null)}
       />
+
+      {/* Row right-click — mirrors per-row buttons. */}
+      <ContextMenu menu={rowMenu}>
+        <ContextMenuItem
+          icon={<PlayIcon size={14} />}
+          onSelect={() => {
+            const s = rowMenuTargetRef.current;
+            if (s) void onCheck(s);
+          }}
+        >
+          {t("sensors.checkNow")}
+        </ContextMenuItem>
+        <ContextMenuItem
+          icon={<EditIcon size={14} />}
+          onSelect={() => {
+            const s = rowMenuTargetRef.current;
+            if (s) setForm({ kind: "edit", sensor: s });
+          }}
+        >
+          {t("common.edit")}
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem
+          icon={<Trash2Icon size={14} />}
+          destructive
+          onSelect={() => {
+            const s = rowMenuTargetRef.current;
+            if (s) setPendingDelete(s);
+          }}
+        >
+          {t("common.delete")}
+        </ContextMenuItem>
+      </ContextMenu>
     </>
   );
 }

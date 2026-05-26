@@ -1,13 +1,26 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { ActivityIcon, XIcon } from "lucide-react";
+import {
+  ActivityIcon,
+  ExternalLinkIcon,
+  EyeIcon,
+  RotateCcwIcon,
+  WorkflowIcon,
+  XIcon,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Header } from "@/components/shell/header";
 import { Card } from "@/components/ui/card";
 import { DataTable, type Column } from "@/components/ui/data-table";
+import {
+  ContextMenu,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  useContextMenu,
+} from "@/components/ui/context-menu";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import {
@@ -113,6 +126,8 @@ export default function RunsPage() {
   const { t } = useLocale();
   const [rows, setRows] = useState<RunSummary[] | null>(null);
   const [pipelines, setPipelines] = useState<PipelineSummary[]>([]);
+  const rowMenu = useContextMenu();
+  const rowMenuTargetRef = useRef<RunSummary | null>(null);
 
   // Pipeline list is a one-shot — used to render readable names in the
   // table and the filter banner instead of bare UUIDs.
@@ -216,6 +231,10 @@ export default function RunsPage() {
               onRowClick={(row) => {
                 if (ws) router.push(`/w/${ws.slug}/runs/${row.id}`);
               }}
+              onRowContextMenu={(row, e) => {
+                rowMenuTargetRef.current = row;
+                rowMenu.openOnEvent(e);
+              }}
               emptyState={
                 <EmptyState
                   icon={<ActivityIcon size={36} strokeWidth={1.5} />}
@@ -231,6 +250,60 @@ export default function RunsPage() {
           )}
         </Card>
       </main>
+
+      {/* Row right-click — quick actions without leaving the list. */}
+      <ContextMenu menu={rowMenu}>
+        <ContextMenuItem
+          icon={<EyeIcon size={14} />}
+          onSelect={() => {
+            const r = rowMenuTargetRef.current;
+            if (r && ws) router.push(`/w/${ws.slug}/runs/${r.id}`);
+          }}
+        >
+          {t("runs.menuOpen")}
+        </ContextMenuItem>
+        <ContextMenuItem
+          icon={<WorkflowIcon size={14} />}
+          onSelect={() => {
+            const r = rowMenuTargetRef.current;
+            if (r && ws) router.push(`/w/${ws.slug}/pipelines/${r.pipeline_id}/edit`);
+          }}
+        >
+          {t("runs.menuOpenPipeline")}
+        </ContextMenuItem>
+        <ContextMenuItem
+          icon={<ExternalLinkIcon size={14} />}
+          onSelect={() => {
+            const r = rowMenuTargetRef.current;
+            if (r && ws)
+              router.push(`/w/${ws.slug}/runs?pipeline=${r.pipeline_id}`);
+          }}
+        >
+          {t("runs.menuFilterPipeline")}
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem
+          icon={<RotateCcwIcon size={14} />}
+          disabled={(() => {
+            const r = rowMenuTargetRef.current;
+            return !r || (r.status !== "failed" && r.status !== "cancelled");
+          })()}
+          onSelect={async () => {
+            const r = rowMenuTargetRef.current;
+            if (!r || !ws) return;
+            try {
+              const fresh = await runsApi.retry(ws.id, r.id);
+              toast.success(t("runs.menuRetried", { id: fresh.id.slice(0, 8) }));
+            } catch (err) {
+              toast.error(
+                err instanceof ApiError ? err.message : t("runs.menuRetryFailed"),
+              );
+            }
+          }}
+        >
+          {t("runs.menuRetry")}
+        </ContextMenuItem>
+      </ContextMenu>
     </>
   );
 }

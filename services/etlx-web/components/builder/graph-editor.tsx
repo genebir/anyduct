@@ -1,11 +1,26 @@
 "use client";
 
-import { useCallback, useState } from "react";
-import { Trash2Icon } from "lucide-react";
+import { useCallback, useRef, useState } from "react";
+import {
+  CopyIcon,
+  EditIcon,
+  GitBranchIcon,
+  Trash2Icon,
+  UnlinkIcon,
+} from "lucide-react";
 import { Palette } from "@/components/builder/palette";
 import { PropertiesPanel, FilterEditor } from "@/components/builder/properties-panel";
 import { GraphCanvas } from "@/components/builder/graph-canvas";
 import { useLocale } from "@/components/providers/locale-provider";
+import {
+  ContextMenu,
+  ContextMenuItem,
+  ContextMenuLabel,
+  ContextMenuSeparator,
+  ContextMenuSubmenu,
+  useContextMenu,
+} from "@/components/ui/context-menu";
+import { OPERATOR_KIND_GROUPS, operatorAllowedForMode } from "@/lib/operators";
 import type { ConnectionSummary } from "@/lib/api";
 import {
   makeGraphNode,
@@ -55,11 +70,15 @@ export function GraphEditor({
   }, []);
 
   const addOperator = useCallback(
-    (operatorId: string) => {
-      const node = makeGraphNode(operatorId, {
+    (operatorId: string, position?: { x: number; y: number }) => {
+      // Cascade default placement so click-added nodes don't pile on top
+      // of each other. Drop-added nodes pass an explicit ``position`` from
+      // the canvas's screenToFlowPosition() so they land under the cursor.
+      const pos = position ?? {
         x: 80 + (state.nodes.length % 4) * 40,
         y: 260 + (state.nodes.length % 6) * 30,
-      });
+      };
+      const node = makeGraphNode(operatorId, pos);
       onChange({ ...state, nodes: [...state.nodes, node] });
       setSelectedNodeId(node.id);
       setSelectedEdgeId(null);
@@ -124,8 +143,54 @@ export function GraphEditor({
     [state, onChange],
   );
 
+  const duplicateNode = useCallback(
+    (id: string) => {
+      const src = state.nodes.find((n) => n.id === id);
+      if (!src) return;
+      const copy = makeGraphNode(src.operatorId, {
+        x: src.position.x + 40,
+        y: src.position.y + 40,
+      });
+      // Carry the source's data so duplicate is genuinely a copy + nudge.
+      copy.data = { ...src.data };
+      onChange({ ...state, nodes: [...state.nodes, copy] });
+      setSelectedNodeId(copy.id);
+      setSelectedEdgeId(null);
+    },
+    [state, onChange],
+  );
+
+  const disconnectNode = useCallback(
+    (id: string) => {
+      // Strip every edge that touches the node — common ask when re-wiring
+      // an existing graph without deleting the node itself.
+      onChange({
+        ...state,
+        edges: state.edges.filter((e) => e.source !== id && e.target !== id),
+      });
+    },
+    [state, onChange],
+  );
+
   const selectedNode = state.nodes.find((n) => n.id === selectedNodeId) ?? null;
   const selectedEdge = state.edges.find((e) => e.id === selectedEdgeId) ?? null;
+
+  // ----- right-click menus (2026-05-26 user request) -----------------------
+  // One menu controller per surface (pane / node / edge). Single source of
+  // truth for "what was right-clicked" so the menu content can act on it.
+  const paneMenu = useContextMenu();
+  const nodeMenu = useContextMenu();
+  const edgeMenu = useContextMenu();
+  // Remember the flow position of the pane right-click so 'Add … here' drops
+  // the node exactly under the original cursor (the menu items fire after
+  // the user has moved the mouse to pick).
+  const paneTargetRef = useRef<{ x: number; y: number } | null>(null);
+  const nodeTargetRef = useRef<string | null>(null);
+  const edgeTargetRef = useRef<string | null>(null);
+
+  const nodeForMenu = nodeTargetRef.current
+    ? state.nodes.find((n) => n.id === nodeTargetRef.current)
+    : null;
 
   return (
     <div className="flex min-h-0 flex-1 overflow-hidden">
@@ -143,14 +208,115 @@ export function GraphEditor({
             onConnect={connect}
             onRemoveEdge={removeEdge}
             onMoveNode={moveNode}
+            onDropOperator={addOperator}
             onDeselect={() => {
               setSelectedNodeId(null);
               setSelectedEdgeId(null);
+            }}
+            onPaneContextMenu={(e, flowPos) => {
+              paneTargetRef.current = flowPos;
+              paneMenu.openAt(e.clientX, e.clientY);
+            }}
+            onNodeContextMenu={(e, nodeId) => {
+              nodeTargetRef.current = nodeId;
+              nodeMenu.openAt(e.clientX, e.clientY);
+            }}
+            onEdgeContextMenu={(e, edgeId) => {
+              edgeTargetRef.current = edgeId;
+              edgeMenu.openAt(e.clientX, e.clientY);
             }}
           />
         </div>
         {dryRunPanel}
       </div>
+
+      {/* --- pane context menu: add node at click point ------------------- */}
+      <ContextMenu menu={paneMenu} minWidth={220}>
+        <ContextMenuLabel>{t("graph.menuAddNode")}</ContextMenuLabel>
+        {OPERATOR_KIND_GROUPS.map((group) => {
+          // graph-only operators (join / aggregate) appear under transforms;
+          // streaming filter excludes irrelevant source/sink in stream mode.
+          const visibleCategories = group.categories
+            .map((c) => ({
+              ...c,
+              specs: c.specs.filter((s) => operatorAllowedForMode(s, mode)),
+            }))
+            .filter((c) => c.specs.length > 0);
+          if (visibleCategories.length === 0) return null;
+          return (
+            <ContextMenuSubmenu key={group.kind} label={group.label}>
+              {visibleCategories.map((cat) => (
+                <div key={cat.category}>
+                  <ContextMenuLabel>{cat.category}</ContextMenuLabel>
+                  {cat.specs.map((spec) => (
+                    <ContextMenuItem
+                      key={spec.id}
+                      onSelect={() => addOperator(spec.id, paneTargetRef.current ?? undefined)}
+                    >
+                      {spec.label}
+                    </ContextMenuItem>
+                  ))}
+                </div>
+              ))}
+            </ContextMenuSubmenu>
+          );
+        })}
+      </ContextMenu>
+
+      {/* --- node context menu ------------------------------------------- */}
+      <ContextMenu menu={nodeMenu}>
+        <ContextMenuItem
+          icon={<EditIcon size={14} />}
+          onSelect={() => nodeTargetRef.current && selectNode(nodeTargetRef.current)}
+        >
+          {t("graph.menuEdit")}
+        </ContextMenuItem>
+        <ContextMenuItem
+          icon={<CopyIcon size={14} />}
+          onSelect={() => nodeTargetRef.current && duplicateNode(nodeTargetRef.current)}
+        >
+          {t("graph.menuDuplicate")}
+        </ContextMenuItem>
+        <ContextMenuItem
+          icon={<UnlinkIcon size={14} />}
+          disabled={
+            // Only enabled when the node actually has edges to strip.
+            !nodeForMenu ||
+            !state.edges.some(
+              (e) => e.source === nodeForMenu.id || e.target === nodeForMenu.id,
+            )
+          }
+          onSelect={() => nodeTargetRef.current && disconnectNode(nodeTargetRef.current)}
+        >
+          {t("graph.menuDisconnect")}
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem
+          icon={<Trash2Icon size={14} />}
+          destructive
+          onSelect={() => nodeTargetRef.current && removeNode(nodeTargetRef.current)}
+        >
+          {t("graph.menuDelete")}
+        </ContextMenuItem>
+      </ContextMenu>
+
+      {/* --- edge context menu ------------------------------------------- */}
+      <ContextMenu menu={edgeMenu}>
+        <ContextMenuItem
+          icon={<GitBranchIcon size={14} />}
+          onSelect={() => edgeTargetRef.current && selectEdge(edgeTargetRef.current)}
+        >
+          {t("graph.menuEditCondition")}
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem
+          icon={<Trash2Icon size={14} />}
+          destructive
+          onSelect={() => edgeTargetRef.current && removeEdge(edgeTargetRef.current)}
+        >
+          {t("graph.menuDeleteEdge")}
+        </ContextMenuItem>
+      </ContextMenu>
       {selectedEdge ? (
         <aside className="flex w-80 shrink-0 flex-col gap-4 overflow-y-auto border-l border-border-subtle bg-surface p-4">
           <header className="flex items-center justify-between">

@@ -1,15 +1,29 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ActivityIcon, PlusIcon, Trash2Icon, WorkflowIcon } from "lucide-react";
+import {
+  ActivityIcon,
+  CalendarPlusIcon,
+  EditIcon,
+  PlayIcon,
+  PlusIcon,
+  Trash2Icon,
+  WorkflowIcon,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Header } from "@/components/shell/header";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { DataTable, type Column } from "@/components/ui/data-table";
+import {
+  ContextMenu,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  useContextMenu,
+} from "@/components/ui/context-menu";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { BackfillDialog } from "@/components/pipelines/backfill-dialog";
@@ -94,6 +108,8 @@ export default function PipelinesPage() {
   );
   const [deleting, setDeleting] = useState(false);
   const [backfillRow, setBackfillRow] = useState<PipelineSummary | null>(null);
+  const rowMenu = useContextMenu();
+  const rowMenuTargetRef = useRef<PipelineSummary | null>(null);
 
   useEffect(() => {
     if (!ws) return;
@@ -341,6 +357,10 @@ export default function PipelinesPage() {
                 },
               ]}
               rows={rows}
+              onRowContextMenu={(row, e) => {
+                rowMenuTargetRef.current = row;
+                rowMenu.openOnEvent(e);
+              }}
               emptyState={
                 <EmptyState
                   icon={<WorkflowIcon size={36} strokeWidth={1.5} />}
@@ -382,6 +402,67 @@ export default function PipelinesPage() {
           onClose={() => setBackfillRow(null)}
         />
       ) : null}
+
+      {/* Row right-click: mirrors the per-row toolbar so power users can
+          flow through pipelines without aiming at small buttons. */}
+      <ContextMenu menu={rowMenu}>
+        <ContextMenuItem
+          icon={<EditIcon size={14} />}
+          onSelect={() => {
+            const r = rowMenuTargetRef.current;
+            if (r && ws) router.push(`/w/${ws.slug}/pipelines/${r.id}/edit`);
+          }}
+        >
+          {t("pipelines.menuOpenBuilder")}
+        </ContextMenuItem>
+        <ContextMenuItem
+          icon={<ActivityIcon size={14} />}
+          onSelect={() => {
+            const r = rowMenuTargetRef.current;
+            if (r && ws) router.push(`/w/${ws.slug}/runs?pipeline=${r.id}`);
+          }}
+        >
+          {t("pipelines.menuViewRuns")}
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem
+          icon={<PlayIcon size={14} />}
+          disabled={(() => {
+            const r = rowMenuTargetRef.current;
+            return !r || !r.current_version;
+          })()}
+          onSelect={() => {
+            const r = rowMenuTargetRef.current;
+            if (r) void onTrigger(r);
+          }}
+        >
+          {t("pipelines.menuTrigger")}
+        </ContextMenuItem>
+        <ContextMenuItem
+          icon={<CalendarPlusIcon size={14} />}
+          disabled={(() => {
+            const r = rowMenuTargetRef.current;
+            return !r || !r.current_version;
+          })()}
+          onSelect={() => {
+            const r = rowMenuTargetRef.current;
+            if (r) setBackfillRow(r);
+          }}
+        >
+          {t("pipelines.menuBackfill")}
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem
+          icon={<Trash2Icon size={14} />}
+          destructive
+          onSelect={() => {
+            const r = rowMenuTargetRef.current;
+            if (r) setPendingDelete(r);
+          }}
+        >
+          {t("pipelines.menuDelete")}
+        </ContextMenuItem>
+      </ContextMenu>
     </>
   );
 }

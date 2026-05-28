@@ -117,7 +117,9 @@ uv run mypy etl_plugins
 
 ## 5. 현재 단계
 
-> **최신 마일스톤 (2026-05-21): Asset/Lineage 축 = "Airflow 오케스트레이션 + Dagster 리니지" 비전 핵심 골격 완성 (A→B→C→D1→D2).** 자세한 진행은 메모리 [[ultimate-vision]] + ROADMAP §6(6.6~6.8) + ADR-0036/0037/0038 참조. 요약:
+> **최신 마일스톤 (2026-05-28): SQL 컬럼 리니지 풀-AST 워커 (Phase X, ADR-0043).** `etl_plugins/runtime/sql_lineage.py`(신규) `extract_sql_lineage`가 `sqlglot.lineage`로 JOIN(모든 종류)/CTE chain·재귀/서브쿼리/UNION/윈도우/CASE/COALESCE/LATERAL 정확 파싱. Placeholder leaf 복구(correlated/LATERAL alias→table) + Aggregate fallback(`COUNT(*)`→base table) + `SELECT *` w/schema 지원. `_Mapping`을 `tuple[ColumnRef, ...]`로 widen(데이터 모델 무변경, DB 마이그레이션 없음). 32 신규 테스트(corpus 25 + stress 4: 200줄 dbt-style + 100-layer CTE 2000줄+ <5s + 50-branch UNION). 옛 "JOIN→opaque" 기대 2개는 새 정확한 결과로 갱신. 코어 703 + 서버 429 green. 다음 슬라이스(자연 보완): `AssetLineage` emit 측에서 query의 referenced 테이블을 inputs로 자동 추가(JOIN의 추가 upstream이 카탈로그에 자동 등록) + SchemaInspector로 `SELECT *` 실행시 해결.
+>
+> **이전 마일스톤 (2026-05-21): Asset/Lineage 축 = "Airflow 오케스트레이션 + Dagster 리니지" 비전 핵심 골격 완성 (A→B→C→D1→D2).** 자세한 진행은 메모리 [[ultimate-vision]] + ROADMAP §6(6.6~6.8) + ADR-0036/0037/0038 참조. 요약:
 > - **A** 코어 모델/정적파생/런타임 emit/카탈로그(`etl_plugins/core/asset.py`, `runtime/lineage.py`, `observability/lineage.py`, `etl_plugins/catalog.py`) — derived-first(zero-config) 리니지, SQL `FROM` 파싱으로 source↔sink 키 일치.
 > - **B** 메타DB 영속화(assets/asset_edges/asset_materializations, Alembic 0004) + `AssetRepository` + 워커 hook + 카탈로그 REST.
 > - **C** 웹 카탈로그(`/w/[slug]/assets`) + `LineageGraph`(@xyflow/react).

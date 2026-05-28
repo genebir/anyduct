@@ -10,6 +10,17 @@
 ## [Unreleased]
 
 ### Added
+- **SQL 컬럼 리니지 — `sqlglot.lineage` 풀-AST 워커로 전면 교체 (Phase X)** [ADR-0043] — 사용자 요청 *"카탈로그와 데이터 리니지를 더 강화. 2천 줄짜리 복잡 쿼리든, 서브쿼리/WITH절 포함 어떤 유형이든 완벽 파싱"*. 옛 hand-written FROM/JOIN 매처는 1:1 SELECT만 풀고 JOIN/CTE/UNION/서브쿼리는 모두 "sink opaque"로 떨궜음 — 정작 lineage가 가장 필요한 warehouse-to-warehouse 패턴에서 빈 그래프. 전면 재작성:
+  - **`etl_plugins/runtime/sql_lineage.py`(신규) `extract_sql_lineage`** — `sqlglot.lineage.lineage()` 트리를 펼쳐 각 출력 컬럼을 `(table, source_col)` leaf 셋으로 정규화. CTE chain / 재귀 CTE / 서브쿼리(FROM·SELECT·correlated) / JOIN(모든 종류, 3-way+) / `UNION [ALL]` / `COALESCE` / `CASE WHEN` / 산술 / 윈도우(PARTITION+ORDER 컬럼 포함) / `LATERAL`(Postgres) 모두 처리.
+  - **Placeholder leaf 복구** — correlated/LATERAL 참조가 `Placeholder`로 떨어지면 alias→table 맵으로 `o.amount` → `orders.amount` 후처리.
+  - **Aggregate fallback** — `COUNT(*)` 같은 leaf는 `source=Select` + 표 참조 없음 → Select가 단일 base table이면 그쪽에 귀속. 순수 리터럴(`42 AS answer`)은 column/star 없으니 fallback 꺼져 upstream 빈 상태 유지.
+  - **`SELECT *` w/ schema** — `sqlglot.optimizer.qualify`로 먼저 확장 후 lineage. schema 없으면 여전히 opaque(SchemaInspector 와이어업은 후속).
+  - **`_Mapping` widen** — `dict[str, ColumnRef|None]` → `dict[str, tuple[ColumnRef, ...]]`. `ColumnEdge`는 원래부터 `tuple` 지원이라 **DB 마이그레이션 없음**. 트랜스폼 체인(rename/select/drop/cast/add_constant/filter/dedupe/assert)이 멀티-upstream 그대로 통과.
+  - **테스트 32 신규**: `test_sql_lineage.py`(25 — 단순/별칭/함수/3-way JOIN/COALESCE/체인·재귀 CTE/서브쿼리/UNION/윈도우/CASE/LATERAL/SELECT * w·schema 등 + combined monster) + `test_sql_lineage_stress.py`(4 — 200줄 dbt-style 실전 쿼리 + 100-layer CTE 2000줄+ <5s 가드 + 50-branch UNION) + `test_column_lineage.py`(+3 멀티-upstream 케이스).
+  - **회귀**: 옛 `test_join_marks_sink_opaque` / `test_complex_expression_keeps_column_drops_upstream` 두 케이스는 새 정확한 결과로 기대값 업데이트(JOIN per-table upstream, `UPPER(b)`→`b` 추적).
+  - **검증**: 코어 unit 703 + server unit/it 429 green. mypy 코어 60 + 서버 100 OK. ruff clean.
+  - **카탈로그/리니지 정확도 대폭 향상**: 실전 warehouse 쿼리(staging→marts CTE chain, COALESCE JOIN, window 등)가 이제 컬럼 단위로 정확히 그려짐.
+
 - **Audit 데이터-플레인 확장 — Source SELECT 쿼리도 기록 (Phase W)** [ADR-0041 W, Phase U follow-up] — Dogfooding 중 발견: Phase U는 변경 SQL + Python만 audit했지만 사용자 *"각 쿼리"* 요구에는 SELECT도 포함. GDPR 4조 read-trail("누가 PII 읽었나?") 충족:
   - **신규 action `run.sql_read`** — after_json: `node_id` / `kind="source"` / `connection` / `connection_type` / `query`(2000 char trunc) / `query_truncated` / `query_hash` / `records_read`(node-level run 한정, 노출된 행 수 forensic).
   - **SQL connection type 가드** — `_SQL_CONNECTION_TYPES = {"postgres", "mysql", "sqlite"}`. HTTP/Kafka/S3 source의 `query` 필드는 path/topic/prefix 의미라 mislabel 방지. `referenced_connection_names` + `load_connections_by_name`로 type lookup, best-effort.

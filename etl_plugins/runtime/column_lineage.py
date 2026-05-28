@@ -1,30 +1,34 @@
-"""Static column-level lineage derivation (ADR-0041, Phase J).
+"""Static column-level lineage derivation (ADR-0041, Phase J + Phase X).
 
-Walks a :class:`PipelineConfig` and emits column→column edges with the hybrid
-strategy agreed in ADR-0041:
+Walks a :class:`PipelineConfig` and emits column→column edges using the hybrid
+strategy from ADR-0041:
 
-* **SQL source query** → :mod:`sqlglot` to enumerate output columns + their
-  source column origins (warehouse-to-warehouse pipelines, the common case).
+* **SQL source query** → :mod:`etl_plugins.runtime.sql_lineage.extract_sql_lineage`
+  (sqlglot's ``lineage`` walker). Handles CTEs, subqueries, joins, UNION,
+  window functions, CASE / COALESCE — every output column is mapped to the
+  full *set* of leaf-table columns that feed it. This is the Phase X upgrade
+  over the original hand-written FROM/JOIN matcher.
 * **Declarative transforms** (``rename`` / ``select`` / ``drop`` / ``cast`` /
-  ``add_constant`` / ``filter`` / ``dedupe``) → mapping update by inspection
-  (no execution). Column mappings are free here — the operators already encode
-  what they do.
-* **``python`` / ``sql_exec`` / unknown** → marks the downstream sinks ``opaque``
-  (the UI shows "opaque" instead of fabricating partial edges).
-* **SELECT ``*`` / direct table read / multi-source joins (v1)** → opaque.
+  ``add_constant`` / ``filter`` / ``dedupe`` / ``assert``) → mapping update
+  by inspection. The operators already declare what they do, so no execution
+  is needed.
+* **``python`` / ``custom_python`` / ``sql_exec`` / unknown** → marks the
+  downstream sinks ``opaque``. We never fabricate edges through user code.
+* **``SELECT *`` without schema / direct table read / un-parseable query** →
+  opaque (no column enumeration possible).
 
-Single-task and Task-DAG shapes use ``effective_tasks()``; graph shape walks
-each sink back to its source through linear transform chains (single source,
-no ``join`` nodes — v1; ``join`` lineage is a later slice that pairs with the
-materialize engine knowing per-join column semantics).
+The same logic powers both pipeline shapes:
+
+* single-task / Task-DAG: every task derives its own mapping through
+  ``effective_tasks()``.
+* graph: each sink walks back to a source through a linear transform chain
+  (graph ``join`` nodes still mark all sinks opaque — multi-source graph
+  lineage is a separate slice from the SQL multi-source case handled here).
 """
 
 from __future__ import annotations
 
 from typing import Any
-
-import sqlglot
-from sqlglot import exp
 
 from etl_plugins.config.models import (
     GraphConfig,
@@ -34,21 +38,23 @@ from etl_plugins.config.models import (
 )
 from etl_plugins.core.asset import AssetKey, derive_asset_key
 from etl_plugins.core.column_lineage import ColumnEdge, ColumnLineage, ColumnRef
+from etl_plugins.runtime.sql_lineage import extract_sql_lineage
 
-# Mapping: output_column → its current upstream :class:`ColumnRef` (or ``None``
-# when the column exists but has no traceable upstream, e.g. ``add_constant``
-# or a complex expression). A whole-mapping ``None`` value means the task is
-# opaque from this point on (e.g. ``python`` transform encountered).
-_Mapping = dict[str, "ColumnRef | None"]
+# Per-output upstream set: a tuple (immutable, stable order) of every
+# :class:`ColumnRef` that contributes to one output column. Empty tuple
+# means "column exists, upstream not traceable" (e.g. ``add_constant`` or a
+# literal). The whole-mapping ``None`` value still means "opaque from this
+# point on" (e.g. a ``python`` transform was encountered).
+_Mapping = dict[str, tuple[ColumnRef, ...]]
 
 
 def derive_column_lineage(cfg: PipelineConfig) -> ColumnLineage:
     """Derive the static column-level lineage of a pipeline.
 
     Best-effort: outputs the edges we *can* trace and lists assets we couldn't
-    (``opaque_assets``). Both shapes (single-task / Task-DAG / graph) supported;
-    multi-source / join graphs mark downstream sinks opaque until the join
-    column lineage slice lands.
+    (``opaque_assets``). All three shapes (single-task / Task-DAG / graph)
+    supported. Multi-source SQL queries (JOINs, multi-CTE) now resolve to
+    multiple upstreams per output column rather than marking the sink opaque.
     """
     edges: list[ColumnEdge] = []
     opaque: dict[str, AssetKey] = {}  # str(key) → key, dedupe + preserve types
@@ -61,11 +67,11 @@ def derive_column_lineage(cfg: PipelineConfig) -> ColumnLineage:
         _process_graph(cfg.graph, edges, _mark_opaque)
     else:
         for task in cfg.effective_tasks():
-            src_key = derive_asset_key(task.source.connection, task.source.model_dump())
+            source_connection = task.source.connection
             sink_keys = [
                 derive_asset_key(s.connection, s.model_dump()) for s in task.effective_sinks()
             ]
-            mapping = _initial_mapping(src_key, task.source.query)
+            mapping = _initial_mapping(source_connection, task.source.query)
             if mapping is None:
                 for sk in sink_keys:
                     _mark_opaque(sk)
@@ -84,18 +90,24 @@ def derive_column_lineage(cfg: PipelineConfig) -> ColumnLineage:
 # ---------- single-task / per-sink core ----------
 
 
-def _initial_mapping(src_key: AssetKey | None, query: str | None) -> _Mapping | None:
-    """Map the source's output columns to their origin :class:`ColumnRef`.
+def _initial_mapping(connection: str | None, query: str | None) -> _Mapping | None:
+    """Resolve the source query to ``{output_col: tuple[ColumnRef, ...]}``.
 
-    Returns ``None`` to mark the path opaque (no source asset, no SQL query to
-    parse, ``SELECT *``, a join, or sqlglot couldn't parse the query).
+    Returns ``None`` to mark the path opaque (no connection, no SQL query to
+    parse, ``SELECT *`` without schema, or sqlglot couldn't parse the query).
     """
-    if src_key is None or not query:
+    if not connection or not query:
         return None
-    cols = _parse_select_columns(query)
-    if cols is None:
+    resolved = extract_sql_lineage(query)
+    if resolved is None:
         return None
-    return {out: (ColumnRef(src_key, src) if src else None) for out, src in cols.items()}
+    out: _Mapping = {}
+    for output_col, leaves in resolved.items():
+        refs = tuple(
+            ColumnRef(AssetKey.of(connection, tbl), col) for tbl, col in leaves if tbl and col
+        )
+        out[output_col] = refs
+    return out
 
 
 def _apply_transform_chain(mapping: _Mapping, transforms: list[TransformConfig]) -> _Mapping | None:
@@ -110,7 +122,14 @@ def _apply_transform_chain(mapping: _Mapping, transforms: list[TransformConfig])
 
 
 def _apply_transform(mapping: _Mapping, tc: TransformConfig) -> _Mapping | None:
-    """One transform → updated column mapping. ``None`` ⇒ opaque from here."""
+    """One transform → updated column mapping. ``None`` ⇒ opaque from here.
+
+    Multi-upstream columns flow through every safe transform unchanged: a
+    ``rename`` of ``a → id`` keeps the original upstream tuple, just under a
+    new output key. ``select``/``drop`` filter the output set without
+    rewriting upstreams. ``cast``/``filter``/``dedupe``/``assert`` are
+    structural pass-throughs.
+    """
     data = tc.model_dump()
     if tc.type == "rename":
         renames = data.get("mapping") or {}
@@ -125,23 +144,23 @@ def _apply_transform(mapping: _Mapping, tc: TransformConfig) -> _Mapping | None:
         col = data.get("column")
         if not col:
             return mapping
-        return {**mapping, col: None}  # new column, no upstream
+        return {**mapping, col: ()}  # new column, empty upstream tuple
     if tc.type in {"cast", "filter", "dedupe", "assert"}:
         # cast = type only; filter/dedupe/assert = row-level decisions
         # (assert may fail the run, but it never reshapes the columns).
         return mapping
-    # python / sql_exec / anything we don't recognize → opaque.
+    # python / custom_python / sql_exec / anything we don't recognize → opaque.
     return None
 
 
 def _emit_edges(mapping: _Mapping, sink_key: AssetKey | None, edges: list[ColumnEdge]) -> None:
     if sink_key is None:
         return
-    for col, upstream in mapping.items():
+    for col, upstreams in mapping.items():
         edges.append(
             ColumnEdge(
                 downstream=ColumnRef(sink_key, col),
-                upstreams=(upstream,) if upstream is not None else (),
+                upstreams=upstreams,
             )
         )
 
@@ -156,7 +175,8 @@ def _process_graph(
 ) -> None:
     """v1: linear graph (one source, transform/sink nodes only) → walk each
     sink back to the source via incoming edges. ``join`` nodes or multi-source
-    graphs mark all sink keys opaque."""
+    graphs mark all sink keys opaque (separate slice for graph-level joins —
+    SQL-level joins are now handled inside :func:`_initial_mapping`)."""
     by_id = {n.id: n for n in graph.nodes}
     incoming: dict[str, list[str]] = {n.id: [] for n in graph.nodes}
     for edge in graph.edges:
@@ -172,18 +192,15 @@ def _process_graph(
         return
 
     src = sources[0]
-    src_key = _node_asset_key(src)
-    base_mapping = _initial_mapping(src_key, src.query)
+    base_mapping = _initial_mapping(src.connection, src.query)
 
     for snk in sinks:
         snk_key = _node_asset_key(snk)
         if base_mapping is None:
             mark_opaque(snk_key)
             continue
-        # Walk from sink back to source, collecting transform nodes in order.
         chain = _path_transforms(snk.id, src.id, by_id, incoming)
         if chain is None:
-            # Unreachable or branched path → opaque for safety.
             mark_opaque(snk_key)
             continue
         path_mapping: _Mapping = dict(base_mapping)
@@ -230,41 +247,6 @@ def _path_transforms(
         cur = parent_id
     chain.reverse()
     return chain
-
-
-# ---------- SQL parsing ----------
-
-
-def _parse_select_columns(query: str) -> dict[str, str | None] | None:
-    """Return ``{output_alias: source_column_or_None}`` for a simple ``SELECT …
-    FROM <table>``. ``None`` value = output column exists but its upstream is
-    not simple-traceable (function call, arithmetic). Returns ``None`` (top
-    level) for un-parseable, non-``SELECT``, ``SELECT *``, or multi-source
-    (``JOIN`` / subquery) queries — those mark the path opaque."""
-    try:
-        parsed = sqlglot.parse_one(query)
-    except Exception:
-        return None
-    if not isinstance(parsed, exp.Select):
-        return None
-    # sqlglot uses ``from_`` (Python keyword) for the FROM clause; ``joins``
-    # are a sibling arg on the Select itself (not nested under from_).
-    if parsed.args.get("from_") is None:
-        return None
-    if parsed.args.get("joins"):
-        return None  # multi-source JOIN — v1 marks opaque
-
-    result: dict[str, str | None] = {}
-    for col_exp in parsed.expressions:
-        if isinstance(col_exp, exp.Star):
-            return None  # SELECT * — can't enumerate columns
-        alias = col_exp.alias_or_name
-        inner = col_exp.unalias() if isinstance(col_exp, exp.Alias) else col_exp
-        if isinstance(inner, exp.Column):
-            result[alias] = inner.name
-        else:
-            result[alias] = None  # complex expression — column exists, upstream opaque
-    return result
 
 
 __all__ = ["derive_column_lineage"]

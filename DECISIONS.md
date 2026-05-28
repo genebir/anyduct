@@ -1390,4 +1390,38 @@ L1 출시 직후 사용자가 5개 회신:
 
 ---
 
+## ADR-0043: SQL 컬럼 리니지 — `sqlglot.lineage` 기반 풀-AST 워커로 전면 교체
+
+**Date**: 2026-05-28
+**Status**: Accepted
+**Context**: ADR-0041 Phase J에서 도입한 `_parse_select_columns`는 손으로 짠 FROM/JOIN 매처였다. `SELECT a, b FROM t` 같은 1:1 케이스만 풀고 JOIN/CTE/서브쿼리/UNION/윈도우/CASE는 전부 "sink opaque"로 떨궜다. 그 결과 카탈로그에 **컬럼 리니지가 가장 필요한 warehouse-to-warehouse 쿼리**(staging→marts 패턴)에서 정작 빈 그래프만 보였다. 사용자가 "어떤 쿼리든, 2천 줄짜리 monster여도, 정확하게 파싱"하라고 명시 요구.
+
+**Decision**:
+1. `etl_plugins/runtime/sql_lineage.py`(신규)에 `extract_sql_lineage(query, *, dialect=None, schema=None)` 도입.
+   - 백엔드는 `sqlglot.lineage.lineage()` — sqlglot이 이미 CTE chain, 서브쿼리, JOIN(모든 종류), `UNION [ALL]`, `COALESCE`/`CASE`/산술, 윈도우 함수, `LATERAL`(Postgres)을 처리한다.
+   - 각 출력 컬럼마다 lineage 트리를 펼친 뒤 leaf를 `(table, column)`으로 정규화. 한 컬럼이 여러 leaf를 갖는 것이 정상 케이스(`COALESCE(a.x, b.y)` → `[(a,x),(b,y)]`).
+   - **Placeholder leaf 후처리**: sqlglot이 correlated/LATERAL 참조를 풀지 못해 `Placeholder`로 떨어뜨릴 때, 부모 AST에서 alias→table 맵을 구해 `o.amount` → `orders.amount`로 복구.
+   - **Aggregate fallback**: `COUNT(*)` 같은 leaf는 `source=Select`로 끝난다(컬럼 참조 없음). 그 Select가 정확히 한 base table을 읽으면 그 테이블에 귀속(`_table_of_leaf` + `_expression_touches_table`). 순수 리터럴(`42 AS answer`)은 column/star가 expression에 없으므로 fallback이 꺼져 upstream 비어있음 유지.
+   - **`SELECT *` 처리**: schema dict가 주어지면 `sqlglot.optimizer.qualify`로 먼저 확장해서 lineage 진행. schema 없으면 여전히 opaque(나중에 SchemaInspector 와이어업이 후속).
+2. `etl_plugins/runtime/column_lineage.py`의 `_Mapping`을 `dict[str, tuple[ColumnRef, ...]]`로 widen.
+   - 한 출력 컬럼에 여러 upstream을 그대로 보존. `ColumnEdge`는 원래부터 `upstreams: tuple[ColumnRef, ...]`였으니 데이터 모델은 변경 없음 — 런타임만 그 폭을 마침내 사용.
+   - 트랜스폼 체인(`rename`/`select`/`drop`/`cast`/`add_constant`/`filter`/`dedupe`/`assert`)은 멀티-upstream을 손대지 않고 통과. `python`/`custom_python`/`sql_exec`/unknown은 종전대로 opaque.
+3. 기존 테스트 2개(`test_join_marks_sink_opaque`, `test_complex_expression_keeps_column_drops_upstream`)가 새 동작과 모순 — 둘 다 옛 한계의 "주의 표시"였으므로 **새 정확한 결과**로 기대값 업데이트(JOIN은 정확한 per-table upstream, `UPPER(b)`는 `b`로 추적).
+4. 새 테스트:
+   - `tests/unit/runtime/test_sql_lineage.py`(25): 단순/별칭/함수/산술/3-way JOIN/COALESCE/체인 CTE/재귀 CTE/FROM 서브쿼리/correlated 서브쿼리/UNION/윈도우/CASE/LATERAL/`SELECT *` w·schema/`*` qualified/parse 에러/non-SELECT/empty + 모든 구성을 결합한 monster 쿼리.
+   - `tests/unit/runtime/test_sql_lineage_stress.py`(4): 200줄 dbt-style 실전 쿼리(CTE 절단 회귀 가드 + 핵심 컬럼 raw table 매핑) + 100-layer chained CTE(2000줄+, <5s 수행) + 50-branch UNION ALL.
+   - `tests/unit/runtime/test_column_lineage.py`(+3): JOIN 멀티-upstream / COALESCE 멀티-upstream / CTE chain.
+
+**Consequences**:
+- ✅ 카탈로그의 컬럼-레벨 lineage가 실전 SQL을 거의 모두 추적. JOIN/CTE/UNION/CASE/COALESCE/window가 정확히 표현됨.
+- ✅ 데이터 모델(`tuple[ColumnRef, ...]`) 변경 없음 — DB 마이그레이션 없음. server의 `AssetRepository.persist_run_column_lineage`가 이미 `for up in edge.upstreams` 형태였기에 무중단.
+- ✅ 100-layer CTE chain이 1.3s 이내 종료(Phase X 성능 회귀 가드).
+- ⚠ `SELECT *`는 schema 없이는 여전히 opaque. SchemaInspector 연계는 후속 슬라이스(connectors의 `inspect_schema()` 결과를 lineage 호출에 inject).
+- ⚠ AssetKey 추론은 source의 `connection`을 모든 leaf 테이블에 동일하게 적용. cross-connection JOIN(SQL이 federated query 등으로 표현)은 옵션 — 현재 정책은 "한 source.connection 내의 멀티 테이블"이라는 warehouse 일반 가정.
+- ⚠ JOIN의 추가 upstream 테이블이 카탈로그에 자동 등록되어 있어야 edge가 만들어진다(`_asset_by_key`가 없으면 skip). 코어 `AssetLineage` emit 측에서 query의 모든 referenced 테이블을 inputs로 추가하는 별도 슬라이스가 다음 자연스러운 보완.
+
+테스트 결과: 코어 unit 703 + server unit/it 429 + 25 신규 sql_lineage + 4 신규 stress + 3 신규 column_lineage 모두 green. mypy 코어 60 + 서버 100 OK. ruff clean.
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

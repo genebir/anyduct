@@ -40,8 +40,11 @@ def test_alias_remaps_output_column() -> None:
     assert out == {"wh/t2:x": ("wh/t1:a",)}
 
 
-def test_complex_expression_keeps_column_drops_upstream() -> None:
-    # UPPER(b) isn't simple-traceable → column exists, no upstream.
+def test_function_call_traces_through_argument() -> None:
+    # Phase X (2026-05-28): the sqlglot.lineage walker traces *through*
+    # function calls, so ``UPPER(b)`` now correctly attributes the output
+    # column to ``t1.b``. The previous parser marked it opaque — that was a
+    # known limitation we explicitly fixed.
     out = _edge_map(
         derive_column_lineage(
             _cfg(
@@ -49,7 +52,19 @@ def test_complex_expression_keeps_column_drops_upstream() -> None:
             )
         )
     )
-    assert out == {"wh/t2:a": ("wh/t1:a",), "wh/t2:bx": ()}
+    assert out == {"wh/t2:a": ("wh/t1:a",), "wh/t2:bx": ("wh/t1:b",)}
+
+
+def test_constant_only_expression_has_empty_upstream() -> None:
+    # A literal projection has no upstream column at all — the row still
+    # exists in the mapping (so the sink table has the column), but with an
+    # empty upstream tuple.
+    out = _edge_map(
+        derive_column_lineage(
+            _cfg(source={"connection": "wh", "query": "SELECT a, 42 AS answer FROM t1"})
+        )
+    )
+    assert out == {"wh/t2:a": ("wh/t1:a",), "wh/t2:answer": ()}
 
 
 # ---------- declarative transforms ----------
@@ -142,11 +157,61 @@ def test_select_star_marks_sink_opaque() -> None:
     assert _is_opaque(cfg, AssetKey.of("wh", "t2"))
 
 
-def test_join_marks_sink_opaque() -> None:
+def test_sql_join_resolves_per_table_upstreams() -> None:
+    # Phase X (2026-05-28): joined queries used to mark the sink opaque
+    # ("multi-source → give up"). The new sqlglot.lineage walker resolves
+    # each output column to its originating table, so ``t1.a`` and ``t2.b``
+    # land on the right asset keys via the source's connection.
     cfg = _cfg(
-        source={"connection": "wh", "query": "SELECT a, b FROM t1 JOIN t2 USING (id)"},
+        source={
+            "connection": "wh",
+            "query": "SELECT t1.a, t2.b FROM t1 JOIN t2 ON t1.id = t2.id",
+        },
+        sink={"connection": "wh", "table": "joined"},
     )
-    assert _is_opaque(cfg, AssetKey.of("wh", "t2"))
+    out = _edge_map(derive_column_lineage(cfg))
+    assert out == {
+        "wh/joined:a": ("wh/t1:a",),
+        "wh/joined:b": ("wh/t2:b",),
+    }
+
+
+def test_sql_coalesce_join_emits_multi_source_upstreams() -> None:
+    # COALESCE across a LEFT JOIN is the canonical case that *needs* the
+    # tuple-of-upstreams shape — one output column with two source columns,
+    # each on a different upstream asset.
+    cfg = _cfg(
+        source={
+            "connection": "wh",
+            "query": ("SELECT COALESCE(a.x, b.y) AS v FROM a LEFT JOIN b ON a.id = b.id"),
+        },
+        sink={"connection": "wh", "table": "merged"},
+    )
+    lineage = derive_column_lineage(cfg)
+    [edge] = lineage.edges
+    assert str(edge.downstream) == "wh/merged:v"
+    assert {str(u) for u in edge.upstreams} == {"wh/a:x", "wh/b:y"}
+
+
+def test_sql_cte_chain_resolves_to_base_columns() -> None:
+    # Chained CTEs were opaque before; now they resolve cleanly to the base
+    # table columns at the bottom of the chain.
+    cfg = _cfg(
+        source={
+            "connection": "wh",
+            "query": """
+            WITH a AS (SELECT id, name FROM users),
+                 b AS (SELECT id, name FROM a WHERE id > 0)
+            SELECT id AS uid, name AS nm FROM b
+            """,
+        },
+        sink={"connection": "wh", "table": "out"},
+    )
+    out = _edge_map(derive_column_lineage(cfg))
+    assert out == {
+        "wh/out:uid": ("wh/users:id",),
+        "wh/out:nm": ("wh/users:name",),
+    }
 
 
 def test_no_query_direct_table_read_is_opaque() -> None:

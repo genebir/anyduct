@@ -1,0 +1,300 @@
+"""SQL column-level lineage extractor (ADR-0041 Phase X, 2026-05-28).
+
+The previous :mod:`etl_plugins.runtime.column_lineage` SQL helper hand-walked the
+``sqlglot`` AST and gave up on anything more interesting than ``SELECT a, b FROM
+t`` — joins, CTEs, subqueries, UNIONs all collapsed to "opaque sink". That left
+the catalog with no column lineage for the warehouse-to-warehouse pipelines
+that *actually* needed it (most real-world cases).
+
+This module replaces that with :func:`extract_sql_lineage`, which uses
+``sqlglot.lineage.lineage`` to walk every output column back to its leaf-table
+origins. The library already understands:
+
+* ``WITH`` / CTE chains, including recursive ones
+* nested derived tables (``SELECT … FROM (SELECT …) sub``)
+* ``JOIN`` of any kind — leaves preserve the originating table
+* ``UNION [ALL]`` — each branch contributes leaves
+* ``COALESCE`` / ``CASE WHEN`` / arithmetic — every referenced column shows up
+* window functions — the ``PARTITION BY`` / ``ORDER BY`` columns count as deps
+* ``LATERAL`` joins (Postgres dialect)
+
+We map each leaf back to ``(table_name, column_name)``. The caller in
+:mod:`etl_plugins.runtime.column_lineage` glues this to the pipeline's source
+``connection`` to produce :class:`ColumnRef` upstreams — a single output column
+can have many (a 1→N edge, which the :class:`ColumnEdge` data model has always
+supported via ``tuple[ColumnRef, ...]``).
+
+``SELECT *`` without a ``schema`` is still opaque (we can't enumerate columns
+the parser doesn't see). Callers can provide a schema dict (same format as
+``sqlglot.optimizer.qualify``) to expand stars at lineage-derivation time —
+v2 leaves that hook in but the runtime worker doesn't wire schema yet (a
+later slice can grab it via the connector's :class:`SchemaInspector`).
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+import sqlglot
+from sqlglot import exp
+from sqlglot.lineage import Node as _LineageNode
+from sqlglot.lineage import lineage as _sqlglot_lineage
+
+
+def extract_sql_lineage(
+    query: str,
+    *,
+    dialect: str | None = None,
+    schema: dict[str, Any] | None = None,
+) -> dict[str, list[tuple[str, str]]] | None:
+    """Resolve a SELECT statement's column lineage.
+
+    Returns a mapping ``{output_column: [(source_table, source_column), ...]}``
+    where each value lists every leaf-table origin that contributes to the
+    output column. Multiple entries are normal — e.g. ``COALESCE(a.x, b.y)``
+    yields ``[("a", "x"), ("b", "y")]``. An empty list means the column exists
+    but its origin couldn't be resolved (e.g. a literal, an unresolved
+    reference). A top-level ``None`` means we should not even try (not a
+    SELECT, ``SELECT *`` without schema, or sqlglot couldn't parse the query).
+
+    Args:
+        query: The raw SQL text. Must be a single statement.
+        dialect: Optional sqlglot dialect hint (``"postgres"`` / ``"mysql"`` /
+            ``"snowflake"`` …). Passing the right dialect helps with vendor
+            extensions like ``LATERAL`` and ``QUALIFY``.
+        schema: Optional schema dictionary in ``sqlglot.optimizer.qualify``
+            format (``{table: {column: type}}``) — when provided, ``SELECT *``
+            is expanded before lineage runs so star projections resolve too.
+    """
+    try:
+        # ``sqlglot.parse_one`` is typed as returning ``exp.Expr`` (the
+        # implicit-string superclass); the body of this module pins it to
+        # ``Expression`` so the structural ``isinstance`` checks below
+        # narrow as expected. It can return ``None`` for empty input in
+        # practice even though the stubs claim non-optional.
+        parsed_any = sqlglot.parse_one(query, dialect=dialect)
+    except Exception:
+        return None
+    if parsed_any is None or not isinstance(parsed_any, exp.Expression):
+        return None
+    parsed: exp.Expression = parsed_any
+
+    # We accept SELECT, set ops (UNION/INTERSECT/EXCEPT), and a top-level CTE
+    # whose body is a SELECT. Everything else (INSERT, CREATE TABLE AS, raw
+    # DDL) we leave opaque — that's the worker's data-plane concern, not the
+    # static catalog's.
+    body: exp.Expression = parsed.expression if isinstance(parsed, exp.With) else parsed
+    if not isinstance(body, exp.Select | exp.Union):
+        return None
+
+    # Optionally qualify ``*`` projections so they show up in
+    # ``select.expressions`` with real column names.
+    work_sql = query
+    if schema is not None:
+        try:
+            from sqlglot.optimizer.qualify import qualify
+
+            qualified = qualify(parsed.copy(), schema=schema, dialect=dialect)
+            work_sql = qualified.sql(dialect=dialect)
+            parsed = qualified
+            body = qualified.expression if isinstance(qualified, exp.With) else qualified
+        except Exception:
+            # Best-effort. If qualify fails (bad schema, dialect mismatch),
+            # fall back to the raw query; star projections will remain opaque.
+            pass
+
+    # The output column list for a UNION takes its names from the first
+    # SELECT branch (SQL semantics). Drill into the leftmost SELECT to get
+    # alias_or_name values; lineage() itself handles the union traversal.
+    select_for_columns: Any = body
+    while isinstance(select_for_columns, exp.Union):
+        # ``exp.Union.left`` returns the ``Query`` superclass — narrowing via
+        # the runtime ``isinstance`` on the next iteration. We pin the variable
+        # to ``Any`` so the recursion typechecks both with and without the
+        # sqlglot type stubs installed (pre-commit's mypy lacks them).
+        select_for_columns = select_for_columns.left
+    if not isinstance(select_for_columns, exp.Select):
+        return None
+
+    # ``SELECT *`` (or qualified ``t.*``) we can't enumerate without a schema.
+    for proj in select_for_columns.expressions:
+        if isinstance(proj, exp.Star) or (
+            isinstance(proj, exp.Column) and isinstance(proj.this, exp.Star)
+        ):
+            return None
+
+    # Build a global alias → real-table map up front so we can recover
+    # lineage from Placeholder leaves (correlated/lateral references that
+    # ``sqlglot.lineage`` can't resolve through its scope walker).
+    alias_to_table = _build_alias_table_map(parsed)
+
+    result: dict[str, list[tuple[str, str]]] = {}
+    for proj in select_for_columns.expressions:
+        col_name = proj.alias_or_name
+        if not col_name:
+            # An unaliased complex expression (e.g. ``a + 1``) — sqlglot uses
+            # the expression's SQL as ``name``. We still record it under that
+            # synthetic name so the column count matches the output.
+            col_name = proj.sql()
+        try:
+            node = _sqlglot_lineage(col_name, sql=work_sql, dialect=dialect, schema=schema)
+        except Exception:
+            result[col_name] = []
+            continue
+        result[col_name] = _collect_leaves(node, alias_to_table)
+    return result
+
+
+def _collect_leaves(
+    root: _LineageNode,
+    alias_to_table: dict[str, str],
+) -> list[tuple[str, str]]:
+    """Walk the lineage tree, returning ``[(table, column), ...]`` for every
+    leaf (a node with no ``downstream`` children). Deduplicates while
+    preserving first-seen order. Drops leaves where neither the source
+    expression nor the ``alias_to_table`` map can resolve the table — the
+    caller treats a column with all-empty leaves as "exists, origin unknown".
+
+    The alias map is the fallback path that handles two cases ``sqlglot``
+    doesn't trace cleanly:
+
+    * **Correlated subqueries / lateral joins** — leaves come through as
+      ``Placeholder`` source with names like ``"o.amount"``. We split the
+      qualifier and look up ``"o" → "orders"``.
+    * **Aliased CTE/subquery refs that bottom out at a base table alias** —
+      same recovery.
+    """
+    seen: set[tuple[str, str]] = set()
+    out: list[tuple[str, str]] = []
+    stack: list[_LineageNode] = [root]
+    while stack:
+        n = stack.pop()
+        if not n.downstream:
+            tbl, col = _resolve_leaf(n, alias_to_table)
+            if tbl and col:
+                key = (tbl, col)
+                if key not in seen:
+                    seen.add(key)
+                    out.append(key)
+            continue
+        # Reverse to preserve left-to-right child order under LIFO stack.
+        for d in reversed(n.downstream):
+            stack.append(d)
+    return out
+
+
+def _resolve_leaf(
+    node: _LineageNode,
+    alias_to_table: dict[str, str],
+) -> tuple[str | None, str | None]:
+    """Best-effort ``(table, column)`` resolution for one lineage leaf."""
+    # Names can come through quoted (``"t"."a"``) after the qualify pass —
+    # strip the SQL identifier quoting before splitting.
+    name = node.name.replace('"', "").replace("`", "")
+    # Strip a qualifier so we always end with the bare column name, plus
+    # the alias/table fragment if present.
+    if "." in name:
+        qualifier, col = name.split(".", 1)
+    else:
+        qualifier, col = None, name
+    if not col:
+        return None, None
+
+    tbl = _table_of_leaf(node)
+    if tbl is None and qualifier:
+        # Placeholder / unresolved leaf: try the alias map, falling back to
+        # the qualifier itself when it already names a real table.
+        tbl = alias_to_table.get(
+            qualifier,
+            qualifier if qualifier in alias_to_table.values() else None,
+        )
+    return tbl, col
+
+
+def _table_of_leaf(node: _LineageNode) -> str | None:
+    """``_table_of`` plus a "Select fallback should depend on the table"
+    guard: a literal projection (``42 AS answer``) should *not* claim an
+    upstream table even though its source is a ``Select``; an aggregate or
+    ``*`` reference scanning the same table should."""
+    direct = _table_of_simple(node.source)
+    if direct is not None:
+        return direct
+    if isinstance(node.source, exp.Select) and _expression_touches_table(node.expression):
+        return _single_base_table(node.source)
+    return None
+
+
+def _table_of_simple(source: object) -> str | None:
+    """Direct Table / aliased Table lookup. No fallback heuristics."""
+    if isinstance(source, exp.Table):
+        return source.name or None
+    if isinstance(source, exp.Alias):
+        inner = source.this
+        if isinstance(inner, exp.Table):
+            return inner.name or None
+    return None
+
+
+def _expression_touches_table(expr: object) -> bool:
+    """``True`` when the leaf's projection expression actually references
+    table data — a ``Column`` reference or a ``Star`` (``COUNT(*)``). Pure
+    literal / parameter expressions return ``False`` so we don't fabricate
+    a fake dependency on the scanned table."""
+    if not isinstance(expr, exp.Expression):
+        return False
+    return any(isinstance(n, exp.Column | exp.Star) for n in expr.walk())
+
+
+def _single_base_table(select: exp.Select) -> str | None:
+    """If a ``Select`` reads from exactly one base table (ignoring CTEs in
+    the enclosing scope), return its name; otherwise ``None``. Used to
+    attribute aggregate leaves to the table they scan."""
+    tables = [
+        tbl.name for tbl in select.find_all(exp.Table) if tbl.name and not _is_cte_ref(tbl, select)
+    ]
+    unique = list(dict.fromkeys(tables))
+    if len(unique) == 1:
+        return str(unique[0])
+    return None
+
+
+def _build_alias_table_map(root: exp.Expression) -> dict[str, str]:
+    """Walk every ``Table`` node and record ``alias → real-table-name``.
+
+    Includes identity entries (``real_name → real_name``) so a qualifier
+    that's already a table name resolves cleanly. CTE names are skipped —
+    the lineage walker has already inlined them by the time we collect
+    leaves, so the meaningful endpoints are the base tables.
+    """
+    cte_names = {cte.alias_or_name for cte in root.find_all(exp.CTE) if cte.alias_or_name}
+    mapping: dict[str, str] = {}
+    for tbl in root.find_all(exp.Table):
+        name = tbl.name
+        if not name or name in cte_names:
+            continue
+        mapping[name] = name
+        alias = tbl.alias
+        if alias and alias != name:
+            mapping[alias] = name
+    return mapping
+
+
+def _is_cte_ref(table: exp.Table, scope: exp.Expression) -> bool:
+    """A ``Table`` node whose name matches a CTE defined in the enclosing
+    scope is a CTE reference, not a base table — ignore it when picking the
+    fallback table for an aggregate leaf."""
+    # ``exp.Expression.parent`` is the broader ``Expr | None`` in sqlglot's
+    # own stubs but ``Any`` without them — declare ``Any`` so both
+    # configurations typecheck. Each iteration validates via ``isinstance``.
+    parent: Any = scope
+    seen: set[str] = set()
+    while parent is not None:
+        if isinstance(parent, exp.With):
+            for cte in parent.expressions:
+                if isinstance(cte, exp.CTE) and cte.alias_or_name:
+                    seen.add(cte.alias_or_name)
+        parent = parent.parent
+    return table.name in seen
+
+
+__all__ = ["extract_sql_lineage"]

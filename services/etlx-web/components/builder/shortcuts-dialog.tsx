@@ -53,6 +53,7 @@ export function ShortcutsDialog({
     { keys: [mod, "⇧", "Z"], action: t("shortcuts.redo") },
     { keys: [mod, "S"], action: t("shortcuts.save") },
     { keys: [mod, "D"], action: t("shortcuts.duplicate") },
+    { keys: [mod, "L"], action: t("shortcuts.autoLayout") },
     { keys: ["Delete"], action: t("shortcuts.delete") },
     { keys: ["⇧", t("shortcuts.click")], action: t("shortcuts.multiSelect") },
     { keys: [t("shortcuts.rightClick")], action: t("shortcuts.contextMenu") },

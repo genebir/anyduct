@@ -10,6 +10,14 @@
 ## [Unreleased]
 
 ### Added
+- **빌더 auto-layout (Cmd+L, dagre LR, Phase O)** [ADR-0041 O] — L1/L2 audit의 Phase 4 NICE-TO-HAVE 1번 항목. L3 후보 중 가장 작은 surface로 큰 UX 이득 — 양 페르소나 모두 혜택, 클라이언트 전용:
+  - **`lib/auto-layout.ts`** `autoLayoutGraph(state) → state` — `@dagrejs/dagre` LR direction(소스 왼쪽 / 싱크 오른쪽, ReactFlow handle 방향과 일치). uniform node 240×80, nodesep 80 / ranksep 110.
+  - **데이터 무변형**: `data` / `operatorId` / `edges` untouched — `position`만 변경 → undo가 이전 layout을 정확히 복원. 빈 그래프는 입력 그대로 반환(noop).
+  - **헤더 버튼** `LayoutGridIcon` (↶/↷/⌨ 클러스터 옆) + **Cmd+L/Ctrl+L 단축키** + ShortcutsDialog cheat-sheet 새 줄. Editable element guard(input/textarea/contenteditable 안에서는 Cmd+L 가로채지 않음 — 브라우저 native 우선).
+  - **`onAutoLayoutRef` 패턴** (Cmd+S와 동일) — 글로벌 listener는 한 번 attach + 함수 identity 변화 무관. `history.commit` 경유 = 단일 undo snapshot.
+  - **신규 deps**: `@dagrejs/dagre`. **i18n**: 1 신규 키 en/ko(`shortcuts.autoLayout`).
+  - **검증**: 웹 tsc green. 서버/코어 변화 0. 신규 시각 컴포넌트 0(LayoutGridIcon은 lucide-react, 헤더 버튼은 기존 ↶/↷/⌨ 패턴 재사용 — Storybook 불요).
+
 - **실행 기록 — 노드 duration + 실패 노드 표면화 + dry-run 가독성 (Phase N)** [ADR-0041 N] — Phase M(노드별 로그 컬럼) 직후 자연 follow-up. 노드 디버깅을 한 단계 더 풍성하게:
   - **DAG 카드 duration** — `started_at`/`finished_at`으로 `D 3.2s` 계산, 진행 중 노드는 `D 1.4s+`(trailing `+` + info 색) elapsed. 큰 시간은 `1m 12s`/`2h 3m`. `formatNodeDuration` + `humanDuration` helper.
   - **실패 노드 강조** — failed 카드에 두꺼운 error glow ring(`shadow-[0_0_0_2px_error/0.35]`).

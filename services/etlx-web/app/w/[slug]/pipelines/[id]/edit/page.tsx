@@ -6,6 +6,7 @@ import Link from "next/link";
 import {
   ActivityIcon,
   KeyboardIcon,
+  LayoutGridIcon,
   PlayIcon,
   RedoIcon,
   SaveIcon,
@@ -40,6 +41,7 @@ import {
   type PipelineSummary,
 } from "@/lib/api";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
+import { autoLayoutGraph } from "@/lib/auto-layout";
 import { useGraphHistory, useGraphHistoryShortcuts } from "@/lib/use-graph-history";
 import { useLocale } from "@/components/providers/locale-provider";
 import { ShortcutsDialog } from "@/components/builder/shortcuts-dialog";
@@ -98,13 +100,15 @@ export default function PipelineEditorPage() {
   useGraphHistoryShortcuts(history);
   const graphState = history.state;
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
-  // Saving — ``onSave`` is defined below; declare a stable wrapper so
-  // the Cmd+S keyboard binding doesn't have to wait for the function
-  // identity each render.
+  // Saving + auto-layout — defined further below; declare stable
+  // wrappers so the Cmd+S / Cmd+L keyboard bindings don't have to wait
+  // for function identity each render.
   const onSaveRef = useRef<() => void>(() => {});
+  const onAutoLayoutRef = useRef<() => void>(() => {});
   // Global keyboard bindings: '?' opens the cheat-sheet, Cmd+S / Ctrl+S
-  // saves. Both bail when the user is typing into an editable surface
-  // so we don't hijack browser-native input behaviour.
+  // saves, Cmd+L / Ctrl+L auto-layouts the graph. All bail when the
+  // user is typing into an editable surface so we don't hijack
+  // browser-native input behaviour.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const target = e.target;
@@ -125,6 +129,19 @@ export default function PipelineEditorPage() {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s" && !e.shiftKey) {
         e.preventDefault();
         onSaveRef.current();
+      }
+      // Cmd+L / Ctrl+L — auto-layout. Bail inside editable surfaces so
+      // we don't fight browser-native "focus the address bar" on
+      // Cmd+L when the user is typing into a JSON field; the toolbar
+      // button stays as the no-keyboard fallback.
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        e.key.toLowerCase() === "l" &&
+        !e.shiftKey &&
+        !inEditable
+      ) {
+        e.preventDefault();
+        onAutoLayoutRef.current();
       }
     }
     window.addEventListener("keydown", onKey);
@@ -362,6 +379,19 @@ export default function PipelineEditorPage() {
     onSaveRef.current = onSave;
   }, [onSave]);
 
+  // Phase O (2026-05-28): auto-layout reflows node positions into a
+  // tidy LR hierarchy via dagre. One history commit so Cmd+Z restores
+  // the prior layout exactly (autoLayoutGraph preserves data/edges,
+  // only positions change, so the undo target is honest). No-op on
+  // empty / loading graphs.
+  const onAutoLayout = useCallback(() => {
+    if (!graphState || graphState.nodes.length === 0) return;
+    history.commit(autoLayoutGraph(graphState));
+  }, [graphState, history]);
+  useEffect(() => {
+    onAutoLayoutRef.current = onAutoLayout;
+  }, [onAutoLayout]);
+
   const onDryRun = useCallback(async () => {
     if (!ws || !pipeline) return;
     if (dirty) {
@@ -446,6 +476,16 @@ export default function PipelineEditorPage() {
               className="inline-flex h-8 w-8 items-center justify-center rounded-md text-text-secondary transition duration-150 hover:bg-overlay hover:text-text disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
             >
               <RedoIcon size={15} />
+            </button>
+            <button
+              type="button"
+              onClick={onAutoLayout}
+              disabled={!graphState || graphState.nodes.length === 0}
+              aria-label={t("shortcuts.autoLayout")}
+              title={`${t("shortcuts.autoLayout")} (Cmd+L)`}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-text-secondary transition duration-150 hover:bg-overlay hover:text-text disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+            >
+              <LayoutGridIcon size={15} />
             </button>
             <button
               type="button"

@@ -122,3 +122,33 @@ async def test_query_applies_limit_and_offset(session: AsyncSession) -> None:
     page2 = await repo.query(workspace_id=ws_a.id, limit=2, offset=2)
     assert [r.action for r in page1] == ["a4", "a3"]
     assert [r.action for r in page2] == ["a2", "a1"]
+
+
+async def test_query_filters_by_action(session: AsyncSession) -> None:
+    """Phase U (2026-05-28): action filter scopes the audit feed to one
+    exact action name. Used by the UI's "show only run.sql_executed"
+    dropdown shortcut."""
+    alice, _, ws_a, _ = await _seed(session)
+    await _record(
+        session,
+        actor=alice,
+        workspace=ws_a,
+        action="run.sql_executed",
+        resource_type="run",
+    )
+    await _record(
+        session,
+        actor=alice,
+        workspace=ws_a,
+        action="run.python_executed",
+        resource_type="run",
+    )
+    await _record(session, actor=alice, workspace=ws_a, action="run.trigger", resource_type="run")
+
+    repo = AuditLogRepository(session)
+    only_sql = await repo.query(workspace_id=ws_a.id, action="run.sql_executed")
+    assert [r.action for r in only_sql] == ["run.sql_executed"]
+    only_py = await repo.query(workspace_id=ws_a.id, action="run.python_executed")
+    assert [r.action for r in only_py] == ["run.python_executed"]
+    none_match = await repo.query(workspace_id=ws_a.id, action="run.does_not_exist")
+    assert none_match == []

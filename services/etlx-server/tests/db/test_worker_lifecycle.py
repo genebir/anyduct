@@ -1241,3 +1241,93 @@ async def test_graph_executor_wave_boundary_honours_cancel_event() -> None:
     assert by_id["k"].status == NODE_SKIPPED
     assert by_id["s"].error_class is None  # cancel != error
     assert by_id["k"].error_class is None
+
+
+# ---- Phase U (2026-05-28) — data-plane audit -----------------------------
+
+
+async def test_node_level_graph_emits_audit_rows_for_sql_and_python(
+    session: AsyncSession, tmp_path: Path
+) -> None:
+    """A node-level graph with a Run SQL source + a custom_python
+    transform produces two audit rows after a successful run — one
+    ``run.sql_executed`` and one ``run.python_executed`` — both
+    scoped to the run via resource_id."""
+    db_path = _prepare_sqlite_fixture(tmp_path)
+    ws = await _seed_workspace(session, slug="wl-audit-data")
+    await _seed_connection(session, workspace_id=ws.id, name="src", config={"database": db_path})
+    await _seed_connection(session, workspace_id=ws.id, name="dst", config={"database": db_path})
+    # Graph: a plain source → custom_python transform → sink. The
+    # sql_exec node sits in parallel (no edge) so its standalone-
+    # source semantics (ADR-0042 follow-up) apply.
+    cfg = {
+        "name": "p",
+        "node_level": True,
+        "graph": {
+            "nodes": [
+                {
+                    "id": "x",
+                    "type": "sql_exec",
+                    "connection": "src",
+                    "statement": "CREATE TABLE IF NOT EXISTS audit_marker (n INT)",
+                },
+                {
+                    "id": "s",
+                    "type": "source",
+                    "connection": "src",
+                    "query": "SELECT id, name FROM seed",
+                },
+                {
+                    "id": "py",
+                    "type": "transform",
+                    "transform": {
+                        "type": "custom_python",
+                        "code": "def transform(record):\n    return record\n",
+                    },
+                },
+                {"id": "k", "type": "sink", "connection": "dst", "table": "out", "mode": "append"},
+            ],
+            "edges": [
+                {"from_node": "s", "to_node": "py"},
+                {"from_node": "py", "to_node": "k"},
+            ],
+        },
+    }
+    p, pv = await _seed_pipeline(session, workspace_id=ws.id, name="p", config=cfg)
+    run = await _seed_pending_run(
+        session, workspace_id=ws.id, pipeline_id=p.id, pipeline_version_id=pv.id
+    )
+    claimed = await claim_pending_run(session, worker_id="worker-audit")
+    assert claimed is not None
+    await session.commit()
+
+    await RunExecutor(
+        _SessionFactoryAdapter(session), StaticSecretBackend(), worker_id="worker-audit"
+    ).execute(run.id)
+
+    from etlx_server.db.models import AuditLog as _AuditLog
+
+    audit_rows = list(
+        (await session.execute(select(_AuditLog).where(_AuditLog.resource_id == str(run.id))))
+        .scalars()
+        .all()
+    )
+    by_action = {r.action for r in audit_rows}
+    assert "run.sql_executed" in by_action
+    assert "run.python_executed" in by_action
+
+    sql_row = next(r for r in audit_rows if r.action == "run.sql_executed")
+    assert sql_row.workspace_id == ws.id
+    assert sql_row.resource_type == "run"
+    assert sql_row.after_json["node_id"] == "x"
+    assert sql_row.after_json["kind"] == "sql_exec"
+    assert sql_row.after_json["connection"] == "src"
+    assert "audit_marker" in sql_row.after_json["statement"]
+    assert "statement_hash" in sql_row.after_json
+
+    py_row = next(r for r in audit_rows if r.action == "run.python_executed")
+    assert py_row.after_json["node_id"] == "py"
+    assert py_row.after_json["kind"] == "transform:custom_python"
+    assert py_row.after_json["first_line"].startswith("def transform")
+    assert py_row.after_json["lines"] >= 1
+    assert "code_hash" in py_row.after_json

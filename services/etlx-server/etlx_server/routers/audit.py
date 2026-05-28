@@ -37,6 +37,7 @@ async def query_audit_log(
     actor_user_id: UUID | None = None,
     resource_type: str | None = Query(default=None, max_length=64),
     resource_id: str | None = Query(default=None, max_length=64),
+    action: str | None = Query(default=None, max_length=64),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     user: CurrentUser = Depends(get_current_user),  # noqa: B008
@@ -63,6 +64,7 @@ async def query_audit_log(
         actor_user_id=actor_user_id,
         resource_type=resource_type,
         resource_id=resource_id,
+        action=action,
         limit=limit,
         offset=offset,
     )

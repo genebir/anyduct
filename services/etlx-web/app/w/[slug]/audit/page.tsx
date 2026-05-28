@@ -24,6 +24,31 @@ const RESOURCE_TYPES = [
   "run",
 ];
 
+/** Quick-filter chips for the action dropdown (Phase U, 2026-05-28).
+ *  Empty value = no action filter ("all actions"). The two data-plane
+ *  events from the worker land here too so an operator can scope the
+ *  audit feed to "what SQL/code actually ran" without typing.
+ *
+ *  Ordering: data-plane first (the new value-add), then the most
+ *  common control-plane events. Anything else still works — the
+ *  filter is a free-string match server-side, the dropdown is just a
+ *  shortcut. */
+const ACTIONS = [
+  "",
+  "run.sql_executed",
+  "run.python_executed",
+  "run.trigger",
+  "run.cancel",
+  "run.retry",
+  "pipeline.create",
+  "pipeline.update",
+  "pipeline.delete",
+  "connection.create",
+  "connection.update",
+  "schedule.create",
+  "sensor.create",
+];
+
 const PAGE_SIZE = 100;
 
 export default function AuditPage() {
@@ -33,6 +58,11 @@ export default function AuditPage() {
   const [rows, setRows] = useState<AuditLogEntry[] | null>(null);
   const [resourceType, setResourceType] = useState("");
   const [resourceId, setResourceId] = useState("");
+  // Phase U (2026-05-28): filter by action name. Empty string = no
+  // filter ("all actions"). Particularly useful to scope to the new
+  // data-plane events (``run.sql_executed`` / ``run.python_executed``)
+  // without scrolling through hundreds of pipeline.create rows.
+  const [actionFilter, setActionFilter] = useState("");
   const [offset, setOffset] = useState(0);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
@@ -44,6 +74,7 @@ export default function AuditPage() {
         const list = await auditApi.query(ws.id, {
           resource_type: resourceType || undefined,
           resource_id: resourceId.trim() || undefined,
+          action: actionFilter || undefined,
           limit: PAGE_SIZE,
           offset,
         });
@@ -60,7 +91,7 @@ export default function AuditPage() {
     return () => {
       cancelled = true;
     };
-  }, [ws, resourceType, resourceId, offset, t]);
+  }, [ws, resourceType, resourceId, actionFilter, offset, t]);
 
   return (
     <>
@@ -78,7 +109,7 @@ export default function AuditPage() {
             title={t("audit.filters")}
             description={t("audit.filtersDesc")}
           />
-          <div className="grid gap-4 md:grid-cols-[1fr_2fr_auto]">
+          <div className="grid gap-4 md:grid-cols-[1fr_1fr_2fr_auto]">
             <label className="flex flex-col gap-1.5">
               <span className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
                 {t("audit.resourceType")}
@@ -94,6 +125,29 @@ export default function AuditPage() {
                 {RESOURCE_TYPES.map((rt) => (
                   <option key={rt} value={rt}>
                     {rt === "" ? t("audit.allResources") : rt}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {/* Action filter (Phase U, 2026-05-28). The dropdown is a
+                shortcut to the most useful values; arbitrary action
+                strings work via URL param if a power user needs
+                them. */}
+            <label className="flex flex-col gap-1.5">
+              <span className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
+                {t("audit.action")}
+              </span>
+              <select
+                value={actionFilter}
+                onChange={(e) => {
+                  setActionFilter(e.target.value);
+                  setOffset(0);
+                }}
+                className="h-10 rounded-md border border-border-subtle bg-elevated px-3 text-sm text-text focus-visible:border-accent focus-visible:outline-none"
+              >
+                {ACTIONS.map((a) => (
+                  <option key={a} value={a}>
+                    {a === "" ? t("audit.allActions") : a}
                   </option>
                 ))}
               </select>
@@ -117,6 +171,7 @@ export default function AuditPage() {
                 onClick={() => {
                   setResourceType("");
                   setResourceId("");
+                  setActionFilter("");
                   setOffset(0);
                 }}
               >

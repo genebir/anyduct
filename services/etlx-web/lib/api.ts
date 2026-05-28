@@ -307,6 +307,10 @@ export const auditApi = {
       actor_user_id?: string;
       resource_type?: string;
       resource_id?: string;
+      /** Filter by exact action name (e.g. ``"run.sql_executed"``).
+       *  Phase U (2026-05-28) — useful for showing only the data-
+       *  plane events the worker records, hiding control-plane noise. */
+      action?: string;
       limit?: number;
       offset?: number;
     } = {},

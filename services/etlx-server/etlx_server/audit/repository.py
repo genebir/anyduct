@@ -23,6 +23,7 @@ class AuditLogRepository:
         actor_user_id: UUID | None = None,
         resource_type: str | None = None,
         resource_id: str | None = None,
+        action: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[AuditLog]:
@@ -31,6 +32,11 @@ class AuditLogRepository:
         ``limit`` is bounded at the router (Pydantic validation); here we
         trust the caller. ``offset`` pagination is fine for the volumes
         Step 8 targets — cursor pagination can land in Step 11 if needed.
+
+        ``action`` (Phase U, 2026-05-28) filters by exact action name
+        (e.g. ``"run.sql_executed"``). Useful when the operator wants
+        to see only the data-plane events the worker records, not the
+        control-plane CRUD noise.
         """
         stmt = select(AuditLog)
         if workspace_id is not None:
@@ -41,6 +47,8 @@ class AuditLogRepository:
             stmt = stmt.where(AuditLog.resource_type == resource_type)
         if resource_id is not None:
             stmt = stmt.where(AuditLog.resource_id == resource_id)
+        if action is not None:
+            stmt = stmt.where(AuditLog.action == action)
         # Secondary sort on ``id`` (UUIDv7 — temporally ordered, see
         # ADR-0020) breaks ties when two audit rows happen to land in
         # the same microsecond. Without it the ``/audit`` response

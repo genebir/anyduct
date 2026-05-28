@@ -10,6 +10,19 @@
 ## [Unreleased]
 
 ### Added
+- **Audit 데이터-플레인 — SQL/Python 실행을 audit_log에 기록 (Phase U)** [ADR-0041 U] — 사용자 요청 *"각 쿼리나 python에서의 로그가 audit 로그에 함께 노출"*. audit_log를 control-plane 전용에서 **data-plane 이벤트도 포함**하는 통합 timeline으로 확장(컴플라이언스/forensic용):
+  - **워커 executor `_record_data_operations` helper** — `version.config_json` 파싱 + `_node_outcomes`(SKIPPED 제외) 교차로 sql_exec / transform:sql_exec / transform:python / transform:custom_python 노드마다 audit row 생성. graph + linear 양 경로 처리.
+  - **신규 action 2종**:
+    * `run.sql_executed` — after_json: `node_id` / `kind` / `connection` / `statement`(2000 char trunc) / `statement_truncated` flag / `statement_hash`(sha256[:16])
+    * `run.python_executed` — after_json: `node_id` / `kind` / `module_function` 또는 `first_line`(200 char trunc) / `lines` / `size_bytes` / `code_hash`
+  - **actor**: run.triggered_by_user_id (스케줄 실행이면 null). **resource_type**: "run". **resource_id**: run.id.
+  - **Best-effort**: try/except + warning log. Audit 기록 실패가 successful run을 fail로 뒤집지 않음.
+  - **Server**: `AuditLogRepository.query(action=...)` + `GET /audit?action=` 옵션.
+  - **Web**: `auditApi.query`에 action field, audit 페이지에 ACTIONS 드롭다운(`run.sql_executed`/`run.python_executed` 우선 표시 → 흔한 control-plane). 4 신규 i18n 키 en/ko.
+  - **레거시 row 영향 0** — schema 변경 없음(JSONB after_json), 옛 audit row 그대로 렌더.
+  - **검증**: 3 신규 it(worker 시나리오 sql_exec+custom_python 2 audit row 검증 + audit repo action 필터 + match 0). 서버 it 424→426 green. 코어 671 unchanged. mypy 100 src OK, web tsc clean.
+  - **컴플라이언스 강화**: "누가 어제 prod에 어떤 SQL 실행?" / "어떤 Python이 고객 데이터 만졌나?" — 단일 workspace audit timeline에서 답변.
+
 - **Workspace 대시보드 polish — 파이프라인 이름 + 성공률 + Sensors 카드 (Phase T)** [ADR-0041 T] — 워크스페이스 첫 화면 + 일상 모니터링 hub의 정보 밀도 강화. 3가지 핵심 변화:
   - **파이프라인 이름 노출** — Recent/Failing run rows의 UUID-prefix 표시 폐기. `pipelines.list`에서 만든 `pipelineNameById` Map으로 이름을 first-line으로 lead, run id는 muted 보조. 운영자 "어느 파이프라인?" 1초 답.
   - **Runs Today 카드 health 요약** — 기존 "X in batch" → `successRate(%) + inFlight(개)`. `todayStats` single-pass useMemo로 metric 계산. inFlight > 0 우선 표시, 그 다음 successRate (finished 분모로 0÷0 함정 회피). "지금 뭐 돌아가? 건강한가?" 두 질문 한번에.

@@ -48,6 +48,7 @@ from etl_plugins.core.exceptions import ConfigError, RegistryError, SecretError
 from etl_plugins.core.pipeline import Pipeline as CorePipeline
 from etl_plugins.core.pipeline import RunResult, Task
 from etl_plugins.runtime.builder import build_connector, build_pipeline
+from etlx_server.audit.service import AuditService
 from etlx_server.db.enums import PipelineMode, RunStatus
 from etlx_server.db.models import Pipeline, PipelineTrigger, PipelineVersion, Run
 from etlx_server.node_runs import NodeRunRepository, NodeSpec
@@ -317,6 +318,17 @@ class RunExecutor:
                             await heartbeat_task
                     # node_runs are written live by ``_run_node_level`` (H3a) —
                     # nothing more to record at the end.
+                    # Phase U (2026-05-28): one audit row per
+                    # SQL-executing / Python-executing node so the
+                    # workspace audit trail records WHAT operations
+                    # the run touched, not just THAT it ran. Same
+                    # session as the status write so it's all-or-
+                    # nothing — a rolled-back run never leaves a "ran
+                    # SQL X" trace.
+                    try:
+                        await self._record_data_operations(session, run, version, log)
+                    except Exception:
+                        log.exception("run.audit_data_ops_failed")
                     await session.commit()
                     return run
                 finally:
@@ -550,6 +562,186 @@ class RunExecutor:
                 target_pipeline_id=str(pipeline_id),
                 assets=sorted(matched),
             )
+
+    async def _record_data_operations(
+        self,
+        session: AsyncSession,
+        run: Run,
+        version: PipelineVersion,
+        log: Any,
+    ) -> None:
+        """Write one ``audit_log`` row per SQL-executing / Python-executing
+        node in this run (Phase U, 2026-05-28).
+
+        Why: the existing workspace audit trail records *control plane*
+        events (pipeline.create, run.cancel, …). For compliance — "who
+        ran which SQL against prod?" / "what Python ran on customer
+        data?" — we also need *data plane* events. Recording the
+        operations alongside the same audit table keeps the timeline
+        unified (one source of truth for "what happened in this
+        workspace"), and the existing UI renders the new action types
+        with no schema change.
+
+        Coverage:
+          * ``sql_exec`` graph nodes (ADR-0042) — standalone SQL.
+          * ``transform: sql_exec`` in legacy linear configs (ADR-0035
+            pre-load action).
+          * ``transform: python`` — user-supplied ``module:function``.
+          * ``transform: custom_python`` — inline Python in the
+            browser (ADR-0041 I2).
+
+        Both SUCCEEDED and FAILED nodes are recorded: a failed SQL may
+        still have made partial changes before the error fired, and
+        regulators want the attempted operation either way. Node-level
+        outcomes are only available for node_level runs; legacy
+        non-node-level runs record every operation the config would
+        have executed (we don't have per-node success/failure for
+        them).
+
+        Best-effort: errors here are logged + swallowed by the caller
+        — the audit trail of the operations must not flip a successful
+        run to failed.
+        """
+        import hashlib
+
+        try:
+            cfg = PipelineConfig.model_validate(version.config_json)
+        except Exception as e:
+            log.warning("run.audit_data_ops_parse_failed", error=str(e))
+            return
+
+        # For node-level runs we know which nodes actually executed.
+        # For non-node-level runs (or older runs without recorded
+        # outcomes), record every operation in the config — the run
+        # ran end-to-end, so they all executed.
+        executed_node_ids: set[str] | None = None
+        if self._node_outcomes is not None:
+            from etlx_server.worker.node_graph import NODE_SKIPPED
+
+            executed_node_ids = {o.node_id for o in self._node_outcomes if o.status != NODE_SKIPPED}
+
+        audit = AuditService(session)
+
+        def _hash(text: str) -> str:
+            """Stable short fingerprint for SQL / code text. Lets the
+            UI dedupe identical statements + makes "same query as
+            yesterday" answerable without storing the full text in
+            metadata."""
+            return hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()[:16]
+
+        async def _record_sql(
+            *, node_id: str, kind: str, connection: str | None, statement: str
+        ) -> None:
+            await audit.record(
+                actor_user_id=run.triggered_by_user_id,
+                workspace_id=run.workspace_id,
+                action="run.sql_executed",
+                resource_type="run",
+                resource_id=str(run.id),
+                after={
+                    "node_id": node_id,
+                    "kind": kind,
+                    "connection": connection,
+                    # Truncated to keep one node's SQL bounded; full
+                    # text already lives in version.config_json for
+                    # forensic deep-dive.
+                    "statement": statement[:2000],
+                    "statement_truncated": len(statement) > 2000,
+                    "statement_hash": _hash(statement),
+                },
+            )
+
+        async def _record_python(*, node_id: str, kind: str, **fields: Any) -> None:
+            await audit.record(
+                actor_user_id=run.triggered_by_user_id,
+                workspace_id=run.workspace_id,
+                action="run.python_executed",
+                resource_type="run",
+                resource_id=str(run.id),
+                after={"node_id": node_id, "kind": kind, **fields},
+            )
+
+        # ── graph shape (ADR-0030 + ADR-0042) ──────────────────────
+        if cfg.graph is not None:
+            for node in cfg.graph.nodes:
+                if executed_node_ids is not None and node.id not in executed_node_ids:
+                    continue
+                if node.type == "sql_exec":
+                    # Standalone SQL node (ADR-0042 follow-up). Both
+                    # connection + statement are required by the
+                    # GraphNodeConfig validator, so non-null.
+                    await _record_sql(
+                        node_id=node.id,
+                        kind="sql_exec",
+                        connection=node.connection,
+                        statement=node.statement or "",
+                    )
+                elif node.type == "transform" and node.transform is not None:
+                    tdump = node.transform.model_dump()
+                    ttype = tdump.get("type")
+                    if ttype == "sql_exec":
+                        await _record_sql(
+                            node_id=node.id,
+                            kind="transform:sql_exec",
+                            connection=tdump.get("connection"),
+                            statement=tdump.get("statement") or "",
+                        )
+                    elif ttype == "python":
+                        await _record_python(
+                            node_id=node.id,
+                            kind="transform:python",
+                            module_function=tdump.get("callable") or tdump.get("function") or "",
+                        )
+                    elif ttype == "custom_python":
+                        code = tdump.get("code") or ""
+                        await _record_python(
+                            node_id=node.id,
+                            kind="transform:custom_python",
+                            first_line=code.split("\n", 1)[0][:200],
+                            lines=code.count("\n") + 1 if code else 0,
+                            size_bytes=len(code),
+                            code_hash=_hash(code),
+                        )
+            return
+
+        # ── linear / task-DAG shape ────────────────────────────────
+        # Non-node-level — no per-node outcomes. Iterate every
+        # operation in every task; we know the run completed (the
+        # caller only invokes us after a success path) so all are
+        # considered "executed". For the failure path we still
+        # record — the FIRST failing step's prior steps DID run.
+        for task in cfg.effective_tasks():
+            # Linear configs put sql_exec inside transforms; the
+            # builder lifts them into task.pre_sql (ADR-0035) but
+            # the config still carries them in ``transforms`` at the
+            # API layer. Iterate transforms verbatim.
+            for tcfg in task.transforms:
+                tdump = tcfg.model_dump()
+                ttype = tdump.get("type")
+                node_id = task.name  # no node id in linear shape — task name is the closest analog
+                if ttype == "sql_exec":
+                    await _record_sql(
+                        node_id=node_id,
+                        kind="transform:sql_exec",
+                        connection=tdump.get("connection"),
+                        statement=tdump.get("statement") or "",
+                    )
+                elif ttype == "python":
+                    await _record_python(
+                        node_id=node_id,
+                        kind="transform:python",
+                        module_function=tdump.get("callable") or tdump.get("function") or "",
+                    )
+                elif ttype == "custom_python":
+                    code = tdump.get("code") or ""
+                    await _record_python(
+                        node_id=node_id,
+                        kind="transform:custom_python",
+                        first_line=code.split("\n", 1)[0][:200],
+                        lines=code.count("\n") + 1 if code else 0,
+                        size_bytes=len(code),
+                        code_hash=_hash(code),
+                    )
 
     async def _trigger_downstream(self, session: AsyncSession, run: Run, log: Any) -> None:
         """Enqueue runs of pipelines this one triggers on success (ADR-0029).

@@ -21,7 +21,10 @@ load-bearing for the lineage graph.
 
 from __future__ import annotations
 
-from etl_plugins.runtime.sql_lineage import extract_sql_lineage
+from etl_plugins.runtime.sql_lineage import (
+    extract_referenced_tables,
+    extract_sql_lineage,
+)
 
 
 def _as_sets(
@@ -273,6 +276,58 @@ def test_empty_query_returns_none() -> None:
 
 
 # ---------- combined complexity ----------
+
+
+# ---------- extract_referenced_tables ----------
+
+
+def test_referenced_tables_simple() -> None:
+    assert extract_referenced_tables("SELECT a FROM t") == ["t"]
+
+
+def test_referenced_tables_join_preserves_order() -> None:
+    assert extract_referenced_tables("SELECT t1.a, t2.b FROM t1 JOIN t2 ON t1.id = t2.id") == [
+        "t1",
+        "t2",
+    ]
+
+
+def test_referenced_tables_cte_excludes_cte_names() -> None:
+    # ``c`` is a CTE, not an asset — only the base ``raw`` should land in the
+    # input set. The same goes for chained CTEs that reference each other.
+    assert extract_referenced_tables("WITH c AS (SELECT a FROM raw) SELECT a FROM c") == ["raw"]
+    assert extract_referenced_tables(
+        """
+        WITH a AS (SELECT * FROM x),
+             b AS (SELECT * FROM a)
+        SELECT * FROM b
+        """
+    ) == ["x"]
+
+
+def test_referenced_tables_union_picks_both_branches() -> None:
+    assert extract_referenced_tables("SELECT * FROM t1 UNION ALL SELECT * FROM t2") == ["t1", "t2"]
+
+
+def test_referenced_tables_correlated_subquery() -> None:
+    # The subquery reads ``orders``, the outer query reads ``users``. Both
+    # belong in the input asset set.
+    tables = extract_referenced_tables(
+        """
+        SELECT u.id,
+               (SELECT MAX(o.amount) FROM orders o WHERE o.user_id = u.id) AS m
+        FROM users u
+        """
+    )
+    assert set(tables) == {"users", "orders"}
+
+
+def test_referenced_tables_non_sql_returns_empty() -> None:
+    # ``source.query`` for a Mongo connector is a collection name string —
+    # un-parseable as SQL. We should silently report "no extra tables" so the
+    # caller falls back to the primary-key derivation.
+    assert extract_referenced_tables("not sql at all") == []
+    assert extract_referenced_tables("") == []
 
 
 def test_cte_join_window_and_case_combined() -> None:

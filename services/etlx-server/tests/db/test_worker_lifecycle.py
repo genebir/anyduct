@@ -743,6 +743,91 @@ async def test_executor_persists_column_lineage(session: AsyncSession, tmp_path:
     assert id_upstreams[0][0].startswith("src/")
 
 
+async def test_executor_persists_join_source_inputs_and_column_edges(
+    session: AsyncSession, tmp_path: Path
+) -> None:
+    """Phase X follow-up (2026-05-28): a JOIN'd source query auto-registers
+    *both* base tables as input assets and the column lineage emits real
+    multi-source per-column edges. Catches a regression where only the
+    regex-keyed first FROM table landed in the catalog.
+
+    The fixture writes a JOIN of two pre-seeded tables (``customers`` +
+    ``orders``) into a sink (``joined``). After execution:
+    * Both ``src/customers`` and ``src/orders`` rows exist as input assets.
+    * Edges ``src/customers → dst/joined`` and ``src/orders → dst/joined``
+      both exist.
+    * Column ``joined.email`` traces to ``customers.email``; ``joined.total``
+      traces to ``orders.total``.
+    """
+    db_path = str(tmp_path / "worker_join.db")
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute("CREATE TABLE customers (id INTEGER, email TEXT)")
+        conn.executemany(
+            "INSERT INTO customers (id, email) VALUES (?, ?)",
+            [(1, "a@x"), (2, "b@x")],
+        )
+        conn.execute("CREATE TABLE orders (customer_id INTEGER, total INTEGER)")
+        conn.executemany(
+            "INSERT INTO orders (customer_id, total) VALUES (?, ?)",
+            [(1, 100), (2, 250)],
+        )
+        conn.execute("CREATE TABLE joined (id INTEGER, email TEXT, total INTEGER)")
+        conn.commit()
+    finally:
+        conn.close()
+
+    ws = await _seed_workspace(session, slug="we-join-assets")
+    await _seed_connection(session, workspace_id=ws.id, name="src", config={"database": db_path})
+    await _seed_connection(session, workspace_id=ws.id, name="dst", config={"database": db_path})
+    cfg = {
+        "name": "p",
+        "source": {
+            "connection": "src",
+            "query": (
+                "SELECT c.id, c.email, o.total "
+                "FROM customers c JOIN orders o ON c.id = o.customer_id"
+            ),
+        },
+        "sink": {"connection": "dst", "table": "joined", "mode": "append"},
+    }
+    p, pv = await _seed_pipeline(session, workspace_id=ws.id, name="p", config=cfg)
+    run = await _seed_pending_run(
+        session, workspace_id=ws.id, pipeline_id=p.id, pipeline_version_id=pv.id
+    )
+    claimed = await claim_pending_run(session, worker_id="worker-CJ")
+    assert claimed is not None
+    await session.commit()
+
+    await RunExecutor(
+        _SessionFactoryAdapter(session), StaticSecretBackend(), worker_id="w"
+    ).execute(run.id)
+
+    repo = AssetRepository(session)
+    assets = {a.asset_key: a for a in await repo.list_for_workspace(workspace_id=ws.id)}
+    # Both source tables landed (Phase X follow-up). Before this slice the
+    # regex picked only the first FROM table, so ``src/orders`` was missing.
+    assert "src/customers" in assets
+    assert "src/orders" in assets
+    assert "dst/joined" in assets
+
+    joined = assets["dst/joined"]
+    ups = {a.asset_key for a in await repo.upstream(joined.id)}
+    assert {"src/customers", "src/orders"} <= ups
+
+    cols, upstream_map = await repo.column_lineage_for_asset(asset_id=joined.id)
+    by_name = {c.name: c for c in cols}
+    assert {"id", "email", "total"} <= set(by_name)
+    email_ups = {
+        (up_asset.asset_key, up_col.name) for up_col, up_asset in upstream_map[by_name["email"].id]
+    }
+    total_ups = {
+        (up_asset.asset_key, up_col.name) for up_col, up_asset in upstream_map[by_name["total"].id]
+    }
+    assert ("src/customers", "email") in email_ups
+    assert ("src/orders", "total") in total_ups
+
+
 async def test_executor_triggers_downstream_on_success(
     session: AsyncSession, tmp_path: Path
 ) -> None:

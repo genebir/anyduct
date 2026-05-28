@@ -225,14 +225,29 @@ def _table_of_leaf(node: _LineageNode) -> str | None:
 
 
 def _table_of_simple(source: object) -> str | None:
-    """Direct Table / aliased Table lookup. No fallback heuristics."""
+    """Direct Table / aliased Table lookup. No fallback heuristics.
+
+    Returns the fully-qualified name (``catalog.schema.table`` if all parts
+    are present, otherwise the shortest dotted form). This matches what
+    :func:`derive_asset_key` keys on for table sinks — without it,
+    ``SELECT * FROM public.orders`` would key as ``orders`` here but
+    ``public.orders`` everywhere else, fanning the catalog into two rows.
+    """
     if isinstance(source, exp.Table):
-        return source.name or None
+        return _table_fq_name(source)
     if isinstance(source, exp.Alias):
         inner = source.this
         if isinstance(inner, exp.Table):
-            return inner.name or None
+            return _table_fq_name(inner)
     return None
+
+
+def _table_fq_name(tbl: exp.Table) -> str | None:
+    """Reconstruct ``catalog.db.name`` from a sqlglot ``Table`` node."""
+    if not tbl.name:
+        return None
+    parts = [p for p in (tbl.catalog, tbl.db, tbl.name) if p]
+    return ".".join(parts) if parts else None
 
 
 def _expression_touches_table(expr: object) -> bool:
@@ -247,14 +262,18 @@ def _expression_touches_table(expr: object) -> bool:
 
 def _single_base_table(select: exp.Select) -> str | None:
     """If a ``Select`` reads from exactly one base table (ignoring CTEs in
-    the enclosing scope), return its name; otherwise ``None``. Used to
-    attribute aggregate leaves to the table they scan."""
-    tables = [
-        tbl.name for tbl in select.find_all(exp.Table) if tbl.name and not _is_cte_ref(tbl, select)
-    ]
-    unique = list(dict.fromkeys(tables))
+    the enclosing scope), return its fully-qualified name; otherwise
+    ``None``. Used to attribute aggregate leaves to the table they scan."""
+    names: list[str] = []
+    for tbl in select.find_all(exp.Table):
+        if not tbl.name or _is_cte_ref(tbl, select):
+            continue
+        fq = _table_fq_name(tbl)
+        if fq:
+            names.append(fq)
+    unique = list(dict.fromkeys(names))
     if len(unique) == 1:
-        return str(unique[0])
+        return unique[0]
     return None
 
 
@@ -272,10 +291,15 @@ def _build_alias_table_map(root: exp.Expression) -> dict[str, str]:
         name = tbl.name
         if not name or name in cte_names:
             continue
-        mapping[name] = name
+        fq = _table_fq_name(tbl) or name
+        # Identity entries cover both the bare name and the fully-qualified
+        # form so a Placeholder leaf's qualifier resolves regardless of the
+        # form the writer used.
+        mapping[name] = fq
+        mapping[fq] = fq
         alias = tbl.alias
         if alias and alias != name:
-            mapping[alias] = name
+            mapping[alias] = fq
     return mapping
 
 
@@ -297,4 +321,44 @@ def _is_cte_ref(table: exp.Table, scope: exp.Expression) -> bool:
     return table.name in seen
 
 
-__all__ = ["extract_sql_lineage"]
+def extract_referenced_tables(query: str, *, dialect: str | None = None) -> list[str]:
+    """List every *base* table the query references, in first-seen order.
+
+    CTE definitions are excluded — they're internal aliases for the query
+    itself, not asset-level inputs. Sub-selects, JOINs, UNIONs, correlated
+    subqueries and lateral joins all contribute their leaf-table references.
+
+    Returns an empty list for non-SQL strings (a Mongo collection name handed
+    in as ``source.query``, for instance), un-parseable input, or anything
+    that's not a parsed sqlglot expression. The caller treats "no referenced
+    tables" as "trust the primary key derivation" — no auto-fanout.
+
+    This is the asset-axis companion to :func:`extract_sql_lineage`: where
+    that one walks down to leaf *columns*, this one walks down to leaf
+    *tables*. The static lineage emitter uses it to register every joined /
+    union'd / sub-queried base table as an input asset, so the catalog graph
+    matches the column-edge graph rather than only the single FROM table
+    that the regex-based ``derive_asset_key`` picks up.
+    """
+    try:
+        parsed = sqlglot.parse_one(query, dialect=dialect)
+    except Exception:
+        return []
+    if not isinstance(parsed, exp.Expression):
+        return []
+    cte_names = {cte.alias_or_name for cte in parsed.find_all(exp.CTE) if cte.alias_or_name}
+    out: list[str] = []
+    seen: set[str] = set()
+    for tbl in parsed.find_all(exp.Table):
+        name = tbl.name
+        if not name or name in cte_names:
+            continue
+        fq = _table_fq_name(tbl) or name
+        if fq in seen:
+            continue
+        seen.add(fq)
+        out.append(fq)
+    return out
+
+
+__all__ = ["extract_referenced_tables", "extract_sql_lineage"]

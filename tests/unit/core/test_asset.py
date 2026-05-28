@@ -182,6 +182,123 @@ def test_derive_lineage_records_kinds() -> None:
     assert lin.kinds[AssetKey.of("lake", "exports/out.parquet")] == "object"
 
 
+def test_derive_lineage_join_query_registers_every_base_table() -> None:
+    """Phase X follow-up (2026-05-28): a JOIN'd source query auto-registers
+    *both* base tables as input assets, and every one gets an edge to the
+    sink. Without this the catalog graph would only see the regex-picked
+    first FROM table, breaking the column-lineage / asset-lineage contract."""
+    cfg = PipelineConfig.model_validate(
+        {
+            "name": "p",
+            "source": {
+                "connection": "wh",
+                "query": "SELECT t1.a, t2.b FROM t1 JOIN t2 ON t1.id = t2.id",
+            },
+            "sink": {"connection": "wh", "table": "joined", "mode": "append"},
+        }
+    )
+    lin = derive_lineage(cfg)
+    t1 = AssetKey.of("wh", "t1")
+    t2 = AssetKey.of("wh", "t2")
+    joined = AssetKey.of("wh", "joined")
+    assert set(lin.inputs) == {t1, t2}
+    assert lin.outputs == [joined]
+    assert LineageEdge(t1, joined) in lin.edges
+    assert LineageEdge(t2, joined) in lin.edges
+    # First-seen order: the regex-keyed primary lands first.
+    assert lin.inputs[0] == t1
+
+
+def test_derive_lineage_cte_registers_only_base_tables() -> None:
+    """CTE names are internal aliases — they shouldn't pollute the input
+    asset set. Only the base table(s) the CTEs read from should land."""
+    cfg = PipelineConfig.model_validate(
+        {
+            "name": "p",
+            "source": {
+                "connection": "wh",
+                "query": (
+                    "WITH a AS (SELECT * FROM raw), " "b AS (SELECT * FROM a) " "SELECT * FROM b"
+                ),
+            },
+            "sink": {"connection": "wh", "table": "out", "mode": "append"},
+        }
+    )
+    lin = derive_lineage(cfg)
+    assert set(lin.inputs) == {AssetKey.of("wh", "raw")}
+
+
+def test_derive_lineage_schema_qualified_join_dedupes_with_primary() -> None:
+    """The primary-key derivation (regex-based) preserves the schema
+    qualifier; the new sqlglot pass must produce the *same* keys for the
+    same tables — otherwise a single ``public.orders`` table would show
+    up as two distinct catalog rows."""
+    cfg = PipelineConfig.model_validate(
+        {
+            "name": "p",
+            "source": {
+                "connection": "wh",
+                "query": (
+                    "SELECT o.id, c.email "
+                    "FROM public.orders o JOIN public.customers c "
+                    "ON o.customer_id = c.id"
+                ),
+            },
+            "sink": {"connection": "wh", "table": "joined", "mode": "append"},
+        }
+    )
+    lin = derive_lineage(cfg)
+    assert set(lin.inputs) == {
+        AssetKey.of("wh", "public.orders"),
+        AssetKey.of("wh", "public.customers"),
+    }
+
+
+def test_derive_lineage_graph_source_with_join_query() -> None:
+    """Graph-shape pipelines apply the same auto-fanout — every JOIN'd table
+    on a source node lands as an input + gets an edge to the sink(s)."""
+    cfg = PipelineConfig.model_validate(
+        {
+            "name": "p",
+            "graph": {
+                "nodes": [
+                    {
+                        "id": "s",
+                        "type": "source",
+                        "connection": "wh",
+                        "query": "SELECT a.x, b.y FROM a LEFT JOIN b ON a.id = b.id",
+                    },
+                    {"id": "k", "type": "sink", "connection": "wh", "table": "merged"},
+                ],
+                "edges": [{"from_node": "s", "to_node": "k"}],
+            },
+        }
+    )
+    lin = derive_lineage(cfg)
+    a = AssetKey.of("wh", "a")
+    b = AssetKey.of("wh", "b")
+    merged = AssetKey.of("wh", "merged")
+    assert set(lin.inputs) == {a, b}
+    assert lin.outputs == [merged]
+    assert LineageEdge(a, merged) in lin.edges
+    assert LineageEdge(b, merged) in lin.edges
+
+
+def test_derive_lineage_non_sql_source_unchanged() -> None:
+    """A non-SQL source (Mongo collection name, Kafka topic, S3 key) goes
+    through the primary key derivation alone — no auto-fanout because there's
+    nothing to parse. Guards against accidentally adding ghost input assets."""
+    cfg = PipelineConfig.model_validate(
+        {
+            "name": "p",
+            "source": {"connection": "mongo", "query": "users"},  # collection name
+            "sink": {"connection": "dst", "table": "out", "mode": "append"},
+        }
+    )
+    lin = derive_lineage(cfg)
+    assert lin.inputs == [AssetKey.of("mongo", "users")]
+
+
 def test_derive_lineage_kafka_topic_and_s3_key() -> None:
     cfg = PipelineConfig.model_validate(
         {

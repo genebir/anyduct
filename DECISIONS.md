@@ -1424,4 +1424,36 @@ L1 출시 직후 사용자가 5개 회신:
 
 ---
 
+## ADR-0044: Static lineage emit이 query의 모든 referenced 테이블을 input asset으로 등록
+
+**Date**: 2026-05-28
+**Status**: Accepted
+**Context**: ADR-0043(Phase X)으로 컬럼 리니지는 JOIN의 양쪽 테이블을 multi-upstream으로 정확히 만들게 됐다. 하지만 asset 등록(`derive_lineage` → `AssetLineage.inputs`)은 여전히 `derive_asset_key`의 regex 파싱이 잡은 *첫 FROM 테이블 하나*만 input asset으로 등록했다. 그 결과 server의 `AssetRepository.persist_run_column_lineage`가 column edge를 만들 때 `_asset_by_key(workspace_id, up.asset)`이 두 번째 JOIN 테이블에 대해 `None`을 반환 → column edge가 그래프에 실제로 나타나지 않음. 컬럼-axis와 asset-axis가 어긋남.
+
+**Decision**:
+1. `etl_plugins/runtime/sql_lineage.py`에 `extract_referenced_tables(query, *, dialect=None) -> list[str]` 추가:
+   - sqlglot AST 전체에서 `exp.Table` 노드를 모두 모음.
+   - CTE 이름은 제외(CTE는 내부 alias이지 자산 아님).
+   - 같은 테이블 dedupe하고 first-seen 순서 유지.
+   - **fully-qualified 이름 반환**(`db.name` / `catalog.db.name`) — `derive_asset_key`의 regex가 dotted name을 그대로 가져오는 것과 일치시켜 `wh/public.orders`와 `wh/orders`가 두 row로 갈라지는 함정 회피.
+2. `etl_plugins/runtime/lineage.py` `derive_lineage`가 source의 query가 있을 때 `extract_referenced_tables`로 추가 base 테이블을 모두 `inputs`에 등록 + 각 sink로 edge 생성:
+   - linear path(`TaskConfig`): primary key + extras 모두 등록, 각 sink로 `edge(primary, sink)` + `edge(extra, sink)`.
+   - graph path: `source` 타입 노드에 동일 로직. `src_keys` 리스트가 extras까지 포함하므로 기존의 "모든 source → 모든 sink" fan-out도 그대로 동작.
+   - `derive_asset_key`의 primary key 추출은 변경 없음 — 기존 catalog row의 안정성 유지. 새 슬라이스는 **추가**만.
+3. `sql_lineage.py`의 `_table_of_simple` / `_single_base_table` / `_build_alias_table_map`도 fq 이름을 사용하도록 통일 — column leaf와 asset key가 동일한 형태로 표현. 새 helper `_table_fq_name(tbl) → catalog.db.name | db.name | name`.
+4. `_query_referenced_asset_keys(source_holder)` helper는 `TaskConfig | GraphNodeConfig`를 받아 source의 `connection`을 가지고 `AssetKey.of(connection, name)` 리스트를 만든다. 비-SQL source(Mongo collection name 등)는 sqlglot가 파싱하면 `extract_referenced_tables` 결과가 `[]` → 자동 fanout 없음.
+
+**Consequences**:
+- ✅ JOIN/CTE/UNION/correlated 서브쿼리의 모든 base 테이블이 카탈로그에 자동 등록. 새 e2e 테스트(`test_executor_persists_join_source_inputs_and_column_edges`)가 sqlite JOIN으로 검증.
+- ✅ Phase X에서 만들어진 multi-upstream column edge가 실제 그래프 row를 만든다 — `_asset_by_key`가 두 번째 테이블에서도 hit. 컬럼-axis와 asset-axis 정합성 복원.
+- ✅ Schema-qualified 이름(`public.orders`)이 두 row로 갈라지지 않음 — fq 이름을 column leaf와 asset extras 양쪽에서 동일하게 사용.
+- ✅ DB 마이그레이션 없음. 기존 catalog row 변경 없음(추가만).
+- ✅ 비-SQL source는 영향 없음(Mongo collection / Kafka topic / S3 key 등).
+- ⚠ `derive_asset_key`의 primary key는 여전히 regex로 추출(behavioral 호환). 그래서 한 query에 *FROM 절이 없는* 비-SQL 문자열이면 primary key는 query 전체 문자열인데 extras는 `[]`라서 자연스럽게 단일 input — 의도된 동작.
+- 🔜 다음 자연스러운 보완: `SELECT *`을 schema 없이 컬럼 enumerate 못하는 한계 — SchemaInspector(ADR-0033)를 lineage 호출에 inject하는 슬라이스로 마무리.
+
+테스트 결과: 코어 unit 714(+11 신규: extract_referenced_tables 6 + derive_lineage 5) + server unit/it 430(+1 e2e JOIN 검증) green. mypy 코어 60 + 서버 100 OK. ruff clean.
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

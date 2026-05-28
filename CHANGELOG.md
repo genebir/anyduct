@@ -10,6 +10,14 @@
 ## [Unreleased]
 
 ### Added
+- **Static lineage emit — JOIN/CTE/UNION의 모든 base 테이블 자동 input 등록 (Phase X 후속)** [ADR-0044] — ADR-0043(컬럼 리니지)에서 만든 multi-upstream column edge가 실제 catalog 그래프에 row를 만들려면, asset-axis(`derive_lineage`)도 source query의 모든 referenced 테이블을 input asset으로 등록해야 했음. 옛 동작은 `derive_asset_key`의 regex가 잡은 첫 FROM 테이블 하나만 등록 → 두 번째 JOIN 테이블에 대한 column edge는 `_asset_by_key` None → 그래프에 안 보임. 컬럼-axis와 asset-axis 정합성 복원:
+  - **`etl_plugins/runtime/sql_lineage.py` `extract_referenced_tables(query)`**: sqlglot AST 전체에서 `exp.Table` 노드 모음, CTE 이름 제외, fully-qualified 형태(`public.orders` / `catalog.db.name`)로 first-seen 순서 반환.
+  - **`derive_lineage` 확장**: linear + graph 양 경로에서 source query가 SQL이면 primary key + 모든 referenced 테이블을 `inputs`에 추가, 각 sink로 edge fan-out. 비-SQL source(Mongo collection / Kafka topic / S3 key)는 `extract_referenced_tables`가 `[]` → 영향 없음.
+  - **fq 이름 통일**: `_table_of_simple` / `_single_base_table` / `_build_alias_table_map`도 `_table_fq_name(tbl)`(catalog.db.name 또는 db.name) 사용. column leaf와 asset extras가 같은 키 형태 → `public.orders`가 두 row로 갈라지는 함정 회피.
+  - **DB 마이그레이션 없음**. 기존 catalog row 안정성 유지(추가만).
+  - **테스트 12 신규**: `test_sql_lineage.py`(+6 — simple/JOIN/CTE/UNION/correlated/non-SQL) + `test_asset.py`(+5 — JOIN multi-input / CTE excludes CTEs / schema-qualified dedup / graph source JOIN / non-SQL unchanged) + `test_worker_lifecycle.py`(+1 e2e — sqlite JOIN 실제 실행 → 양쪽 source asset 등록 + multi-upstream column edge 검증).
+  - **검증**: 코어 unit 714 + 서버 unit/it 430 green. mypy 코어 60 + 서버 100 OK. ruff clean.
+
 - **SQL 컬럼 리니지 — `sqlglot.lineage` 풀-AST 워커로 전면 교체 (Phase X)** [ADR-0043] — 사용자 요청 *"카탈로그와 데이터 리니지를 더 강화. 2천 줄짜리 복잡 쿼리든, 서브쿼리/WITH절 포함 어떤 유형이든 완벽 파싱"*. 옛 hand-written FROM/JOIN 매처는 1:1 SELECT만 풀고 JOIN/CTE/UNION/서브쿼리는 모두 "sink opaque"로 떨궜음 — 정작 lineage가 가장 필요한 warehouse-to-warehouse 패턴에서 빈 그래프. 전면 재작성:
   - **`etl_plugins/runtime/sql_lineage.py`(신규) `extract_sql_lineage`** — `sqlglot.lineage.lineage()` 트리를 펼쳐 각 출력 컬럼을 `(table, source_col)` leaf 셋으로 정규화. CTE chain / 재귀 CTE / 서브쿼리(FROM·SELECT·correlated) / JOIN(모든 종류, 3-way+) / `UNION [ALL]` / `COALESCE` / `CASE WHEN` / 산술 / 윈도우(PARTITION+ORDER 컬럼 포함) / `LATERAL`(Postgres) 모두 처리.
   - **Placeholder leaf 복구** — correlated/LATERAL 참조가 `Placeholder`로 떨어지면 alias→table 맵으로 `o.amount` → `orders.amount` 후처리.

@@ -10,11 +10,19 @@ graph emerges when two pipelines reference the same key (see
 This is *static* — computed from config alone, no run required — so the catalog
 and the builder can show lineage before anything executes. Runtime emit
 (OpenLineage) builds on the same key derivation in a later slice.
+
+**Phase X follow-up (2026-05-28, ADR-0043):** when ``source.query`` is parseable
+SQL, we additionally register every *referenced* base table as an input asset
+(JOINs, CTEs reading from raw tables, UNION branches, correlated subqueries).
+That keeps the asset-axis graph in step with the column-lineage axis — both now
+recognise all upstream tables a query touches, not just the regex-picked first
+``FROM``. The primary key derivation in :func:`derive_asset_key` is unchanged
+(so existing keying / catalog rows stay stable); we only *add* assets and edges.
 """
 
 from __future__ import annotations
 
-from etl_plugins.config.models import PipelineConfig
+from etl_plugins.config.models import GraphNodeConfig, PipelineConfig, SourceConfig, TaskConfig
 from etl_plugins.core.asset import (
     AssetKey,
     AssetLineage,
@@ -22,6 +30,7 @@ from etl_plugins.core.asset import (
     asset_kind,
     derive_asset_key,
 )
+from etl_plugins.runtime.sql_lineage import extract_referenced_tables
 
 
 def derive_lineage(cfg: PipelineConfig) -> AssetLineage:
@@ -67,33 +76,70 @@ def derive_lineage(cfg: PipelineConfig) -> AssetLineage:
             edges.append(LineageEdge(upstream=u, downstream=d))
 
     if cfg.graph is not None:
+        # Tree-shaped graph (ADR-0030): every sink derives from every source.
+        # The flat ``src_keys`` list is a depth-1 fan-in across all sources;
+        # extra source-side tables (JOIN'd bases, CTE roots) join it too.
         src_keys: list[AssetKey] = []
         for node in cfg.graph.nodes:
             data = node.model_dump()
             if node.type == "source":
-                k = derive_asset_key(node.connection, data)
-                _add_in(k, asset_kind(data))
-                if k is not None:
-                    src_keys.append(k)
+                primary = derive_asset_key(node.connection, data)
+                _add_in(primary, asset_kind(data))
+                if primary is not None:
+                    src_keys.append(primary)
+                for k in _query_referenced_asset_keys(node):
+                    if k != primary:
+                        _add_in(k, "table")
+                        src_keys.append(k)
             elif node.type == "sink":
-                k = derive_asset_key(node.connection, data)
-                _add_out(k, asset_kind(data))
-                # Tree-shaped graph (ADR-0030): every sink derives from the
-                # single source. Edge each source → each sink.
+                sink_key = derive_asset_key(node.connection, data)
+                _add_out(sink_key, asset_kind(data))
                 for sk in src_keys:
-                    _add_edge(sk, k)
+                    _add_edge(sk, sink_key)
     else:
         for task in cfg.effective_tasks():
             src_data = task.source.model_dump()
-            in_key = derive_asset_key(task.source.connection, src_data)
-            _add_in(in_key, asset_kind(src_data))
+            primary_in = derive_asset_key(task.source.connection, src_data)
+            _add_in(primary_in, asset_kind(src_data))
+            extras = [k for k in _query_referenced_asset_keys(task) if k != primary_in]
+            for k in extras:
+                _add_in(k, "table")
             for snk in task.effective_sinks():
                 snk_data = snk.model_dump()
                 out_key = derive_asset_key(snk.connection, snk_data)
                 _add_out(out_key, asset_kind(snk_data))
-                _add_edge(in_key, out_key)
+                _add_edge(primary_in, out_key)
+                for k in extras:
+                    _add_edge(k, out_key)
 
     return AssetLineage(inputs=inputs, outputs=outputs, edges=edges, kinds=kinds)
+
+
+def _query_referenced_asset_keys(
+    source_holder: TaskConfig | GraphNodeConfig,
+) -> list[AssetKey]:
+    """Resolve every base table the source's SQL query references and key it
+    on the source's ``connection``.
+
+    Returns ``[]`` when there's no parseable SQL query (non-SQL sources, table
+    reads, Kafka/HTTP/Mongo, etc.) — the caller's primary-key derivation stays
+    the only asset for those. The function is intentionally narrow: only the
+    *source*'s query matters here; sink writes go through ``derive_asset_key``
+    on their explicit table/topic/key field.
+    """
+    source: SourceConfig | GraphNodeConfig
+    if isinstance(source_holder, TaskConfig):
+        source = source_holder.source
+    else:
+        source = source_holder
+        if source.type != "source":
+            return []
+    query = source.query
+    connection = source.connection
+    if not query or not connection:
+        return []
+    names = extract_referenced_tables(query)
+    return [AssetKey.of(connection, name) for name in names]
 
 
 __all__ = ["derive_lineage"]

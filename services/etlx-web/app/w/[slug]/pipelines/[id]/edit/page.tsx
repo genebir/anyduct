@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import {
   ActivityIcon,
+  HistoryIcon,
   KeyboardIcon,
   LayoutGridIcon,
   PlayIcon,
@@ -16,6 +17,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Header } from "@/components/shell/header";
+import { BackfillDialog } from "@/components/pipelines/backfill-dialog";
 import { Button } from "@/components/ui/button";
 import dynamic from "next/dynamic";
 import { PipelineSettingsPanel } from "@/components/builder/pipeline-settings-panel";
@@ -172,6 +174,12 @@ export default function PipelineEditorPage() {
   // pending.
   const [savedGraphIndex, setSavedGraphIndex] = useState<number | null>(null);
   const [metaDirty, setMetaDirty] = useState(false);
+  // Phase Q (2026-05-28): backfill dialog state. Same dialog the
+  // pipelines list page uses — re-mounting it here lets the user
+  // backfill without going back to the list. Disabled below when the
+  // pipeline has no saved version or has unsaved changes (the server
+  // would 400 with a stale config either way).
+  const [backfillOpen, setBackfillOpen] = useState(false);
 
   // Load pipeline + connections + triggers.
   useEffect(() => {
@@ -558,6 +566,28 @@ export default function PipelineEditorPage() {
               <PlayIcon size={16} />
               {t("common.trigger")}
             </Button>
+            {/* Backfill (ADR-0039) — same dialog the pipelines list
+                page uses. Mounting here means the user editing a
+                pipeline doesn't have to navigate back to the list to
+                rerun a cursor range. Same disabled rules as Trigger:
+                pipeline must have a saved version (server needs the
+                current config to run, draft edits would be ignored).
+                Unsaved changes don't block backfill — the dialog
+                operates on the *saved* version (Save first if you
+                want today's edits to apply). Phase Q (2026-05-28). */}
+            <Button
+              variant="ghost"
+              onClick={() => setBackfillOpen(true)}
+              disabled={!pipeline?.current_version}
+              title={
+                !pipeline?.current_version
+                  ? t("builder.saveFirst")
+                  : t("backfill.action")
+              }
+            >
+              <HistoryIcon size={16} />
+              {t("backfill.action")}
+            </Button>
             {/* Quick nav to the runs list pre-filtered to THIS pipeline.
                 The runs page reads ``?pipeline=<id>`` and shows a banner
                 so the user can tell they're not seeing the workspace-wide
@@ -611,6 +641,17 @@ export default function PipelineEditorPage() {
           The placeholder fills the same flex slot so the layout
           doesn't jump when the editor swaps in. */}
       <ShortcutsDialog open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
+      {/* Backfill dialog — re-uses the pipelines-list dialog; mounts
+          only when ``backfillOpen`` so the form resets each time the
+          user opens it (dialog's own ``useEffect`` clears from/to on
+          ``open``). Pipeline is the LOADED, saved row — drafts don't
+          flow through here. Phase Q (2026-05-28). */}
+      <BackfillDialog
+        open={backfillOpen}
+        workspaceId={ws?.id ?? ""}
+        pipeline={pipeline}
+        onClose={() => setBackfillOpen(false)}
+      />
       {graphState ? (
         <GraphEditor
           state={graphState}

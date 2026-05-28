@@ -10,6 +10,8 @@
 ## [Unreleased]
 
 ### Added
+- **빌더 backfill 액션 (Phase Q)** [ADR-0041 Q, ADR-0039 follow-up] — L1 audit Phase 3 잔여. 이전엔 backfill이 pipelines 목록에서만 가능, 빌더에서 편집 중인 사용자는 목록으로 돌아가야 했음. 빌더 헤더에 `HistoryIcon` Backfill 버튼 추가, 기존 `BackfillDialog` 재마운트(코드 중복 0). 동일 disabled 규칙: `!pipeline?.current_version` → "Save first" 툴팁. Unsaved 변경사항은 막지 않음 — 다이얼로그는 *저장된* 버전에 대해 동작하므로 (저장 안 한 편집은 의도적으로 무시). cursor_column 누락은 기존대로 서버 400 + 친화적 toast. 신규 i18n 키 0(`backfill.action` 등 재사용), 신규 컴포넌트 0. 웹 tsc green, 서버/코어 변화 0.
+
 - **실행 취소 (cooperative cancel, Phase P)** [ADR-0041 P] — 사용자 추천 순서 위임. 가장 자주 필요한 운영 액션(잘못 실행한 prod 파이프라인 즉시 중단). 풀스택 한 슬라이스, 워커의 **single writer for status** 원칙 유지:
   - **Alembic 0010** `runs.cancel_requested_at: timestamptz nullable` — 인덱스 불필요(단일-row 조회 only). `RunDetail` DTO에 노출.
   - **REST `POST /workspaces/{ws}/runs/{rid}/cancel`** (Runner+):

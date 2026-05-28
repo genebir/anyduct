@@ -654,6 +654,10 @@ export const en = {
   // Phase S (2026-05-28) — runs list filter + pagination.
   "runs.statusFilterLabel": "Status:",
   "runs.statusFilterAll": "All",
+  // Phase T (2026-05-28) — workspace dashboard polish.
+  "overview.inFlightCount": "{n} in flight",
+  "overview.successRate": "{pct}% ok",
+  "overview.pausedSensors": "{n} paused",
   "runs.showing": "Showing {count} run(s)",
   "runs.loadMore": "Load more",
   "runs.atCap": "Showing the most recent {cap} runs (server cap).",
@@ -1473,6 +1477,10 @@ export const ko: Messages = {
   // Phase S (2026-05-28) — 실행 목록 필터 + 페이지네이션.
   "runs.statusFilterLabel": "상태:",
   "runs.statusFilterAll": "전체",
+  // Phase T (2026-05-28) — 워크스페이스 대시보드 강화.
+  "overview.inFlightCount": "{n}건 진행 중",
+  "overview.successRate": "{pct}% 성공",
+  "overview.pausedSensors": "{n}개 일시중지",
   "runs.showing": "{count}건 표시 중",
   "runs.loadMore": "더 보기",
   "runs.atCap": "최근 {cap}건만 표시됩니다 (서버 상한).",

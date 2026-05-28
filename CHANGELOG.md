@@ -10,6 +10,14 @@
 ## [Unreleased]
 
 ### Added
+- **Workspace 대시보드 polish — 파이프라인 이름 + 성공률 + Sensors 카드 (Phase T)** [ADR-0041 T] — 워크스페이스 첫 화면 + 일상 모니터링 hub의 정보 밀도 강화. 3가지 핵심 변화:
+  - **파이프라인 이름 노출** — Recent/Failing run rows의 UUID-prefix 표시 폐기. `pipelines.list`에서 만든 `pipelineNameById` Map으로 이름을 first-line으로 lead, run id는 muted 보조. 운영자 "어느 파이프라인?" 1초 답.
+  - **Runs Today 카드 health 요약** — 기존 "X in batch" → `successRate(%) + inFlight(개)`. `todayStats` single-pass useMemo로 metric 계산. inFlight > 0 우선 표시, 그 다음 successRate (finished 분모로 0÷0 함정 회피). "지금 뭐 돌아가? 건강한가?" 두 질문 한번에.
+  - **Sensors 카드 (5번째 stat)** — K3 framework v1 종료 후 시각화 부재 해소. `sensorsApi.list`로 active + paused 수. lg grid 4 → 5 컬럼. `RadarIcon`(sensor 페이지와 동일).
+  - **Promise.allSettled 채택** — 한 endpoint 실패가 전 페이지 blank 막음. 패널별 독립 fallback.
+  - **i18n**: 3 신규 키 en/ko (`overview.inFlightCount/successRate/pausedSensors`).
+  - **검증**: 신규 시각 컴포넌트 0(`StatCard` 재사용). 웹 tsc clean. 서버/코어 변화 0.
+
 - **Runs 목록 — status 필터 + Load more 페이지네이션 (Phase S)** [ADR-0041 S] — 실제 운영 시 run 누적으로 100개 limit이 막힘. 클라이언트 전용 슬라이스(서버는 이미 limit/offset/status 지원):
   - **Status 필터 드롭다운** — 헤더 actions에 `<select>` (All/Pending/Running/Failed/Succeeded/Cancelled, "operator hunt order"). URL sync `?status=<status>` — share link 친화적. 기존 `?pipeline=` 필터와 조합 가능.
   - **Load more 페이지네이션** — offset 대신 limit 증가(매 클릭 +100, 500 cap = 서버 ceiling). 폴링 5s tick이 현재 limit으로 재페치하므로 큰 view도 stays current.

@@ -9,6 +9,7 @@ import {
   CableIcon,
   CalendarClockIcon,
   ChevronRightIcon,
+  RadarIcon,
   WorkflowIcon,
 } from "lucide-react";
 import { Header } from "@/components/shell/header";
@@ -21,10 +22,12 @@ import {
   pipelinesApi,
   runsApi,
   schedulesApi,
+  sensorsApi,
   type ConnectionSummary,
   type PipelineSummary,
   type RunSummary,
   type ScheduleSummary,
+  type SensorSummary,
 } from "@/lib/api";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import { useLocale } from "@/components/providers/locale-provider";
@@ -48,6 +51,7 @@ export default function WorkspaceHomePage() {
   const [connections, setConnections] = useState<ConnectionSummary[] | null>(null);
   const [schedules, setSchedules] = useState<ScheduleRow[] | null>(null);
   const [runs, setRuns] = useState<RunSummary[] | null>(null);
+  const [sensors, setSensors] = useState<SensorSummary[] | null>(null);
 
   useEffect(() => {
     if (!ws) return;
@@ -55,15 +59,23 @@ export default function WorkspaceHomePage() {
 
     async function load(workspaceId: string) {
       try {
-        const [ps, conns, rs] = await Promise.all([
+        // Phase T (2026-05-28): added sensorsApi.list to the dashboard
+        // fan-out. Promise.allSettled instead of all so a single
+        // failing endpoint doesn't blank the entire page — each panel
+        // falls back to its own loading/empty state.
+        const [psR, connsR, rsR, sensR] = await Promise.allSettled([
           pipelinesApi.list(workspaceId),
           connectionsApi.list(workspaceId),
           runsApi.list(workspaceId, { limit: 50 }),
+          sensorsApi.list(workspaceId),
         ]);
         if (cancelled) return;
-        setPipelines(ps);
-        setConnections(conns);
-        setRuns(rs);
+        const ps =
+          psR.status === "fulfilled" ? psR.value : ([] as PipelineSummary[]);
+        if (psR.status === "fulfilled") setPipelines(ps);
+        if (connsR.status === "fulfilled") setConnections(connsR.value);
+        if (rsR.status === "fulfilled") setRuns(rsR.value);
+        if (sensR.status === "fulfilled") setSensors(sensR.value);
 
         const groups = await Promise.all(
           ps.map(async (p) => {
@@ -94,14 +106,48 @@ export default function WorkspaceHomePage() {
     () => (runs ?? []).filter((r) => r.status === "failed").slice(0, 5),
     [runs],
   );
-  const runsToday = useMemo(() => {
-    if (!runs) return 0;
+
+  // Phase T (2026-05-28): pipeline_id → name lookup. Recent + failing
+  // rows render the actual pipeline name (truncated to a sensible
+  // width) instead of the UUID-prefix stand-in. Falls back to the old
+  // UUID slice for pipelines that have since been deleted but still
+  // have runs lingering.
+  const pipelineNameById = useMemo(
+    () => new Map((pipelines ?? []).map((p) => [p.id, p.name])),
+    [pipelines],
+  );
+
+  /** Today's runs window — used for both the count and the success-rate
+   *  pill below. Single pass so we walk the array once. */
+  const todayStats = useMemo(() => {
+    if (!runs) return { total: 0, succeeded: 0, failed: 0, inFlight: 0 };
     const cutoff = Date.now() - ONE_DAY_MS;
-    return runs.filter((r) => new Date(r.created_at).getTime() >= cutoff)
-      .length;
+    let total = 0;
+    let succeeded = 0;
+    let failed = 0;
+    let inFlight = 0;
+    for (const r of runs) {
+      if (new Date(r.created_at).getTime() < cutoff) continue;
+      total += 1;
+      if (r.status === "succeeded") succeeded += 1;
+      else if (r.status === "failed") failed += 1;
+      else if (r.status === "running" || r.status === "pending") inFlight += 1;
+    }
+    return { total, succeeded, failed, inFlight };
   }, [runs]);
 
+  // Success rate over today's *finished* runs (we exclude in-flight so
+  // the rate stays meaningful while a wave is still landing). Display
+  // as integer percentage; only show when there's a non-zero
+  // denominator (otherwise "100%" of zero runs is misleading).
+  const todaySuccessRate = useMemo(() => {
+    const finished = todayStats.succeeded + todayStats.failed;
+    if (finished === 0) return null;
+    return Math.round((todayStats.succeeded / finished) * 100);
+  }, [todayStats]);
+
   const activeSchedules = (schedules ?? []).filter((s) => s.is_active).length;
+  const activeSensors = (sensors ?? []).filter((s) => s.is_active).length;
 
   return (
     <>
@@ -110,7 +156,7 @@ export default function WorkspaceHomePage() {
         subtitle={ws ? t("overview.subtitle") : undefined}
       />
       <main className="mx-auto w-full max-w-6xl flex-1 space-y-6 overflow-y-auto px-6 py-8">
-        <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
           <StatCard
             label={t("nav.pipelines")}
             value={pipelines?.length}
@@ -129,6 +175,19 @@ export default function WorkspaceHomePage() {
             }
           />
           <StatCard
+            label={t("nav.sensors")}
+            value={sensors ? activeSensors : undefined}
+            icon={<RadarIcon size={18} />}
+            href={ws ? `/w/${ws.slug}/sensors` : "#"}
+            sub={
+              sensors && sensors.length > 0
+                ? t("overview.pausedSensors", {
+                    n: sensors.length - activeSensors,
+                  })
+                : undefined
+            }
+          />
+          <StatCard
             label={t("nav.connections")}
             value={connections?.length}
             icon={<CableIcon size={18} />}
@@ -136,12 +195,26 @@ export default function WorkspaceHomePage() {
           />
           <StatCard
             label={t("overview.runsToday")}
-            value={runs ? runsToday : undefined}
+            value={runs ? todayStats.total : undefined}
             icon={<ActivityIcon size={18} />}
             href={ws ? `/w/${ws.slug}/runs` : "#"}
             sub={
-              runs && runs.length > 0
-                ? t("overview.inLastBatch", { n: runs.length })
+              // Phase T (2026-05-28): replace the generic "inLastBatch"
+              // sub with a health summary. Three parts in priority
+              // order: in-flight (operator action signal) → success
+              // rate (health) → in-batch count (calibration). Falls
+              // back to the original "no runs yet" hint when empty.
+              runs && todayStats.total > 0
+                ? [
+                    todayStats.inFlight > 0
+                      ? t("overview.inFlightCount", { n: todayStats.inFlight })
+                      : null,
+                    todaySuccessRate !== null
+                      ? t("overview.successRate", { pct: todaySuccessRate })
+                      : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")
                 : undefined
             }
           />
@@ -175,13 +248,20 @@ export default function WorkspaceHomePage() {
                     >
                       <StatusBadge status={r.status} />
                       <div className="min-w-0">
-                        <div className="truncate font-mono text-xs text-text-secondary">
-                          {t("overview.run", { id: r.id.slice(0, 8) })}
+                        {/* Phase T (2026-05-28): lead with the pipeline
+                            NAME instead of the run UUID — operators
+                            scan for "which pipeline" first, then the
+                            run id. Run id shifts down to a muted line
+                            so it stays available for cross-reference
+                            without dominating the row. */}
+                        <div className="truncate text-sm font-medium text-text">
+                          {pipelineNameById.get(r.pipeline_id) ??
+                            t("overview.pipelineRef", {
+                              id: r.pipeline_id.slice(0, 8),
+                            })}
                         </div>
-                        <div className="truncate text-[11px] text-text-muted">
-                          {t("overview.pipelineRef", {
-                            id: r.pipeline_id.slice(0, 8),
-                          })}
+                        <div className="truncate font-mono text-[11px] text-text-muted">
+                          {t("overview.run", { id: r.id.slice(0, 8) })}
                           {"  ·  "}
                           {r.schedule_id
                             ? t("overview.scheduled")
@@ -235,10 +315,17 @@ export default function WorkspaceHomePage() {
                         </span>
                       </div>
                       <div className="mt-0.5 truncate text-[11px] text-text-muted">
-                        {t("overview.run", { id: r.id.slice(0, 8) })} ·{" "}
-                        {t("overview.pipelineRef", {
-                          id: r.pipeline_id.slice(0, 8),
-                        })}
+                        {/* Phase T: pipeline NAME first in failures
+                            too — operator's "which pipeline broke?"
+                            answer should be at first glance. */}
+                        <span className="font-medium text-text-secondary">
+                          {pipelineNameById.get(r.pipeline_id) ??
+                            t("overview.pipelineRef", {
+                              id: r.pipeline_id.slice(0, 8),
+                            })}
+                        </span>
+                        {" · "}
+                        {t("overview.run", { id: r.id.slice(0, 8) })}
                       </div>
                     </Link>
                   </li>

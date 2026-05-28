@@ -10,6 +10,14 @@
 ## [Unreleased]
 
 ### Added
+- **Runs 목록 — status 필터 + Load more 페이지네이션 (Phase S)** [ADR-0041 S] — 실제 운영 시 run 누적으로 100개 limit이 막힘. 클라이언트 전용 슬라이스(서버는 이미 limit/offset/status 지원):
+  - **Status 필터 드롭다운** — 헤더 actions에 `<select>` (All/Pending/Running/Failed/Succeeded/Cancelled, "operator hunt order"). URL sync `?status=<status>` — share link 친화적. 기존 `?pipeline=` 필터와 조합 가능.
+  - **Load more 페이지네이션** — offset 대신 limit 증가(매 클릭 +100, 500 cap = 서버 ceiling). 폴링 5s tick이 현재 limit으로 재페치하므로 큰 view도 stays current.
+  - **Pagination footer** — "Showing X runs" + Load more 버튼. `maxedOut`(서버가 limit보다 적게 반환) 시 disabled + "End of list" or "Showing the most recent {cap} runs (server cap)".
+  - **필터 변경 시 limit 재설정** — pipeline/status 변경 시 limit=100으로 reset(clean 1페이지).
+  - **i18n**: 6 신규 키 en/ko (`runs.statusFilterLabel`/`statusFilterAll`/`showing`/`loadMore`/`atCap`/`endOfList`).
+  - **검증**: 신규 시각 컴포넌트 0 (`Button` + 평범한 `<select>` 사용 → DESIGN 토큰 안전, Storybook 불요). 웹 tsc clean. 서버/코어 변화 0.
+
 - **DatasetRowCountSensor (Phase R, K3 framework 5번째 빌트인)** [ADR-0041 R] — 데이터 품질 게이트의 destination-side: assertion transform(K1)이 in-flight 검사라면 row_count는 *결과 테이블* 폴링.
   - **`etlx_server/sensors/builtins/dataset_row_count.py`**: `DatasetRowCountSensor`. config `connection_id` (BatchSource 지원 connector 필수) + `table` + `min_rows` / `max_rows` (둘 중 하나 필수) + `where` (optional SQL fragment).
   - **빌드 검증**: min/max 둘 다 None → ConfigError(절대 fire 안 함), min>max → ConfigError, bool int trap 거부, 음수 거부.

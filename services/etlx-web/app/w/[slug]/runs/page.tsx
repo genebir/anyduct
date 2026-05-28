@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
@@ -23,11 +23,13 @@ import {
 } from "@/components/ui/context-menu";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { EmptyState } from "@/components/ui/empty-state";
+import { Button } from "@/components/ui/button";
 import {
   ApiError,
   pipelinesApi,
   runsApi,
   type PipelineSummary,
+  type RunStatus,
   type RunSummary,
 } from "@/lib/api";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
@@ -117,17 +119,69 @@ function buildColumns(
   ];
 }
 
+/** Status filter options for the runs list dropdown. The empty string
+ *  is the "all" choice and means we send no ``status=`` query param to
+ *  the server (workspace-wide). Order mirrors a typical operator's
+ *  mental sort: pending/running first (active), then terminal states
+ *  by usefulness (failed first — the row you're hunting). Phase S
+ *  (2026-05-28). */
+const STATUS_OPTIONS: { value: "" | RunStatus; labelKey: keyof Messages }[] = [
+  { value: "", labelKey: "runs.statusFilterAll" },
+  { value: "pending", labelKey: "status.pending" },
+  { value: "running", labelKey: "status.running" },
+  { value: "failed", labelKey: "status.failed" },
+  { value: "succeeded", labelKey: "status.succeeded" },
+  { value: "cancelled", labelKey: "status.cancelled" },
+];
+
+/** Page size for the runs list — keep below the server's 500 ceiling
+ *  while large enough that most workspaces fit in one fetch. ``Load
+ *  more`` adds another batch up to the cap (server enforces). */
+const PAGE_SIZE = 100;
+const MAX_LOAD = 500;
+
 export default function RunsPage() {
   const router = useRouter();
   const { slug } = useParams<{ slug: string }>();
   const search = useSearchParams();
   const pipelineFilter = search.get("pipeline");
+  // Status filter — URL-synced via ``?status=`` so shared links land on
+  // the same view. ``null`` means the filter is off (show all).
+  const statusFilter = (search.get("status") as RunStatus | null) ?? null;
   const ws = useWorkspaceFromSlug(slug);
   const { t } = useLocale();
   const [rows, setRows] = useState<RunSummary[] | null>(null);
   const [pipelines, setPipelines] = useState<PipelineSummary[]>([]);
+  // Visible row count (grows on Load more). Polling re-fetches with
+  // this limit so a long view stays current. ``maxedOut`` is true once
+  // the last fetch returned fewer rows than ``limit`` — the queue is
+  // exhausted and Load more should be disabled.
+  const [limit, setLimit] = useState<number>(PAGE_SIZE);
+  const [maxedOut, setMaxedOut] = useState<boolean>(false);
+  const [loadingMore, setLoadingMore] = useState<boolean>(false);
   const rowMenu = useContextMenu();
   const rowMenuTargetRef = useRef<RunSummary | null>(null);
+
+  // Filter change → reset paging to the first page. Without this the
+  // user switches to "failed only" and keeps the old "succeeded too"
+  // limit, which is confusing.
+  useEffect(() => {
+    setLimit(PAGE_SIZE);
+    setMaxedOut(false);
+  }, [pipelineFilter, statusFilter]);
+
+  /** Update the ``?status=`` URL param (preserve any ``?pipeline=``).
+   *  Empty value clears the filter. */
+  const setStatusFilter = useCallback(
+    (next: "" | RunStatus) => {
+      const params = new URLSearchParams(search.toString());
+      if (next) params.set("status", next);
+      else params.delete("status");
+      const qs = params.toString();
+      router.push(qs ? `/w/${slug}/runs?${qs}` : `/w/${slug}/runs`);
+    },
+    [router, search, slug],
+  );
 
   // Pipeline list is a one-shot — used to render readable names in the
   // table and the filter banner instead of bare UUIDs.
@@ -148,12 +202,20 @@ export default function RunsPage() {
 
     async function fetchOnce(workspaceId: string) {
       try {
-        // ``?pipeline=<id>`` URL query → server-side filter, so we don't
-        // shovel hundreds of unrelated runs to the client.
-        const query: Parameters<typeof runsApi.list>[1] = { limit: 100 };
+        // Server-side filters keep the wire small. URL params (``?pipeline=`` /
+        // ``?status=``) are the SSoT; UI controls write to URL + this read
+        // sees them on the next tick.
+        const query: Parameters<typeof runsApi.list>[1] = { limit };
         if (pipelineFilter) query.pipeline_id = pipelineFilter;
+        if (statusFilter) query.status = statusFilter;
         const list = await runsApi.list(workspaceId, query);
-        if (!cancelled) setRows(list);
+        if (!cancelled) {
+          setRows(list);
+          // We hit the bottom of the queue when the server returned
+          // fewer rows than we asked for — no point letting "Load more"
+          // burn another roundtrip. Also fires when we hit the 500 cap.
+          setMaxedOut(list.length < limit || list.length >= MAX_LOAD);
+        }
       } catch (err) {
         if (!cancelled) {
           toast.error(
@@ -173,7 +235,20 @@ export default function RunsPage() {
       cancelled = true;
       window.clearInterval(id);
     };
-  }, [ws, t, pipelineFilter]);
+  }, [ws, t, pipelineFilter, statusFilter, limit]);
+
+  /** "Load more" — bump the limit by another page (server cap 500 still
+   *  applies). The effect above re-fetches automatically when limit
+   *  changes. Disabled when ``maxedOut`` (server returned a short
+   *  page or we hit the cap). */
+  const onLoadMore = useCallback(() => {
+    setLoadingMore(true);
+    setLimit((cur) => Math.min(cur + PAGE_SIZE, MAX_LOAD));
+    // The actual fetch fires via the effect above; flip loadingMore
+    // off on next render after rows update. The simple approach: clear
+    // on the next effect tick by listening to rows changing.
+    setTimeout(() => setLoadingMore(false), 0);
+  }, []);
 
   const pipelineNameById = new Map(pipelines.map((p) => [p.id, p.name]));
   const filteredPipelineName = pipelineFilter
@@ -188,6 +263,27 @@ export default function RunsPage() {
           ws
             ? t("common.workspaceSubtitle", { name: ws.name })
             : t("common.loadingWorkspace")
+        }
+        actions={
+          // Status filter dropdown (Phase S, 2026-05-28). URL-synced via
+          // ?status= — share-link friendly. The visual is a plain
+          // <select> styled to match Input — keeps the runs page free
+          // of a heavier dropdown primitive while still being clearly
+          // interactive (pointer cursor inherited from globals.css).
+          <label className="flex items-center gap-1.5 text-xs text-text-secondary">
+            <span className="text-text-muted">{t("runs.statusFilterLabel")}</span>
+            <select
+              value={statusFilter ?? ""}
+              onChange={(e) => setStatusFilter(e.target.value as "" | RunStatus)}
+              className="h-8 rounded-md border border-border-subtle bg-elevated px-2 text-sm text-text focus-visible:border-accent focus-visible:outline-none"
+            >
+              {STATUS_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {t(opt.labelKey)}
+                </option>
+              ))}
+            </select>
+          </label>
         }
       />
       {/* Pipeline filter banner — shown when arriving from the pipeline
@@ -248,6 +344,31 @@ export default function RunsPage() {
               }
             />
           )}
+          {/* Pagination footer — only renders when we have actual rows.
+              Shows "Showing X runs" + "Load more" when there's more to
+              fetch + a hint when we hit the 500 cap. Phase S
+              (2026-05-28). */}
+          {rows && rows.length > 0 ? (
+            <div className="mt-4 flex items-center justify-between border-t border-border-subtle pt-3 text-xs text-text-muted">
+              <span>{t("runs.showing", { count: rows.length })}</span>
+              {!maxedOut ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={onLoadMore}
+                  loading={loadingMore}
+                >
+                  {t("runs.loadMore")}
+                </Button>
+              ) : rows.length >= MAX_LOAD ? (
+                <span className="text-text-secondary">
+                  {t("runs.atCap", { cap: MAX_LOAD })}
+                </span>
+              ) : (
+                <span className="text-text-secondary">{t("runs.endOfList")}</span>
+              )}
+            </div>
+          ) : null}
         </Card>
       </main>
 

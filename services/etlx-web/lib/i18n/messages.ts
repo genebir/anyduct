@@ -651,6 +651,13 @@ export const en = {
   "runs.menuRetried": "Queued retry as run {id}…",
   "runs.menuRetryFailed": "Couldn't retry the run.",
   "runs.loadFailed": "Couldn't load runs.",
+  // Phase S (2026-05-28) — runs list filter + pagination.
+  "runs.statusFilterLabel": "Status:",
+  "runs.statusFilterAll": "All",
+  "runs.showing": "Showing {count} run(s)",
+  "runs.loadMore": "Load more",
+  "runs.atCap": "Showing the most recent {cap} runs (server cap).",
+  "runs.endOfList": "End of list.",
 
   // run detail
   "runDetail.backAria": "Back to runs",
@@ -1463,6 +1470,13 @@ export const ko: Messages = {
   "runs.menuRetried": "재시도가 {id}… 실행으로 큐에 들어갔습니다",
   "runs.menuRetryFailed": "재시도할 수 없습니다.",
   "runs.loadFailed": "실행 기록을 불러올 수 없습니다.",
+  // Phase S (2026-05-28) — 실행 목록 필터 + 페이지네이션.
+  "runs.statusFilterLabel": "상태:",
+  "runs.statusFilterAll": "전체",
+  "runs.showing": "{count}건 표시 중",
+  "runs.loadMore": "더 보기",
+  "runs.atCap": "최근 {cap}건만 표시됩니다 (서버 상한).",
+  "runs.endOfList": "목록의 끝입니다.",
 
   "runDetail.backAria": "실행 목록으로",
   "runDetail.backToList": "실행 목록으로 돌아가기",

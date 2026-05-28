@@ -675,6 +675,17 @@ export const en = {
   "runDetail.clearNodeFilter": "Clear node filter",
   "runDetail.openFailedNodeTitle": "Filter logs to the failed node ({node}) and pin it in the DAG",
   "runDetail.nodeError": "Node-level error ({node})",
+  // Phase P (2026-05-28) — user-requested cancellation.
+  "runDetail.cancel": "Cancel run",
+  "runDetail.cancelling": "Cancelling…",
+  "runDetail.cancelRequested": "Cancellation requested — will stop after the current node finishes.",
+  "runDetail.cancelledNow": "Pending run cancelled.",
+  "runDetail.cancelFailed": "Couldn't cancel this run.",
+  "runDetail.cancelConfirmTitle": "Cancel this run?",
+  "runDetail.cancelConfirmPendingDesc":
+    "This run hasn't started yet — cancelling marks it cancelled immediately.",
+  "runDetail.cancelConfirmRunningDesc":
+    "The worker will stop after the current node finishes. Records already written stay written.",
   "runDetail.summary": "Summary",
   "runDetail.metrics": "Metrics",
   "runDetail.points": "{count} point(s)",
@@ -1474,6 +1485,17 @@ export const ko: Messages = {
   "runDetail.clearNodeFilter": "노드 필터 해제",
   "runDetail.openFailedNodeTitle": "실패한 노드({node})로 로그 필터 + DAG 강조",
   "runDetail.nodeError": "노드 레벨 오류 ({node})",
+  // Phase P (2026-05-28) — 사용자 요청 취소.
+  "runDetail.cancel": "실행 취소",
+  "runDetail.cancelling": "취소 중…",
+  "runDetail.cancelRequested": "취소 요청됨 — 현재 노드가 끝난 후 중단됩니다.",
+  "runDetail.cancelledNow": "대기 중이던 실행을 취소했습니다.",
+  "runDetail.cancelFailed": "이 실행을 취소할 수 없습니다.",
+  "runDetail.cancelConfirmTitle": "이 실행을 취소할까요?",
+  "runDetail.cancelConfirmPendingDesc":
+    "아직 시작되지 않은 실행입니다 — 즉시 취소 상태로 표시됩니다.",
+  "runDetail.cancelConfirmRunningDesc":
+    "워커가 현재 노드를 마친 뒤 중단합니다. 이미 기록된 레코드는 그대로 남습니다.",
   "runDetail.summary": "요약",
   "runDetail.metrics": "메트릭",
   "runDetail.points": "{count}개 포인트",

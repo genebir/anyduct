@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import threading
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
@@ -145,6 +146,7 @@ async def execute_graph_nodes_concurrent(
     *,
     on_node_start: OnNodeStart | None = None,
     on_node_finish: OnNodeFinish | None = None,
+    cancel_event: threading.Event | None = None,
 ) -> list[NodeOutcome]:
     """Run ``task``'s graph wave-by-wave with per-node connectors + concurrency
     (ADR-0041, H2c — the real parallelism path).
@@ -159,6 +161,14 @@ async def execute_graph_nodes_concurrent(
     node (H3a live progress). They run in the event loop between waves —
     safe to do async DB writes that commit per-node so a UI poll sees progress
     mid-run rather than only after the whole run finishes.
+
+    ``cancel_event`` (Phase P, 2026-05-28): checked between waves. When
+    set, every node that hasn't yet started is marked SKIPPED with the
+    on_node_finish callback firing for each so the live DAG flips to
+    cancelled colour without a final scan. **In-flight nodes finish
+    their current wave** — Python doesn't preempt threads, and a hard
+    kill mid-record would leak connections / half-write rows. So the
+    cancel lands at the next wave boundary, not the next record.
 
     Returns per-node outcomes in topological order (same shape as
     :func:`execute_graph_nodes`). The caller persists them as ``node_runs``.
@@ -238,7 +248,28 @@ async def execute_graph_nodes_concurrent(
         if on_node_finish is not None:
             await on_node_finish(outcomes[nid])
 
+    async def _mark_remaining_skipped() -> None:
+        """Emit SKIPPED for every node we haven't started yet. Used at
+        cancel + as the cascading-skip path below — DRY's the
+        on_node_finish callback so live DAG progress always sees the
+        flip regardless of why the node was skipped."""
+        for nid in list(remaining):
+            outcomes[nid] = NodeOutcome(nid, by_id[nid].kind, NODE_SKIPPED)
+            blocked.add(nid)
+            remaining.discard(nid)
+            if on_node_finish is not None:
+                await on_node_finish(outcomes[nid])
+
     while remaining:
+        # Phase P: bail out before claiming the next wave when cancel
+        # was requested. In-flight nodes (in the previous wave's gather)
+        # have already returned by the time we're back here, so this
+        # check naturally lands at a wave boundary — no need to
+        # interrupt the thread pool.
+        if cancel_event is not None and cancel_event.is_set():
+            await _mark_remaining_skipped()
+            break
+
         # Mark skipped any remaining node whose upstream is blocked, so they
         # don't get claimed when pending_deps hits 0 (their dep "completed"
         # but blocked, not succeeded).

@@ -457,6 +457,11 @@ class RunDetail(RunSummary):
     worker_id: str | None
     error_message: str | None
     result_json: dict[str, Any]
+    # Stamped by POST /runs/{rid}/cancel (Phase P, 2026-05-28). When
+    # set on a RUNNING row the worker will land the cancellation at
+    # the next node boundary; the UI uses this to show "Cancelling…"
+    # in the gap between request and final status.
+    cancel_requested_at: datetime | None = None
 
 
 class RunLogEntry(BaseModel):

@@ -199,6 +199,11 @@ export interface RunDetail extends RunSummary {
   worker_id: string | null;
   error_message: string | null;
   result_json: Record<string, unknown>;
+  /** Stamped by POST /runs/{rid}/cancel (Phase P, 2026-05-28). When
+   *  set on a still-running row, the worker will land the cancel at
+   *  the next node boundary; the UI uses this to show a "Cancelling…"
+   *  chip in the gap between request and final CANCELLED status. */
+  cancel_requested_at: string | null;
 }
 
 export type LogLevel = "debug" | "info" | "warning" | "error";
@@ -550,6 +555,15 @@ export const runsApi = {
     api<NodeRunEntry[]>(`/workspaces/${workspaceId}/runs/${runId}/node-runs`),
   retry: (workspaceId: string, runId: string) =>
     api<RunSummary>(`/workspaces/${workspaceId}/runs/${runId}/retry`, {
+      method: "POST",
+      json: {},
+    }),
+  cancel: (workspaceId: string, runId: string) =>
+    // Phase P (2026-05-28). Server returns the updated RunDetail —
+    // pending rows flip to status=cancelled immediately, running rows
+    // come back with cancel_requested_at stamped (status changes to
+    // cancelled once the worker lands the next wave boundary).
+    api<RunDetail>(`/workspaces/${workspaceId}/runs/${runId}/cancel`, {
       method: "POST",
       json: {},
     }),

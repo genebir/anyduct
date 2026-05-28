@@ -20,6 +20,7 @@ driving the shape would just freeze guesses.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -33,10 +34,19 @@ from etlx_server.db.models import Pipeline, PipelineVersion, Run, RunLog, RunMet
 # ``running`` would be a "run it twice" mistake; ``succeeded`` already did
 # its job and rerunning is a fresh ``trigger``, not a retry.
 _RETRYABLE_STATUSES: frozenset[RunStatus] = frozenset({RunStatus.FAILED, RunStatus.CANCELLED})
+# A run is cancel-eligible while it can still be stopped — pending (hasn't
+# started so we can flip it immediately) or running (worker will land the
+# cancel at the next node boundary). Anything else is already terminal.
+_CANCELLABLE_STATUSES: frozenset[RunStatus] = frozenset({RunStatus.PENDING, RunStatus.RUNNING})
 
 
 class RunNotRetryableError(Exception):
     """Raised by :meth:`RunRepository.add_retry` when the source run isn't terminal-failed."""
+
+
+class RunNotCancellableError(Exception):
+    """Raised by :meth:`RunRepository.request_cancel` when the run is already terminal
+    (succeeded/failed/cancelled) and there's nothing left to stop."""
 
 
 _DEFAULT_LIMIT = 50
@@ -189,5 +199,51 @@ class RunRepository:
         await self._session.flush()
         return run
 
+    async def request_cancel(self, run: Run) -> Run:
+        """Mark ``run`` for cancellation. Returns the updated row.
 
-__all__ = ["RunNotRetryableError", "RunRepository"]
+        Phase P (2026-05-28). Two-track semantics depending on the
+        run's current status:
+
+          * **pending** — the worker hasn't claimed it yet. Flip status
+            to ``cancelled`` immediately with ``finished_at = now`` so
+            the row never becomes a claim target. (The worker's
+            ``FOR UPDATE SKIP LOCKED`` query already filters to
+            ``status = pending``, so a race where the worker claims
+            in-between this read and write is harmless: the worker
+            wins, status goes to running, and the next cancel call
+            takes the running path below.)
+
+          * **running** — record ``cancel_requested_at = now`` only.
+            The worker's heartbeat loop polls this column each tick;
+            when set, it signals a threading.Event the node-level
+            graph executor checks between waves. Final status (CANCELLED)
+            is written by the worker, not here — keeps the worker the
+            single writer for run-status transitions.
+
+        Raises :class:`RunNotCancellableError` for terminal rows
+        (succeeded / failed / cancelled — nothing to stop).
+        """
+        if run.status not in _CANCELLABLE_STATUSES:
+            raise RunNotCancellableError(
+                f"run status {run.status.value!r} is terminal; "
+                f"only pending/running runs may be cancelled"
+            )
+        now = datetime.now(UTC)
+        run.cancel_requested_at = now
+        if run.status == RunStatus.PENDING:
+            # Pre-claim cancel — flip the row to terminal directly so
+            # the worker never picks it up. No worker collision: the
+            # claim query filters by status=PENDING; this transitions
+            # it out of that set.
+            run.status = RunStatus.CANCELLED
+            run.finished_at = now
+        await self._session.flush()
+        return run
+
+
+__all__ = [
+    "RunNotCancellableError",
+    "RunNotRetryableError",
+    "RunRepository",
+]

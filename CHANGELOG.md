@@ -10,6 +10,20 @@
 ## [Unreleased]
 
 ### Added
+- **실행 취소 (cooperative cancel, Phase P)** [ADR-0041 P] — 사용자 추천 순서 위임. 가장 자주 필요한 운영 액션(잘못 실행한 prod 파이프라인 즉시 중단). 풀스택 한 슬라이스, 워커의 **single writer for status** 원칙 유지:
+  - **Alembic 0010** `runs.cancel_requested_at: timestamptz nullable` — 인덱스 불필요(단일-row 조회 only). `RunDetail` DTO에 노출.
+  - **REST `POST /workspaces/{ws}/runs/{rid}/cancel`** (Runner+):
+    - **PENDING** → 즉시 status=CANCELLED + finished_at flip. 워커 claim 쿼리가 status=PENDING 필터라 race-free.
+    - **RUNNING** → cancel_requested_at만 stamp; 워커가 실제 status 전이(single-writer 보존).
+    - 터미널 → 409 `RunNotCancellableError`.
+    - audit pairing (`run.cancel`).
+  - **워커 cooperative cancel** — `heartbeat_loop`에 옵션 `cancel_event: threading.Event` 추가, 매 tick UPDATE-RETURNING + cancel_requested_at SELECT, set 시 Event 신호. `execute_graph_nodes_concurrent`에 `cancel_event` 옵션 → **wave 사이에 체크 + 미실행 노드 SKIPPED + on_node_finish callback fire**(live DAG가 그대로 cancelled 색). In-flight wave는 자연 종료(Python 스레드 preempt 불가, 하드 cancel은 connection 누수 위험).
+  - **Executor `_RunCancelled` sentinel** — cancel_event set + no failures → `_record_cancelled`(status=CANCELLED, error_class/message null). 실패가 cancel보다 먼저 land했으면 _record_failure 우선(더 정보 풍부).
+  - **Web UI** — `runsApi.cancel`, run 상세 헤더에 `BanIcon` Cancel 버튼(pending/running + cancel_requested_at null일 때만), `ConfirmDialog`(pending/running별 다른 description: 즉시 vs 다음 노드 끝), **Cancelling… chip**(running + cancel_requested_at 있을 때 warning pulse dot).
+  - **i18n**: 9 신규 키 en/ko (`runDetail.cancel`/`cancelling`/`cancelRequested`/`cancelledNow`/`cancelFailed`/`cancelConfirmTitle`/`cancelConfirmPendingDesc`/`cancelConfirmRunningDesc`).
+  - **v1 한계 명시**: 비-node-level(monolithic to_thread) 경로는 cancel 요청만 기록, 자연 종료 후 반영. 매우 빠른 파이프라인(<10s)은 heartbeat tick 전에 끝나 cancel 못 잡음 — 그땐 자연 succeeded.
+  - **검증**: 5 신규 it (REST 3분기: pending 즉시 cancel / running stamp만 / 터미널 409 + worker 2: pre-set cancel_event wave-boundary SKIPPED + pending row 영속). 서버 it 410→417 green. 코어 671 unchanged. mypy 99 src OK, web tsc clean.
+
 - **빌더 auto-layout (Cmd+L, dagre LR, Phase O)** [ADR-0041 O] — L1/L2 audit의 Phase 4 NICE-TO-HAVE 1번 항목. L3 후보 중 가장 작은 surface로 큰 UX 이득 — 양 페르소나 모두 혜택, 클라이언트 전용:
   - **`lib/auto-layout.ts`** `autoLayoutGraph(state) → state` — `@dagrejs/dagre` LR direction(소스 왼쪽 / 싱크 오른쪽, ReactFlow handle 방향과 일치). uniform node 240×80, nodesep 80 / ranksep 110.
   - **데이터 무변형**: `data` / `operatorId` / `edges` untouched — `position`만 변경 → undo가 이전 layout을 정확히 복원. 빈 그래프는 입력 그대로 반환(noop).

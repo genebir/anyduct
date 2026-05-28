@@ -499,3 +499,105 @@ async def test_backfill_without_cursor_column_is_400(session: AsyncSession) -> N
             headers={"Authorization": f"Bearer {token}"},
         )
     assert resp.status_code == 400, resp.text
+
+
+# ---- POST /runs/{rid}/cancel (Phase P, 2026-05-28) -----------------------
+
+
+async def test_cancel_pending_flips_to_cancelled_immediately(
+    session: AsyncSession,
+) -> None:
+    """A run that hasn't been claimed yet: the API itself can transition
+    it to CANCELLED — the worker's claim query filters by status=PENDING
+    so flipping the row out of that set is race-free."""
+    user = await _seed_user(session, email="ra-cancel-pending@example.com")
+    ws = await _seed_workspace(session, slug="ra-cnc-pending", user=user, role=WorkspaceRole.RUNNER)
+    pipeline, pv = await _seed_pipeline_with_version(session, workspace_id=ws.id, name="p")
+    pending = await _seed_run(
+        session,
+        workspace_id=ws.id,
+        pipeline_id=pipeline.id,
+        pipeline_version_id=pv.id,
+        status=RunStatus.PENDING,
+    )
+    app = _build_app(session)
+    async with _client(app) as client:
+        token = await _login(client, email=user.email)
+        resp = await client.post(
+            f"/workspaces/{ws.id}/runs/{pending.id}/cancel",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    assert resp.status_code == 202, resp.text
+    body = resp.json()
+    assert body["status"] == "cancelled"
+    assert body["cancel_requested_at"] is not None
+    # finished_at is stamped so the dashboard's "in flight" filter
+    # immediately excludes this row.
+    await session.commit()
+    refreshed = (await session.execute(select(Run).where(Run.id == pending.id))).scalar_one()
+    assert refreshed.status == RunStatus.CANCELLED
+    assert refreshed.cancel_requested_at is not None
+    assert refreshed.finished_at is not None
+    rows = await _audit_rows(session, resource_id=pending.id)
+    assert [r.action for r in rows] == ["run.cancel"]
+    assert rows[0].before_json == {"status": "pending"}
+    assert rows[0].after_json["status"] == "cancelled"
+
+
+async def test_cancel_running_stamps_cancel_requested_at_only(
+    session: AsyncSession,
+) -> None:
+    """A running run: the API records ``cancel_requested_at`` but leaves
+    status=RUNNING — the worker writes the final CANCELLED status after
+    the next wave boundary. This keeps the worker the single writer for
+    status transitions (no race with worker writing SUCCEEDED)."""
+    user = await _seed_user(session, email="ra-cancel-running@example.com")
+    ws = await _seed_workspace(session, slug="ra-cnc-running", user=user, role=WorkspaceRole.RUNNER)
+    pipeline, pv = await _seed_pipeline_with_version(session, workspace_id=ws.id, name="p")
+    running = await _seed_run(
+        session,
+        workspace_id=ws.id,
+        pipeline_id=pipeline.id,
+        pipeline_version_id=pv.id,
+        status=RunStatus.RUNNING,
+    )
+    app = _build_app(session)
+    async with _client(app) as client:
+        token = await _login(client, email=user.email)
+        resp = await client.post(
+            f"/workspaces/{ws.id}/runs/{running.id}/cancel",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    assert resp.status_code == 202, resp.text
+    body = resp.json()
+    assert body["status"] == "running"
+    assert body["cancel_requested_at"] is not None
+    await session.commit()
+    refreshed = (await session.execute(select(Run).where(Run.id == running.id))).scalar_one()
+    assert refreshed.status == RunStatus.RUNNING  # worker will flip later
+    assert refreshed.cancel_requested_at is not None
+    assert refreshed.finished_at is None  # NOT terminal yet
+
+
+async def test_cancel_409_for_terminal_run(session: AsyncSession) -> None:
+    """succeeded / failed / cancelled rows: nothing to stop, returns 409."""
+    user = await _seed_user(session, email="ra-cancel-done@example.com")
+    ws = await _seed_workspace(session, slug="ra-cnc-done", user=user, role=WorkspaceRole.RUNNER)
+    pipeline, pv = await _seed_pipeline_with_version(session, workspace_id=ws.id, name="p")
+    done = await _seed_run(
+        session,
+        workspace_id=ws.id,
+        pipeline_id=pipeline.id,
+        pipeline_version_id=pv.id,
+        status=RunStatus.SUCCEEDED,
+        error_class=None,
+        error_message=None,
+    )
+    app = _build_app(session)
+    async with _client(app) as client:
+        token = await _login(client, email=user.email)
+        resp = await client.post(
+            f"/workspaces/{ws.id}/runs/{done.id}/cancel",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    assert resp.status_code == 409

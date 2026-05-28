@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import {
   ArrowLeftIcon,
+  BanIcon,
   ExternalLinkIcon,
   RefreshCwIcon,
   RotateCcwIcon,
@@ -14,6 +15,7 @@ import { toast } from "sonner";
 import { Header } from "@/components/shell/header";
 import { Card, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { EmptyState } from "@/components/ui/empty-state";
 import { StatusBadge } from "@/components/ui/status-badge";
 import {
@@ -68,6 +70,8 @@ export default function RunDetailPage() {
   const [metrics, setMetrics] = useState<RunMetricEntry[] | null>(null);
   const [nodeRuns, setNodeRuns] = useState<NodeRunEntry[] | null>(null);
   const [retrying, setRetrying] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelOpen, setCancelOpen] = useState(false);
   // Phase M (2026-05-26): drill-down filter for the log panel. ``null``
   // means "all logs" — the default. Setting it to a node id (via the
   // NODE chip in LogView or the click on a node card in RunDagGraph)
@@ -268,6 +272,33 @@ export default function RunDetailPage() {
     }
   }
 
+  // Phase P (2026-05-28): request cancellation. PENDING rows flip to
+  // CANCELLED immediately (server-side); RUNNING rows come back with
+  // ``cancel_requested_at`` stamped and the worker lands the actual
+  // status flip at the next node boundary. Either way we patch the
+  // local ``run`` so the UI reflects the new state without waiting
+  // for the next polling tick.
+  async function onCancel() {
+    if (!ws || !run) return;
+    setCancelling(true);
+    try {
+      const fresh = await runsApi.cancel(ws.id, run.id);
+      setRun(fresh);
+      toast.success(
+        fresh.status === "cancelled"
+          ? t("runDetail.cancelledNow")
+          : t("runDetail.cancelRequested"),
+      );
+    } catch (err) {
+      toast.error(
+        err instanceof ApiError ? err.message : t("runDetail.cancelFailed"),
+      );
+    } finally {
+      setCancelling(false);
+      setCancelOpen(false);
+    }
+  }
+
   return (
     <>
       <Header
@@ -306,6 +337,33 @@ export default function RunDetailPage() {
               <RefreshCwIcon size={16} />
               {t("common.refresh")}
             </Button>
+            {/* Cancel button — visible only for cancellable states
+                (pending / running) and only when no cancel request is
+                already in flight. Phase P (2026-05-28). */}
+            {run &&
+            (run.status === "pending" || run.status === "running") &&
+            !run.cancel_requested_at ? (
+              <Button
+                onClick={() => setCancelOpen(true)}
+                variant="destructive"
+                loading={cancelling}
+              >
+                <BanIcon size={16} />
+                {t("runDetail.cancel")}
+              </Button>
+            ) : null}
+            {/* "Cancelling…" chip for the gap between cancel request
+                and worker-final CANCELLED status. Stops the user from
+                wondering "did the click work?" while the next wave
+                boundary is still in flight. */}
+            {run &&
+            run.cancel_requested_at &&
+            run.status === "running" ? (
+              <span className="inline-flex items-center gap-1.5 rounded-sm border border-warning/40 bg-warning/10 px-2 py-1 text-xs font-medium text-warning">
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-warning" aria-hidden />
+                {t("runDetail.cancelling")}
+              </span>
+            ) : null}
             {run &&
             (run.status === "failed" || run.status === "cancelled") ? (
               <Button onClick={onRetry} loading={retrying}>
@@ -315,6 +373,21 @@ export default function RunDetailPage() {
             ) : null}
           </div>
         }
+      />
+      <ConfirmDialog
+        open={cancelOpen}
+        title={t("runDetail.cancelConfirmTitle")}
+        description={
+          run?.status === "pending"
+            ? t("runDetail.cancelConfirmPendingDesc")
+            : t("runDetail.cancelConfirmRunningDesc")
+        }
+        confirmLabel={t("runDetail.cancel")}
+        cancelLabel={t("common.cancel")}
+        destructive
+        loading={cancelling}
+        onConfirm={onCancel}
+        onCancel={() => setCancelOpen(false)}
       />
       <main className="flex-1 overflow-y-auto px-6 py-8">
         <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">

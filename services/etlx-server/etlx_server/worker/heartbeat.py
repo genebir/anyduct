@@ -18,10 +18,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from etlx_server.db.models import Run
@@ -35,12 +36,20 @@ async def heartbeat_loop(
     *,
     stop_event: asyncio.Event,
     interval_seconds: float,
+    cancel_event: threading.Event | None = None,
 ) -> None:
     """Stamp ``runs.heartbeat_at = now()`` every ``interval_seconds``.
 
     Returns when ``stop_event`` fires. Errors during a heartbeat are
     logged and swallowed — a transient DB hiccup must not crash an
     in-flight pipeline.
+
+    ``cancel_event`` (Phase P, 2026-05-28): when supplied, each tick
+    also reads ``runs.cancel_requested_at``; if non-null the
+    threading.Event is ``set()``. The node-level graph executor checks
+    this between waves and bails out cooperatively. Passing
+    ``None`` keeps the loop pure-heartbeat for callers that don't care
+    about cancellation (test paths, legacy non-node-level runs).
     """
     while not stop_event.is_set():
         # Wait first, so the executor's own claim stamp (set just
@@ -54,9 +63,22 @@ async def heartbeat_loop(
 
         try:
             async with factory() as session:
+                # One round-trip: UPDATE-RETURNING so the cancel poll
+                # piggybacks on the heartbeat write instead of adding a
+                # second query per tick. Postgres returns the (now
+                # updated) row; we look at cancel_requested_at to
+                # decide whether to signal.
                 await session.execute(
                     update(Run).where(Run.id == run_id).values(heartbeat_at=datetime.now(UTC))
                 )
+                if cancel_event is not None and not cancel_event.is_set():
+                    result = await session.execute(
+                        select(Run.cancel_requested_at).where(Run.id == run_id)
+                    )
+                    requested = result.scalar_one_or_none()
+                    if requested is not None:
+                        cancel_event.set()
+                        logger.info("run %s: cancel requested at %s", run_id, requested)
                 await session.commit()
         except Exception:  # log + keep going
             logger.exception("heartbeat update failed for run %s", run_id)

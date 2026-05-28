@@ -65,6 +65,17 @@ class Run(UUIDMixin, TimestampMixin, Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # User-requested cancellation (Phase P, 2026-05-28). The REST cancel
+    # endpoint stamps this column instead of touching ``status``
+    # directly so the worker remains the single writer for the actual
+    # status transition (no race between the API setting CANCELLED and
+    # the worker writing SUCCEEDED on the same row). The worker's
+    # heartbeat loop polls this column on each tick; when set, it
+    # signals a threading.Event that the node-level graph executor
+    # checks between waves to bail out cooperatively.
+    cancel_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     worker_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     # 코어 RunResult 매핑.

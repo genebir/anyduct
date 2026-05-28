@@ -27,6 +27,7 @@ import asyncio
 import contextlib
 import functools
 import logging
+import threading
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
@@ -70,6 +71,14 @@ logger = logging.getLogger(__name__)
 
 class _NodeExecutionError(Exception):
     """Raised when a node-level graph run had a failing node (routes the run to failed)."""
+
+
+class _RunCancelledError(Exception):
+    """Phase P (2026-05-28) — sentinel for user-requested cancellation
+    detected mid-run. Branches the executor's except-handling away from
+    ``_record_failure`` (which would write a misleading error_class /
+    error_message) to ``_record_cancelled`` (status=cancelled, no error
+    fields). Never bubbles past the executor's try/except."""
 
 
 # Truncate stored error_message to fit reasonable UI display + DB column.
@@ -204,14 +213,20 @@ class RunExecutor:
                     # Heartbeat task runs on the asyncio main loop with its own
                     # session; while the run blocks the thread-pool worker, this
                     # keeps ``heartbeat_at`` fresh so the reaper doesn't mistake
-                    # an honest long-running run for a zombie.
+                    # an honest long-running run for a zombie. The cancel_event
+                    # (Phase P, 2026-05-28) lets the heartbeat poll
+                    # ``runs.cancel_requested_at`` and signal the graph executor
+                    # to bail out at the next wave boundary if cancel was
+                    # requested via POST /runs/{rid}/cancel.
                     heartbeat_stop = asyncio.Event()
+                    cancel_event = threading.Event()
                     heartbeat_task = asyncio.create_task(
                         heartbeat_loop(
                             self._factory,
                             run.id,
                             stop_event=heartbeat_stop,
                             interval_seconds=_HEARTBEAT_INTERVAL_SECONDS,
+                            cancel_event=cancel_event,
                         )
                     )
                     try:
@@ -222,9 +237,20 @@ class RunExecutor:
                             # a fresh session so they're visible before execution
                             # starts; callbacks commit per-node status mid-run.
                             assert self._node_level_task is not None
-                            outcomes = await self._run_node_level(run.id, run_name)
+                            outcomes = await self._run_node_level(
+                                run.id, run_name, cancel_event=cancel_event
+                            )
                             self._node_outcomes = outcomes
                             failures = [o for o in outcomes if o.status == NODE_FAILED]
+                            if cancel_event.is_set() and not failures:
+                                # User-requested cancel landed cleanly (no node
+                                # failed before the wave-boundary check). Raise
+                                # the sentinel so the except below maps it to
+                                # _record_cancelled instead of _record_failure
+                                # (a cancel isn't an error from the operator's
+                                # perspective — see the rationale on
+                                # _record_cancelled).
+                                raise _RunCancelledError("cancelled by user")
                             if failures:
                                 f = failures[0]
                                 raise _NodeExecutionError(
@@ -265,6 +291,15 @@ class RunExecutor:
                         # on success, fire-and-forget. Same transaction as the
                         # success write so it's all-or-nothing.
                         await self._trigger_downstream(session, run, log)
+                    except _RunCancelledError:
+                        # Phase P (2026-05-28) — user-requested cancel. Not an
+                        # error; suppress the failure log + record_failure
+                        # path and write status=cancelled cleanly.
+                        log.info(
+                            "run.pipeline_cancelled",
+                            node_outcomes=len(self._node_outcomes or []),
+                        )
+                        _record_cancelled(run)
                     except Exception as e:
                         # Any exception coming out of ``pipeline.run`` lands here.
                         # The core re-raises after recording metrics, so the
@@ -287,7 +322,13 @@ class RunExecutor:
                 finally:
                     current_run_id.reset(ctx_token)
 
-    async def _run_node_level(self, run_id: UUID, run_name: str) -> list[NodeOutcome]:
+    async def _run_node_level(
+        self,
+        run_id: UUID,
+        run_name: str,
+        *,
+        cancel_event: threading.Event | None = None,
+    ) -> list[NodeOutcome]:
         """Execute the node-level path with live ``node_runs`` updates (ADR-0041 H3a).
 
         Pre-inserts PENDING ``node_runs`` (with deps) in a fresh session so a
@@ -351,6 +392,7 @@ class RunExecutor:
             self._node_level_conn_cfgs,
             on_node_start=_on_start,
             on_node_finish=_on_finish,
+            cancel_event=cancel_event,
         )
 
     def _lineage_for(self, version: PipelineVersion, log: Any) -> AssetLineage | None:
@@ -737,6 +779,22 @@ def _record_failure(run: Run, error_class: str, error_message: str) -> None:
     run.heartbeat_at = now
     run.error_class = error_class
     run.error_message = error_message[:_MAX_ERROR_MESSAGE_LEN]
+
+
+def _record_cancelled(run: Run) -> None:
+    """Mark a run as user-cancelled (Phase P, 2026-05-28).
+
+    Distinct from :func:`_record_failure` because no error occurred —
+    the operator told us to stop. ``error_class`` / ``error_message``
+    stay null so the UI doesn't show a misleading failure card on a
+    voluntary stop. ``cancel_requested_at`` already carries the
+    "when" (stamped by the REST endpoint); we only flip status +
+    finished_at here.
+    """
+    now = datetime.now(UTC)
+    run.status = RunStatus.CANCELLED
+    run.finished_at = now
+    run.heartbeat_at = now
 
 
 def _run_pipeline_in_thread(

@@ -54,7 +54,11 @@ from etlx_server.auth.workspace_context import (
 from etlx_server.db.enums import RunStatus, WorkspaceRole
 from etlx_server.dependencies import get_session, get_session_factory
 from etlx_server.node_runs import NodeRunRepository
-from etlx_server.runs.repository import RunNotRetryableError, RunRepository
+from etlx_server.runs.repository import (
+    RunNotCancellableError,
+    RunNotRetryableError,
+    RunRepository,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -346,3 +350,58 @@ async def retry_run(
     )
     await session.commit()
     return RunSummary.model_validate(new_run)
+
+
+@router.post(
+    "/{run_id}/cancel",
+    response_model=RunDetail,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def cancel_run(
+    run_id: UUID,
+    ctx: WorkspaceContext = _require_runner,
+    session: AsyncSession = Depends(get_session),  # noqa: B008
+    audit: AuditService = Depends(get_audit_service),  # noqa: B008
+) -> RunDetail:
+    """Request cancellation of a pending or running run.
+
+    Two-track semantics (see :meth:`RunRepository.request_cancel`):
+
+    * **pending** — status flips to ``cancelled`` immediately; the row
+      becomes ineligible for worker claim.
+    * **running** — only ``cancel_requested_at`` is stamped here. The
+      worker's heartbeat loop polls this column each tick and signals
+      a threading.Event the node-level graph executor checks between
+      waves. The eventual ``status = cancelled`` write comes from the
+      worker so it stays the single writer for run-status transitions
+      (no race with a worker that just wrote ``succeeded``).
+
+    Returns 202 in both cases — the resource (run) is now in the
+    requested state OR will land there shortly. Terminal-status runs
+    raise 409 since there's nothing left to cancel.
+    """
+    repo = RunRepository(session)
+    run = await repo.get(workspace_id=ctx.workspace.id, run_id=run_id)
+    if run is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run not found")
+    prior_status = run.status.value
+    try:
+        cancelled = await repo.request_cancel(run)
+    except RunNotCancellableError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
+    await audit.record(
+        actor_user_id=ctx.user.id,
+        workspace_id=ctx.workspace.id,
+        action="run.cancel",
+        resource_type="run",
+        resource_id=str(cancelled.id),
+        before={"status": prior_status},
+        after={
+            "status": cancelled.status.value,
+            "cancel_requested_at": cancelled.cancel_requested_at.isoformat()
+            if cancelled.cancel_requested_at
+            else None,
+        },
+    )
+    await session.commit()
+    return RunDetail.model_validate(cancelled)

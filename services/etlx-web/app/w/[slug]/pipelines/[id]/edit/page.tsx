@@ -673,6 +673,17 @@ function ValidationBanner({
 
 // --- Dry run panel (graph-only mode reuses the same component) -------------
 
+// Phase N (2026-05-28): Dry-run feedback used to be a wall of bullets
+// indistinguishable from a console dump. The audit specifically called
+// this out as "Dry run 결과 보기 어려움". Three changes here:
+//   * Connector list always rendered with explicit ✓/✗ per row so the
+//     operator sees what passed alongside what failed (not just "here
+//     are the broken ones").
+//   * Per-connector errors land in a copy-able monospace code block —
+//     when a connector returns a SQL error the operator now copies the
+//     full text without selecting through highlighted bullets.
+//   * The whole panel respects the same theme tokens as the rest of
+//     the builder (border-error / bg-error/5 banding for failed rows).
 function DryRunPanel({
   result,
   onDismiss,
@@ -683,9 +694,10 @@ function DryRunPanel({
   t: Translate;
 }) {
   const checkedCount = result.connectors.length;
+  const failedConnectors = result.connectors.filter((c) => !c.ok);
   return (
     <div
-      className="shrink-0 border-t border-border-subtle bg-elevated px-4 py-3 text-sm"
+      className="shrink-0 max-h-[40vh] overflow-y-auto border-t border-border-subtle bg-elevated px-4 py-3 text-sm"
       role="status"
       aria-live="polite"
     >
@@ -696,7 +708,7 @@ function DryRunPanel({
               ✓ {t("builder.dryRunPassedHeader")}
             </span>
           ) : (
-            <span className="inline-flex items-center gap-1 text-error">
+            <span className="inline-flex items-center gap-1 font-semibold text-error">
               ✗ {t("builder.dryRunFailedHeader")}
             </span>
           )}
@@ -713,24 +725,98 @@ function DryRunPanel({
           ×
         </button>
       </div>
+      {/* Top-level errors (graph build / config / etc.) — these are
+          NOT connector errors, they're emitted before connectors are
+          even touched. Render as their own copyable block so the
+          operator can paste the message into a ticket. */}
       {result.errors.length > 0 ? (
-        <ul className="mt-2 list-inside list-disc text-error">
+        <ul className="mt-2 space-y-1">
           {result.errors.map((e, i) => (
-            <li key={i}>{e}</li>
+            <li
+              key={i}
+              className="rounded-md border border-error/40 bg-error/5 p-2 font-mono text-xs text-error"
+            >
+              <CopyButton text={e} t={t} />
+              <div className="whitespace-pre-wrap break-words pr-7">{e}</div>
+            </li>
           ))}
         </ul>
       ) : null}
-      {result.connectors.some((c) => !c.ok) ? (
-        <ul className="mt-2 list-inside list-disc text-error">
-          {result.connectors
-            .filter((c) => !c.ok)
-            .map((c, i) => (
-              <li key={i}>
-                <strong>{c.name}</strong>: {c.error ?? t("builder.dryRunFailedHeader")}
+      {/* Connector outcomes — show ALL of them (not just failures), so
+          the user has the full picture. Failed rows get the error
+          banded panel + copy button; healthy rows are a one-line ✓. */}
+      {result.connectors.length > 0 ? (
+        <ul className="mt-2 space-y-1">
+          {result.connectors.map((c, i) => {
+            if (c.ok) {
+              return (
+                <li
+                  key={i}
+                  className="flex items-center gap-2 px-2 py-1 text-xs text-text-secondary"
+                >
+                  <span className="text-success">✓</span>
+                  <code className="font-mono text-text">{c.name}</code>
+                  <span className="text-text-muted">— {t("builder.dryRunOk")}</span>
+                </li>
+              );
+            }
+            const msg = c.error ?? t("builder.dryRunFailedHeader");
+            return (
+              <li
+                key={i}
+                className="relative rounded-md border border-error/40 bg-error/5 p-2 text-xs"
+              >
+                <CopyButton text={`${c.name}: ${msg}`} t={t} />
+                <div className="flex items-baseline gap-2 pr-7">
+                  <span className="text-error">✗</span>
+                  <code className="font-mono font-semibold text-error">{c.name}</code>
+                </div>
+                <pre className="mt-1 ml-5 whitespace-pre-wrap break-words pr-7 font-mono text-text-secondary">
+                  {msg}
+                </pre>
               </li>
-            ))}
+            );
+          })}
         </ul>
       ) : null}
+      {/* Summary footer when there are failures — same role as the
+          validation banner's "N issues" header. Helps the user
+          calibrate effort without counting bullets. */}
+      {failedConnectors.length > 0 ? (
+        <div className="mt-2 text-[11px] text-text-muted">
+          {t("builder.dryRunFailedCount", {
+            failed: failedConnectors.length,
+            total: result.connectors.length,
+          })}
+        </div>
+      ) : null}
     </div>
+  );
+}
+
+/** Tiny absolute-positioned copy-to-clipboard button used inside the
+ *  dry-run error blocks. Falls back silently when the Clipboard API
+ *  isn't available (older Safari / file://) — copy is a convenience,
+ *  not a critical path. */
+function CopyButton({ text, t }: { text: string; t: Translate }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(text);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        } catch {
+          /* clipboard unavailable — silently no-op */
+        }
+      }}
+      title={copied ? t("common.copied") : t("common.copy")}
+      aria-label={t("common.copy")}
+      className="absolute right-1.5 top-1.5 rounded-sm bg-elevated px-1.5 py-0.5 text-[10px] text-text-muted hover:bg-overlay hover:text-text"
+    >
+      {copied ? "✓" : "⧉"}
+    </button>
   );
 }

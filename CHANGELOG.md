@@ -10,6 +10,14 @@
 ## [Unreleased]
 
 ### Added
+- **실행 기록 — 노드 duration + 실패 노드 표면화 + dry-run 가독성 (Phase N)** [ADR-0041 N] — Phase M(노드별 로그 컬럼) 직후 자연 follow-up. 노드 디버깅을 한 단계 더 풍성하게:
+  - **DAG 카드 duration** — `started_at`/`finished_at`으로 `D 3.2s` 계산, 진행 중 노드는 `D 1.4s+`(trailing `+` + info 색) elapsed. 큰 시간은 `1m 12s`/`2h 3m`. `formatNodeDuration` + `humanDuration` helper.
+  - **실패 노드 강조** — failed 카드에 두꺼운 error glow ring(`shadow-[0_0_0_2px_error/0.35]`).
+  - **실패 시 root cause 표면화** — page-level error 카드 헤더에 `Failed at: source-xxx →` chip(error 색), 클릭 시 로그 필터 + DAG 카드 강조(Phase M ring과 동일 톤). `failedNode` = nodeRuns 중 finished_at 가장 빠른 failed(첫 실패가 보통 root cause). node-level error_message가 run-level과 다르면 separator 아래에 추가 표시(unwrapped error).
+  - **Dry-run 패널 보강** — 모든 connector ✓/✗ 명시(이전엔 fail만 나열), 실패 시 monospace `<pre>` + 우상단 copy-to-clipboard 버튼(⧉ → ✓ 1.5s feedback), top-level errors도 동일 banded panel. footer에 "X of Y connector(s) failed" summary. `CopyButton` 헬퍼(Clipboard API 미지원 silent no-op). `max-h-40vh + overflow-y-auto`로 긴 에러 안전.
+  - **i18n**: 6 신규 키 en/ko (`common.copy`/`copied` / `runDetail.openFailedNodeTitle`/`nodeError` / `builder.dryRunOk`/`dryRunFailedCount`).
+  - **검증**: 웹 tsc clean. 서버/코어 변화 0(클라이언트 전용 슬라이스).
+
 - **실행 기록 — 노드별 로그 컬럼 + 필터 (Phase M, 사용자 요청 "LEVEL 오른쪽에 NODE 정보")** [ADR-0041 M] — node-level execution(ADR-0041 H2/H3) DAG 뷰는 이미 있지만 로그는 run 단위로 섞여서 어느 노드의 출력인지 알 수 없었음. 풀스택 한 슬라이스:
   - **Alembic 0009 + RunLog.node_id 컬럼** — `(run_id, node_id, ts)` 인덱스 추가. leading run_id로 기존 run-wide 쿼리 인덱스 영향 0. 기존 행은 NULL → "run-level"(build/connector setup/summary).
   - **워커 ContextVar bind** — `node_graph.py._run_node_in_thread`가 진입 시 `structlog.contextvars.bind_contextvars(node_id=node.id)` → `merge_contextvars` processor가 모든 event_dict에 자동 inject → `RunRecorder.log_processor`가 추출해 `RunLog.node_id`로 저장(context_json에 중복 0). `asyncio.to_thread` contextvars 전파로 워커 thread + 코어 connector 호출 모두 자동 태깅.

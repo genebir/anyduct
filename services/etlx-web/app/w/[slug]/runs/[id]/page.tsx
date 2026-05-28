@@ -235,6 +235,24 @@ export default function RunDetailPage() {
 
   const grouped = useMemo(() => groupMetrics(metrics ?? []), [metrics]);
 
+  // First failed node in execution order — drives the "Failed at"
+  // chip on the run-level error card (Phase N, 2026-05-28). Order
+  // matters because a graph can have multiple failures; the first
+  // one is usually the root cause and the rest cascade. We pick the
+  // earliest ``finished_at`` among failed nodes; ties broken by
+  // node_id for stability.
+  const failedNode = useMemo(() => {
+    if (!nodeRuns) return null;
+    const failed = nodeRuns.filter((n) => n.status === "failed");
+    if (failed.length === 0) return null;
+    return [...failed].sort((a, b) => {
+      const ta = a.finished_at ? Date.parse(a.finished_at) : Number.POSITIVE_INFINITY;
+      const tb = b.finished_at ? Date.parse(b.finished_at) : Number.POSITIVE_INFINITY;
+      if (ta !== tb) return ta - tb;
+      return a.node_id.localeCompare(b.node_id);
+    })[0];
+  }, [nodeRuns]);
+
   async function onRetry() {
     if (!ws || !run) return;
     setRetrying(true);
@@ -404,7 +422,30 @@ export default function RunDetailPage() {
             </Card>
             {run?.error_message ? (
               <Card>
-                <CardHeader title={t("common.error")} />
+                <CardHeader
+                  title={t("common.error")}
+                  // Phase N (2026-05-28): when the failure is a graph
+                  // node, surface WHICH node directly in the header so
+                  // the operator doesn't have to scan the DAG for the
+                  // red card. Clicking pins the log panel filter +
+                  // selects the same node in the DAG (accent ring) so
+                  // both surfaces line up.
+                  action={
+                    failedNode ? (
+                      <button
+                        type="button"
+                        onClick={() => setNodeFilter(failedNode.node_id)}
+                        className="inline-flex items-center gap-1 rounded-sm border border-error/40 bg-error/10 px-2 py-1 text-xs font-medium text-error hover:bg-error/20"
+                        title={t("runDetail.openFailedNodeTitle", {
+                          node: failedNode.node_id,
+                        })}
+                      >
+                        <span className="font-mono">{failedNode.node_id}</span>
+                        <span aria-hidden>→</span>
+                      </button>
+                    ) : null
+                  }
+                />
                 <div className="space-y-2 font-mono text-xs">
                   {run.error_class ? (
                     <div className="text-error">{run.error_class}</div>
@@ -412,6 +453,23 @@ export default function RunDetailPage() {
                   <pre className="overflow-auto whitespace-pre-wrap break-words text-text-secondary">
                     {run.error_message}
                   </pre>
+                  {failedNode?.error_message &&
+                  failedNode.error_message !== run.error_message ? (
+                    // The run-level message is usually the wrapped
+                    // failure ("node X failed: ..."), but the node's
+                    // own error_message often contains the unwrapped
+                    // root cause (a connector traceback, a SQL error).
+                    // Show both when they differ so the operator
+                    // doesn't have to dig.
+                    <div className="mt-2 border-t border-border-subtle/60 pt-2">
+                      <div className="mb-1 text-[10px] uppercase tracking-wider text-text-muted">
+                        {t("runDetail.nodeError", { node: failedNode.node_id })}
+                      </div>
+                      <pre className="overflow-auto whitespace-pre-wrap break-words text-text-secondary">
+                        {failedNode.error_message}
+                      </pre>
+                    </div>
+                  ) : null}
                 </div>
               </Card>
             ) : null}

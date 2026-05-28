@@ -55,6 +55,37 @@ const STATUS_TEXT: Record<StatusKey, string> = {
   cancelled: "text-text-muted",
 };
 
+/** Render a node-run's duration as ``D 3.2s`` (succeeded/failed/cancelled)
+ *  or ``D 1.4s+`` (still running — shows elapsed since started_at, the
+ *  trailing ``+`` flags that it's not the final number).
+ *
+ *  Returns ``null`` for nodes that haven't started yet (no ts to compute
+ *  against) so the card stays compact. Bigger durations switch to
+ *  ``1m 12s`` / ``2h 3m`` ranges so the figure fits the 200 px card
+ *  width without truncation. Phase N (2026-05-28). */
+function formatNodeDuration(n: NodeRunEntry): string | null {
+  if (!n.started_at) return null;
+  const start = Date.parse(n.started_at);
+  const end = n.finished_at ? Date.parse(n.finished_at) : Date.now();
+  if (Number.isNaN(start) || Number.isNaN(end) || end < start) return null;
+  const ms = end - start;
+  const live = !n.finished_at;
+  const txt = humanDuration(ms);
+  return live ? `D ${txt}+` : `D ${txt}`;
+}
+
+function humanDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  const seconds = ms / 1000;
+  if (seconds < 60) return `${seconds.toFixed(1)}s`;
+  const m = Math.floor(seconds / 60);
+  const s = Math.round(seconds - m * 60);
+  if (m < 60) return s > 0 ? `${m}m ${s}s` : `${m}m`;
+  const h = Math.floor(m / 60);
+  const mm = m - h * 60;
+  return mm > 0 ? `${h}h ${mm}m` : `${h}h`;
+}
+
 function bfsDepth(nodes: NodeRunEntry[]): Map<string, number> {
   const byId = new Map(nodes.map((n) => [n.node_id, n]));
   const depth = new Map<string, number>();
@@ -81,6 +112,7 @@ function bfsDepth(nodes: NodeRunEntry[]): Map<string, number> {
 
 function nodeCard(n: NodeRunEntry, selected: boolean): React.ReactNode {
   const showCounters = n.records_read > 0 || n.records_written > 0;
+  const duration = formatNodeDuration(n);
   return (
     <div
       className={cn(
@@ -90,6 +122,10 @@ function nodeCard(n: NodeRunEntry, selected: boolean): React.ReactNode {
         // the log panel header so the user sees the link between the
         // two surfaces (Phase M, 2026-05-26).
         selected && "ring-2 ring-accent ring-offset-1 ring-offset-bg",
+        // Failed nodes get a thicker error border + glow so they pop
+        // against the run DAG without the operator having to scan
+        // labels (Phase N, 2026-05-28).
+        n.status === "failed" && "shadow-[0_0_0_2px_rgb(var(--error)/0.35)]",
       )}
     >
       <div className="flex items-center gap-1.5">
@@ -105,11 +141,22 @@ function nodeCard(n: NodeRunEntry, selected: boolean): React.ReactNode {
         <span className="text-[10px] uppercase tracking-wider text-text-muted">{n.kind}</span>
         <span className={cn("text-[10px] font-medium", STATUS_TEXT[n.status])}>{n.status}</span>
       </div>
-      {showCounters ? (
+      {showCounters || duration ? (
         <div className="mt-0.5 text-[10px] text-text-secondary">
           {n.records_read > 0 ? `R ${n.records_read}` : null}
           {n.records_read > 0 && n.records_written > 0 ? " · " : null}
           {n.records_written > 0 ? `W ${n.records_written}` : null}
+          {(n.records_read > 0 || n.records_written > 0) && duration ? " · " : null}
+          {/* Duration display (Phase N, 2026-05-28): turns the silent
+              "this node took how long?" question into one glance. For
+              still-running nodes we show the elapsed time so the
+              operator can see if a node is unexpectedly slow without
+              opening the logs. */}
+          {duration ? (
+            <span className={cn(n.status === "running" && "text-info")}>
+              {duration}
+            </span>
+          ) : null}
         </div>
       ) : null}
       {n.error_class ? (

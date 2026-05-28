@@ -193,6 +193,40 @@ def test_sql_coalesce_join_emits_multi_source_upstreams() -> None:
     assert {str(u) for u in edge.upstreams} == {"wh/a:x", "wh/b:y"}
 
 
+def test_select_star_with_schema_resolves_columns() -> None:
+    """Phase Z (2026-05-28): caller supplies a schemas map → ``SELECT *``
+    expands per-column rather than marking the sink opaque. The schemas
+    entry is the same ``{table: {column: type}}`` shape sqlglot's
+    ``qualify`` expects, keyed by *connection name*."""
+    cfg = _cfg(source={"connection": "wh", "query": "SELECT * FROM t1"})
+    schemas = {"wh": {"t1": {"a": "INT", "b": "TEXT"}}}
+    out = _edge_map(derive_column_lineage(cfg, schemas=schemas))
+    assert out == {
+        "wh/t2:a": ("wh/t1:a",),
+        "wh/t2:b": ("wh/t1:b",),
+    }
+
+
+def test_select_star_without_schema_still_opaque() -> None:
+    """Default (no schemas) keeps the v1 behaviour — star projections
+    remain opaque so we never fabricate columns we can't see."""
+    cfg = _cfg(source={"connection": "wh", "query": "SELECT * FROM t1"})
+    lineage = derive_column_lineage(cfg)
+    assert lineage.edges == []
+    assert AssetKey.of("wh", "t2") in lineage.opaque_assets
+
+
+def test_select_qualified_star_with_schema() -> None:
+    """``t.*`` should expand the same way ``*`` does."""
+    cfg = _cfg(source={"connection": "wh", "query": "SELECT t1.* FROM t1"})
+    schemas = {"wh": {"t1": {"a": "INT", "b": "TEXT"}}}
+    out = _edge_map(derive_column_lineage(cfg, schemas=schemas))
+    assert out == {
+        "wh/t2:a": ("wh/t1:a",),
+        "wh/t2:b": ("wh/t1:b",),
+    }
+
+
 def test_sql_cte_chain_resolves_to_base_columns() -> None:
     # Chained CTEs were opaque before; now they resolve cleanly to the base
     # table columns at the bottom of the chain.

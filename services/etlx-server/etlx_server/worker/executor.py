@@ -457,6 +457,14 @@ class RunExecutor:
         etc.) never flips a successful run to failed. Runs *after*
         :meth:`_persist_lineage` so the asset rows exist for the repo to
         reference by key.
+
+        Phase Z (ADR-0045, 2026-05-28): when a source query contains
+        ``SELECT *``, we first fetch the table schema via the connector's
+        :class:`SchemaInspector` capability and pass it to
+        :func:`derive_column_lineage`. That lets the lineage walker expand
+        the star projection into real column edges instead of marking the
+        sink opaque — closing the last "I just don't know" path in the
+        lineage axis.
         """
         from etl_plugins.runtime.column_lineage import derive_column_lineage
         from etlx_server.assets.repository import AssetRepository
@@ -464,8 +472,18 @@ class RunExecutor:
         if not lineage.outputs:
             return
         try:
-            col_lineage = derive_column_lineage(PipelineConfig.model_validate(version.config_json))
+            cfg = PipelineConfig.model_validate(version.config_json)
         except Exception as e:  # parse or unsupported shape — fall back silently
+            log.warning(
+                "run.column_lineage_derive_failed",
+                error_class=type(e).__name__,
+                error=str(e),
+            )
+            return
+        schemas = await self._build_schemas_for_star_queries(session, run, version, log)
+        try:
+            col_lineage = derive_column_lineage(cfg, schemas=schemas)
+        except Exception as e:
             log.warning(
                 "run.column_lineage_derive_failed",
                 error_class=type(e).__name__,
@@ -484,6 +502,99 @@ class RunExecutor:
                 error_class=type(e).__name__,
                 error=str(e),
             )
+
+    async def _build_schemas_for_star_queries(
+        self,
+        session: AsyncSession,
+        run: Run,
+        version: PipelineVersion,
+        log: Any,
+    ) -> dict[str, dict[str, dict[str, str]]]:
+        """Fetch the schema dict only for tables referenced by ``SELECT *``.
+
+        Returns ``{connection_name: {table_name: {column_name: type}}}``
+        suitable for :func:`derive_column_lineage(..., schemas=...)`.
+
+        The scan is cheap (string ``"*" in query`` then sqlglot AST walk
+        for table names) so we run it unconditionally; only sources whose
+        query actually contains ``*`` trigger a connection inspection.
+        Connections whose connector doesn't implement
+        :class:`SchemaInspector` (HTTP, Kafka, …) are silently skipped —
+        their queries can't be ``SELECT *`` in any meaningful sense.
+        """
+        from collections import defaultdict
+
+        from etl_plugins.runtime.sql_lineage import extract_referenced_tables
+        from etlx_server.connections.inspect import (
+            ConnectionInspector,
+            InspectionUnsupportedError,
+        )
+
+        cfg_data = version.config_json or {}
+        needs: dict[str, set[str]] = defaultdict(set)
+
+        def _visit(source: dict[str, Any] | None) -> None:
+            if not isinstance(source, dict):
+                return
+            query = source.get("query")
+            connection = source.get("connection")
+            if not isinstance(query, str) or not isinstance(connection, str):
+                return
+            if "*" not in query:
+                return
+            for tbl in extract_referenced_tables(query):
+                needs[connection].add(tbl)
+
+        # Top-level (single-task) source.
+        _visit(cfg_data.get("source"))
+        # Task-DAG sources.
+        for t in cfg_data.get("tasks", []) or []:
+            if isinstance(t, dict):
+                _visit(t.get("source"))
+        # Graph source nodes.
+        graph = cfg_data.get("graph")
+        if isinstance(graph, dict):
+            for node in graph.get("nodes", []) or []:
+                if isinstance(node, dict) and node.get("type") == "source":
+                    _visit(node)
+
+        if not needs:
+            return {}
+
+        try:
+            rows = await load_connections_by_name(
+                session, workspace_id=run.workspace_id, names=list(needs)
+            )
+        except Exception as e:
+            log.warning("run.column_lineage_schema_lookup_failed", error=str(e))
+            return {}
+
+        inspector = ConnectionInspector(self._backend)
+        schemas: dict[str, dict[str, dict[str, str]]] = {}
+        for name, conn in rows.items():
+            sub: dict[str, dict[str, str]] = {}
+            for tbl in needs[name]:
+                try:
+                    cols = await inspector.list_columns(conn, tbl)
+                except InspectionUnsupportedError:
+                    # Connector type can't introspect — give up on this
+                    # whole connection silently.
+                    sub = {}
+                    break
+                except Exception as e:
+                    # Per-table failure (table missing, perms): skip just this
+                    # table but keep trying the others.
+                    log.warning(
+                        "run.column_lineage_schema_table_failed",
+                        connection=name,
+                        table=tbl,
+                        error=str(e),
+                    )
+                    continue
+                sub[tbl] = {c.name: c.type for c in cols}
+            if sub:
+                schemas[name] = sub
+        return schemas
 
     async def _trigger_asset_consumers(
         self, session: AsyncSession, run: Run, lineage: AssetLineage, log: Any

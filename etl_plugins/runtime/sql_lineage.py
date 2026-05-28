@@ -187,12 +187,26 @@ def _resolve_leaf(
     node: _LineageNode,
     alias_to_table: dict[str, str],
 ) -> tuple[str | None, str | None]:
-    """Best-effort ``(table, column)`` resolution for one lineage leaf."""
+    """Best-effort ``(table, column)`` resolution for one lineage leaf.
+
+    Three resolution paths in priority order:
+
+    1. **Direct table source** — the leaf's ``source`` is an ``exp.Table``
+       (or aliased Table). Use that table; the leaf's ``name`` already
+       carries the qualified column.
+    2. **Aggregate fallback** (``source=Select``) — the lineage walker
+       bottomed out at the enclosing Select (typical for ``COUNT(*)``).
+       If the leaf's expression actually references the scanned table,
+       attribute it to that table; use the *real* column reference inside
+       the expression for the column name (not the projection alias).
+       Pure literals fail this guard so they don't manufacture upstreams.
+    3. **Placeholder fallback** — correlated / lateral refs that sqlglot
+       couldn't resolve. The leaf's qualifier (``"o"`` in ``"o.amount"``)
+       gets looked up in the FROM-aliases map for the whole query.
+    """
     # Names can come through quoted (``"t"."a"``) after the qualify pass —
     # strip the SQL identifier quoting before splitting.
     name = node.name.replace('"', "").replace("`", "")
-    # Strip a qualifier so we always end with the bare column name, plus
-    # the alias/table fragment if present.
     if "." in name:
         qualifier, col = name.split(".", 1)
     else:
@@ -200,28 +214,47 @@ def _resolve_leaf(
     if not col:
         return None, None
 
-    tbl = _table_of_leaf(node)
-    if tbl is None and qualifier:
-        # Placeholder / unresolved leaf: try the alias map, falling back to
-        # the qualifier itself when it already names a real table.
-        tbl = alias_to_table.get(
+    # (1) Direct table source.
+    direct = _table_of_simple(node.source)
+    if direct is not None:
+        return direct, col
+
+    # (2) Aggregate fallback. The leaf's outer name is the projection
+    # alias, which is *not* a real source column — use whatever the inner
+    # expression actually references.
+    if isinstance(node.source, exp.Select):
+        if not _expression_touches_table(node.expression):
+            return None, None
+        tbl = _single_base_table(node.source)
+        if tbl is None:
+            return None, None
+        return tbl, _column_from_expression(node.expression)
+
+    # (3) Placeholder fallback.
+    if qualifier:
+        resolved = alias_to_table.get(
             qualifier,
             qualifier if qualifier in alias_to_table.values() else None,
         )
-    return tbl, col
+        if resolved:
+            return resolved, col
+    return None, None
 
 
-def _table_of_leaf(node: _LineageNode) -> str | None:
-    """``_table_of`` plus a "Select fallback should depend on the table"
-    guard: a literal projection (``42 AS answer``) should *not* claim an
-    upstream table even though its source is a ``Select``; an aggregate or
-    ``*`` reference scanning the same table should."""
-    direct = _table_of_simple(node.source)
-    if direct is not None:
-        return direct
-    if isinstance(node.source, exp.Select) and _expression_touches_table(node.expression):
-        return _single_base_table(node.source)
-    return None
+def _column_from_expression(expr: object) -> str:
+    """Find the first ``exp.Column`` or ``exp.Star`` reference inside an
+    aggregate leaf's expression. ``COUNT(*)`` returns ``"*"``; an aggregate
+    like ``COUNT(name)`` returns ``"name"``. Defaulting to ``"*"`` for the
+    no-reference case keeps the API total — the caller has already
+    checked ``_expression_touches_table`` so we know there's *some* ref."""
+    if not isinstance(expr, exp.Expression):
+        return "*"
+    for n in expr.walk():
+        if isinstance(n, exp.Column):
+            return str(n.name)
+        if isinstance(n, exp.Star):
+            return "*"
+    return "*"
 
 
 def _table_of_simple(source: object) -> str | None:

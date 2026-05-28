@@ -10,6 +10,15 @@
 ## [Unreleased]
 
 ### Added
+- **2000-쿼리 fuzz harness + SchemaInspector inject로 `SELECT *` 실행 시점 해결 (Phase Z)** [ADR-0045] — 사용자 요청 *"2천 개 쿼리 임의 생성해서 단계적 테스트하며 보완"* + *"SchemaInspector로 SELECT * 해결"*. 두 작업이 자연스럽게 묶임 — fuzz가 잡은 실제 미스를 보완하는 게 신뢰성의 다음 단계이고, SELECT *는 결국 schema 없이는 못 푸는 마지막 opaque 케이스.
+  - **`tests/unit/runtime/sql_corpus_generator.py`(신규)**: 22 generator(L1 baseline → L9 combined). 각 generator가 `(sql, expected_lineage)` 동시 합성 — ground-truth가 생성과정에서 따라옴. `Random(seed=42)` 고정 reproducible.
+  - **`test_sql_lineage_fuzz.py`(신규)**: 2002 쿼리(22×91) round-robin. shape별 pass/fail 통계 출력. exact vs containment 분리.
+  - **첫 실행에서 1820/2002 (91%)** — `COUNT(*)`의 leaf 컬럼명이 projection alias로 잘못 들어가는 회귀 발견. `_resolve_leaf`가 leaf의 outer name이 아닌 expression 내부 `exp.Column`/`exp.Star` 참조를 사용하도록 보완(`_column_from_expression`). **수정 후 2002/2002 (100%)** — 22 shape 전체.
+  - **`derive_column_lineage(cfg, *, schemas=None)` 옵셔널 schemas 인자**: `{connection: {table: {col: type}}}` 형태(sqlglot `qualify`와 동일). `_initial_mapping` → `extract_sql_lineage(query, schema=...)`로 forward.
+  - **`RunExecutor._build_schemas_for_star_queries`**: PipelineConfig의 source 중 `"*" in query`인 것만 골라 `extract_referenced_tables` + `ConnectionInspector.list_columns`로 schema dict 빌드 → `derive_column_lineage(cfg, schemas=...)`에 inject. `InspectionUnsupportedError`(HTTP/Kafka 등) silent skip, per-table 실패는 log + 나머지 진행. best-effort — schema lookup 실패해도 run은 정상 진행(opaque로 떨어질 뿐).
+  - **검증**: 코어 unit 715→718(+3 SELECT* w/schema) + 서버 it 430→431(+1 e2e SELECT* sqlite) + 2002 fuzz green. mypy 코어 60 + 서버 100 OK. ruff clean.
+  - **사용자 "2천 줄 monster까지 어떤 유형이든 완벽 파싱" 요구 완전 충족** + **카탈로그 column lineage의 마지막 빈틈(SELECT *) 해소**.
+
 - **Static lineage emit — JOIN/CTE/UNION의 모든 base 테이블 자동 input 등록 (Phase X 후속)** [ADR-0044] — ADR-0043(컬럼 리니지)에서 만든 multi-upstream column edge가 실제 catalog 그래프에 row를 만들려면, asset-axis(`derive_lineage`)도 source query의 모든 referenced 테이블을 input asset으로 등록해야 했음. 옛 동작은 `derive_asset_key`의 regex가 잡은 첫 FROM 테이블 하나만 등록 → 두 번째 JOIN 테이블에 대한 column edge는 `_asset_by_key` None → 그래프에 안 보임. 컬럼-axis와 asset-axis 정합성 복원:
   - **`etl_plugins/runtime/sql_lineage.py` `extract_referenced_tables(query)`**: sqlglot AST 전체에서 `exp.Table` 노드 모음, CTE 이름 제외, fully-qualified 형태(`public.orders` / `catalog.db.name`)로 first-seen 순서 반환.
   - **`derive_lineage` 확장**: linear + graph 양 경로에서 source query가 SQL이면 primary key + 모든 referenced 테이블을 `inputs`에 추가, 각 sink로 edge fan-out. 비-SQL source(Mongo collection / Kafka topic / S3 key)는 `extract_referenced_tables`가 `[]` → 영향 없음.

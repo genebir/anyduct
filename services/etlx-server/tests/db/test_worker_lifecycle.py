@@ -743,6 +743,53 @@ async def test_executor_persists_column_lineage(session: AsyncSession, tmp_path:
     assert id_upstreams[0][0].startswith("src/")
 
 
+async def test_executor_select_star_expands_via_schema_inspector(
+    session: AsyncSession, tmp_path: Path
+) -> None:
+    """Phase Z (2026-05-28, ADR-0045): ``SELECT * FROM seed`` should resolve
+    per column at run time. The worker fetches the source table's schema
+    through the connector's ``SchemaInspector`` capability (sqlite supports
+    it) and passes the resulting ``{connection: {table: {col: type}}}`` map
+    to :func:`derive_column_lineage`. Result: the sink asset's column
+    lineage shows real edges instead of being opaque."""
+    db_path = _prepare_sqlite_fixture(tmp_path)
+    ws = await _seed_workspace(session, slug="we-star-schema")
+    await _seed_connection(session, workspace_id=ws.id, name="src", config={"database": db_path})
+    await _seed_connection(session, workspace_id=ws.id, name="dst", config={"database": db_path})
+    cfg = {
+        "name": "p",
+        # ``SELECT *`` — without schema injection this would mark the sink
+        # opaque, killing the column lineage view in the catalog.
+        "source": {"connection": "src", "query": "SELECT * FROM seed"},
+        "sink": {"connection": "dst", "table": "out", "mode": "append"},
+    }
+    p, pv = await _seed_pipeline(session, workspace_id=ws.id, name="p", config=cfg)
+    run = await _seed_pending_run(
+        session, workspace_id=ws.id, pipeline_id=p.id, pipeline_version_id=pv.id
+    )
+    claimed = await claim_pending_run(session, worker_id="worker-STAR")
+    assert claimed is not None
+    await session.commit()
+
+    await RunExecutor(
+        _SessionFactoryAdapter(session), StaticSecretBackend(), worker_id="w"
+    ).execute(run.id)
+
+    repo = AssetRepository(session)
+    assets = {a.asset_key: a for a in await repo.list_for_workspace(workspace_id=ws.id)}
+    out_asset = assets["dst/out"]
+    # Schema injection made the column lineage tracable, so the asset is
+    # *not* marked opaque (which would be the v1 outcome).
+    assert out_asset.column_lineage_opaque is False
+    cols, upstream_map = await repo.column_lineage_for_asset(asset_id=out_asset.id)
+    assert {c.name for c in cols} == {"id", "name"}
+    by_name = {c.name: c for c in cols}
+    id_ups = [
+        (up_asset.asset_key, up_col.name) for up_col, up_asset in upstream_map[by_name["id"].id]
+    ]
+    assert id_ups and id_ups[0] == ("src/seed", "id")
+
+
 async def test_executor_persists_join_source_inputs_and_column_edges(
     session: AsyncSession, tmp_path: Path
 ) -> None:

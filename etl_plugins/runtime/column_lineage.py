@@ -14,8 +14,12 @@ strategy from ADR-0041:
   is needed.
 * **``python`` / ``custom_python`` / ``sql_exec`` / unknown** → marks the
   downstream sinks ``opaque``. We never fabricate edges through user code.
-* **``SELECT *`` without schema / direct table read / un-parseable query** →
-  opaque (no column enumeration possible).
+* **``SELECT *``** → expands when the caller passes a ``schemas`` map
+  (``{connection: {table: {column: type}}}``) so sqlglot can resolve the
+  star projection. Without a schema map it stays opaque, same as before.
+  The service worker (Phase Z, ADR-0045) wires this via the optional
+  ``SchemaInspector`` connector capability.
+* **direct table read / un-parseable query** → opaque (no enumeration).
 
 The same logic powers both pipeline shapes:
 
@@ -48,13 +52,26 @@ from etl_plugins.runtime.sql_lineage import extract_sql_lineage
 _Mapping = dict[str, tuple[ColumnRef, ...]]
 
 
-def derive_column_lineage(cfg: PipelineConfig) -> ColumnLineage:
+def derive_column_lineage(
+    cfg: PipelineConfig,
+    *,
+    schemas: dict[str, dict[str, dict[str, str]]] | None = None,
+) -> ColumnLineage:
     """Derive the static column-level lineage of a pipeline.
 
     Best-effort: outputs the edges we *can* trace and lists assets we couldn't
     (``opaque_assets``). All three shapes (single-task / Task-DAG / graph)
     supported. Multi-source SQL queries (JOINs, multi-CTE) now resolve to
     multiple upstreams per output column rather than marking the sink opaque.
+
+    Args:
+        cfg: The pipeline configuration.
+        schemas: Optional ``{connection_name: {table_name: {column_name: type}}}``.
+            When provided, ``SELECT *`` projections expand against the
+            schema of the source's connection so star queries trace per
+            column. Without it (default), ``SELECT *`` remains opaque.
+            Producers (the service worker) plug this in by fetching schema
+            via the optional :class:`SchemaInspector` connector capability.
     """
     edges: list[ColumnEdge] = []
     opaque: dict[str, AssetKey] = {}  # str(key) → key, dedupe + preserve types
@@ -64,14 +81,14 @@ def derive_column_lineage(cfg: PipelineConfig) -> ColumnLineage:
             opaque.setdefault(str(k), k)
 
     if cfg.graph is not None:
-        _process_graph(cfg.graph, edges, _mark_opaque)
+        _process_graph(cfg.graph, edges, _mark_opaque, schemas)
     else:
         for task in cfg.effective_tasks():
             source_connection = task.source.connection
             sink_keys = [
                 derive_asset_key(s.connection, s.model_dump()) for s in task.effective_sinks()
             ]
-            mapping = _initial_mapping(source_connection, task.source.query)
+            mapping = _initial_mapping(source_connection, task.source.query, schemas)
             if mapping is None:
                 for sk in sink_keys:
                     _mark_opaque(sk)
@@ -90,15 +107,25 @@ def derive_column_lineage(cfg: PipelineConfig) -> ColumnLineage:
 # ---------- single-task / per-sink core ----------
 
 
-def _initial_mapping(connection: str | None, query: str | None) -> _Mapping | None:
+def _initial_mapping(
+    connection: str | None,
+    query: str | None,
+    schemas: dict[str, dict[str, dict[str, str]]] | None = None,
+) -> _Mapping | None:
     """Resolve the source query to ``{output_col: tuple[ColumnRef, ...]}``.
 
     Returns ``None`` to mark the path opaque (no connection, no SQL query to
     parse, ``SELECT *`` without schema, or sqlglot couldn't parse the query).
+
+    When ``schemas`` is supplied, the lookup ``schemas[connection]`` is fed
+    to ``extract_sql_lineage`` so ``SELECT *`` projections expand. The
+    schema entry is in the same shape sqlglot's ``qualify`` expects —
+    ``{table: {column: type}}``.
     """
     if not connection or not query:
         return None
-    resolved = extract_sql_lineage(query)
+    schema = schemas.get(connection) if schemas else None
+    resolved = extract_sql_lineage(query, schema=schema)
     if resolved is None:
         return None
     out: _Mapping = {}
@@ -172,6 +199,7 @@ def _process_graph(
     graph: GraphConfig,
     edges: list[ColumnEdge],
     mark_opaque: Any,  # Callable[[AssetKey | None], None]
+    schemas: dict[str, dict[str, dict[str, str]]] | None = None,
 ) -> None:
     """v1: linear graph (one source, transform/sink nodes only) → walk each
     sink back to the source via incoming edges. ``join`` nodes or multi-source
@@ -192,7 +220,7 @@ def _process_graph(
         return
 
     src = sources[0]
-    base_mapping = _initial_mapping(src.connection, src.query)
+    base_mapping = _initial_mapping(src.connection, src.query, schemas)
 
     for snk in sinks:
         snk_key = _node_asset_key(snk)

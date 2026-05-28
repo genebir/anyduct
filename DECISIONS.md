@@ -1456,4 +1456,40 @@ L1 출시 직후 사용자가 5개 회신:
 
 ---
 
+## ADR-0045: 2000-쿼리 fuzz harness + SchemaInspector inject로 `SELECT *` 실행 시점 해결
+
+**Date**: 2026-05-28
+**Status**: Accepted
+**Context**: ADR-0043/0044가 SQL 컬럼 리니지를 풀-AST로 끌어올렸지만, 사용자가 *"임의 생성 2000개 쿼리로 단계적 테스트하며 보완"* + *"SchemaInspector로 SELECT * 해결"* 요구. 두 작업이 자연스럽게 묶인다:
+- Fuzz harness가 catch한 실제 미스를 보완하는 것이 신뢰성의 다음 단계.
+- SELECT *는 결국 schema 없이 못 푸는 마지막 opaque 케이스 — `SchemaInspector`(ADR-0033)를 lineage 호출에 inject하면 완성.
+
+**Decision**:
+
+### Z1/Z2 — 2000-쿼리 fuzz harness
+1. `tests/unit/runtime/sql_corpus_generator.py`(신규): 22 generator(L1 baseline → L2 predicate/grouping → L3 join → L4 cte → L5 subquery → L6 set op → L7 window → L8 conditional → L9 combined-real-world). 각 generator는 `GeneratedQuery(sql, expected, shape)`를 반환 — *합성 과정에서 ground-truth lineage를 동시에 build*. `Random(seed=42)` 고정으로 재현 가능.
+2. `tests/unit/runtime/test_sql_lineage_fuzz.py`: 2002개 쿼리(22 × 91)를 round-robin으로 생성·실행, 22 shape별 pass/fail 통계 출력. exact equality vs containment-only는 shape별 분리(window/case/correlated 등은 sqlglot이 합당하게 추가하는 join key를 우리가 expected에 안 박으니까).
+3. **첫 실행에서 발견된 회귀 (1820/2002 = 91%)**: `COUNT(*)`의 leaf 컬럼명이 projection alias(`cnt`)로 잘못 들어감. `_resolve_leaf`가 aggregate fallback에서 leaf의 outer name이 아닌 expression 내부 `exp.Column`/`exp.Star` 참조를 사용하도록 보완(`_column_from_expression(expr)`). 수정 후 **2002/2002 = 100%**, 모든 22 shape에서 100%.
+
+### Z3 — SchemaInspector inject
+1. **코어**: `derive_column_lineage(cfg, *, schemas=None)`에 옵셔널 `schemas: dict[connection_name, dict[table_name, dict[column_name, type]]]` 추가. `_initial_mapping` → `extract_sql_lineage(query, schema=schemas[connection])` 형태로 forward. 기본값은 종전대로 `None`(SELECT *는 opaque) — 모든 기존 호출 site 변경 없음.
+2. **서버**: `RunExecutor._build_schemas_for_star_queries(session, run, version)` 신규 메소드:
+   - PipelineConfig의 모든 source(linear/task-DAG/graph)를 훑어 `"*" in query`인 source의 connection + referenced 테이블을 수집(`extract_referenced_tables(query)` 활용).
+   - `load_connections_by_name`로 connection row fetch, `ConnectionInspector.list_columns(connection, table)`로 schema fetch.
+   - `InspectionUnsupportedError`(HTTP/Kafka 등)는 silent skip, per-table 실패는 log warning + 나머지 진행.
+   - 결과 schemas dict을 `derive_column_lineage(cfg, schemas=...)`에 inject.
+3. **best-effort**: schema lookup이 실패해도 column lineage derive는 정상 진행(opaque로 떨어질 뿐). run을 fail로 뒤집지 않음(기존 Phase J2 정책 유지).
+
+**Consequences**:
+- ✅ **2002/2002 fuzz pass rate** — 사용자 요구 "2천 줄 monster까지 어떤 유형이든 완벽 파싱"에 정량적 답변. 22 shape마다 100% 보장.
+- ✅ **`SELECT *` no longer opaque**: SQL-introspectable connector(postgres/mysql/sqlite)의 source는 star projection도 실제 컬럼으로 확장. 카탈로그 column lineage 그래프의 마지막 빈틈 해소.
+- ✅ **회귀 없음**: 기존 715 코어 단위 + 430 서버 it + 2002 fuzz + 새 26 column_lineage(+3) + 새 e2e(+1) 전부 green.
+- ✅ schema fetch는 query에 `*`가 *실제로* 들어 있을 때만 발동 — 일반 쿼리는 overhead 0.
+- ⚠ schema dict format은 sqlglot의 `qualify` 입력과 일치(`{table: {col: type}}`) — 다른 lineage 백엔드로 바꾸면 어댑터 필요.
+- ⚠ SchemaInspector를 구현하지 않는 connector(HTTP/Kafka/S3)의 `*`는 여전히 opaque — 그쪽은 schema 개념 자체가 다르니 의도된 동작.
+
+테스트 결과: 코어 unit 718(+3 신규: SELECT * w/schema 케이스) + server unit/it 431(+1 e2e SELECT * 검증) + 2002 fuzz green. mypy 코어 60 + 서버 100 OK. ruff clean.
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

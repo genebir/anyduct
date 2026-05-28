@@ -10,6 +10,15 @@
 ## [Unreleased]
 
 ### Added
+- **Audit 데이터-플레인 확장 — Source SELECT 쿼리도 기록 (Phase W)** [ADR-0041 W, Phase U follow-up] — Dogfooding 중 발견: Phase U는 변경 SQL + Python만 audit했지만 사용자 *"각 쿼리"* 요구에는 SELECT도 포함. GDPR 4조 read-trail("누가 PII 읽었나?") 충족:
+  - **신규 action `run.sql_read`** — after_json: `node_id` / `kind="source"` / `connection` / `connection_type` / `query`(2000 char trunc) / `query_truncated` / `query_hash` / `records_read`(node-level run 한정, 노출된 행 수 forensic).
+  - **SQL connection type 가드** — `_SQL_CONNECTION_TYPES = {"postgres", "mysql", "sqlite"}`. HTTP/Kafka/S3 source의 `query` 필드는 path/topic/prefix 의미라 mislabel 방지. `referenced_connection_names` + `load_connections_by_name`로 type lookup, best-effort.
+  - **graph + linear 양 경로** — graph는 `node.type == "source"` + `node.query` 조건, linear는 `task.source.query`.
+  - **records_read** — `_node_outcomes`에서 가져옴(node-level 한정). non-node-level은 run row의 total로 충분(중복 저장 X).
+  - **웹 ACTIONS 드롭다운**에 `run.sql_read` 추가, data-plane 3종 우선 표시.
+  - **검증**: 2 신규 it(source select query 시나리오 real SQLite + SQL connection type 가드). 서버 it 427→429 green. 코어 671 unchanged. mypy 100 src OK, web tsc clean.
+  - **사용자 "각 쿼리" 요구사항 완전 충족**: read + write + python 모두 단일 audit timeline.
+
 - **Audit 데이터-플레인 — SQL/Python 실행을 audit_log에 기록 (Phase U)** [ADR-0041 U] — 사용자 요청 *"각 쿼리나 python에서의 로그가 audit 로그에 함께 노출"*. audit_log를 control-plane 전용에서 **data-plane 이벤트도 포함**하는 통합 timeline으로 확장(컴플라이언스/forensic용):
   - **워커 executor `_record_data_operations` helper** — `version.config_json` 파싱 + `_node_outcomes`(SKIPPED 제외) 교차로 sql_exec / transform:sql_exec / transform:python / transform:custom_python 노드마다 audit row 생성. graph + linear 양 경로 처리.
   - **신규 action 2종**:

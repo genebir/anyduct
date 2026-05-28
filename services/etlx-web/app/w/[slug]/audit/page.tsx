@@ -35,6 +35,7 @@ const RESOURCE_TYPES = [
  *  shortcut. */
 const ACTIONS = [
   "",
+  "run.sql_read",
   "run.sql_executed",
   "run.python_executed",
   "run.trigger",

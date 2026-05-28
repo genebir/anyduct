@@ -620,6 +620,35 @@ class RunExecutor:
 
             executed_node_ids = {o.node_id for o in self._node_outcomes if o.status != NODE_SKIPPED}
 
+        # Per-node records_read snapshot for graph node-level runs.
+        # Used to attach a volume number to the source-read audit rows
+        # (Phase W, 2026-05-28). Empty dict for non-node-level — the
+        # source-read audit still fires, just without a per-node count.
+        records_read_by_node: dict[str, int] = (
+            {o.node_id: o.records_read for o in self._node_outcomes}
+            if self._node_outcomes is not None
+            else {}
+        )
+
+        # Phase W (2026-05-28): user wants SELECT queries audited too
+        # ("각 쿼리"), not only data-mutating sql_exec / python paths
+        # Phase U recorded. Compliance need: "who read PII?" matters
+        # for GDPR / SOX. Restrict to SQL connection types so
+        # HTTP/Kafka/S3 sources whose ``query`` field means something
+        # different (path / topic / prefix) don't get mislabelled.
+        # Future slices can add run.http_read / run.kafka_read.
+        _SQL_CONNECTION_TYPES = {"postgres", "mysql", "sqlite"}  # noqa: N806 — const-style local for clarity
+        connection_type_by_name: dict[str, str] = {}
+        try:
+            conn_names = referenced_connection_names(cfg)
+            if conn_names:
+                rows = await load_connections_by_name(
+                    session, workspace_id=run.workspace_id, names=conn_names
+                )
+                connection_type_by_name = {n: r.type for n, r in rows.items()}
+        except Exception as e:  # best-effort — skip source-read auditing if lookup fails
+            log.warning("run.audit_conn_type_lookup_failed", error=str(e))
+
         audit = AuditService(session)
 
         def _hash(text: str) -> str:
@@ -661,12 +690,58 @@ class RunExecutor:
                 after={"node_id": node_id, "kind": kind, **fields},
             )
 
+        async def _record_sql_read(*, node_id: str, connection: str | None, query: str) -> None:
+            """Phase W (2026-05-28): audit a source-side SELECT against a
+            SQL connection. Skipped when the connection type isn't one
+            of the SQL ones — see the comment on _SQL_CONNECTION_TYPES
+            above for why we don't mislabel HTTP/Kafka/S3 reads as
+            SQL."""
+            if not connection or not query:
+                return
+            ctype = connection_type_by_name.get(connection)
+            if ctype not in _SQL_CONNECTION_TYPES:
+                return
+            after: dict[str, Any] = {
+                "node_id": node_id,
+                "kind": "source",
+                "connection": connection,
+                "connection_type": ctype,
+                "query": query[:2000],
+                "query_truncated": len(query) > 2000,
+                "query_hash": _hash(query),
+            }
+            # Per-node records_read is only known in node-level runs;
+            # attach when available so forensics can answer "how many
+            # rows were exposed?". For non-node-level the total run
+            # records_read already lives on the run row.
+            if node_id in records_read_by_node:
+                after["records_read"] = records_read_by_node[node_id]
+            await audit.record(
+                actor_user_id=run.triggered_by_user_id,
+                workspace_id=run.workspace_id,
+                action="run.sql_read",
+                resource_type="run",
+                resource_id=str(run.id),
+                after=after,
+            )
+
         # ── graph shape (ADR-0030 + ADR-0042) ──────────────────────
         if cfg.graph is not None:
             for node in cfg.graph.nodes:
                 if executed_node_ids is not None and node.id not in executed_node_ids:
                     continue
-                if node.type == "sql_exec":
+                if node.type == "source" and node.query:
+                    # Phase W: SQL source read. ``_record_sql_read``
+                    # filters out non-SQL connection types itself, so a
+                    # truthy ``query`` on an HTTP source (where the
+                    # field means "path") doesn't generate a misleading
+                    # run.sql_read row.
+                    await _record_sql_read(
+                        node_id=node.id,
+                        connection=node.connection,
+                        query=node.query,
+                    )
+                elif node.type == "sql_exec":
                     # Standalone SQL node (ADR-0042 follow-up). Both
                     # connection + statement are required by the
                     # GraphNodeConfig validator, so non-null.
@@ -711,6 +786,17 @@ class RunExecutor:
         # considered "executed". For the failure path we still
         # record — the FIRST failing step's prior steps DID run.
         for task in cfg.effective_tasks():
+            # Phase W: source SELECT in the linear shape. ``query`` is
+            # optional (some sources read by table name only), so
+            # check truthy. Same SQL-connection-type filter as the
+            # graph path applies.
+            src_q = task.source.query
+            if src_q:
+                await _record_sql_read(
+                    node_id=task.name,
+                    connection=task.source.connection,
+                    query=src_q,
+                )
             # Linear configs put sql_exec inside transforms; the
             # builder lifts them into task.pre_sql (ADR-0035) but
             # the config still carries them in ``transforms`` at the

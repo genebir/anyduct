@@ -75,6 +75,12 @@ const SENSOR_TYPES: { value: string; label: string; configHint: string }[] = [
     configHint:
       '{"connection_id": "<workspace s3 connection UUID>", "prefix": "incoming/orders/", "pattern": "*.parquet", "min_size_bytes": 1}',
   },
+  {
+    value: "dataset_row_count",
+    label: "Dataset row count (SQL table threshold)",
+    configHint:
+      '{"connection_id": "<workspace SQL connection UUID>", "table": "public.orders", "min_rows": 1, "max_rows": null, "where": "created_at > now() - interval \'1 day\'"}',
+  },
 ];
 
 type FormState =

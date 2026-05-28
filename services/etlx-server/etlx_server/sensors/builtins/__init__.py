@@ -23,6 +23,7 @@ from __future__ import annotations
 # import time, populating etl_plugins.core.sensor._REGISTRY.
 from etlx_server.sensors.builtins import (  # noqa: F401
     asset_freshness,
+    dataset_row_count,
     file_landed,
     lineage_arrival,
 )

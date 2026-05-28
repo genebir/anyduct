@@ -10,6 +10,16 @@
 ## [Unreleased]
 
 ### Added
+- **DatasetRowCountSensor (Phase R, K3 framework 5번째 빌트인)** [ADR-0041 R] — 데이터 품질 게이트의 destination-side: assertion transform(K1)이 in-flight 검사라면 row_count는 *결과 테이블* 폴링.
+  - **`etlx_server/sensors/builtins/dataset_row_count.py`**: `DatasetRowCountSensor`. config `connection_id` (BatchSource 지원 connector 필수) + `table` + `min_rows` / `max_rows` (둘 중 하나 필수) + `where` (optional SQL fragment).
+  - **빌드 검증**: min/max 둘 다 None → ConfigError(절대 fire 안 함), min>max → ConfigError, bool int trap 거부, 음수 거부.
+  - **쿼리**: `SELECT COUNT(*) AS n FROM <table> [WHERE <where>]` — connector.read() 첫 record 추출(driver별 column case 대응), connect/close 본인 소유, `asyncio.to_thread`로 이벤트 루프 비차단.
+  - **Soft-fail 6분기**: missing_context / connection_not_found / secret_resolution_failed / connector_build_failed / wrong_connection_type / query_failed — 모두 metadata에 error_class.
+  - **4 결과 분기**: below_min / above_max / in_band / (impossible) — metadata: count + min_rows + max_rows + reason.
+  - **웹 `SENSOR_TYPES`**: 5번째 옵션 + sample config hint(`where` 예제 포함).
+  - **K3 sensor framework v1 빌트인 5종 완성**: http(core) / asset_freshness / lineage_arrival / file_landed / dataset_row_count — Day-1 prod 운영 핵심 알림 패턴 풀스택.
+  - **검증**: 7 신규 it(builder validation 8분기 / missing context / unknown connection + 4 결과 분기 real SQLite + where 좁히기). 서버 it 417→424 green. 코어 671 unchanged. mypy 100 src OK, web tsc clean.
+
 - **빌더 backfill 액션 (Phase Q)** [ADR-0041 Q, ADR-0039 follow-up] — L1 audit Phase 3 잔여. 이전엔 backfill이 pipelines 목록에서만 가능, 빌더에서 편집 중인 사용자는 목록으로 돌아가야 했음. 빌더 헤더에 `HistoryIcon` Backfill 버튼 추가, 기존 `BackfillDialog` 재마운트(코드 중복 0). 동일 disabled 규칙: `!pipeline?.current_version` → "Save first" 툴팁. Unsaved 변경사항은 막지 않음 — 다이얼로그는 *저장된* 버전에 대해 동작하므로 (저장 안 한 편집은 의도적으로 무시). cursor_column 누락은 기존대로 서버 400 + 친화적 toast. 신규 i18n 키 0(`backfill.action` 등 재사용), 신규 컴포넌트 0. 웹 tsc green, 서버/코어 변화 0.
 
 - **실행 취소 (cooperative cancel, Phase P)** [ADR-0041 P] — 사용자 추천 순서 위임. 가장 자주 필요한 운영 액션(잘못 실행한 prod 파이프라인 즉시 중단). 풀스택 한 슬라이스, 워커의 **single writer for status** 원칙 유지:

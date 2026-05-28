@@ -35,6 +35,7 @@ from etlx_server.db.models import (
 from etlx_server.dependencies import get_secret_backend_dep, get_session, get_session_factory
 from etlx_server.sensors import SensorRepository, SensorScheduler
 from etlx_server.sensors.builtins.asset_freshness import AssetFreshnessSensor
+from etlx_server.sensors.builtins.dataset_row_count import DatasetRowCountSensor
 from etlx_server.sensors.builtins.file_landed import FileLandedSensor
 from etlx_server.sensors.builtins.lineage_arrival import LineageArrivalSensor
 from etlx_server.sensors.context import use_sensor_context
@@ -1287,6 +1288,308 @@ async def test_file_landed_dedupes_via_last_triggered_at(
             second = await sensor.check_async()
         assert second.triggered is False
         assert second.metadata["match_count"] == 0
+    finally:
+        async with real_factory() as s:
+            await s.execute(delete(Connection).where(Connection.workspace_id == ws_id))
+            await s.execute(delete(Workspace).where(Workspace.id == ws_id))
+            await s.commit()
+
+
+# ---- DatasetRowCountSensor builtin ----------------------------------------
+#
+# Polls SELECT COUNT(*) on a referenced SQL table; fires when the count
+# is below ``min_rows`` or above ``max_rows``. Build-time validation +
+# the four result branches (below / above / in-band / connector wrong
+# type) + soft-fail on a missing connection.
+
+
+async def test_dataset_row_count_builder_rejects_bad_config() -> None:
+    from etl_plugins.core.exceptions import ConfigError
+    from etl_plugins.core.sensor import build_sensor
+
+    valid_uuid = str(uuid4())
+    # Missing connection_id
+    with pytest.raises(ConfigError):
+        build_sensor("dataset_row_count", {"table": "t", "min_rows": 1})
+    # connection_id not a UUID
+    with pytest.raises(ConfigError):
+        build_sensor(
+            "dataset_row_count",
+            {"connection_id": "not-a-uuid", "table": "t", "min_rows": 1},
+        )
+    # Missing table
+    with pytest.raises(ConfigError):
+        build_sensor("dataset_row_count", {"connection_id": valid_uuid, "min_rows": 1})
+    # Empty table string
+    with pytest.raises(ConfigError):
+        build_sensor(
+            "dataset_row_count",
+            {"connection_id": valid_uuid, "table": "", "min_rows": 1},
+        )
+    # No bounds at all — sensor would never fire.
+    with pytest.raises(ConfigError):
+        build_sensor("dataset_row_count", {"connection_id": valid_uuid, "table": "t"})
+    # Negative bound
+    with pytest.raises(ConfigError):
+        build_sensor(
+            "dataset_row_count",
+            {"connection_id": valid_uuid, "table": "t", "min_rows": -1},
+        )
+    # bool min_rows (isinstance(True, int) trap)
+    with pytest.raises(ConfigError):
+        build_sensor(
+            "dataset_row_count",
+            {"connection_id": valid_uuid, "table": "t", "min_rows": True},
+        )
+    # min > max — impossible band
+    with pytest.raises(ConfigError):
+        build_sensor(
+            "dataset_row_count",
+            {
+                "connection_id": valid_uuid,
+                "table": "t",
+                "min_rows": 100,
+                "max_rows": 10,
+            },
+        )
+
+
+async def test_dataset_row_count_missing_context_soft_fails() -> None:
+    sensor = DatasetRowCountSensor(
+        connection_id=uuid4(),
+        table="t",
+        min_rows=1,
+        max_rows=None,
+        where=None,
+    )
+    result = await sensor.check_async()
+    assert result.triggered is False
+    assert result.metadata["error"] == "missing_context"
+
+
+async def test_dataset_row_count_unknown_connection_soft_fails(
+    real_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    slug = f"sn-drc-noconn-{uuid4().hex[:8]}"
+    async with real_factory() as s:
+        ws = await _seed_workspace(s, slug=slug)
+        await s.commit()
+        ws_id = ws.id
+    try:
+        sensor = DatasetRowCountSensor(
+            connection_id=uuid4(),
+            table="t",
+            min_rows=1,
+            max_rows=None,
+            where=None,
+        )
+        async with use_sensor_context(
+            session_factory=real_factory,
+            workspace_id=ws_id,
+            secret_backend=_NoopBackend(),  # type: ignore[arg-type]
+        ):
+            result = await sensor.check_async()
+        assert result.triggered is False
+        assert result.metadata["error"] == "connection_not_found"
+    finally:
+        async with real_factory() as s:
+            await s.execute(delete(Workspace).where(Workspace.id == ws_id))
+            await s.commit()
+
+
+def _seed_sqlite_connection(
+    session: AsyncSession,
+    *,
+    workspace_id: UUID,
+    name: str,
+    db_path: str,
+) -> Connection:
+    """Helper: a SQLite connection that build_connector can materialise
+    in tests without secrets / network. Tests then create a table +
+    rows via raw sqlite3 so the SELECT COUNT(*) returns real values."""
+    conn = Connection(
+        workspace_id=workspace_id,
+        type="sqlite",
+        name=name,
+        config_json={"database": db_path},
+        secret_refs=[],
+    )
+    session.add(conn)
+    return conn
+
+
+async def test_dataset_row_count_triggers_below_min(
+    real_factory: async_sessionmaker[AsyncSession],
+    tmp_path: Any,
+) -> None:
+    """Real SQLite table with 2 rows; min_rows=5 → triggered (below min)."""
+    import sqlite3
+
+    db_path = str(tmp_path / "drc-min.db")
+    with sqlite3.connect(db_path) as raw:
+        raw.execute("CREATE TABLE orders (id INTEGER)")
+        raw.executemany("INSERT INTO orders VALUES (?)", [(1,), (2,)])
+        raw.commit()
+
+    slug = f"sn-drc-min-{uuid4().hex[:8]}"
+    async with real_factory() as s:
+        ws = await _seed_workspace(s, slug=slug)
+        conn = _seed_sqlite_connection(s, workspace_id=ws.id, name="db", db_path=db_path)
+        await s.commit()
+        ws_id, conn_id = ws.id, conn.id
+    try:
+        sensor = DatasetRowCountSensor(
+            connection_id=conn_id,
+            table="orders",
+            min_rows=5,
+            max_rows=None,
+            where=None,
+        )
+        async with use_sensor_context(
+            session_factory=real_factory,
+            workspace_id=ws_id,
+            secret_backend=_NoopBackend(),  # type: ignore[arg-type]
+        ):
+            result = await sensor.check_async()
+        assert result.triggered is True
+        assert result.metadata["count"] == 2
+        assert result.metadata["reason"] == "below_min"
+        assert result.metadata["min_rows"] == 5
+    finally:
+        async with real_factory() as s:
+            await s.execute(delete(Connection).where(Connection.workspace_id == ws_id))
+            await s.execute(delete(Workspace).where(Workspace.id == ws_id))
+            await s.commit()
+
+
+async def test_dataset_row_count_triggers_above_max(
+    real_factory: async_sessionmaker[AsyncSession],
+    tmp_path: Any,
+) -> None:
+    """Real SQLite table with 10 rows; max_rows=5 → triggered (above max)."""
+    import sqlite3
+
+    db_path = str(tmp_path / "drc-max.db")
+    with sqlite3.connect(db_path) as raw:
+        raw.execute("CREATE TABLE orders (id INTEGER)")
+        raw.executemany("INSERT INTO orders VALUES (?)", [(i,) for i in range(10)])
+        raw.commit()
+
+    slug = f"sn-drc-max-{uuid4().hex[:8]}"
+    async with real_factory() as s:
+        ws = await _seed_workspace(s, slug=slug)
+        conn = _seed_sqlite_connection(s, workspace_id=ws.id, name="db", db_path=db_path)
+        await s.commit()
+        ws_id, conn_id = ws.id, conn.id
+    try:
+        sensor = DatasetRowCountSensor(
+            connection_id=conn_id,
+            table="orders",
+            min_rows=None,
+            max_rows=5,
+            where=None,
+        )
+        async with use_sensor_context(
+            session_factory=real_factory,
+            workspace_id=ws_id,
+            secret_backend=_NoopBackend(),  # type: ignore[arg-type]
+        ):
+            result = await sensor.check_async()
+        assert result.triggered is True
+        assert result.metadata["count"] == 10
+        assert result.metadata["reason"] == "above_max"
+    finally:
+        async with real_factory() as s:
+            await s.execute(delete(Connection).where(Connection.workspace_id == ws_id))
+            await s.execute(delete(Workspace).where(Workspace.id == ws_id))
+            await s.commit()
+
+
+async def test_dataset_row_count_in_band_quiet(
+    real_factory: async_sessionmaker[AsyncSession],
+    tmp_path: Any,
+) -> None:
+    """3 rows, min=1 max=10 → in band, not triggered."""
+    import sqlite3
+
+    db_path = str(tmp_path / "drc-band.db")
+    with sqlite3.connect(db_path) as raw:
+        raw.execute("CREATE TABLE orders (id INTEGER)")
+        raw.executemany("INSERT INTO orders VALUES (?)", [(1,), (2,), (3,)])
+        raw.commit()
+
+    slug = f"sn-drc-band-{uuid4().hex[:8]}"
+    async with real_factory() as s:
+        ws = await _seed_workspace(s, slug=slug)
+        conn = _seed_sqlite_connection(s, workspace_id=ws.id, name="db", db_path=db_path)
+        await s.commit()
+        ws_id, conn_id = ws.id, conn.id
+    try:
+        sensor = DatasetRowCountSensor(
+            connection_id=conn_id,
+            table="orders",
+            min_rows=1,
+            max_rows=10,
+            where=None,
+        )
+        async with use_sensor_context(
+            session_factory=real_factory,
+            workspace_id=ws_id,
+            secret_backend=_NoopBackend(),  # type: ignore[arg-type]
+        ):
+            result = await sensor.check_async()
+        assert result.triggered is False
+        assert result.metadata["count"] == 3
+        assert result.metadata["reason"] == "in_band"
+    finally:
+        async with real_factory() as s:
+            await s.execute(delete(Connection).where(Connection.workspace_id == ws_id))
+            await s.execute(delete(Workspace).where(Workspace.id == ws_id))
+            await s.commit()
+
+
+async def test_dataset_row_count_where_clause_narrows_count(
+    real_factory: async_sessionmaker[AsyncSession],
+    tmp_path: Any,
+) -> None:
+    """``where`` filters the count. Table has 5 rows, but only 2 match
+    the predicate — min_rows=3 fires (below_min) because only the
+    filtered slice counts."""
+    import sqlite3
+
+    db_path = str(tmp_path / "drc-where.db")
+    with sqlite3.connect(db_path) as raw:
+        raw.execute("CREATE TABLE orders (id INTEGER, status TEXT)")
+        raw.executemany(
+            "INSERT INTO orders VALUES (?, ?)",
+            [(1, "open"), (2, "open"), (3, "closed"), (4, "closed"), (5, "closed")],
+        )
+        raw.commit()
+
+    slug = f"sn-drc-where-{uuid4().hex[:8]}"
+    async with real_factory() as s:
+        ws = await _seed_workspace(s, slug=slug)
+        conn = _seed_sqlite_connection(s, workspace_id=ws.id, name="db", db_path=db_path)
+        await s.commit()
+        ws_id, conn_id = ws.id, conn.id
+    try:
+        sensor = DatasetRowCountSensor(
+            connection_id=conn_id,
+            table="orders",
+            min_rows=3,
+            max_rows=None,
+            where="status = 'open'",
+        )
+        async with use_sensor_context(
+            session_factory=real_factory,
+            workspace_id=ws_id,
+            secret_backend=_NoopBackend(),  # type: ignore[arg-type]
+        ):
+            result = await sensor.check_async()
+        assert result.triggered is True
+        assert result.metadata["count"] == 2  # only 'open' rows
+        assert result.metadata["reason"] == "below_min"
+        assert result.metadata["where"] == "status = 'open'"
     finally:
         async with real_factory() as s:
             await s.execute(delete(Connection).where(Connection.workspace_id == ws_id))

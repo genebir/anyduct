@@ -132,11 +132,24 @@ def execute_graph_nodes(task: Task, connectors: dict[str, Connector]) -> list[No
 
 
 def _connection_names_for(node: GraphNode) -> list[str]:
-    """The connection name(s) a node needs at execution time (source/sink only)."""
+    """The connection name(s) a node needs at execution time.
+
+    Source / sink nodes carry their connection in well-known places.
+    ``sql_exec`` (ADR-0042 follow-up, 2026-05-28) is the third kind
+    that needs a connection — it runs a SQL statement via the named
+    connector's :class:`SqlExecutor`. **This helper was missed when
+    sql_exec landed; the bug surfaced during dogfooding when a
+    node-level graph with a sql_exec node failed with "No connector
+    for sql_exec X" because the node-level loader didn't know to
+    instantiate the connector.** Caught by the dogfooding session
+    2026-05-28 and fixed in the same commit.
+    """
     if node.kind == "source" and node.source_name:
         return [node.source_name]
     if node.kind == "sink" and node.sink:
         return [node.sink.name]
+    if node.kind == "sql_exec" and node.source_name:
+        return [node.source_name]
     return []
 
 

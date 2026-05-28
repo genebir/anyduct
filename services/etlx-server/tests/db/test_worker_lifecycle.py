@@ -1331,3 +1331,73 @@ async def test_node_level_graph_emits_audit_rows_for_sql_and_python(
     assert py_row.after_json["first_line"].startswith("def transform")
     assert py_row.after_json["lines"] >= 1
     assert "code_hash" in py_row.after_json
+
+
+async def test_node_level_graph_with_sql_exec_loads_connector(
+    session: AsyncSession, tmp_path: Path
+) -> None:
+    """Regression: caught during dogfooding 2026-05-28. The node-level
+    path's ``_connection_names_for`` helper was missed when sql_exec
+    landed as a 6th GRAPH_NODE_TYPE (ADR-0042 follow-up), so a
+    node-level graph with a sql_exec node failed with "No connector
+    for sql_exec X". This test runs a standalone sql_exec + a normal
+    source→sink chain in node-level mode; before the fix the sql_exec
+    node landed FAILED while source/sink stayed succeeded."""
+    db_path = _prepare_sqlite_fixture(tmp_path)
+    ws = await _seed_workspace(session, slug="wl-sqlexec-nodelevel")
+    await _seed_connection(session, workspace_id=ws.id, name="src", config={"database": db_path})
+    await _seed_connection(session, workspace_id=ws.id, name="dst", config={"database": db_path})
+    cfg = {
+        "name": "p",
+        "node_level": True,
+        "graph": {
+            "nodes": [
+                # Standalone sql_exec — no incoming/outgoing edges.
+                # The previous bug surfaced here because the helper
+                # didn't know to load a connector for kind=sql_exec.
+                {
+                    "id": "x",
+                    "type": "sql_exec",
+                    "connection": "src",
+                    "statement": "CREATE TABLE IF NOT EXISTS x_marker (n INT)",
+                },
+                {
+                    "id": "s",
+                    "type": "source",
+                    "connection": "src",
+                    "query": "SELECT id, name FROM seed",
+                },
+                {
+                    "id": "k",
+                    "type": "sink",
+                    "connection": "dst",
+                    "table": "out",
+                    "mode": "append",
+                },
+            ],
+            "edges": [{"from_node": "s", "to_node": "k"}],
+        },
+    }
+    p, pv = await _seed_pipeline(session, workspace_id=ws.id, name="p", config=cfg)
+    run = await _seed_pending_run(
+        session, workspace_id=ws.id, pipeline_id=p.id, pipeline_version_id=pv.id
+    )
+    claimed = await claim_pending_run(session, worker_id="worker-sqlexec")
+    assert claimed is not None
+    await session.commit()
+
+    await RunExecutor(
+        _SessionFactoryAdapter(session),
+        StaticSecretBackend(),
+        worker_id="worker-sqlexec",
+    ).execute(run.id)
+
+    refreshed = (await session.execute(select(Run).where(Run.id == run.id))).scalar_one()
+    assert refreshed.status == RunStatus.SUCCEEDED, (
+        refreshed.error_class,
+        refreshed.error_message,
+    )
+    # All three nodes succeeded including the previously-broken sql_exec.
+    nodes = await _node_runs_for(session, run.id)
+    assert {n.status for n in nodes.values()} == {RunStatus.SUCCEEDED}
+    assert "x" in nodes  # the sql_exec node ran

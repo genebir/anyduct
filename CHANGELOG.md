@@ -9,7 +9,17 @@
 
 ## [Unreleased]
 
-### Added
+### Added/Fixed
+- **DLQ 시나리오 검증 + 두 코어 버그 보완 (Phase II)** [ADR-0053] — 사용자 "sample 데이터 깊게" 요청. dogfood하다가 두 silent 미스 발견 + 동시 보완:
+  - **버그 1 — DLQ silent drop**: `_dlq_route_batch`가 `sink.write([record], mode=...)`만 호출하고 `table` kwarg 전달 안 함. sqlite BatchSink가 `WriteError("requires 'table'")` 발생 → `contextlib.suppress`가 삼킴. *DLQ가 약속한 partial-success를 실제로 못 함*. 보완: `dlq.table` 명시 전달.
+  - **버그 2 — DLQ catalog 미등록**: `derive_lineage`가 DLQ를 outputs로 안 추가. "실패 record 어디 갔지?" 카탈로그에서 답 없음. 보완: cfg.dlq를 outputs + 모든 inputs→dlq edge.
+  - **E2E 시나리오 2종** (test_dlq_scenarios.py):
+    * II1 — 5 raw(3 positive + 2 negative amount). custom_python이 negative raise. 결과: clean_orders 3 row, bad_orders 2 row, run SUCCEEDED. 데이터 측면 partial-success 동작 확인.
+    * II2 — 같은 시나리오 + 카탈로그에 src/raw_orders + dst/clean_orders + dst/bad_orders 모두 등록 확인.
+  - **코어 단위 1**: derive_lineage DLQ outputs + edge 단위 검증.
+  - **검증**: 코어 unit 737→738(+1). 서버 it 448→450(+2). DB 마이그레이션 0.
+  - **Dogfooding 가치**: 단위 테스트로는 mock sink 써서 silent skip을 못 잡음 + lineage 누락도 production 데이터 없으면 안 보임. sample-data e2e가 catch.
+
 - **Multi-workspace 격리 시나리오 — 멀티 테넌트 신뢰성 깊은 검증 (Phase HH)** [ADR-0052] — 같은 connection name + 같은 table name이 두 워크스페이스에 공존해도 격리 보장 e2e 검증:
   - **HH1 — Auto-materialize는 workspace-scoped**: 두 ws가 같은 connection name(src/dst) + 같은 table name(raw/staging/mart)을 쓰지만 per-tenant sqlite. ws_a producer만 큐 → drain 후 ws_a 2 runs, ws_b 0 runs. data-plane도 격리.
   - **HH2 — Catalog row가 workspace-scoped**: 같은 asset_key 문자열이 양쪽에 있어도 row id가 다름. upstream 조회가 자기 ws만 반환(disjoint id 집합).

@@ -117,7 +117,9 @@ uv run mypy etl_plugins
 
 ## 5. 현재 단계
 
-> **최신 마일스톤 (2026-05-29): Multi-workspace 격리 시나리오 — 멀티 테넌트 신뢰성 (Phase HH, ADR-0052).** 같은 connection name + 같은 table name이 두 ws에 공존해도 격리 보장. HH1(auto-materialize trigger가 ws 경계 안 넘음 — ws_a producer만 큐 → ws_a 2 runs/ws_b 0 runs/data 격리) + HH2(catalog row가 ws-scoped — 같은 asset_key 문자열이지만 row id 분리, upstream disjoint). 3-layer 검증(data/run/catalog). 서버 it 446→448(+2). 코어 737 unchanged. mypy 코어 61 + 서버 100 OK. ruff clean. DB 마이그레이션 0. SaaS 멀티 테넌트 운영 신뢰성 확인.
+> **최신 마일스톤 (2026-05-29): DLQ 시나리오 검증 + 두 코어 버그 보완 (Phase II, ADR-0053).** dogfood 시나리오 작성 중 두 silent 미스 동시 발견: (1) `_dlq_route_batch`가 `table` kwarg 전달 안 함 → sqlite sink가 WriteError 발생 → `contextlib.suppress`가 삼킴 → DLQ가 실제로 *동작 안 함*. (2) `derive_lineage`가 DLQ를 outputs로 안 추가 → 카탈로그에 "실패 record 어디 갔지?" 답 없음. 둘 다 코어에서 보완. e2e 시나리오 2종(II1 record-level partial success — clean 3 row/bad 2 row, II2 catalog에 DLQ asset 등록). 코어 단위 1 신규. 코어 unit 737→738(+1) + 서버 it 448→450(+2). mypy 코어 61 + 서버 100 OK. ruff clean. DB 마이그레이션 0. **단위로는 catch 못 했을 미스를 sample-data e2e가 catch — 사용자 요청의 가치 입증**.
+>
+> **이전 마일스톤 (2026-05-29): Multi-workspace 격리 시나리오 — 멀티 테넌트 신뢰성 (Phase HH, ADR-0052).** 같은 connection name + 같은 table name이 두 ws에 공존해도 격리 보장. HH1(auto-materialize trigger가 ws 경계 안 넘음 — ws_a producer만 큐 → ws_a 2 runs/ws_b 0 runs/data 격리) + HH2(catalog row가 ws-scoped — 같은 asset_key 문자열이지만 row id 분리, upstream disjoint). 3-layer 검증(data/run/catalog). 서버 it 446→448(+2). 코어 737 unchanged. mypy 코어 61 + 서버 100 OK. ruff clean. DB 마이그레이션 0. SaaS 멀티 테넌트 운영 신뢰성 확인.
 >
 > **이전 마일스톤 (2026-05-29): Auto-materialize 시나리오 corpus — chain/fan-out/실패 차단 깊은 검증 (Phase GG, ADR-0051).** ADR-0037 D1 메커니즘의 interplay(catalog 정합성 + chain 동작 + 실패 차단)를 sample data e2e로 깊게: GG1 happy chain(A→B 자동 trigger, catalog 전체 chain), GG2 fan-out(A→B+C 둘 다 자동), GG3 failure blocks(A 실패 → B 큐 empty + catalog dirty 안 됨). 3-layer 검증(record/asset/run lineage). `_drain_pending_runs` helper로 큐 끝까지. Asset key `connection/table` 디자인이 chain에서 표면화되는 점을 코멘트로 명문화. 서버 it 443→446(+3 시나리오). 코어 737 unchanged. mypy 코어 61 + 서버 100 OK. ruff clean. DB 마이그레이션 0.
 >

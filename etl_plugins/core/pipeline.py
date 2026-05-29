@@ -1266,14 +1266,25 @@ class Pipeline:
         connectors: dict[str, Connector],
         record: Record,
     ) -> None:
-        """Best-effort write the offending record to the DLQ BatchSink."""
+        """Best-effort write the offending record to the DLQ BatchSink.
+
+        Phase II (ADR-0053, 2026-05-29): forward ``table`` from
+        :class:`DlqConfig` to the sink. Without this kwarg a sink like
+        :class:`SQLiteConnector` raises ``WriteError("requires 'table'")``
+        and the ``contextlib.suppress`` below silently dropped every
+        bad record — DLQ promised partial-success but delivered
+        nothing. Bug surfaced by the dogfood scenario.
+        """
         if self.dlq is None:
             return
         sink = connectors.get(self.dlq.connection)
         if not isinstance(sink, BatchSink):
             return
+        write_kwargs: dict[str, Any] = {"mode": self.dlq.mode}
+        if self.dlq.table is not None:
+            write_kwargs["table"] = self.dlq.table
         with contextlib.suppress(Exception):
-            sink.write([record], mode=self.dlq.mode)
+            sink.write([record], **write_kwargs)
 
     async def _dlq_route_stream(
         self,

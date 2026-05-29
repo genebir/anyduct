@@ -1724,4 +1724,43 @@ L1 출시 직후 사용자가 5개 회신:
 
 ---
 
+## ADR-0053: DLQ 시나리오 검증 + 두 버그 보완(table forwarding / catalog 등록)
+
+**Date**: 2026-05-29
+**Status**: Accepted
+**Context**: 사용자 요청 "sample 데이터로 깊게". DLQ는 record-level partial-success의 핵심 운영 패턴이지만 실전 시나리오 e2e 검증이 없었음. dogfood 시나리오 작성하다가 *두 개의 사용성 미스* 동시 발견:
+1. **DLQ가 silent fail**: `Pipeline._dlq_route_batch`가 `sink.write([record], mode=...)`만 호출, `table` kwarg 전달 안 함. sqlite BatchSink는 `WriteError("requires 'table'")` 발생 → `contextlib.suppress(Exception)`이 silent 삼킴. *DLQ가 약속한 partial-success를 실제로 못 함*. 5개 record 중 3개 정상 → clean sink로, 2개 실패 → DLQ로 *기록 안 됨*(silent drop).
+2. **DLQ가 catalog에 미등록**: `derive_lineage`가 DLQ destination을 outputs로 안 추가. 운영자가 "내 실패 record가 어디 갔지?" 묻고 카탈로그에서 DLQ 찾으면 없음. 카탈로그가 실제 데이터 flow와 다름.
+
+**Decision**:
+1. **코어 버그 fix 1 — `_dlq_route_batch`가 `table`/options 전달**:
+   ```python
+   write_kwargs = {"mode": self.dlq.mode}
+   if self.dlq.table is not None:
+       write_kwargs["table"] = self.dlq.table
+   sink.write([record], **write_kwargs)
+   ```
+   `contextlib.suppress(Exception)`은 유지(best-effort). 단 진짜 dlq sink가 동작 가능한 상태일 땐 record가 실제로 도착함.
+2. **코어 버그 fix 2 — `derive_lineage`가 DLQ를 outputs로 자동 등록**:
+   - `cfg.dlq is not None`이면 `derive_asset_key(cfg.dlq.connection, cfg.dlq.model_dump())`로 키 얻고 `_add_out`. 모든 inputs → dlq edge도 추가(partial-success topology가 실제 data flow와 일치).
+3. **e2e 시나리오 2종** (`test_dlq_scenarios.py`):
+   - **II1 — Record-level partial success**: 5 raw record(3 positive amount + 2 negative). custom_python이 negative에 raise. 결과: clean_orders에 3 row, bad_orders에 2 row, run status=SUCCEEDED.
+   - **II2 — DLQ catalog asset**: 동일 시나리오 + 카탈로그에 `src/raw_orders` + `dst/clean_orders` + **`dst/bad_orders`** 모두 등록 검증.
+4. **코어 단위 1 신규** (`test_asset.py`): `derive_lineage`가 DLQ를 outputs에 추가 + edge 생성 직접 검증.
+
+**Consequences**:
+- ✅ **DLQ 실제 동작**: partial-success가 약속된 대로 record-level로 routing. silent drop 버그 해소.
+- ✅ **카탈로그 완전성**: 실패 record가 어디 갔는지 카탈로그에서 답 가능. 운영자 디버깅 path 명확.
+- ✅ **Phase EE 시나리오 B(fan-out by `when`)와 일관**: 다중 sink 라우팅 둘 다 카탈로그 등록.
+- ✅ DB 마이그레이션 0. lineage emit 변경만(추가).
+- ✅ 코어 723→738(+1 unit 신규 + 737 unchanged) + 서버 it 448→450(+2 e2e).
+- ⚠ **`_dlq_route_batch`의 `contextlib.suppress(Exception)` 유지**: 실제 사용 시 sink가 down/credential 실패하면 여전히 silent drop. 향후 슬라이스에서 DLQ failure를 logger warn으로 emit하는 게 자연.
+- ⚠ **Stream DLQ는 별개 경로**: `_dlq_route_stream`은 topic forwarding 다른 메커니즘 — 별도 시나리오 슬라이스 필요.
+
+**Dogfooding 발견 2개 (코어 보완 동반)**: 둘 다 sample-data e2e가 아니면 catch 못 했을 미스. 단위 테스트로는 mock sink 쓰기 때문에 silent skip 못 잡음 + lineage emit 누락도 production 데이터 없으면 안 보임.
+
+**검증**: 코어 unit 737→738(+1 DLQ 단위). 서버 it 448→450(+2 e2e). mypy 코어 61 + 서버 100 OK. ruff clean. DB 마이그레이션 0.
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

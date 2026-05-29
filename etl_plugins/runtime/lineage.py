@@ -112,6 +112,19 @@ def derive_lineage(cfg: PipelineConfig) -> AssetLineage:
                 for k in extras:
                     _add_edge(k, out_key)
 
+    # Phase II (ADR-0053, 2026-05-29): the DLQ destination is an output
+    # asset too — operators clicking through asset lineage should see
+    # both the clean sink and the DLQ sink. Without this row the
+    # question "where did my failed records go?" has no answer in the
+    # catalog. Edges go from every input to the DLQ so the topology
+    # mirrors the actual partial-success data flow.
+    if cfg.dlq is not None:
+        dlq_data = cfg.dlq.model_dump()
+        dlq_key = derive_asset_key(cfg.dlq.connection, dlq_data)
+        _add_out(dlq_key, asset_kind(dlq_data))
+        for src_key in inputs:
+            _add_edge(src_key, dlq_key)
+
     return AssetLineage(inputs=inputs, outputs=outputs, edges=edges, kinds=kinds)
 
 

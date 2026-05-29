@@ -284,6 +284,33 @@ def test_derive_lineage_graph_source_with_join_query() -> None:
     assert LineageEdge(b, merged) in lin.edges
 
 
+def test_derive_lineage_includes_dlq_as_output_asset() -> None:
+    """Phase II (2026-05-29, ADR-0053): the DLQ destination is an output
+    asset too — operators clicking through asset lineage should see both
+    the clean sink and the DLQ in the catalog. Without this row the
+    question "where did my failed records go?" has no answer in the
+    catalog."""
+    cfg = PipelineConfig.model_validate(
+        {
+            "name": "p",
+            "source": {"connection": "src", "query": "SELECT id, amount FROM raw"},
+            "sink": {"connection": "dst", "table": "clean", "mode": "append"},
+            "dlq": {"connection": "dst", "table": "bad", "mode": "append"},
+        }
+    )
+    lin = derive_lineage(cfg)
+    src = AssetKey.of("src", "raw")
+    clean = AssetKey.of("dst", "clean")
+    bad = AssetKey.of("dst", "bad")
+    assert lin.inputs == [src]
+    # Both clean sink and DLQ land in outputs.
+    assert set(lin.outputs) == {clean, bad}
+    # Both get an edge from the source — the DLQ topology mirrors the
+    # actual partial-success data flow.
+    assert LineageEdge(src, clean) in lin.edges
+    assert LineageEdge(src, bad) in lin.edges
+
+
 def test_derive_lineage_non_sql_source_unchanged() -> None:
     """A non-SQL source (Mongo collection name, Kafka topic, S3 key) goes
     through the primary key derivation alone — no auto-fanout because there's

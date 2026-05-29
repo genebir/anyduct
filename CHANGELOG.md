@@ -9,6 +9,13 @@
 
 ## [Unreleased]
 
+### Added
+- **Cursor backfill 시나리오 — incremental sync semantics 깊은 검증 (Phase JJ)** [ADR-0054] — ADR-0039 backfill의 cursor range semantics(`(cursor_from, cursor_to]`)와 catalog materialization audit trail을 sample-data e2e로:
+  - **JJ1 — Backfill respects bounds**: 10 rows(day 1~10), backfill('2026-05-02', '2026-05-05') → 정확히 3 rows(day 3/4/5)만 sink로. records_read=3 + records_written=3. backfill marker가 run.result_json에 survive.
+  - **JJ2 — Full run + backfill catalog**: full(no cursor bounds, 10 rows) → backfill(day 7-10, 4 rows). 결과: 14 rows append + catalog에 *같은 asset row* + 2개의 materialization entries(audit trail).
+  - **`_seed_backfill_run` helper**: result_json.backfill 직접 박아 router와 동일한 worker 경로 코드 일관.
+  - **검증**: 코어 738 unchanged. 서버 it 450→452(+2). DB 마이그레이션 0.
+
 ### Added/Fixed
 - **DLQ 시나리오 검증 + 두 코어 버그 보완 (Phase II)** [ADR-0053] — 사용자 "sample 데이터 깊게" 요청. dogfood하다가 두 silent 미스 발견 + 동시 보완:
   - **버그 1 — DLQ silent drop**: `_dlq_route_batch`가 `sink.write([record], mode=...)`만 호출하고 `table` kwarg 전달 안 함. sqlite BatchSink가 `WriteError("requires 'table'")` 발생 → `contextlib.suppress`가 삼킴. *DLQ가 약속한 partial-success를 실제로 못 함*. 보완: `dlq.table` 명시 전달.

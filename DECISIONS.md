@@ -1763,4 +1763,29 @@ L1 출시 직후 사용자가 5개 회신:
 
 ---
 
+## ADR-0054: Cursor-based backfill 시나리오 — incremental sync semantics 깊은 검증
+
+**Date**: 2026-05-29
+**Status**: Accepted
+**Context**: ADR-0039이 backfill을 도입했지만 sample-data e2e가 없어 cursor range semantics(exclusive lower / inclusive upper)가 실제로 어떻게 동작하는지 검증 부족. 운영 흔한 패턴: full sync → 누락분 backfill로 재처리. 카탈로그가 둘을 어떻게 구분/기록하는지도 확인 안 됨.
+
+**Decision**:
+1. **`test_backfill_scenarios.py`(신규)** — 2 시나리오 e2e:
+   - **JJ1 — Backfill respects bounds**: 10 rows(day 1~10). cursor_from='2026-05-02', cursor_to='2026-05-05' → 정확히 3 rows(day 3, 4, 5) sink로. 검증: records_read=3 + records_written=3 + run.result_json에 backfill marker survive.
+   - **JJ2 — Full run + backfill catalog**: full run(no cursor bounds, 10 rows) → backfill window(day 7-10, 4 rows). 결과: data plane에 14 rows(append), catalog에 same asset row + **2개의 materialization** entries(audit trail 의도 보존).
+2. **`_seed_backfill_run` helper**: REST endpoint 없이 Run row에 `result_json.backfill.{cursor_from, cursor_to}` 직접 박음 — worker가 router와 동일하게 처리(코드 경로 일관).
+3. **Sample data 구조**: 10일치 timestamp+value rows. 매일 1개 → cursor windowing 의미가 row count로 명확 표현.
+
+**Consequences**:
+- ✅ **cursor range semantics 명확화**: `(cursor_from, cursor_to]` (exclusive lower, inclusive upper) 동작이 e2e로 입증. ADR-0039 spec 따름.
+- ✅ **Catalog materialization audit trail**: 같은 asset에 대해 full run + backfill을 둘 다 materialization entry로 보존(2개) — 운영자 "이 자산이 언제 새로 고쳐졌나"에 시간 순으로 답.
+- ✅ **Run row source 구분**: `result_json.source = "backfill"` marker가 survive — 옛 backfill을 audit/replay 가능.
+- ✅ DB 마이그레이션 0. 신규 e2e만.
+- ⚠ **Incremental sync(자동 cursor watermarking) 별도 슬라이스**: 현재 backfill은 명시적 range만. 다음 run이 last_cursor 자동 sync는 worker에 미지원 — 후속 슬라이스에서 DbCursorState integration.
+- ⚠ **400 error 케이스 e2e 미포함**: cursor 없는 파이프라인에서 backfill 시도 → router가 400. 이미 router 단위 테스트가 cover라 e2e 중복 불필요.
+
+**검증**: 코어 unit 738 unchanged(서버 측 신규 시나리오만). 서버 it 450→452(+2 시나리오). mypy 코어 61 + 서버 100 OK. ruff clean. DB 마이그레이션 0.
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

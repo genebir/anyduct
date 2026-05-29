@@ -159,3 +159,115 @@ def test_graph_shape_walks_every_transform_node() -> None:
 def test_empty_pipeline_emits_no_warnings() -> None:
     """No transforms at all → nothing to lint."""
     assert lint_pipeline(_cfg()) == []
+
+
+# ---------- Phase FF: column_mapping consistency ----------
+
+
+def test_column_mapping_unknown_source_column_emits_warning() -> None:
+    """Phase FF (ADR-0050): if the user names a source column that isn't
+    actually in the upstream mapping (typo, or already renamed away by an
+    earlier transform), surface it. The catalog would otherwise emit an
+    empty-upstream row for the output — silently losing the user's
+    declared intent."""
+    cfg = _cfg(
+        # Source projects {a, b}. The mapping for 'wh/t1' will have keys 'a', 'b'.
+        source={"connection": "wh", "query": "SELECT a, b FROM t1"},
+        transforms=[
+            {
+                "type": "custom_python",
+                "code": "def transform(record):\n    return record\n",
+                "column_mapping": {
+                    "id": ["a"],
+                    "wrong_name": ["doesnt_exist"],  # typo
+                },
+            }
+        ],
+    )
+    warnings = lint_pipeline(cfg)
+    typo_warnings = [w for w in warnings if w.code == "column_mapping_unknown_source_column"]
+    assert len(typo_warnings) == 1
+    assert "doesnt_exist" in typo_warnings[0].message
+    assert "wrong_name" in typo_warnings[0].message
+    assert typo_warnings[0].location == "transforms.0"
+
+
+def test_column_mapping_with_valid_source_columns_passes() -> None:
+    """Declaration that names real source columns → no typo warning."""
+    cfg = _cfg(
+        transforms=[
+            {
+                "type": "custom_python",
+                "code": "def transform(record):\n    return record\n",
+                "column_mapping": {"out_a": ["a"], "out_b": ["b"]},
+            }
+        ]
+    )
+    warnings = lint_pipeline(cfg)
+    assert not any(w.code == "column_mapping_unknown_source_column" for w in warnings)
+
+
+def test_column_mapping_consistency_walks_through_rename() -> None:
+    """A rename earlier in the chain renames ``a`` → ``id``. A later
+    column_mapping referencing ``a`` should fire the typo lint (the
+    column lineage walker has already moved on to ``id``)."""
+    cfg = _cfg(
+        transforms=[
+            {"type": "rename", "mapping": {"a": "id"}},
+            {
+                "type": "custom_python",
+                "code": "def transform(r):\n    return r\n",
+                "column_mapping": {"out": ["a"]},  # ``a`` no longer exists
+            },
+        ]
+    )
+    typos = [w for w in lint_pipeline(cfg) if w.code == "column_mapping_unknown_source_column"]
+    assert len(typos) == 1
+    assert typos[0].location == "transforms.1"
+
+
+def test_column_mapping_with_new_column_empty_list_no_warning() -> None:
+    """``output: []`` means "this is a new column" — no source col to
+    validate, so no typo lint."""
+    cfg = _cfg(
+        transforms=[
+            {
+                "type": "custom_python",
+                "code": "def transform(r):\n    return r\n",
+                "column_mapping": {"tier": []},  # new column, no upstream
+            }
+        ]
+    )
+    warnings = lint_pipeline(cfg)
+    assert not any(w.code == "column_mapping_unknown_source_column" for w in warnings)
+
+
+def test_column_mapping_consistency_skips_graph_shape() -> None:
+    """Graph-shape lint coverage is a separate slice — current consistency
+    walker bails (no false positives, no coverage either)."""
+    cfg = PipelineConfig.model_validate(
+        {
+            "name": "p",
+            "graph": {
+                "nodes": [
+                    {"id": "s", "type": "source", "connection": "wh", "query": "SELECT a FROM t"},
+                    {
+                        "id": "py",
+                        "type": "transform",
+                        "transform": {
+                            "type": "custom_python",
+                            "code": "def transform(r):\n    return r\n",
+                            "column_mapping": {"x": ["nope"]},
+                        },
+                    },
+                    {"id": "k", "type": "sink", "connection": "wh", "table": "out"},
+                ],
+                "edges": [
+                    {"from_node": "s", "to_node": "py"},
+                    {"from_node": "py", "to_node": "k"},
+                ],
+            },
+        }
+    )
+    typos = [w for w in lint_pipeline(cfg) if w.code == "column_mapping_unknown_source_column"]
+    assert typos == []

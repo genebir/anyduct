@@ -10,6 +10,13 @@
 ## [Unreleased]
 
 ### Added
+- **column_mapping typo 검출 lint + 실패/재시도 시나리오 검증 (Phase FF)** [ADR-0050] — 신뢰성의 두 추가 차원: (a) 사용자 실수 catch + (b) 비정상 경로 카탈로그 일관성.
+  - **새 lint 규칙 `column_mapping_unknown_source_column`**: linear/task-DAG에서 transform chain walk(derive_column_lineage와 동일). 각 transform의 column_mapping declaration이 그 시점 upstream mapping에 없는 source col을 참조하면 warning. 이전 transform의 rename도 정확히 반영. typo / stale 참조 silent 부정확 mapping 회피.
+  - **시나리오 F: Failed run** — `custom_python`이 명시 raise → run status=failed → worker except branch가 `_persist_lineage` skip → sink/source asset row 생성 안 됨. 실패가 카탈로그 dirty하게 안 함.
+  - **시나리오 G: Rerun idempotency** — 같은 config 2회 → asset row count + edge + column lineage edge 모두 변화 없음(같은 row id 유지). `AssetMaterialization`만 run마다 +1(audit trail 의도).
+  - **기존 e2e 1개 narrow**: column_mapping의 source col이 source query에 실제 있어야 새 lint 안 발동 — assertion을 특정 code 두 가지에 대해서만 단언하도록 보강(후속 lint 추가가 깨지지 않게).
+  - **검증**: 코어 unit 732→737(+5 lint). 서버 it 441→443(+2 시나리오). DB 마이그레이션 0.
+
 - **확장 dogfood 시나리오 corpus — 실전 패턴 5종 sample-data e2e (Phase EE)** [ADR-0049] — 사용자 요청 *"테스트를 중점적으로 해서 항상 샘플 데이터를 생성해서 기능이 정상적인지 좀 깊게 테스트"*. Phase BB의 4-stage 시나리오를 깊이로 확장:
   - **Scenario A — SCD Type 2 dimension**: `customers_history`에 `effective_from`(alias→raw col) + `effective_to`/`is_current`(리터럴). 리터럴 컬럼이 정확히 empty upstream으로 catalog 등록.
   - **Scenario B — Fan-out by status**: 한 source query → `when` 술어로 confirmed/cancelled 두 sink 분기(ADR-0027). 양쪽 모두 asset edge + per-column lineage 정확.

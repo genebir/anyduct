@@ -582,3 +582,146 @@ async def test_scenario_e_schema_evolution_via_passthrough(
     # for a column whose data the pipeline doesn't actually populate.
     added_refs = upstream_map2[by_name["added_at"].id]
     assert added_refs == []
+
+
+# ===== Scenario F: Failed run leaves the catalog untouched ==================
+
+
+async def test_scenario_f_failed_transform_does_not_pollute_catalog(
+    session: AsyncSession, tmp_path: Path
+) -> None:
+    """Phase FF (ADR-0050, 2026-05-29): when a transform raises, the run
+    lands in ``failed`` status. The worker only persists lineage on the
+    success path, so the catalog should not register the would-be sink
+    asset (and certainly no column lineage). The source asset *can* still
+    appear in the catalog if a previous successful run registered it;
+    here we use a fresh workspace so no rows exist before the failure.
+    """
+    db_path = tmp_path / "fail.db"
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.execute("CREATE TABLE raw (id INTEGER, amount INTEGER)")
+        conn.executemany("INSERT INTO raw VALUES (?, ?)", [(1, 100), (2, 50), (3, 200)])
+        conn.execute("CREATE TABLE out (id INTEGER, amount INTEGER)")
+        conn.commit()
+    finally:
+        conn.close()
+
+    ws = await _seed_workspace(session, slug="ee-fail")
+    await _seed_connection(
+        session, workspace_id=ws.id, name="src", config={"database": str(db_path)}
+    )
+    await _seed_connection(
+        session, workspace_id=ws.id, name="dst", config={"database": str(db_path)}
+    )
+
+    cfg = {
+        "name": "fails-on-purpose",
+        "source": {"connection": "src", "query": "SELECT id, amount FROM raw"},
+        "transforms": [
+            {
+                "type": "custom_python",
+                # Deliberate raise — exercise the worker's failure path.
+                "code": (
+                    "def transform(record):\n" "    raise ValueError('intentional test failure')\n"
+                ),
+            }
+        ],
+        "sink": {"connection": "dst", "table": "out", "mode": "append"},
+    }
+    p, pv = await _seed_pipeline(session, workspace_id=ws.id, name="p", config=cfg)
+    await _seed_pending_run(
+        session, workspace_id=ws.id, pipeline_id=p.id, pipeline_version_id=pv.id
+    )
+    await _run_next_pending(session, "ee-fail")
+
+    # No rows were committed to the sink table.
+    assert _query_rows(db_path, "SELECT id FROM out") == []
+
+    repo = AssetRepository(session)
+    assets = {a.asset_key for a in await repo.list_for_workspace(workspace_id=ws.id)}
+    # The failure path skipped ``_persist_lineage`` entirely — the sink
+    # asset never lands. (Source side likewise — a failed run doesn't
+    # leak a half-written catalog.)
+    assert "dst/out" not in assets
+    assert "src/raw" not in assets
+
+
+# ===== Scenario G: Idempotent re-runs ========================================
+
+
+async def test_scenario_g_rerun_is_idempotent_for_catalog_rows(
+    session: AsyncSession, tmp_path: Path
+) -> None:
+    """Phase FF (ADR-0050, 2026-05-29): running the same pipeline twice
+    must not duplicate asset rows, asset edges, or column lineage edges.
+    A materialization row *does* get added per run (that's the audit
+    trail of "this asset was refreshed at T"), which is the only place
+    duplication is expected.
+    """
+    db_path = tmp_path / "idem.db"
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.execute("CREATE TABLE raw (id INTEGER, name TEXT)")
+        conn.executemany("INSERT INTO raw VALUES (?, ?)", [(1, "alice"), (2, "bob")])
+        conn.execute("CREATE TABLE out (id INTEGER, name TEXT)")
+        conn.commit()
+    finally:
+        conn.close()
+
+    ws = await _seed_workspace(session, slug="ee-idem")
+    await _seed_connection(
+        session, workspace_id=ws.id, name="src", config={"database": str(db_path)}
+    )
+    await _seed_connection(
+        session, workspace_id=ws.id, name="dst", config={"database": str(db_path)}
+    )
+    cfg = {
+        "name": "idem",
+        "source": {"connection": "src", "query": "SELECT id, name FROM raw"},
+        "sink": {"connection": "dst", "table": "out", "mode": "append"},
+    }
+    p, pv = await _seed_pipeline(session, workspace_id=ws.id, name="p", config=cfg)
+
+    # ---- Run #1 ----
+    await _seed_pending_run(
+        session, workspace_id=ws.id, pipeline_id=p.id, pipeline_version_id=pv.id
+    )
+    await _run_next_pending(session, "ee-idem-1")
+
+    repo = AssetRepository(session)
+    assets_after_1 = {a.asset_key: a for a in await repo.list_for_workspace(workspace_id=ws.id)}
+    out_after_1 = assets_after_1["dst/out"]
+    out_ups_after_1 = {a.asset_key for a in await repo.upstream(out_after_1.id)}
+    cols_1, upstream_map_1 = await repo.column_lineage_for_asset(asset_id=out_after_1.id)
+    mats_1 = await repo.materializations(asset_id=out_after_1.id)
+
+    assert len(mats_1) == 1, "first run should record exactly one materialization"
+
+    # ---- Run #2 — same config, just trigger again ----
+    await _seed_pending_run(
+        session, workspace_id=ws.id, pipeline_id=p.id, pipeline_version_id=pv.id
+    )
+    await _run_next_pending(session, "ee-idem-2")
+
+    assets_after_2 = {a.asset_key: a for a in await repo.list_for_workspace(workspace_id=ws.id)}
+    out_after_2 = assets_after_2["dst/out"]
+    # ``id`` stays stable across runs — it's the *same* asset row.
+    assert out_after_2.id == out_after_1.id
+    # Asset row count unchanged.
+    assert set(assets_after_2) == set(assets_after_1)
+    # Upstream edges unchanged (no duplicates).
+    out_ups_after_2 = {a.asset_key for a in await repo.upstream(out_after_2.id)}
+    assert out_ups_after_2 == out_ups_after_1
+    # Column lineage rows + edges unchanged.
+    cols_2, upstream_map_2 = await repo.column_lineage_for_asset(asset_id=out_after_2.id)
+    assert {c.name for c in cols_2} == {c.name for c in cols_1}
+    # The per-column upstream counts shouldn't grow either — same edges,
+    # same source columns.
+    for col in cols_2:
+        assert len(upstream_map_2[col.id]) == len(
+            upstream_map_1[next(c.id for c in cols_1 if c.name == col.name)]
+        )
+    # Materializations *do* grow by one per run — that's the audit trail.
+    mats_2 = await repo.materializations(asset_id=out_after_2.id)
+    assert len(mats_2) == 2

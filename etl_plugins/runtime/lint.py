@@ -28,6 +28,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from etl_plugins.config.models import PipelineConfig, TransformConfig
+from etl_plugins.runtime.column_lineage import (
+    _apply_transform as _column_lineage_apply_transform,
+)
+from etl_plugins.runtime.column_lineage import (
+    _initial_mapping as _column_lineage_initial_mapping,
+)
 
 #: Transform types whose body the static column-lineage walker can't read.
 #: These are the targets of the ``column_mapping_recommended`` rule —
@@ -56,7 +62,7 @@ class LintWarning:
 
 
 def lint_pipeline(cfg: PipelineConfig) -> list[LintWarning]:
-    """Run every Phase DD lint rule over a parsed pipeline config.
+    """Run every Phase DD/FF lint rule over a parsed pipeline config.
 
     Warnings are **advisory**: callers (dry-run, builder pre-save) decide
     whether to fail the operation or just surface them. The default
@@ -77,6 +83,12 @@ def lint_pipeline(cfg: PipelineConfig) -> list[LintWarning]:
         # Single-task (legacy) shape — transforms live at the top level.
         for tc_idx, tc in enumerate(cfg.transforms):
             warnings.extend(_lint_transform(tc, f"transforms.{tc_idx}"))
+
+    # Phase FF: chain-aware lint that needs the upstream column mapping at
+    # each transform position. Single-task / Task-DAG shapes only — graph
+    # shape is handled by a future slice once we settle on how a multi-
+    # source chain reports its "upstream mapping" at a transform node.
+    warnings.extend(_lint_column_mapping_consistency(cfg))
 
     return warnings
 
@@ -117,6 +129,78 @@ def _rule_column_mapping_recommended(tc: TransformConfig, location: str) -> list
             location=location,
         )
     ]
+
+
+def _lint_column_mapping_consistency(cfg: PipelineConfig) -> list[LintWarning]:
+    """Phase FF (ADR-0050): per-task chain walk that flags a
+    ``column_mapping`` declaration whose ``source_col`` doesn't actually
+    exist in the upstream mapping at that point in the transform chain.
+
+    This catches the most common ``column_mapping`` mistake: a typo in
+    the source column name, or a stale declaration that references a
+    column an earlier transform already renamed away. Without this lint
+    the catalog silently emits an empty-upstream row for the output
+    column — technically correct but probably not what the user wanted.
+
+    Replays the same walk that :func:`derive_column_lineage` does at
+    persist time, but instead of building edges it inspects each
+    transform's declaration before applying it.
+    """
+    if cfg.graph is not None:
+        # Graph shape: punt to a future slice (see lint_pipeline docstring).
+        return []
+
+    warnings: list[LintWarning] = []
+    has_explicit_tasks = bool(cfg.tasks)
+    for task_idx, task in enumerate(cfg.effective_tasks()):
+        source = task.source
+        transforms = list(task.transforms)
+        mapping = _column_lineage_initial_mapping(source.connection, source.query)
+        if mapping is None:
+            # If the source query isn't parseable as SQL, we have no
+            # upstream mapping to consult — skip the consistency check.
+            continue
+        for tc_idx, tc in enumerate(transforms):
+            data = tc.model_dump()
+            declaration = data.get("column_mapping")
+            if isinstance(declaration, dict):
+                location = (
+                    f"tasks.{task_idx}.transforms.{tc_idx}"
+                    if has_explicit_tasks
+                    else f"transforms.{tc_idx}"
+                )
+                for out_col, source_cols in declaration.items():
+                    if not isinstance(source_cols, list):
+                        continue
+                    if not isinstance(out_col, str):
+                        continue
+                    for src_col in source_cols:
+                        if not isinstance(src_col, str):
+                            continue
+                        if src_col not in mapping:
+                            warnings.append(
+                                LintWarning(
+                                    code="column_mapping_unknown_source_column",
+                                    message=(
+                                        f"column_mapping for output '{out_col}' "
+                                        f"references source column '{src_col}', "
+                                        "but that name isn't in the upstream "
+                                        "mapping at this point in the chain. "
+                                        "Check the spelling, or whether an "
+                                        "earlier transform already renamed it."
+                                    ),
+                                    location=location,
+                                )
+                            )
+            next_mapping = _column_lineage_apply_transform(mapping, tc)
+            if next_mapping is None:
+                # The chain went opaque at this transform — every later
+                # column_mapping necessarily references columns we
+                # can't validate, so we stop the walk for this task.
+                break
+            mapping = next_mapping
+
+    return warnings
 
 
 __all__ = ["LintWarning", "lint_pipeline"]

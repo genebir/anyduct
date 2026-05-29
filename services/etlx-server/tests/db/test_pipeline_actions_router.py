@@ -262,6 +262,10 @@ async def test_dry_run_no_lint_warning_when_column_mapping_declared(
     await _seed_connection(session, workspace_id=ws.id, name="src")
     await _seed_connection(session, workspace_id=ws.id, name="dst")
     cfg = _sample_pipeline_config("p", source_conn="src", sink_conn="dst")
+    # Source query exposes ``id`` so the column_mapping's source column
+    # actually exists upstream (the Phase FF consistency lint would
+    # otherwise flag it as ``column_mapping_unknown_source_column``).
+    cfg["source"]["query"] = "select 1 as id"
     cfg["transforms"] = [
         {
             "type": "custom_python",
@@ -282,7 +286,11 @@ async def test_dry_run_no_lint_warning_when_column_mapping_declared(
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["ok"] is True
-    assert body["warnings"] == []
+    # Narrowed: the Phase DD lint specifically should not fire when the
+    # user declared a column_mapping. (Other Phase FF+ lint rules can
+    # still emit advice as new ones land.)
+    assert not any(w["code"] == "column_mapping_recommended" for w in body["warnings"])
+    assert not any(w["code"] == "column_mapping_unknown_source_column" for w in body["warnings"])
 
 
 async def test_dry_run_reports_missing_connection(session: AsyncSession) -> None:

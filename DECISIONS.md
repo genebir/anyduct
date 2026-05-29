@@ -1637,4 +1637,34 @@ L1 출시 직후 사용자가 5개 회신:
 
 ---
 
+## ADR-0050: 추가 lint 규칙 `column_mapping_unknown_source_column` + 실패/재시도 시나리오 검증
+
+**Date**: 2026-05-29
+**Status**: Accepted
+**Context**: Phase EE에서 정상 경로의 5종 패턴을 검증했지만, 신뢰성의 또 다른 차원은 *(a) 사용자 실수 catch* + *(b) 비정상 경로(실패/재시도)에서도 카탈로그 일관성*. 둘 다 사용자 부담 줄이는 핵심:
+- (a): `column_mapping`에 typo가 있으면 사용자가 본인 declaration이 잘못된 줄 모름. 카탈로그가 silent empty upstream → 디버깅 어려움.
+- (b): 실패한 run이 카탈로그를 dirty하게 하면 운영자가 "정말 성공한 자산"과 "마지막 실패 자산"을 구분 못 함. 재시도가 row 중복하면 long-tail 통계 깨짐.
+
+**Decision**:
+1. **새 lint 규칙 `column_mapping_unknown_source_column`** (`etl_plugins/runtime/lint.py`):
+   - `_lint_column_mapping_consistency(cfg)`: linear / task-DAG 경로에서 transform chain을 `derive_column_lineage`와 동일하게 walk. 각 transform의 `column_mapping`에서 declaration된 source col이 그 시점의 upstream `_Mapping` 키에 *없으면* warning.
+   - 이전 transform의 rename도 정확히 반영(예: `a → id` rename 후 `column_mapping`이 `["a"]`를 참조하면 warning).
+   - 새 컬럼 `output: []`은 source col 검증 대상 아님(empty list).
+   - Graph shape는 후속 슬라이스(multi-source chain의 "upstream mapping" 의미가 별도 결정 필요).
+2. **시나리오 F: Failed run leaves catalog untouched** — `custom_python`이 명시적 raise → run status=failed → worker의 except branch가 `_persist_lineage` 건너뜀 → sink/source asset row 생성 안 됨. 정상 동작 확인.
+3. **시나리오 G: Rerun idempotency** — 같은 config 2회 실행 → asset row count 변화 없음, 같은 row(id) 유지, asset edge 중복 없음, column lineage edge 중복 없음. `AssetMaterialization`만 run마다 1행씩 증가(audit trail 의도).
+
+**Consequences**:
+- ✅ **사용자 실수 자동 catch**: column_mapping typo / stale 참조가 dry-run에서 즉시 안내. silent 부정확 mapping 회피.
+- ✅ **Catalog cleanliness 정책 명문화**: 실패 run = 카탈로그 무변화 / 성공 run = idempotent upsert + 매번 materialization 추가. 사용자가 카탈로그를 신뢰 가능.
+- ✅ **Phase EE 시나리오 corpus 7종으로 확장**: 정상 5 + 실패 + 재시도. 비정상 경로 회귀 가드.
+- ✅ DB 마이그레이션 0. lint는 pure config 분석, 시나리오는 신규 테스트만.
+- ⚠ **Graph shape lint 미지원**: multi-source chain의 "upstream mapping at a transform node" 의미가 별도 결정 필요. linear/task-DAG에서 80%+ 케이스 cover.
+- ⚠ **재시도 정책 확장 시**: 만약 향후 partial success(일부 record만 sink로) 지원하면 catalog 정합성 정책 재검토 필요. 현재는 all-or-nothing batch.
+- 🔧 **기존 e2e 수정 1건**: `test_dry_run_no_lint_warning_when_column_mapping_declared`가 `select 1` source에서 `id` 컬럼을 참조해 새 lint가 발동 → source query에 `select 1 as id` 추가하고 assertion을 narrow(특정 code 두 가지에 대해서만 단언). 후속 lint 규칙 추가가 깨지지 않도록.
+
+**검증**: 코어 unit 732→737(+5: lint 규칙 typo 발동 / 정상 mapping 무 warning / rename 후 typo / empty list 무 warning / graph shape skip). 서버 it 441→443(+2: 실패 시 카탈로그 untouched / rerun idempotent). 기존 e2e 1개 보강(narrow assertion). mypy 코어 61 + 서버 100 OK. ruff clean. DB 마이그레이션 0.
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

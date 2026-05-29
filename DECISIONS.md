@@ -1871,4 +1871,29 @@ L1 출시 직후 사용자가 5개 회신:
 
 ---
 
+## ADR-0058: Sensors freshness 시나리오 — 시간 기반 auto-materialize sample-data e2e
+
+**Date**: 2026-05-29
+**Status**: Accepted
+**Context**: ADR-0038의 시간 기반 auto-materialize(`freshness_sla_minutes`)는 unit으로는 cover되지만 실제 sample-data + 시간 시뮬레이션으로 *(a) stale → 자동 enqueue + (b) within SLA → no fire* 동작이 운영 시나리오에서 정확히 작동하는지 검증 부족. Phase GG/LL의 asset-driven trigger와 함께 운영 신뢰성 핵심.
+
+**Decision**:
+1. **`test_freshness_scenarios.py`(신규)** — 2 시나리오 e2e:
+   - **NN1 — Stale asset triggers freshness**: `freshness_sla_minutes: 60` pipeline. 정상 run → catalog row 생성. `Asset.last_materialized_at`을 2시간 전으로 강제 update + 옛 Run.created_at도 같이 rewind(cooldown guard 회피). `Scheduler._tick_freshness(session, now)` 직접 호출 → fired=1 → PENDING run enqueue. `result_json.triggered_by == "freshness"` + `sla_minutes` stamp. Drain → asset refresh.
+   - **NN2 — Within SLA no fire**: 같은 setup이지만 `last_materialized_at`이 기본값(now-ish). `_tick_freshness` → fired=0. PENDING 큐 empty. 건강한 pipeline이 큐 storm 안 함.
+2. **시간 시뮬 전략**: `Asset.last_materialized_at` + `Run.created_at` 직접 UPDATE. freshness walker가 읽는 두 column이라 이 둘만 강제하면 일관된 과거 상태. 외부 시간 mock 불필요.
+3. **Scheduler internal 호출**: `Scheduler(_SessionFactoryAdapter(session))` 후 `_tick_freshness(session, now)` 직접. caller commits 정책 따름. 실제 production code path 그대로(`tick_once`의 freshness leg 부분만).
+
+**Consequences**:
+- ✅ **시간 기반 auto-materialize 운영 정확성 확인**: stale 감지 + cooldown 둘 다 sample data로 입증.
+- ✅ **Sample-data 시간 시뮬 패턴 확립**: 향후 다른 시간 기반 e2e(sensors / schedules / TTL)에서 재사용 가능.
+- ✅ **Phase GG/LL과 보완**: asset-axis(GG) + cycle 차단(LL) + time-axis(NN)이 모두 sample-data로 검증된 auto-materialize family.
+- ✅ DB 마이그레이션 0. 신규 e2e만.
+- ⚠ **External wall-clock에 일부 의존**: `_tick_freshness`가 `now`를 받지만 `Asset.last_materialized_at` write는 worker가 자체 `datetime.now()` 사용. Drain 후 refresh 확인할 때 `refreshed.last_materialized_at >= now` 검증 — millisecond 정밀도 의존.
+- ⚠ **Sensors 모듈(`etlx_server.sensors.builtins.asset_freshness`) 별도 검증 미포함**: 그것도 ADR-0038 family이지만 별도 메커니즘(K3 sensor framework). 향후 슬라이스에서 sensor e2e 추가 가능.
+
+**검증**: 코어 unit 738 unchanged. 서버 it 457→459(+2 NN1/NN2). mypy 코어 61 + 서버 100 OK. ruff clean. DB 마이그레이션 0.
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

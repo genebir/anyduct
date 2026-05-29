@@ -9,6 +9,13 @@
 
 ## [Unreleased]
 
+### Added
+- **Sensors freshness 시나리오 — 시간 기반 auto-materialize sample-data e2e (Phase NN)** [ADR-0058] — ADR-0038의 `freshness_sla_minutes` 동작을 sample-data + 시간 시뮬로:
+  - **NN1 — Stale → 자동 enqueue**: SLA 60분, last_materialized_at 2시간 전 강제. `_tick_freshness` → fired=1, PENDING run에 `triggered_by: freshness` stamp, drain 시 asset refresh.
+  - **NN2 — Within SLA → no fire**: SLA 60분, last_materialized_at 기본(최근). fired=0. 건강한 pipeline이 큐 storm 안 함.
+  - **시간 시뮬 패턴**: `Asset.last_materialized_at` + `Run.created_at` 직접 UPDATE → 외부 wall-clock mock 불필요.
+  - **검증**: 코어 738 unchanged. 서버 it 457→459(+2). DB 마이그레이션 0.
+
 ### Fixed
 - **Workspace variables 시나리오 + lineage emit silent bug 보완 (Phase MM)** [ADR-0057] — sample-data dogfood 중 발견된 silent correctness bug:
   - **Bug**: `RunExecutor._lineage_for`가 `version.config_json` 그대로 사용 → catalog asset_key가 미해결 `${var.target_table}`로 저장. pipeline은 정상 실행되나 운영자가 카탈로그에서 자산 이름을 찾을 수 없음.

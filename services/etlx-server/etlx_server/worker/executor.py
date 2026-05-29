@@ -42,6 +42,7 @@ from etl_plugins.config.models import ConnectionConfig, PipelineConfig
 from etl_plugins.config.secrets import SecretBackend
 from etl_plugins.config.variables import resolve_config_variables
 from etl_plugins.core.asset import AssetLineage
+from etl_plugins.core.column_lineage import ColumnLineage
 from etl_plugins.core.connector import Connector
 from etl_plugins.core.context import Context
 from etl_plugins.core.exceptions import ConfigError, RegistryError, SecretError
@@ -490,6 +491,31 @@ class RunExecutor:
                 error=str(e),
             )
             return
+
+        # Phase AA (ADR-0046, 2026-05-29): schema-passthrough fallback.
+        # When a sink came out opaque (a python/custom_python/sql_exec
+        # transform blocked the static derivation), try to recover a
+        # 1:1 lineage by intersecting the source and sink schemas. Any
+        # column whose name appears on both sides is treated as a
+        # passthrough — the dominant pattern for "tweak some values but
+        # keep the row shape" transforms.
+        if col_lineage.opaque_assets:
+            try:
+                col_lineage = await self._augment_opaque_with_schema_passthrough(
+                    session=session,
+                    run=run,
+                    cfg=cfg,
+                    col_lineage=col_lineage,
+                    seed_schemas=schemas,
+                    log=log,
+                )
+            except Exception as e:  # never fail the run on a lineage glitch
+                log.warning(
+                    "run.column_lineage_passthrough_failed",
+                    error_class=type(e).__name__,
+                    error=str(e),
+                )
+
         try:
             await AssetRepository(session).persist_run_column_lineage(
                 workspace_id=run.workspace_id,
@@ -595,6 +621,151 @@ class RunExecutor:
             if sub:
                 schemas[name] = sub
         return schemas
+
+    async def _augment_opaque_with_schema_passthrough(
+        self,
+        *,
+        session: AsyncSession,
+        run: Run,
+        cfg: PipelineConfig,
+        col_lineage: ColumnLineage,
+        seed_schemas: dict[str, dict[str, dict[str, str]]],
+        log: Any,
+    ) -> ColumnLineage:
+        """Schema-passthrough fallback for opaque sinks (ADR-0046).
+
+        When :func:`derive_column_lineage` couldn't trace a sink's columns —
+        because some transform in the chain (``python`` / ``custom_python`` /
+        ``sql_exec`` / unknown) is opaque to static analysis — we still want
+        the catalog to show *something*. The conservative guess is **column
+        name passthrough**: any column whose name appears in both the
+        source's and the sink's schema is treated as a 1:1 attribution.
+
+        Why this is defensible:
+
+        * The dominant python-transform pattern is "tweak values, keep the
+          schema" — adding a derived flag, filtering rows, normalising text.
+          A 1:1 name match matches what *actually happens* in those cases.
+        * Columns that only exist on one side (the python code added them,
+          or dropped them) stay un-attributed — no fabricated upstream.
+        * Asset-level lineage (source → sink edges) is already auto-derived
+          by :func:`derive_lineage`; this only adds the missing column rows.
+
+        Returns the updated :class:`ColumnLineage` with passthrough edges
+        appended and any sink we managed to enrich removed from
+        ``opaque_assets``. Sinks whose schema we can't fetch (HTTP / Kafka
+        sinks, permissions issues) stay opaque — that's the truthful state.
+        """
+        from collections import defaultdict
+
+        from etl_plugins.core.asset import AssetKey
+        from etl_plugins.core.column_lineage import ColumnEdge, ColumnLineage, ColumnRef
+        from etl_plugins.runtime.lineage import derive_lineage
+        from etlx_server.connections.inspect import (
+            ConnectionInspector,
+            InspectionUnsupportedError,
+        )
+
+        # 1. Use the asset axis to learn which source asset(s) feed each opaque sink.
+        asset_lineage = derive_lineage(cfg)
+        sink_to_sources: dict[AssetKey, list[AssetKey]] = defaultdict(list)
+        for edge in asset_lineage.edges:
+            sink_to_sources[edge.downstream].append(edge.upstream)
+
+        opaque_set = {str(k): k for k in col_lineage.opaque_assets}
+        if not opaque_set:
+            return col_lineage
+
+        # 2. Figure out which connection/table schemas we still need
+        # to fetch (anything not already in seed_schemas).
+        needed: dict[str, set[str]] = defaultdict(set)
+
+        def _need(key: AssetKey) -> None:
+            if len(key.path) < 2:
+                return
+            connection_name, table_name = key.path[0], key.path[1]
+            already = seed_schemas.get(connection_name, {}).get(table_name)
+            if already is None:
+                needed[connection_name].add(table_name)
+
+        for sink_key in opaque_set.values():
+            _need(sink_key)
+            for src_key in sink_to_sources.get(sink_key, []):
+                _need(src_key)
+
+        # 3. Fetch what we don't have yet.
+        fetched: dict[str, dict[str, dict[str, str]]] = {}
+        if needed:
+            try:
+                conn_rows = await load_connections_by_name(
+                    session, workspace_id=run.workspace_id, names=list(needed)
+                )
+            except Exception as e:
+                log.warning("run.column_lineage_passthrough_conn_lookup_failed", error=str(e))
+                conn_rows = {}
+
+            inspector = ConnectionInspector(self._backend)
+            for conn_name, conn_row in conn_rows.items():
+                sub: dict[str, dict[str, str]] = {}
+                for tbl in needed[conn_name]:
+                    try:
+                        cols = await inspector.list_columns(conn_row, tbl)
+                    except InspectionUnsupportedError:
+                        # Connector type doesn't introspect schemas. Bail
+                        # on this whole connection — likely an HTTP/Kafka
+                        # sink we genuinely can't infer.
+                        sub = {}
+                        break
+                    except Exception as e:
+                        log.warning(
+                            "run.column_lineage_passthrough_table_failed",
+                            connection=conn_name,
+                            table=tbl,
+                            error=str(e),
+                        )
+                        continue
+                    sub[tbl] = {c.name: c.type for c in cols}
+                if sub:
+                    fetched[conn_name] = sub
+
+        # 4. Build a merged schema map: seed (SELECT-* schemas) + freshly fetched.
+        full: dict[str, dict[str, dict[str, str]]] = {}
+        for source in (seed_schemas, fetched):
+            for conn_name, tables in source.items():
+                full.setdefault(conn_name, {}).update(tables)
+
+        def _columns(key: AssetKey) -> set[str]:
+            if len(key.path) < 2:
+                return set()
+            return set(full.get(key.path[0], {}).get(key.path[1], {}))
+
+        # 5. Walk each opaque sink and emit passthrough edges where we can.
+        new_edges = list(col_lineage.edges)
+        still_opaque: list[AssetKey] = []
+        for sink_key in opaque_set.values():
+            sink_cols = _columns(sink_key)
+            if not sink_cols:
+                still_opaque.append(sink_key)
+                continue
+            # For each shared column name, every upstream source that has
+            # that column contributes — keeps multi-source attribution.
+            per_col_upstreams: dict[str, list[ColumnRef]] = defaultdict(list)
+            for src_key in sink_to_sources.get(sink_key, []):
+                shared = sink_cols & _columns(src_key)
+                for col in shared:
+                    per_col_upstreams[col].append(ColumnRef(src_key, col))
+            if not per_col_upstreams:
+                still_opaque.append(sink_key)
+                continue
+            for col, refs in per_col_upstreams.items():
+                new_edges.append(
+                    ColumnEdge(
+                        downstream=ColumnRef(sink_key, col),
+                        upstreams=tuple(refs),
+                    )
+                )
+
+        return ColumnLineage(edges=new_edges, opaque_assets=still_opaque)
 
     async def _trigger_asset_consumers(
         self, session: AsyncSession, run: Run, lineage: AssetLineage, log: Any

@@ -743,6 +743,72 @@ async def test_executor_persists_column_lineage(session: AsyncSession, tmp_path:
     assert id_upstreams[0][0].startswith("src/")
 
 
+async def test_executor_python_transform_falls_back_to_schema_passthrough(
+    session: AsyncSession, tmp_path: Path
+) -> None:
+    """Phase AA (2026-05-29, ADR-0046): a ``custom_python`` transform makes
+    the static column derivation give up — the worker then falls back to
+    matching source and sink *schema* by column name and emits 1:1
+    passthrough edges for the intersection. The catalog ends up with real
+    column rows + edges (not just an "opaque" flag), matching how the
+    pipeline actually moves data through python user code.
+    """
+    db_path = _prepare_sqlite_fixture(tmp_path)
+    ws = await _seed_workspace(session, slug="we-pyt-passthrough")
+    await _seed_connection(session, workspace_id=ws.id, name="src", config={"database": db_path})
+    await _seed_connection(session, workspace_id=ws.id, name="dst", config={"database": db_path})
+    cfg = {
+        "name": "p",
+        "source": {"connection": "src", "query": "SELECT id, name FROM seed"},
+        "transforms": [
+            {
+                "type": "custom_python",
+                # User code that the static analyser can't trace — yet the
+                # row shape it returns happens to match the sink schema.
+                "code": "def transform(record):\n    return record\n",
+            }
+        ],
+        "sink": {"connection": "dst", "table": "out", "mode": "append"},
+    }
+    p, pv = await _seed_pipeline(session, workspace_id=ws.id, name="p", config=cfg)
+    run = await _seed_pending_run(
+        session, workspace_id=ws.id, pipeline_id=p.id, pipeline_version_id=pv.id
+    )
+    claimed = await claim_pending_run(session, worker_id="worker-PASS")
+    assert claimed is not None
+    await session.commit()
+
+    await RunExecutor(
+        _SessionFactoryAdapter(session), StaticSecretBackend(), worker_id="w"
+    ).execute(run.id)
+
+    repo = AssetRepository(session)
+    assets = {a.asset_key: a for a in await repo.list_for_workspace(workspace_id=ws.id)}
+    # Asset-level lineage is always recorded — that's true even before this
+    # slice, so the source + sink rows + the edge are unchanged.
+    assert "src/seed" in assets
+    assert "dst/out" in assets
+    seed_asset = assets["src/seed"]
+    out_asset = assets["dst/out"]
+    ups = {a.asset_key for a in await repo.upstream(out_asset.id)}
+    assert "src/seed" in ups
+
+    # The interesting part: the python transform used to mark the sink
+    # opaque (no per-column rows). Phase AA's schema-passthrough fallback
+    # should have flipped it back off + emitted 1:1 edges for the
+    # shared {id, name} schema.
+    assert out_asset.column_lineage_opaque is False
+    cols, upstream_map = await repo.column_lineage_for_asset(asset_id=out_asset.id)
+    by_name = {c.name: c for c in cols}
+    assert {"id", "name"} <= set(by_name)
+    for col_name in ("id", "name"):
+        refs = [
+            (up_asset.asset_key, up_col.name)
+            for up_col, up_asset in upstream_map[by_name[col_name].id]
+        ]
+        assert (seed_asset.asset_key, col_name) in refs
+
+
 async def test_executor_select_star_expands_via_schema_inspector(
     session: AsyncSession, tmp_path: Path
 ) -> None:

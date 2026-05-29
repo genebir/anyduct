@@ -10,6 +10,15 @@
 ## [Unreleased]
 
 ### Added
+- **Schema-passthrough fallback — 어떤 트랜스폼이든 column edge 자동 생성 (Phase AA)** [ADR-0046] — 사용자 요청 *"어떤 소스던 간에 결국 소스/타겟이 있잖아. 난 자동생성하고 싶은데 전부"*. 카탈로그의 asset row + asset edge는 이미 트랜스폼 무관하게 자동, 빠진 건 column 매핑. python/custom_python/sql_exec 트랜스폼이 끼면 정적 분석 불가 → opaque로 떨어지던 마지막 빈틈을 schema 기반 보수적 휴리스틱으로 채움:
+  - **`RunExecutor._augment_opaque_with_schema_passthrough`**: 1차 derive 후 opaque sink가 남으면 발동.
+  - `derive_lineage`의 asset edge로 source→sink 매핑 확보 → sink + 모든 upstream source schema fetch (`ConnectionInspector.list_columns`, Phase Z의 seed schemas 재사용).
+  - **컬럼명 intersection만 1:1 attribute** — sink schema col 이름 ∩ source schema col 이름의 각 컬럼에 `ColumnEdge(downstream=sink.col, upstreams=(src.col,))`. 여러 source가 같은 이름 컬럼 가지면 멀티-upstream.
+  - **보수적**: 이름 다르면 mapping 없음. 거짓 양성 0. 본질 opaque(HTTP/Kafka sink, 컬럼명 disjoint)는 정직하게 유지.
+  - **best-effort**: passthrough 실패해도 run은 정상, 원래 opaque로 fallback.
+  - **검증**: e2e 1개 (sqlite source + `custom_python` transform + sqlite sink → `column_lineage_opaque=False` + `id`/`name` 자동 1:1 edge 검증). 서버 it 431→432 green. 코어 718 unchanged. mypy 100 src OK.
+  - **사용자 "전부 자동" 요구 완전 충족**: 컬럼명 보존 트랜스폼(python 사용 패턴의 다수)은 catalog가 자동 column edge.
+
 - **2000-쿼리 fuzz harness + SchemaInspector inject로 `SELECT *` 실행 시점 해결 (Phase Z)** [ADR-0045] — 사용자 요청 *"2천 개 쿼리 임의 생성해서 단계적 테스트하며 보완"* + *"SchemaInspector로 SELECT * 해결"*. 두 작업이 자연스럽게 묶임 — fuzz가 잡은 실제 미스를 보완하는 게 신뢰성의 다음 단계이고, SELECT *는 결국 schema 없이는 못 푸는 마지막 opaque 케이스.
   - **`tests/unit/runtime/sql_corpus_generator.py`(신규)**: 22 generator(L1 baseline → L9 combined). 각 generator가 `(sql, expected_lineage)` 동시 합성 — ground-truth가 생성과정에서 따라옴. `Random(seed=42)` 고정 reproducible.
   - **`test_sql_lineage_fuzz.py`(신규)**: 2002 쿼리(22×91) round-robin. shape별 pass/fail 통계 출력. exact vs containment 분리.

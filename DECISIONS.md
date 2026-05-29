@@ -1492,4 +1492,42 @@ L1 출시 직후 사용자가 5개 회신:
 
 ---
 
+## ADR-0046: Schema-passthrough fallback — 어떤 트랜스폼이든 카탈로그 column edge 자동 생성
+
+**Date**: 2026-05-29
+**Status**: Accepted
+**Context**: 사용자 *"어떤 소스던 간에 결국 소스/타겟이 있잖아. 난 자동생성하고 싶은데 전부"*. 현황 점검:
+- **Asset row** (source/sink 등록): 트랜스폼과 무관하게 이미 자동 (`derive_lineage`).
+- **Asset edge** (source → sink): 트랜스폼과 무관하게 이미 자동.
+- **Column lineage**: `python` / `custom_python` / `sql_exec` 트랜스폼이 끼면 sink가 `opaque_assets`로 떨어져 column 매핑 없음.
+
+즉 카탈로그 자체는 잘 만들어지는데, *column 단위*가 트랜스폼 종류에 따라 비어 있다는 게 사용자가 본 문제. 사용자 코드의 정적 분석은 본질적으로 불가능하지만, 실전 python transform의 압도적 다수는 **컬럼 이름을 유지**하면서 값만 변형(필터·정규화·플래그 추가). 이 사실을 활용해 보수적 휴리스틱으로 column edge를 자동 생성.
+
+**Decision**:
+1. **`RunExecutor._augment_opaque_with_schema_passthrough`(신규)** — `_persist_column_lineage`에서 1차 derive 후 opaque sink가 남아 있으면 발동.
+2. **알고리즘** (per opaque sink):
+   - `derive_lineage(cfg)`로 source→sink edge 맵 확보(asset axis에서 이미 정확).
+   - sink + 모든 upstream source의 schema fetch (`ConnectionInspector.list_columns` — Phase Z의 `_build_schemas_for_star_queries`가 이미 seed로 가져온 schemas는 재사용, 모자란 것만 추가 fetch).
+   - **passthrough 규칙**: sink schema column name ∩ source schema column name의 각 컬럼에 대해 1:1 `ColumnEdge(downstream=sink_key.col, upstreams=(src_key.col,))` 생성.
+   - 여러 source가 같은 이름 컬럼을 가지면(JOIN 등) 멀티-upstream으로 모두 포함.
+3. **안전 가정**:
+   - 컬럼명이 **동일**한 경우만 attribute. 이름이 다르면 mapping 없음 — 부정확한 추측 안 함.
+   - sink가 SchemaInspector를 구현 안 하는 connector(Kafka/HTTP)면 schema fetch 실패 → 여전히 opaque(=정직).
+   - 정확히 일치하지 않는 컬럼(python이 새 컬럼 추가)은 sink 측에 mapping 없는 row로 남음 — 기존 `add_constant` 케이스와 동일 의미(컬럼 존재, upstream unknown).
+4. **best-effort**: passthrough 자체가 throw해도 run은 fail 안 되고 원래 opaque 결과를 유지. log warning.
+5. **호출 위치**: `derive_column_lineage` 결과 받은 직후. opaque 없으면 no-op (overhead 0).
+
+**Consequences**:
+- ✅ **카탈로그 column lineage 자동 생성률 대폭 향상**: python/custom_python/sql_exec 트랜스폼을 거치는 파이프라인도, 컬럼명이 보존되는 한(실전 패턴 다수) 자동 column edge.
+- ✅ **Source/sink schema 모두 사용 가능한 connector**(postgres/mysql/sqlite ↔ 같은 connector 부류) 사이에서 사실상 항상 column lineage 채움.
+- ✅ **거짓 양성 없음**: 컬럼명 일치만 사용 → "python transform이 a를 b로 rename"같은 케이스는 자동 못 잡지만 false edge도 안 만듦.
+- ✅ Asset axis는 종전대로 무조건 자동 — 트랜스폼 무관.
+- ⚠ **본질적 opaque 잔존**: HTTP/Kafka sink(schema 없음), source/sink 컬럼명 완전 disjoint, schema fetch 실패. 이런 케이스는 여전히 column_lineage_opaque=True (정직한 상태 표시).
+- ⚠ python이 의미적으로 컬럼 값을 크게 바꿔도(e.g. `email` → 해시) 우리는 같은 이름이면 passthrough로 간주. lineage는 "structural dependency" 의미라 보통 문제 없으나, semantic-aware lineage가 필요한 별도 use case가 있다면 사용자 명시 마커가 필요.
+- ✅ DB 마이그레이션 없음. 기존 `column_lineage_opaque` 플래그 + ColumnEdge 모델 그대로.
+
+**검증**: 코어 unit 718 (변경 없음 — 서버 측만 변경) + 서버 unit/it 431 → 432(+1 e2e: sqlite source + `custom_python` transform + sqlite sink → `column_lineage_opaque=False` + `id`/`name` 자동 1:1 edge). mypy 코어 60 + 서버 100 OK. ruff clean.
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

@@ -177,6 +177,7 @@ def _build_task(
         task.sink_key_columns = snk.key_columns
         task.sink_options = snk.model_dump(exclude=_SINK_OPTS_EXCLUDE)
         task.sink_pre_sql = snk.model_dump().get("pre_sql")
+        task.sink_auto_create_table = bool(snk.model_dump().get("auto_create_table"))
     else:
         task.sinks = [
             SinkSpec(
@@ -187,6 +188,7 @@ def _build_task(
                 options=snk.model_dump(exclude=_SINK_OPTS_EXCLUDE),
                 when=snk.when,
                 pre_sql=snk.model_dump().get("pre_sql"),
+                auto_create_table=bool(snk.model_dump().get("auto_create_table")),
             )
             for snk in sink_cfgs
         ]
@@ -283,6 +285,7 @@ def _build_graph_task(
                         mode=n.mode,
                         key_columns=n.key_columns,
                         options=n.model_dump(exclude=_GRAPH_NODE_EXCLUDE),
+                        auto_create_table=bool(n.model_dump().get("auto_create_table")),
                     ),
                 )
             )

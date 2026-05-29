@@ -62,6 +62,15 @@ class SinkConfig(BaseModel):
     # set, this sink only receives records the expression accepts; routing uses
     # first-match across the sink list, with ``when``-less sinks as the default.
     when: str | None = None
+    # Phase VV (ADR-0066, 2026-05-29): cross-DB replication. When ``True``
+    # and the sink connector implements :class:`SchemaWriter` *and* the
+    # source connector implements :class:`SchemaInspector`, the pipeline
+    # creates the sink table from the source's column schema before the
+    # first write — translated through :mod:`etl_plugins.core.type_mapping`
+    # so e.g. a postgres ``BIGINT`` becomes a sqlite ``INTEGER`` and
+    # round-trips cleanly. Default ``False`` keeps the existing behaviour
+    # (sink table must already exist).
+    auto_create_table: bool = False
 
 
 class TransformConfig(BaseModel):

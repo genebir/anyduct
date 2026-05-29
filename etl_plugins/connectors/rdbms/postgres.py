@@ -15,6 +15,7 @@ memory usage stays bounded for arbitrarily large result sets.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Iterator
 from typing import Any
 from uuid import uuid4
@@ -27,6 +28,12 @@ from etl_plugins.core.exceptions import ConnectError, ReadError, WriteError
 from etl_plugins.core.inspect import ColumnInfo
 from etl_plugins.core.record import Record
 from etl_plugins.core.registry import ConnectorRegistry
+
+# Identifier validation regexes for DDL string interpolation
+# (psycopg.sql.Identifier handles parameterised values; identifiers
+# don't accept placeholders, so we whitelist before substitution).
+_SAFE_IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_SAFE_QUALIFIED_IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$")
 
 
 @ConnectorRegistry.register("postgres")
@@ -117,16 +124,101 @@ class PostgresConnector(BatchSource, BatchSink):
             return [f"{schema}.{name}" for schema, name in cur.fetchall()]
 
     def list_columns(self, table: str) -> list[ColumnInfo]:
+        """Postgres column metadata.
+
+        Phase VV (ADR-0066): when a column declares precision/scale or a
+        character_maximum_length, fold them back into the returned type
+        string (``NUMERIC(10,2)`` rather than bare ``NUMERIC``,
+        ``VARCHAR(64)`` rather than ``character varying``). The
+        translator in :mod:`etl_plugins.core.type_mapping` then keeps
+        those specs across the dialect hop.
+        """
         schema, sep, name = table.rpartition(".")
         if not sep:
             schema, name = "public", table
         with self.connection.cursor() as cur:
             cur.execute(
-                "SELECT column_name, data_type FROM information_schema.columns "
-                "WHERE table_schema = %s AND table_name = %s ORDER BY ordinal_position",
+                "SELECT column_name, data_type, character_maximum_length, "
+                "numeric_precision, numeric_scale "
+                "FROM information_schema.columns "
+                "WHERE table_schema = %s AND table_name = %s "
+                "ORDER BY ordinal_position",
                 (schema, name),
             )
-            return [ColumnInfo(name=col, type=dtype) for col, dtype in cur.fetchall()]
+            out: list[ColumnInfo] = []
+            for col, dtype, char_len, prec, scale in cur.fetchall():
+                rendered = dtype
+                if char_len is not None and "char" in dtype:
+                    rendered = f"{dtype}({char_len})"
+                elif dtype == "numeric" and prec is not None:
+                    if scale is not None:
+                        rendered = f"{dtype}({prec},{scale})"
+                    else:
+                        rendered = f"{dtype}({prec})"
+                out.append(ColumnInfo(name=col, type=rendered))
+            return out
+
+    # ---------- SchemaWriter (Phase VV / ADR-0066, 2026-05-29) -------------
+
+    def ensure_table(
+        self,
+        table: str,
+        columns: list[ColumnInfo],
+        *,
+        if_exists: str = "skip",  # "skip" | "drop" | "error"
+    ) -> None:
+        """Create ``table`` from ``columns`` if it doesn't already exist.
+
+        The vendor type string of each column is normalised through
+        :mod:`etl_plugins.core.type_mapping` and rendered back in
+        postgres's vocabulary — so a sqlite ``INTEGER`` becomes ``INTEGER``,
+        a mysql ``DATETIME`` becomes ``TIMESTAMPTZ``, etc. ``schema.name``
+        is honoured; a bare name lands in ``public``.
+        """
+        from etl_plugins.core.type_mapping import normalize_db_type, render_canonical
+
+        if not _SAFE_QUALIFIED_IDENT.match(table):
+            raise WriteError(f"invalid table name for ensure_table: {table!r}")
+        if not columns:
+            raise WriteError(f"ensure_table({table!r}) requires a non-empty column list")
+
+        schema, sep, name = table.rpartition(".")
+        if not sep:
+            schema, name = "public", table
+
+        with self.connection.cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM information_schema.tables "
+                "WHERE table_schema = %s AND table_name = %s",
+                (schema, name),
+            )
+            already_exists = cur.fetchone() is not None
+        if already_exists:
+            if if_exists == "skip":
+                return
+            if if_exists == "error":
+                raise WriteError(f"table {table!r} already exists")
+            if if_exists == "drop":
+                with self.connection.cursor() as cur:
+                    cur.execute(f'DROP TABLE "{schema}"."{name}"')
+        elif if_exists not in {"skip", "drop", "error"}:
+            raise WriteError(
+                f"ensure_table: unknown if_exists={if_exists!r} " "(use 'skip', 'drop', or 'error')"
+            )
+
+        col_fragments: list[str] = []
+        for c in columns:
+            if not _SAFE_IDENT.match(c.name):
+                raise WriteError(
+                    f"ensure_table: invalid column name {c.name!r} "
+                    f"(must match {_SAFE_IDENT.pattern})"
+                )
+            spec = normalize_db_type(c.type or "")
+            pg_type = render_canonical(spec, dialect="postgres")
+            col_fragments.append(f'"{c.name}" {pg_type}')
+        ddl = f'CREATE TABLE "{schema}"."{name}" ({", ".join(col_fragments)})'
+        with self.connection.cursor() as cur:
+            cur.execute(ddl)
 
     # ---------- SqlExecutor (ADR-0035) -------------------------------------
 

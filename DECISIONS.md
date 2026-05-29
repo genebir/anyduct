@@ -2115,4 +2115,56 @@ L1 출시 직후 사용자가 5개 회신:
 
 ---
 
+## ADR-0066: Cross-DB replication — type mapping + 자동 sink table 생성
+
+**Date**: 2026-05-29
+**Status**: Accepted
+**Context**: 사용자 요청 *"DB간의 마이그레이션 및 테이블 복제 추가. 데이터 타입을 DB별로 잘 맞춰주고"*. 실제 운영 흔한 패턴: postgres OLTP → sqlite/mysql analytics, mysql → postgres 등 cross-DB 복제 + 자동 destination DDL. 기존엔 dest 테이블 수동 생성 + 타입 직접 매핑 필요 → 엔지니어가 one-off 스크립트 양산.
+
+**Decision**:
+1. **`etl_plugins/core/type_mapping.py`(신규)** — DB-agnostic 타입 매핑 모듈:
+   - **`CanonicalType` enum** — INTEGER/BIGINT/SMALLINT/REAL/DOUBLE/DECIMAL/TEXT/VARCHAR/BOOLEAN/TIMESTAMP/DATE/JSON/BLOB 13개. 작은 set + 새 dialect 추가는 dialect_ddl 한 entry로.
+   - **`TypeSpec(canonical, length, precision, scale)`** — VARCHAR/DECIMAL의 attribute 보존.
+   - **`normalize_db_type(raw)`** — 벤더 타입 문자열 → TypeSpec. 대소문자/공백/괄호 처리. unknown은 TEXT 안전 fallback.
+   - **`render_canonical(spec, dialect)`** — TypeSpec → 벤더-specific DDL. length/precision은 base 타입이 받을 때만 emit(sqlite의 VARCHAR→TEXT는 length 드롭).
+   - **dialect별 DDL 테이블**: sqlite / postgres / mysql 매핑. 향후 snowflake/duckdb는 한 entry 추가.
+2. **`etl_plugins/core/inspect.py`에 `SchemaWriter` Protocol** — SchemaInspector의 dual. `ensure_table(table, columns, *, if_exists="skip" | "drop" | "error")`. optional capability, runtime_checkable.
+3. **`SinkConfig.auto_create_table: bool = False`** — Pydantic 옵셔널 필드. True + sink가 SchemaWriter + source가 SchemaInspector → 자동 DDL.
+4. **`SinkSpec.auto_create_table` + `Task.sink_auto_create_table`** — 코어 dataclass에 forward. builder가 single-sink/fan-out 양 path 채움.
+5. **`Pipeline._auto_create_sink_tables(task, source, sinks)`** — `_run_pre_sql` 직전 호출. source.list_columns → 각 auto_create_table sink의 ensure_table. best-effort(예외는 silent skip — 다음 write가 더 명확한 에러).
+6. **sqlite + postgres + mysql connector에 `ensure_table` 구현** — 각자 dialect로 render. identifier 화이트리스트(`_SAFE_IDENT`).
+7. **`postgres.list_columns` 보강** — `character_maximum_length`/`numeric_precision`/`numeric_scale` 활용해서 VARCHAR(64) / NUMERIC(10,2) attribute 보존.
+
+**Type 매핑 표 (핵심 예)**:
+
+| Source vendor | Canonical | postgres | mysql | sqlite |
+|---|---|---|---|---|
+| `BIGINT` / `INT8` | BIGINT | `BIGINT` | `BIGINT` | `INTEGER` (affinity) |
+| `INTEGER` / `INT4` | INTEGER | `INTEGER` | `INT` | `INTEGER` |
+| `DOUBLE PRECISION` | DOUBLE | `DOUBLE PRECISION` | `DOUBLE` | `REAL` |
+| `NUMERIC(10,2)` | DECIMAL | `NUMERIC(10,2)` | `DECIMAL(10,2)` | `NUMERIC(10,2)` |
+| `VARCHAR(64)` | VARCHAR | `VARCHAR(64)` | `VARCHAR(64)` | `TEXT` (length 드롭) |
+| `TIMESTAMPTZ` / `DATETIME` | TIMESTAMP | `TIMESTAMPTZ` | `DATETIME` | `TEXT` (ISO 8601) |
+| `JSONB` / `JSON` | JSON | `JSONB` | `JSON` | `TEXT` |
+| `BOOLEAN` | BOOLEAN | `BOOLEAN` | `TINYINT(1)` | `INTEGER` |
+
+**Consequences**:
+- ✅ **운영 흔한 cross-DB 복제 무료**: `auto_create_table: true` 하나만 박으면 dest DDL 자동. 엔지니어 one-off 스크립트 양산 해소.
+- ✅ **타입 round-trip 정확**: postgres BIGINT → sqlite INTEGER → postgres BIGINT(다시 ensure_table) 모두 의도된 동작.
+- ✅ **확장성**: 새 connector(snowflake/duckdb/clickhouse) 추가 시 dialect_ddl 한 entry + ensure_table 구현으로 끝.
+- ✅ **Backward-compat**: SinkConfig.auto_create_table 기본 False → 기존 파이프라인 무영향. `_auto_create_sink_tables`는 best-effort라 capability 없는 connector(HTTP/Kafka)는 silent skip.
+- ✅ **PostgresConnector.list_columns 정밀도 향상**: precision/scale + character_maximum_length 추가 emit → cross-DB뿐 아니라 SchemaInspector REST에서도 더 정확한 정보.
+- ✅ 코어 unit 738 → 799 (+61 신규: type_mapping 모든 dialect/canonical 조합 50+ + sqlite ensure_table 6).
+- ⚠ **테스트 시점 PostgreSQL connector의 raw type 문자열은 lower-case** — `bigint` vs `BIGINT`. normalize는 대소문자 무관이라 무영향이지만 통합 테스트가 lower-case 기대.
+- ⚠ **JSON ↔ JSONB 변환은 connector write 책임**: PostgresConnector는 dict → JSONB 자동, SQLiteConnector는 dict → text 변환 필요(시나리오에서 명시적 json.dumps). 추후 별도 슬라이스에서 connector-level 자동 변환 가능.
+- ⚠ **list_columns 정밀도 보강은 postgres만**: mysql/sqlite도 같은 패턴으로 향후 보강 가능. 현재 mysql은 `data_type`만 반환(VARCHAR 길이는 별도 column).
+
+**검증**:
+- 코어 unit **799** (+61: type_mapping 50+ + sqlite ensure_table 6 + 기타).
+- 서버 it (조회 중).
+- 통합 it **2 신규**(postgres↔sqlite 양방향 cross-DB, testcontainers postgres).
+- mypy 코어 62 + 서버 100 OK. ruff clean. DB 마이그레이션 0(metadata DB 무변경). backward-compat 완전 유지.
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

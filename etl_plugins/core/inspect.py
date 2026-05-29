@@ -35,4 +35,28 @@ class SchemaInspector(Protocol):
     def list_columns(self, table: str) -> list[ColumnInfo]: ...
 
 
-__all__ = ["ColumnInfo", "SchemaInspector"]
+@runtime_checkable
+class SchemaWriter(Protocol):
+    """A connector that can create a table from a column schema (Phase VV,
+    2026-05-29).
+
+    The dual of :class:`SchemaInspector` — *Inspector* reads the layout
+    of an existing table; *Writer* creates a table from a desired layout.
+    Used by the cross-DB replication path: the source's
+    ``list_columns`` output is mapped through
+    :mod:`etl_plugins.core.type_mapping` and handed to the sink's
+    ``ensure_table`` so the sink table exists before the first
+    ``write``. Optional capability — connectors that can't issue DDL
+    (HTTP, Kafka, S3) don't implement it.
+    """
+
+    def ensure_table(
+        self,
+        table: str,
+        columns: list[ColumnInfo],
+        *,
+        if_exists: str = "skip",  # "skip" | "drop" | "error"
+    ) -> None: ...
+
+
+__all__ = ["ColumnInfo", "SchemaInspector", "SchemaWriter"]

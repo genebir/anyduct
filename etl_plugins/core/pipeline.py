@@ -90,6 +90,12 @@ class SinkSpec:
     # insert commit together — atomic delete-then-insert idempotency. RDBMS
     # sinks only; runs even on empty input (clears the partition).
     pre_sql: str | None = None
+    # Cross-DB replication (Phase VV / ADR-0066, 2026-05-29). When ``True``
+    # and the source connector implements :class:`SchemaInspector` and the
+    # sink connector implements :class:`SchemaWriter`, the pipeline
+    # creates the sink table from the source's schema before the first
+    # write — translated through :mod:`etl_plugins.core.type_mapping`.
+    auto_create_table: bool = False
 
 
 @dataclass(frozen=True)
@@ -188,6 +194,11 @@ class Task:
     sink_key_columns: list[str] | None = None
     sink_options: dict[str, Any] = field(default_factory=dict)
     sink_pre_sql: str | None = None
+    # Phase VV (ADR-0066, 2026-05-29): flat-sink mirror of
+    # ``SinkSpec.auto_create_table``. Builder forwards from
+    # ``SinkConfig.auto_create_table`` so single-sink configs also opt
+    # into cross-DB schema replication.
+    sink_auto_create_table: bool = False
     # Fan-out targets (ADR-0026). When non-empty these take precedence over the
     # flat ``sink*`` fields and the source is re-read once per sink.
     sinks: list[SinkSpec] = field(default_factory=list)
@@ -220,6 +231,7 @@ class Task:
                 key_columns=self.sink_key_columns,
                 options=self.sink_options,
                 pre_sql=self.sink_pre_sql,
+                auto_create_table=self.sink_auto_create_table,
             )
         ]
 
@@ -1058,6 +1070,70 @@ class Pipeline:
 
         return records_read, written, None
 
+    def _auto_create_sink_tables(
+        self,
+        task: Task,
+        source: Connector,
+        sinks: list[tuple[SinkSpec, BatchSink]],
+    ) -> None:
+        """Phase VV (ADR-0066): create any sink tables flagged with
+        ``auto_create_table=True`` from the source's schema.
+
+        This is the cross-DB replication path. The flow is:
+
+        1. find the source's table name (``task.source_options['table']``
+           or the first ``FROM`` clause of ``task.query``);
+        2. ask the source for its columns via the optional
+           :class:`SchemaInspector` capability;
+        3. for each ``auto_create_table`` sink, call its
+           :class:`SchemaWriter.ensure_table` with the columns. The
+           sink's own implementation translates the vendor type strings
+           through :mod:`etl_plugins.core.type_mapping`.
+
+        Best-effort: missing capabilities, an un-parseable query, or a
+        non-existent source table degrade to "no auto-create" rather
+        than raising. The sink ``write`` later in the pipeline will
+        produce a much more useful error than a half-built schema.
+        """
+        from etl_plugins.core.inspect import SchemaInspector, SchemaWriter
+
+        wanted = [(spec, sink) for spec, sink in sinks if spec.auto_create_table]
+        if not wanted:
+            return
+        if not isinstance(source, SchemaInspector):
+            return
+
+        src_table = task.source_options.get("table") if task.source_options else None
+        if not src_table and task.query:
+            try:
+                from etl_plugins.runtime.sql_lineage import extract_referenced_tables
+
+                tables = extract_referenced_tables(task.query)
+                src_table = tables[0] if tables else None
+            except Exception:
+                src_table = None
+        if not src_table:
+            return
+
+        try:
+            columns = source.list_columns(src_table)
+        except Exception:
+            return
+        if not columns:
+            return
+
+        for spec, sink in wanted:
+            if not isinstance(sink, SchemaWriter):
+                continue
+            if not spec.table:
+                continue
+            # Best-effort: a connector-specific quirk shouldn't abort
+            # the run before a write has even been tried. The sink's
+            # write will raise a clearer "no such table" if the DDL
+            # silently failed.
+            with contextlib.suppress(Exception):
+                sink.ensure_table(spec.table, columns)
+
     def _run_pre_sql(self, task: Task, connectors: dict[str, Connector]) -> None:
         """Execute the task's pre-load SQL actions once, in order (ADR-0035)."""
         for action in task.pre_sql:
@@ -1102,6 +1178,13 @@ class Pipeline:
             if not isinstance(sink, BatchSink):
                 raise TaskError(f"Sink '{spec.name}' is not a BatchSink")
             sinks.append((spec, sink))
+
+        # Phase VV (ADR-0066, 2026-05-29): cross-DB replication. Any sink
+        # spec with ``auto_create_table=True`` triggers a one-shot
+        # ``source.list_columns(...) → sink.ensure_table(...)`` before
+        # the first read. We translate vendor type strings between
+        # dialects in ``ensure_table`` itself (per :mod:`type_mapping`).
+        self._auto_create_sink_tables(task, source, sinks)
 
         # Pre-load SQL (ADR-0035): run once, before reading, so a DELETE clears
         # the target rows this run re-inserts → delete-then-insert idempotency.

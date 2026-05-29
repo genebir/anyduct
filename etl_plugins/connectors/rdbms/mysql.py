@@ -18,6 +18,7 @@ usage stays bounded for arbitrarily large result sets.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Iterator
 from typing import Any
 
@@ -29,6 +30,10 @@ from etl_plugins.core.exceptions import ConnectError, ReadError, WriteError
 from etl_plugins.core.inspect import ColumnInfo
 from etl_plugins.core.record import Record
 from etl_plugins.core.registry import ConnectorRegistry
+
+# DDL identifier whitelist — identifiers don't accept parameterised
+# placeholders, so we validate before string interpolation.
+_SAFE_IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 @ConnectorRegistry.register("mysql")
@@ -122,6 +127,65 @@ class MySQLConnector(BatchSource, BatchSink):
                 (table,),
             )
             return [ColumnInfo(name=col, type=dtype) for col, dtype in cur.fetchall()]
+
+    # ---------- SchemaWriter (Phase VV / ADR-0066, 2026-05-29) -------------
+
+    def ensure_table(
+        self,
+        table: str,
+        columns: list[ColumnInfo],
+        *,
+        if_exists: str = "skip",  # "skip" | "drop" | "error"
+    ) -> None:
+        """Create ``table`` from ``columns`` if it doesn't already exist.
+
+        Vendor type strings get normalised through
+        :mod:`etl_plugins.core.type_mapping` and rendered in mysql's
+        vocabulary — postgres ``BIGINT`` stays ``BIGINT``, sqlite
+        ``INTEGER`` becomes ``INT``, ``TIMESTAMPTZ`` becomes ``DATETIME``,
+        etc.
+        """
+        from etl_plugins.core.type_mapping import normalize_db_type, render_canonical
+
+        if self._conn is None or not self._conn.open:
+            raise ConnectError("MySQLConnector is not connected")
+        if not _SAFE_IDENT.match(table):
+            raise WriteError(f"invalid table name for ensure_table: {table!r}")
+        if not columns:
+            raise WriteError(f"ensure_table({table!r}) requires a non-empty column list")
+
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM information_schema.tables "
+                "WHERE table_schema = DATABASE() AND table_name = %s",
+                (table,),
+            )
+            already_exists = cur.fetchone() is not None
+        if already_exists:
+            if if_exists == "skip":
+                return
+            if if_exists == "error":
+                raise WriteError(f"table {table!r} already exists")
+            if if_exists == "drop":
+                with self._conn.cursor() as cur:
+                    cur.execute(f"DROP TABLE `{table}`")
+                self._conn.commit()
+        elif if_exists not in {"skip", "drop", "error"}:
+            raise WriteError(
+                f"ensure_table: unknown if_exists={if_exists!r} " "(use 'skip', 'drop', or 'error')"
+            )
+
+        col_fragments: list[str] = []
+        for c in columns:
+            if not _SAFE_IDENT.match(c.name):
+                raise WriteError(f"ensure_table: invalid column name {c.name!r}")
+            spec = normalize_db_type(c.type or "")
+            mysql_type = render_canonical(spec, dialect="mysql")
+            col_fragments.append(f"`{c.name}` {mysql_type}")
+        ddl = f"CREATE TABLE `{table}` ({', '.join(col_fragments)})"
+        with self._conn.cursor() as cur:
+            cur.execute(ddl)
+        self._conn.commit()
 
     # ---------- SqlExecutor (ADR-0035) -------------------------------------
 

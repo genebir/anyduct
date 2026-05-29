@@ -9,6 +9,17 @@
 
 ## [Unreleased]
 
+### Added
+- **Cross-DB replication — type mapping + 자동 sink table 생성 (Phase VV)** [ADR-0066] — 사용자 요청 *"DB 간 마이그레이션 + 테이블 복제, 데이터 타입 DB별로 매핑"*. 새 기능:
+  - **`etl_plugins/core/type_mapping.py`(신규)**: `CanonicalType` enum 13개 + `TypeSpec` + `normalize_db_type` + `render_canonical`. dialect 매핑 테이블(sqlite/postgres/mysql). 새 dialect는 한 entry로 추가.
+  - **`SchemaWriter` Protocol** (`etl_plugins/core/inspect.py`): SchemaInspector의 dual. `ensure_table(table, columns, *, if_exists)` capability.
+  - **`SinkConfig.auto_create_table: bool = False`** — Pydantic 옵셔널. True + source가 SchemaInspector + sink가 SchemaWriter → 자동 DDL.
+  - **`Pipeline._auto_create_sink_tables`** — `_run_pre_sql` 직전 호출, best-effort.
+  - **sqlite + postgres + mysql connector에 `ensure_table` 구현** — 각자 dialect render + identifier 화이트리스트.
+  - **`postgres.list_columns` 보강** — character_maximum_length / numeric_precision / numeric_scale 활용 → `VARCHAR(64)` / `NUMERIC(10,2)` attribute 보존.
+  - **타입 매핑 핵심**: `BIGINT`↔postgres `BIGINT`/mysql `BIGINT`/sqlite `INTEGER`. `TIMESTAMPTZ`↔postgres `TIMESTAMPTZ`/mysql `DATETIME`/sqlite `TEXT`. `JSONB`↔postgres `JSONB`/mysql `JSON`/sqlite `TEXT`. `BOOLEAN`↔postgres `BOOLEAN`/mysql `TINYINT(1)`/sqlite `INTEGER`. `VARCHAR(n)`↔postgres/mysql `VARCHAR(n)`/sqlite `TEXT`(length 드롭).
+  - **검증**: 코어 unit 738→799(+61: type_mapping 50+ + sqlite ensure_table 6). 서버 it 472→473(+1 sqlite→sqlite e2e). 통합 it 2 신규(postgres↔sqlite 양방향 testcontainers). mypy 코어 62 + 서버 100 OK. ruff clean. DB 마이그레이션 0(metadata DB 무변경). backward-compat 완전 유지(auto_create_table 기본값 False).
+
 ### Added/Fixed
 - **Analyst exploration journey + AssetSummary 누락 필드 보완 (Phase UU)** [ADR-0065] — 두 번째 사용자 페르소나(분석가). Viewer 권한으로 catalog 탐색 5-step:
   - **UU1 — Analyst catalog 탐색**: Owner가 2-stage chain 실행 → 분석가가 list → lineage → column drill-down → materializations → Viewer-금지 action 403.

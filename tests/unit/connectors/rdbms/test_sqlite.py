@@ -471,5 +471,98 @@ def test_write_pre_sql_runs_on_empty_input(db_path: Path) -> None:
     assert rows == [2]  # the DELETE ran despite 0 input records
 
 
+# ---------- ensure_table (Phase VV / ADR-0066, 2026-05-29) ----------
+
+
+def test_ensure_table_creates_table_from_columns(db_path: Path) -> None:
+    """``ensure_table`` translates vendor types through the canonical
+    table and creates the sqlite table. Type round-trip: postgres-style
+    ``BIGINT`` arrives as sqlite's ``INTEGER`` affinity."""
+    from etl_plugins.core.inspect import ColumnInfo
+
+    conn = SQLiteConnector(database=str(db_path))
+    with conn:
+        conn.ensure_table(
+            "replicated",
+            [
+                ColumnInfo(name="id", type="BIGINT"),  # postgres-flavoured
+                ColumnInfo(name="payload", type="JSONB"),  # → TEXT on sqlite
+                ColumnInfo(name="created_at", type="TIMESTAMPTZ"),  # → TEXT
+                ColumnInfo(name="name", type="VARCHAR(255)"),  # → TEXT
+            ],
+        )
+    with sqlite3.connect(db_path) as raw:
+        rows = raw.execute('PRAGMA table_info("replicated")').fetchall()
+    by_name = {r[1]: r[2] for r in rows}
+    assert by_name == {
+        "id": "INTEGER",
+        "payload": "TEXT",
+        "created_at": "TEXT",
+        "name": "TEXT",
+    }
+
+
+def test_ensure_table_skip_when_exists(db_path: Path) -> None:
+    """Default ``if_exists='skip'`` is a no-op when the table is already there."""
+    from etl_plugins.core.inspect import ColumnInfo
+
+    with sqlite3.connect(db_path) as raw:
+        raw.execute("CREATE TABLE pre (id INTEGER)")
+        raw.executemany("INSERT INTO pre VALUES (?)", [(1,), (2,)])
+        raw.commit()
+    conn = SQLiteConnector(database=str(db_path))
+    with conn:
+        # A different schema — the helper must skip rather than rebuild.
+        conn.ensure_table("pre", [ColumnInfo(name="x", type="TEXT")])
+    with sqlite3.connect(db_path) as raw:
+        rows = sorted(r[0] for r in raw.execute("SELECT id FROM pre"))
+    assert rows == [1, 2]
+
+
+def test_ensure_table_drop_recreates(db_path: Path) -> None:
+    """``if_exists='drop'`` wipes the old table first."""
+    from etl_plugins.core.inspect import ColumnInfo
+
+    with sqlite3.connect(db_path) as raw:
+        raw.execute("CREATE TABLE t (old_col TEXT)")
+        raw.commit()
+    conn = SQLiteConnector(database=str(db_path))
+    with conn:
+        conn.ensure_table(
+            "t",
+            [ColumnInfo(name="id", type="INTEGER"), ColumnInfo(name="value", type="TEXT")],
+            if_exists="drop",
+        )
+    with sqlite3.connect(db_path) as raw:
+        cols = {r[1] for r in raw.execute('PRAGMA table_info("t")').fetchall()}
+    assert cols == {"id", "value"}
+
+
+def test_ensure_table_error_when_exists(db_path: Path) -> None:
+    """``if_exists='error'`` raises if the table already exists."""
+    from etl_plugins.core.inspect import ColumnInfo
+
+    with sqlite3.connect(db_path) as raw:
+        raw.execute("CREATE TABLE t (id INTEGER)")
+        raw.commit()
+    conn = SQLiteConnector(database=str(db_path))
+    with conn, pytest.raises(WriteError, match="already exists"):
+        conn.ensure_table("t", [ColumnInfo(name="id", type="INTEGER")], if_exists="error")
+
+
+def test_ensure_table_rejects_invalid_table_name(db_path: Path) -> None:
+    from etl_plugins.core.inspect import ColumnInfo
+
+    conn = SQLiteConnector(database=str(db_path))
+    with conn, pytest.raises(WriteError, match="invalid table name"):
+        conn.ensure_table("bad name; DROP", [ColumnInfo(name="x", type="TEXT")])
+
+
+def test_ensure_table_rejects_empty_columns(db_path: Path) -> None:
+    conn = SQLiteConnector(database=str(db_path))
+    with conn, pytest.raises(WriteError, match="non-empty column list"):
+        conn.ensure_table("t", [])
+
+
 def _unused(_: Any) -> None:
     """Silence ruff F401 for the type-only Any import."""

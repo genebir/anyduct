@@ -109,6 +109,63 @@ class SQLiteConnector(BatchSource, BatchSink):
         rows = self.connection.execute(f'PRAGMA table_info("{table}")').fetchall()
         return [ColumnInfo(name=r["name"], type=r["type"] or "") for r in rows]
 
+    # ---------- SchemaWriter (Phase VV / ADR-0066, 2026-05-29) -------------
+
+    def ensure_table(
+        self,
+        table: str,
+        columns: list[ColumnInfo],
+        *,
+        if_exists: str = "skip",  # "skip" | "drop" | "error"
+    ) -> None:
+        """Create ``table`` from ``columns`` if it doesn't already exist.
+
+        Each column's vendor type string is normalised through
+        :mod:`etl_plugins.core.type_mapping` and rendered back in sqlite's
+        type-affinity vocabulary. Pre-existing tables are left untouched
+        when ``if_exists='skip'`` (the common case for resumable jobs);
+        ``'drop'`` does a fresh recreate; ``'error'`` raises if the table
+        already exists.
+        """
+        from etl_plugins.core.type_mapping import normalize_db_type, render_canonical
+
+        if not _SAFE_IDENT.match(table):
+            raise WriteError(f"invalid table name for ensure_table: {table!r}")
+        if not columns:
+            raise WriteError(f"ensure_table({table!r}) requires a non-empty column list")
+
+        already_exists = bool(
+            self.connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                (table,),
+            ).fetchone()
+        )
+        if already_exists:
+            if if_exists == "skip":
+                return
+            if if_exists == "error":
+                raise WriteError(f"table {table!r} already exists")
+            if if_exists == "drop":
+                self.connection.execute(f'DROP TABLE "{table}"')
+                self.connection.commit()
+        elif if_exists not in {"skip", "drop", "error"}:
+            raise WriteError(
+                f"ensure_table: unknown if_exists={if_exists!r} " "(use 'skip', 'drop', or 'error')"
+            )
+
+        col_fragments: list[str] = []
+        for c in columns:
+            if not _SAFE_IDENT.match(c.name):
+                raise WriteError(
+                    f"ensure_table: invalid column name {c.name!r} (must match {_SAFE_IDENT.pattern})"
+                )
+            spec = normalize_db_type(c.type or "")
+            sqlite_type = render_canonical(spec, dialect="sqlite")
+            col_fragments.append(f'"{c.name}" {sqlite_type}')
+        ddl = f'CREATE TABLE "{table}" ({", ".join(col_fragments)})'
+        self.connection.execute(ddl)
+        self.connection.commit()
+
     # ---------- SqlExecutor (ADR-0035) -------------------------------------
 
     def execute_statement(self, statement: str) -> int:

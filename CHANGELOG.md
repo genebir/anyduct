@@ -10,6 +10,11 @@
 ## [Unreleased]
 
 ### Added
+- **Cross-DB fan-out — sink별 `auto_create_table` 독립 동작 검증 (Phase ZZ)** [ADR-0070] — 운영 흔한 fan-out 패턴:
+  - ZZ1: source orders → 2 sinks(analytics with auto_create + warehouse 기존 테이블). analytics는 자동 생성(id, amount), warehouse는 untouched(id, amount, batch 그대로).
+  - Sink별 flag 독립 적용 + 기존 테이블 보호 확인.
+  - 검증: 서버 it 475→476(+1).
+
 - **빌더 UI에 `auto_create_table` 토글 노출 + boolean FieldKind (Phase YY)** [ADR-0069] — cross-DB migration의 UX 마지막 1마일:
   - **FieldDef에 `kind: "boolean"` 신규** — defaultValue 옵셔널. wire shape true/false, false는 serializer가 drop(`onChange(e.target.checked || undefined)`).
   - **Properties panel renderer**: `<input type="checkbox">` + label, accent color.

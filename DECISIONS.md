@@ -2243,7 +2243,28 @@ L1 출시 직후 사용자가 5개 회신:
 - ✅ Backward-compat: 새 필드 옵셔널 + 기본 false. 옛 파이프라인 무영향.
 - ⚠ **Mongo / S3 / Kafka sink는 미포함**: SchemaWriter 미구현. 추후 schema registry / object schema 슬라이스에서 가능.
 
-**검증**: web typecheck(tsc) clean. 코어 unit 799 unchanged. 서버 it (회귀 진행 중). DB 마이그레이션 0. backward-compat 완전 유지.
+**검증**: web typecheck(tsc) clean. 코어 unit 799 unchanged. 서버 it 475 회귀 green. DB 마이그레이션 0. backward-compat 완전 유지.
+
+---
+
+## ADR-0070: Cross-DB fan-out — sink별 `auto_create_table` 독립 동작 검증
+
+**Date**: 2026-05-29
+**Status**: Accepted
+**Context**: 운영 흔한 패턴: 같은 source를 두 destination(analytics sandbox + warehouse)으로 fan-out, 한 곳은 새 테이블 자동 생성, 다른 곳은 기존 테이블 유지. ADR-0066/0068의 `auto_create_table`이 sink별 독립 적용되는지 sample-data로 확인.
+
+**Decision**:
+1. **`test_cross_db_fanout_scenario.py`(신규)** — ZZ1: 동일 source → 2 sinks:
+   - Sink #1 (`analytics`): fresh sqlite file, `orders_copy` 없음, `auto_create_table: true` → 자동 생성.
+   - Sink #2 (`warehouse`): 이미 `orders_copy(id, amount, batch)` 존재, flag 없음 → untouched.
+2. **검증**: 양 sink에 데이터 정상 write + analytics는 `(id, amount)`만 / warehouse는 기존 `(id, amount, batch)` 그대로.
+
+**Consequences**:
+- ✅ **Sink별 독립 동작 확인**: 운영자가 fan-out 시 일부 sink만 자동 생성 가능.
+- ✅ **기존 테이블 보호**: flag 없는 sink는 절대 ALTER 안 함.
+- ✅ DB 마이그레이션 0. 신규 e2e만.
+
+**검증**: 서버 it 475→476(+1 ZZ1). DB 마이그레이션 0.
 
 ---
 

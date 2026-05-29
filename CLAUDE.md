@@ -117,7 +117,9 @@ uv run mypy etl_plugins
 
 ## 5. 현재 단계
 
-> **최신 마일스톤 (2026-05-29): Connection 실패 시나리오 — catalog clean 정책 보장 (Phase OO, ADR-0059).** 운영 흔한 실패 2종: OO1(invalid db path → connect 실패), OO2(source table missing → read 실패). 둘 다 run.status=FAILED + error_class/error_message 채워짐 + 카탈로그 empty. transform fail(FF/F) + DLQ fail(II) + connect fail(OO1) + read fail(OO2) 4-stage 모두 같은 "no half-written catalog rows" posture 통합 검증. 서버 it 459→461(+2). 코어 738 unchanged. mypy 코어 61 + 서버 100 OK. ruff clean. DB 마이그레이션 0.
+> **최신 마일스톤 (2026-05-29): Pipeline evolution 시나리오 — config 변경 시 catalog 동작 명문화 (Phase PP, ADR-0060).** 운영 흔한 패턴 검증: PP1(v1 sink:stage_v1 → v2 sink:stage_v2, catalog에 둘 다 보유 + 각자 materialization 1개 + v1 자연스럽게 stale), PP2(v1 raw → v2 raw JOIN dim_country, src/dim_country 자동 등록 + edge 추가 + sink materialization 1→2). Catalog evolution 정책 명문화: 자산 immutable/append-only + 새 자산 자동 등록(Phase X 후속의 extract_referenced_tables) + edge upsert + materialization run-per-row. 서버 it 461→463(+2). 코어 738 unchanged. mypy 코어 61 + 서버 100 OK. ruff clean. DB 마이그레이션 0.
+>
+> **이전 마일스톤 (2026-05-29): Connection 실패 시나리오 — catalog clean 정책 보장 (Phase OO, ADR-0059).** 운영 흔한 실패 2종: OO1(invalid db path → connect 실패), OO2(source table missing → read 실패). 둘 다 run.status=FAILED + error_class/error_message 채워짐 + 카탈로그 empty. transform fail(FF/F) + DLQ fail(II) + connect fail(OO1) + read fail(OO2) 4-stage 모두 같은 "no half-written catalog rows" posture 통합 검증. 서버 it 459→461(+2). 코어 738 unchanged. mypy 코어 61 + 서버 100 OK. ruff clean. DB 마이그레이션 0.
 >
 > **이전 마일스톤 (2026-05-29): Sensors freshness 시나리오 — 시간 기반 auto-materialize sample-data e2e (Phase NN, ADR-0058).** ADR-0038의 `freshness_sla_minutes` 동작 검증: NN1(SLA 60분 + last_materialized_at 2시간 전 강제 → `_tick_freshness` fired=1 + PENDING run에 `triggered_by: freshness` stamp + drain 시 asset refresh), NN2(SLA 60분 + 최근 materialized → fired=0, 건강한 pipeline 큐 storm 안 함). 시간 시뮬 패턴(`Asset.last_materialized_at` + `Run.created_at` 직접 UPDATE)으로 외부 wall-clock mock 불필요. 향후 시간 기반 e2e에서 재사용 가능. 서버 it 457→459(+2). 코어 738 unchanged. mypy 코어 61 + 서버 100 OK. ruff clean. DB 마이그레이션 0.
 >

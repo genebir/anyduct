@@ -10,6 +10,12 @@
 ## [Unreleased]
 
 ### Added
+- **Pipeline evolution 시나리오 — config 변경 시 catalog 동작 명문화 (Phase PP)** [ADR-0060] — 운영자가 pipeline config 변경 시 catalog가 어떻게 변화를 반영하는지:
+  - **PP1 — Sink table rename**: v1 sink:stage_v1 → v2 sink:stage_v2. catalog에 *둘 다* 보유, 각자 materialization 1개. v1은 자연스럽게 stale(last_materialized_at 안 갱신).
+  - **PP2 — Source JOIN dimension 추가**: v1 raw만 → v2 raw JOIN dim_country. v2 run 후 src/dim_country 자동 등록(Phase X 후속) + edge 자동 추가. Sink는 동일 identity라 materialization 1→2.
+  - **catalog evolution 정책 명문화**: 자산 immutable/append-only / 새 자산 자동 등록 / edge upsert / materialization run-per-row.
+  - **검증**: 코어 738 unchanged. 서버 it 461→463(+2). DB 마이그레이션 0.
+
 - **Connection 실패 시나리오 — catalog clean 정책 보장 (Phase OO)** [ADR-0059] — 운영 흔한 실패 2종에서 catalog가 항상 깨끗 유지:
   - **OO1 — Invalid database path**: 잘못된 path → connect 실패 → run failed + error_class/error_message 채워짐 + 카탈로그 empty.
   - **OO2 — Source table missing**: 유효한 db이지만 raw table 없음 → read 실패 → run failed + error_message에 table 정보 + 카탈로그 empty.

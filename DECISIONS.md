@@ -1923,4 +1923,40 @@ L1 출시 직후 사용자가 5개 회신:
 
 ---
 
+## ADR-0060: Pipeline evolution 시나리오 — config 변경 시 catalog 동작 명문화
+
+**Date**: 2026-05-29
+**Status**: Accepted
+**Context**: 운영자가 pipeline config을 자주 편집(sink table 이름 변경, JOIN dimension 추가, source 쿼리 확장 등). 새 `PipelineVersion`이 생성되고 다음 run이 새 cfg로 실행. 카탈로그가 **어떻게 변화를 반영**하는지 명문화 부족:
+- 옛 자산은 어떻게? 그대로 남나? stale 표시?
+- 새 자산은 어떻게 등록되나?
+- materialization 카운트는 어떻게 분리되나?
+- source 쿼리 확장 시 새 input asset이 자동 등록되나?
+
+운영 신뢰성과 카탈로그 추적성 직결.
+
+**Decision**:
+1. **`test_pipeline_evolution_scenarios.py`(신규)** — 2 시나리오 e2e:
+   - **PP1 — Sink table rename**: v1 `sink: stage_v1` → v2 `sink: stage_v2`. 두 run 후 catalog가 `dst/stage_v1` + `dst/stage_v2` *둘 다* 보유. 각자 materialization 1개씩(no double counting). v1 row의 `last_materialized_at`은 v2 시점에 갱신 안 됨 → 자연스럽게 stale.
+   - **PP2 — Source JOIN dimension 추가**: v1 source=raw → v2 source=raw JOIN dim_country. v2 run 후 catalog에 `src/dim_country` 자동 등록(Phase X 후속의 `extract_referenced_tables`) + edge `src/dim_country → dst/joined`. Sink row 같은 identity(동일 connection/table)라 materialization 1→2.
+2. **catalog evolution 정책 명문화**:
+   - **자산 row는 immutable / append-only**: 옛 자산은 절대 삭제 안 함. 옛 materialization 그대로 보존.
+   - **새 자산 자동 등록**: 새 cfg가 참조하는 base table은 자동으로 input asset로 추가(Phase X 후속).
+   - **Edge는 매 run마다 upsert**: 같은 (upstream, downstream) 조합이면 한 row, 중복 없음.
+   - **Materialization은 run-per-row**: 같은 자산에 대해 각 run마다 1 entry.
+3. **`_add_pipeline_version` helper**: `is_current=False` 옛 row + 새 row `is_current=True` 패턴 — API의 `PipelineRepository.ensure_version` 동작 mirror.
+
+**Consequences**:
+- ✅ **운영 마이그레이션 추적성**: 옛 자산이 catalog에 남아서 "이 자산 언제부터 쓰지 않았나?" 답 가능.
+- ✅ **새 dimension 자동 catch**: source 쿼리 확장 시 운영자가 수동으로 dimension 등록할 필요 없음.
+- ✅ **Materialization 정확성**: run-per-row이므로 시간순 audit trail이 정확.
+- ✅ **PipelineVersion immutability와 일관**: 옛 version의 lineage는 보존, 새 version의 lineage 추가. 양쪽 모두 활용 가능.
+- ✅ DB 마이그레이션 0. 신규 e2e만.
+- ⚠ **옛 자산 stale 표시 자동화 부재**: 운영자가 직접 "이 자산 deprecated" 마킹해야 정리됨. 향후 슬라이스: PipelineVersion config에서 사라진 sink는 자동 archived flag 추가 가능.
+- ⚠ **JOIN으로 새로 register된 input asset의 materialization은 없음**: dim_country는 input이지 sink가 아니라 lineage emit에서 last_materialized_at 갱신 안 됨. 정상 동작(읽기만 함).
+
+**검증**: 코어 unit 738 unchanged. 서버 it 461→463(+2 PP1/PP2). mypy 코어 61 + 서버 100 OK. ruff clean. DB 마이그레이션 0.
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

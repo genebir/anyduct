@@ -284,10 +284,19 @@ class RunExecutor:
                         # materialized + edges, then auto-trigger downstream
                         # pipelines that consume them. Best-effort — a catalog
                         # hiccup must not flip a successful run to failed.
-                        lineage = self._lineage_for(version, log)
-                        if lineage is not None:
+                        #
+                        # Phase MM (ADR-0057, 2026-05-29): resolve workspace
+                        # vars *before* deriving lineage so asset keys reflect
+                        # the resolved table names the pipeline actually
+                        # wrote to.
+                        lineage, resolved_cfg = await self._lineage_for_resolved(
+                            session, run, version, log
+                        )
+                        if lineage is not None and resolved_cfg is not None:
                             await self._persist_lineage(session, run, result, lineage, log)
-                            await self._persist_column_lineage(session, run, version, lineage, log)
+                            await self._persist_column_lineage(
+                                session, run, version, lineage, log, resolved_cfg=resolved_cfg
+                            )
                             await self._trigger_asset_consumers(session, run, lineage, log)
                         # Call-pipeline (ADR-0029): enqueue downstream pipelines
                         # on success, fire-and-forget. Same transaction as the
@@ -410,7 +419,14 @@ class RunExecutor:
 
     def _lineage_for(self, version: PipelineVersion, log: Any) -> AssetLineage | None:
         """Derive the run's static asset lineage from config. ``None`` on any
-        parse/derive error (best-effort — lineage never fails a run)."""
+        parse/derive error (best-effort — lineage never fails a run).
+
+        Note: this overload uses the raw ``config_json`` without resolving
+        workspace variables. Callers that need resolved asset keys (e.g.
+        when the pipeline references ``${var.target_table}``) should use
+        :meth:`_lineage_for_resolved` instead, which is the path the
+        success branch in :meth:`execute` takes.
+        """
         from etl_plugins.runtime.lineage import derive_lineage
 
         try:
@@ -418,6 +434,50 @@ class RunExecutor:
         except Exception as e:
             log.warning("run.lineage_derive_failed", error_class=type(e).__name__, error=str(e))
             return None
+
+    async def _lineage_for_resolved(
+        self,
+        session: AsyncSession,
+        run: Run,
+        version: PipelineVersion,
+        log: Any,
+    ) -> tuple[AssetLineage | None, PipelineConfig | None]:
+        """Resolve workspace vars + derive lineage from the resolved config.
+
+        Returns ``(lineage, cfg)`` so the caller can reuse the resolved
+        config for column-lineage emission (which would otherwise
+        re-resolve and risk drift). Phase MM (ADR-0057, 2026-05-29):
+        without this resolution step the catalog asset keys retained
+        unresolved ``${var.name}`` placeholders even though the pipeline
+        wrote to the *resolved* table — the catalog disagreed with
+        reality, a silent-correctness bug.
+        """
+        from etl_plugins.runtime.lineage import derive_lineage
+
+        try:
+            global_vars = await WorkspaceVariableRepository(session).as_dict(
+                workspace_id=run.workspace_id
+            )
+            cfg_dict = resolve_config_variables(version.config_json, extra=global_vars)
+            cfg = PipelineConfig.model_validate(cfg_dict)
+        except Exception as e:
+            log.warning(
+                "run.lineage_derive_failed",
+                error_class=type(e).__name__,
+                error=str(e),
+                phase="resolve_or_validate",
+            )
+            return None, None
+        try:
+            return derive_lineage(cfg), cfg
+        except Exception as e:
+            log.warning(
+                "run.lineage_derive_failed",
+                error_class=type(e).__name__,
+                error=str(e),
+                phase="derive",
+            )
+            return None, cfg
 
     async def _persist_lineage(
         self,
@@ -451,6 +511,8 @@ class RunExecutor:
         version: PipelineVersion,
         lineage: AssetLineage,
         log: Any,
+        *,
+        resolved_cfg: PipelineConfig | None = None,
     ) -> None:
         """Record per-column lineage for this run's output assets (ADR-0041 J2).
 
@@ -466,21 +528,30 @@ class RunExecutor:
         the star projection into real column edges instead of marking the
         sink opaque — closing the last "I just don't know" path in the
         lineage axis.
+
+        Phase MM (ADR-0057, 2026-05-29): callers in the success path pass
+        ``resolved_cfg`` so column-asset keys match the asset-axis
+        lineage (which already resolved workspace variables). Without
+        this, column rows would be attached to the *unresolved*
+        ``${var.X}`` key and not find their asset row.
         """
         from etl_plugins.runtime.column_lineage import derive_column_lineage
         from etlx_server.assets.repository import AssetRepository
 
         if not lineage.outputs:
             return
-        try:
-            cfg = PipelineConfig.model_validate(version.config_json)
-        except Exception as e:  # parse or unsupported shape — fall back silently
-            log.warning(
-                "run.column_lineage_derive_failed",
-                error_class=type(e).__name__,
-                error=str(e),
-            )
-            return
+        if resolved_cfg is not None:
+            cfg = resolved_cfg
+        else:
+            try:
+                cfg = PipelineConfig.model_validate(version.config_json)
+            except Exception as e:  # parse or unsupported shape — fall back silently
+                log.warning(
+                    "run.column_lineage_derive_failed",
+                    error_class=type(e).__name__,
+                    error=str(e),
+                )
+                return
         schemas = await self._build_schemas_for_star_queries(session, run, version, log)
         try:
             col_lineage = derive_column_lineage(cfg, schemas=schemas)

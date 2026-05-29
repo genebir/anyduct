@@ -9,6 +9,14 @@
 
 ## [Unreleased]
 
+### Fixed
+- **Workspace variables 시나리오 + lineage emit silent bug 보완 (Phase MM)** [ADR-0057] — sample-data dogfood 중 발견된 silent correctness bug:
+  - **Bug**: `RunExecutor._lineage_for`가 `version.config_json` 그대로 사용 → catalog asset_key가 미해결 `${var.target_table}`로 저장. pipeline은 정상 실행되나 운영자가 카탈로그에서 자산 이름을 찾을 수 없음.
+  - **보완**: 새 `_lineage_for_resolved(session, run, version, log)` — `WorkspaceVariableRepository.as_dict` → `resolve_config_variables` → `derive_lineage` 흐름. `_persist_column_lineage(..., *, resolved_cfg=None)` 옵셔널 인자로 column lineage도 동일 resolved cfg 사용. success branch가 두 모듈 unified path.
+  - **시나리오 MM1**: 두 ws(prod/dev)에 동일 pipeline config(`table: "${var.target_table}"`) + 각자 var값 다름. 검증: 데이터/카탈로그 둘 다 환경별 resolved.
+  - **이번 세션 4번째 silent bug** dogfood가 catch (Z COUNT(*) / BB sink-only / II DLQ × 2 / MM lineage var).
+  - **검증**: 코어 738 unchanged. 서버 it 456→457(+1). mypy 코어 61 + 서버 100 OK. DB 마이그레이션 0.
+
 ### Added
 - **Auto-materialize cycle 차단 시나리오 — `trigger_chain` 안전성 (Phase LL)** [ADR-0056] — ADR-0037의 cycle 방지가 unit으로는 mock 가능, 실제 worker drain loop에서 동작 확인은 다른 차원:
   - A(auto_materialize, staging→mart), B(auto_materialize, mart→staging). 서로 cross-wired.

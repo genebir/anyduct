@@ -1839,4 +1839,36 @@ L1 출시 직후 사용자가 5개 회신:
 
 ---
 
+## ADR-0057: Workspace variables 시나리오 + 코어 silent bug 보완 (lineage emit이 unresolved 키 사용)
+
+**Date**: 2026-05-29
+**Status**: Accepted
+**Context**: 사용자 *"sample 데이터 깊게"* 패턴 적용 — Phase MM은 workspace variables(`${var.name}`)의 multi-tenant 동작을 검증. 시나리오 작성 중 **silent correctness bug 발견**:
+- pipeline은 정상 실행 (records_written=3 ok, sink table에 정상 데이터)
+- 그러나 catalog asset_key가 **미해결 `${var.target_table}`** 그대로 저장
+- 즉 사용자가 카탈로그를 보면 자산 이름이 "${var.target_table}" 같은 placeholder. 실제 데이터는 `marts_prod` 테이블에 있음
+- 운영자가 카탈로그로 자산 찾을 수 없음
+
+**Root cause**: `RunExecutor._lineage_for(version, log)`이 `version.config_json`을 *직접* `PipelineConfig.model_validate(...)`에 넘김. Worker의 pipeline 실행 path는 `_prepare`에서 `resolve_config_variables` 호출 후 build_pipeline — variable 해결됨. 하지만 lineage emit path는 별도라 raw config json 사용.
+
+**Decision**:
+1. **새 메소드 `_lineage_for_resolved(session, run, version, log)`**: `WorkspaceVariableRepository(session).as_dict(workspace_id)` → `resolve_config_variables(version.config_json, extra=global_vars)` → `PipelineConfig.model_validate` → `derive_lineage`. 반환: `(AssetLineage | None, PipelineConfig | None)` — resolved cfg를 caller가 재사용해서 column lineage도 동일하게 emit.
+2. **`_persist_column_lineage(..., *, resolved_cfg=None)`** 옵셔널 인자 추가: success branch는 resolved cfg 전달, 기존 (호출 site가 없는) 경로는 옛 동작 유지(backward-compat).
+3. **Success branch 변경**: `lineage, resolved_cfg = await self._lineage_for_resolved(...)` → 둘 다 not None일 때만 persist + column lineage + trigger.
+4. **e2e 시나리오 1종** (`test_workspace_variables_scenarios.py` MM1): 두 워크스페이스(prod/dev)에 동일 pipeline config(`table: "${var.target_table}"`). 각자 `target_table` var 다른 값(marts_prod / marts_dev). 실행 후 catalog가 **각자 resolved key**(dst/marts_prod, dst/marts_dev) 보유 + 데이터도 각자 sink로.
+
+**Consequences**:
+- ✅ **Silent correctness bug 보완**: 카탈로그가 이제 실제 sink table 이름을 보여줌. 운영자 디버깅 path 동작.
+- ✅ **Multi-tenant 환경별 운영 패턴 확인**: 같은 pipeline config text + 환경별 var → 환경별 catalog. SaaS의 핵심 use case.
+- ✅ **Backward compat**: `_lineage_for(version, log)` 시그니처 변경 없음(opt-in). 기존 호출 site / 미래의 dry-run-like consumer 등도 동작.
+- ✅ DB 마이그레이션 0. column_lineage 통합도 추가 인자 옵셔널.
+- ⚠ **Phase BB의 4-stage 시나리오 등 옛 e2e는 variable 안 써서 영향 없음**: catalog 결과 동일.
+- ⚠ **Variable 해결 실패 시 lineage 전체 skip**: variable이 없거나 typo면 `resolve_config_variables`가 `ConfigError` raise → log warning + lineage skip(opaque catalog). 이건 안전 정책(catalog가 잘못된 placeholder 키 저장 안 함).
+
+**Dogfooding 가치 입증**: 단위 테스트는 mock cfg 쓰니까 catch 못 함. variable 정의된 ws에서 실행 → catalog 키 검증이 e2e가 catch. **이번 세션에서 4번째 silent bug** (Z의 COUNT(*) leaf + AA의 sink-only column + II의 DLQ silent drop + catalog 미등록 + 지금의 lineage variable resolution). 사용자 "sample 데이터로 깊게" 요청이 매번 가치 입증.
+
+**검증**: 코어 unit 738 unchanged. 서버 it 456→457(+1 MM1). mypy 코어 61 + 서버 100 OK. ruff clean. DB 마이그레이션 0.
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

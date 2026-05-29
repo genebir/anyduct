@@ -117,7 +117,9 @@ uv run mypy etl_plugins
 
 ## 5. 현재 단계
 
-> **최신 마일스톤 (2026-05-29): Auto-materialize cycle 차단 시나리오 — `trigger_chain` 안전성 (Phase LL, ADR-0056).** A(staging→mart) + B(mart→staging) 둘 다 auto_materialize. A 트리거 → drain → 정확히 A 1 run + B 1 run (무한 loop 없음). B의 result_json.trigger_chain == [A.id]로 cycle 차단 메커니즘 audit lineage 보존. 운영 안전성 확인 — 잘못된 wiring이 무한 큐 못 만듦. 서버 it 455→456(+1). 코어 738 unchanged. mypy 코어 61 + 서버 100 OK. ruff clean. DB 마이그레이션 0.
+> **최신 마일스톤 (2026-05-29): Workspace variables 시나리오 + lineage emit silent bug 보완 (Phase MM, ADR-0057).** sample-data dogfood 중 발견: `_lineage_for`가 `version.config_json` 그대로 사용 → catalog asset_key가 unresolved `${var.target_table}`로 저장. Pipeline은 정상 실행되나 운영자가 catalog에서 자산 못 찾음. 보완: 새 `_lineage_for_resolved(session, run, version, log)` — workspace vars resolve 후 derive_lineage. `_persist_column_lineage(..., *, resolved_cfg=None)` 옵셔널 인자로 column lineage도 동일 resolved cfg. MM1 시나리오: 두 ws(prod/dev) 동일 config + 다른 var값 → 각자 resolved key catalog. **이번 세션 4번째 silent bug** dogfood가 catch. 서버 it 456→457(+1). 코어 738 unchanged. mypy 코어 61 + 서버 100 OK. ruff clean. DB 마이그레이션 0. backward-compat 유지(`_lineage_for` 그대로 + column_lineage 추가 인자 옵셔널).
+>
+> **이전 마일스톤 (2026-05-29): Auto-materialize cycle 차단 시나리오 — `trigger_chain` 안전성 (Phase LL, ADR-0056).** A(staging→mart) + B(mart→staging) 둘 다 auto_materialize. A 트리거 → drain → 정확히 A 1 run + B 1 run (무한 loop 없음). B의 result_json.trigger_chain == [A.id]로 cycle 차단 메커니즘 audit lineage 보존. 운영 안전성 확인 — 잘못된 wiring이 무한 큐 못 만듦. 서버 it 455→456(+1). 코어 738 unchanged. mypy 코어 61 + 서버 100 OK. ruff clean. DB 마이그레이션 0.
 >
 > **이전 마일스톤 (2026-05-29): Catalog REST API 시나리오 — UI 경로 e2e 검증 (Phase KK, ADR-0055).** worker가 쓴 카탈로그를 UI가 호출하는 REST endpoint로 조회 정확성 검증: KK1(2-pipeline chain → list+lineage 응답 정확), KK2(2 runs → materializations 2 entries + column-lineage opaque=false), KK3(cross-ws 404 + non-member 403). `_build_app(session)`이 outer-transaction session 공유로 worker write/REST read atomicity. 서버 it 452→455(+3). 코어 738 unchanged. mypy 코어 61 + 서버 100 OK. ruff clean. DB 마이그레이션 0. UI ↔ worker shape drift 회귀 가드.
 >

@@ -35,6 +35,7 @@ from etl_plugins.config.secrets import SecretBackend
 from etl_plugins.config.variables import resolve_config_variables
 from etl_plugins.core.exceptions import ConfigError, RegistryError, SecretError
 from etl_plugins.runtime.builder import build_connector, build_pipeline
+from etl_plugins.runtime.lint import LintWarning, lint_pipeline
 from etlx_server.db.models import Pipeline, PipelineVersion
 from etlx_server.pipelines.runtime import (
     load_connections_by_name,
@@ -56,11 +57,19 @@ class ConnectorCheck:
 
 @dataclass(frozen=True)
 class DryRunResult:
-    """Bundled output. ``ok`` is true iff every check passed."""
+    """Bundled output. ``ok`` is true iff every check passed.
+
+    ``warnings`` (Phase DD, 2026-05-29) carries advisory lint hints —
+    things the pipeline can still run with, like an opaque transform
+    that would benefit from a ``column_mapping`` declaration for
+    accurate catalog lineage. The UI shows them beside the connector
+    checks; they don't flip ``ok`` to False.
+    """
 
     ok: bool
     errors: list[str] = field(default_factory=list)
     connectors: list[ConnectorCheck] = field(default_factory=list)
+    warnings: list[LintWarning] = field(default_factory=list)
 
 
 def _blocking_health_check(connector: Any) -> tuple[bool, str | None]:
@@ -186,7 +195,16 @@ class DryRunService:
         except ConfigError as e:
             errors.append(f"pipeline build failed: {e}")
             self._close_all(connectors)
-            return DryRunResult(ok=False, errors=errors, connectors=checks)
+            return DryRunResult(
+                ok=False,
+                errors=errors,
+                connectors=checks,
+                warnings=lint_pipeline(pipeline_cfg),
+            )
+
+        # Phase DD: lint the parsed config now that build has validated
+        # its shape. Warnings are advisory — they don't change ``ok``.
+        warnings = lint_pipeline(pipeline_cfg)
 
         # 5) Optional connector health checks — what the user really
         # wants to know is "would the credentials work right now?".
@@ -205,11 +223,12 @@ class DryRunService:
                     ok=False,
                     errors=["one or more connectors failed health_check"],
                     connectors=checks,
+                    warnings=warnings,
                 )
         else:
             self._close_all(connectors)
 
-        return DryRunResult(ok=True, errors=[], connectors=checks)
+        return DryRunResult(ok=True, errors=[], connectors=checks, warnings=warnings)
 
     @staticmethod
     def _close_all(connectors: dict[str, Any]) -> None:

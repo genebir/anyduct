@@ -204,6 +204,85 @@ async def test_dry_run_happy_path_sqlite(session: AsyncSession) -> None:
     names = {c["name"]: c for c in body["connectors"]}
     assert set(names) == {"src", "dst"}
     assert all(c["ok"] for c in body["connectors"])
+    # Phase DD (2026-05-29): warnings field always present; empty when
+    # there's nothing to nudge the user about (declarative-only pipeline).
+    assert body["warnings"] == []
+
+
+async def test_dry_run_surfaces_column_mapping_lint_for_opaque_transform(
+    session: AsyncSession,
+) -> None:
+    """Phase DD (2026-05-29, ADR-0048): a pipeline with a python transform
+    that doesn't declare ``column_mapping`` should still pass dry-run
+    (ok=True) but include an advisory ``column_mapping_recommended``
+    warning, so the UI can surface "add a column_mapping for accurate
+    catalog lineage" beside the otherwise-green checks.
+    """
+    user = await _seed_user(session, email="pa-dr-lint@example.com")
+    ws = await _seed_workspace(session, slug="pa-dr-lint", user=user, role=WorkspaceRole.RUNNER)
+    await _seed_connection(session, workspace_id=ws.id, name="src")
+    await _seed_connection(session, workspace_id=ws.id, name="dst")
+    cfg = _sample_pipeline_config("p", source_conn="src", sink_conn="dst")
+    cfg["transforms"] = [
+        {
+            "type": "custom_python",
+            "code": "def transform(record):\n    return record\n",
+            # Intentionally no column_mapping — exactly what the lint flags.
+        }
+    ]
+    pipeline, _ = await _seed_pipeline_with_version(
+        session, workspace_id=ws.id, name="p", config=cfg
+    )
+    app, _ = _build_app(session)
+    async with _client(app) as client:
+        token = await _login(client, email=user.email)
+        resp = await client.post(
+            f"/workspaces/{ws.id}/pipelines/{pipeline.id}/dry-run",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    # Warnings are advisory — ok stays True.
+    assert body["ok"] is True
+    assert body["errors"] == []
+    codes = [w["code"] for w in body["warnings"]]
+    assert "column_mapping_recommended" in codes
+    matching = next(w for w in body["warnings"] if w["code"] == "column_mapping_recommended")
+    assert matching["location"] == "transforms.0"
+    assert "column_mapping" in matching["message"]
+
+
+async def test_dry_run_no_lint_warning_when_column_mapping_declared(
+    session: AsyncSession,
+) -> None:
+    """Same pipeline shape with ``column_mapping`` declared → no warning.
+    Confirms the lint actually responds to the user's escape hatch."""
+    user = await _seed_user(session, email="pa-dr-nolint@example.com")
+    ws = await _seed_workspace(session, slug="pa-dr-nolint", user=user, role=WorkspaceRole.RUNNER)
+    await _seed_connection(session, workspace_id=ws.id, name="src")
+    await _seed_connection(session, workspace_id=ws.id, name="dst")
+    cfg = _sample_pipeline_config("p", source_conn="src", sink_conn="dst")
+    cfg["transforms"] = [
+        {
+            "type": "custom_python",
+            "code": "def transform(record):\n    return record\n",
+            "column_mapping": {"id": ["id"]},
+        }
+    ]
+    pipeline, _ = await _seed_pipeline_with_version(
+        session, workspace_id=ws.id, name="p", config=cfg
+    )
+    app, _ = _build_app(session)
+    async with _client(app) as client:
+        token = await _login(client, email=user.email)
+        resp = await client.post(
+            f"/workspaces/{ws.id}/pipelines/{pipeline.id}/dry-run",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["warnings"] == []
 
 
 async def test_dry_run_reports_missing_connection(session: AsyncSession) -> None:

@@ -531,18 +531,35 @@ class DryRunConnectorCheck(BaseModel):
     error: str | None = None
 
 
+class DryRunLintWarning(BaseModel):
+    """One advisory lint warning (Phase DD, 2026-05-29).
+
+    Distinct from ``errors``: a warning never flips ``ok`` to False. The
+    UI surfaces these as hints — e.g. "this python transform has no
+    ``column_mapping``, catalog lineage will rely on a heuristic".
+    """
+
+    code: str
+    message: str
+    location: str | None = None
+
+
 class DryRunResponse(BaseModel):
     """Response of ``POST /workspaces/{ws}/pipelines/{pid}/dry-run``.
 
     ``ok`` summarizes the answer; ``errors`` carries top-level issues
     (config invalid, build failure, missing connection name, etc.);
     ``connectors`` reports per-connection results so the UI can show
-    which credential needs attention.
+    which credential needs attention. ``warnings`` (Phase DD) carries
+    advisory lint hints that don't block running but flag accuracy
+    gaps the user can close (e.g. missing ``column_mapping`` on a
+    python transform).
     """
 
     ok: bool
     errors: list[str] = Field(default_factory=list)
     connectors: list[DryRunConnectorCheck] = Field(default_factory=list)
+    warnings: list[DryRunLintWarning] = Field(default_factory=list)
 
 
 class RunTriggerRequest(BaseModel):

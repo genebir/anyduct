@@ -1574,4 +1574,32 @@ L1 출시 직후 사용자가 5개 회신:
 
 ---
 
+## ADR-0048: Pipeline lint — dry-run에서 column_mapping 권장 등 advisory warning 노출
+
+**Date**: 2026-05-29
+**Status**: Accepted
+**Context**: ADR-0047(Phase CC)이 사용자-명시 `column_mapping`을 도입했지만 *opt-in*. 사용자가 그 escape hatch를 *알아야* 채택률이 올라간다. python/custom_python/sql_exec 트랜스폼을 만들 때 "column_mapping을 박을 수 있다"는 사실을 자동으로 안내하면, 카탈로그 정확도가 자연스럽게 상승. Dry-run은 이미 사용자가 "이 파이프라인 실행 가능한가?" 확인하는 자연 통과 지점이라 lint 결과를 같이 노출하기 좋은 위치.
+
+**Decision**:
+1. **`etl_plugins/runtime/lint.py`(신규) `lint_pipeline(cfg) -> list[LintWarning]`** — pure function, 코어에 둠(라이브러리 단독 사용자도 활용 가능).
+   - `LintWarning(code, message, location)` — `code`는 stable identifier(UI 필터/dismissal 키), `message`는 영어(i18n은 UI 책임), `location`은 `tasks.0.transforms.2` 같은 path(builder가 jump).
+   - 모든 shape 순회: single-task / task-DAG / graph. `derive_column_lineage`의 walker와 동일 패턴.
+2. **첫 규칙 `column_mapping_recommended`**:
+   - `_OPAQUE_TRANSFORM_TYPES = {"python", "custom_python", "sql_exec"}` 중 하나면서 `column_mapping`이 없으면 발동.
+   - Message: schema-passthrough fallback이 시도되지만 rename/이동은 못 잡으니 정확한 lineage를 원하면 `column_mapping` 추가하라는 권장.
+3. **`DryRunResult.warnings: list[LintWarning]` 필드 추가** — 모든 dry-run return path에서 `lint_pipeline(pipeline_cfg)` 호출해 채움. **Advisory**: warnings만 있으면 `ok=True` 유지. 차단 안 함.
+4. **`DryRunResponse` Pydantic schema에 `warnings: list[DryRunLintWarning]` 추가**, router가 dataclass → Pydantic 변환.
+5. **하위 호환**: 기존 응답에 `warnings` 필드만 추가, 기존 필드 변경 0. 옛 클라이언트가 무시해도 동작.
+
+**Consequences**:
+- ✅ **column_mapping 채택률 향상 path**: 사용자가 python transform 만들 때 dry-run하면 즉시 "column_mapping 추가 권장" 안내. 자연스러운 nudge.
+- ✅ **Lint extensibility**: 새 규칙은 `_lint_transform`에 helper 추가만으로 확장 가능. 예: `sink_table_missing_in_schema_inspector`, `python_imports_external_package` 등 향후 슬라이스.
+- ✅ **Advisory 정책**: warnings이 운영을 막지 않음 — 사용자가 "지금 당장 실행"하고 싶으면 그대로 가능. 정확도는 trade-off.
+- ✅ DB 마이그레이션 0. 응답 필드 추가만.
+- ⚠ **Builder UI 통합은 별개 슬라이스**: 현재는 dry-run 응답만 노출. 빌더에서 properties panel에 warning 표시 + 인라인 fix 액션(column_mapping editor)은 후속.
+
+**검증**: 코어 unit 723→732(+9 신규: rule fires/missing-mapping / mapping present 무 lint / 모든 트랜스폼 타입(python/custom_python/sql_exec) / declarative 무 lint / 멀티 opaque → 멀티 warning / task-DAG 순회 / graph 순회 / empty pipeline). 서버 it 434→436(+2 e2e: opaque transform → warning 노출 / column_mapping 박힌 동일 shape → 무 lint + happy-path에 `warnings==[]` 체크 추가). mypy 코어 61 + 서버 100 OK. ruff clean. DB 마이그레이션 0.
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

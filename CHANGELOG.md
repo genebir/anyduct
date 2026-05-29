@@ -10,6 +10,15 @@
 ## [Unreleased]
 
 ### Added
+- **Pipeline lint — dry-run에서 column_mapping 권장 advisory warning 노출 (Phase DD)** [ADR-0048] — Phase CC의 `column_mapping`은 opt-in이라 사용자가 *알아야* 채택률 올라감. dry-run 단계에서 자동 안내:
+  - **`etl_plugins/runtime/lint.py`(신규) `lint_pipeline(cfg) -> list[LintWarning]`** — pure function, 모든 shape(linear/task-DAG/graph) 순회. 코어에 두어 라이브러리 단독 사용자도 활용.
+  - **`LintWarning(code, message, location)`** — `code`는 stable identifier(UI 필터 키), `location`은 `tasks.0.transforms.2` 같은 path(builder가 jump).
+  - **첫 규칙 `column_mapping_recommended`**: `python`/`custom_python`/`sql_exec` 트랜스폼이 `column_mapping` 없으면 발동. "schema-passthrough가 시도되지만 rename/이동은 못 잡으니 column_mapping 추가 권장".
+  - **`DryRunResult.warnings` + 모든 return path에서 lint 호출**. Advisory: warnings만 있으면 `ok=True` 유지(차단 안 함).
+  - **`DryRunResponse` Pydantic schema에 `warnings: list[DryRunLintWarning]` 추가**, router가 변환. 하위 호환(필드 추가만, 기존 변경 0).
+  - **검증**: 코어 unit 723→732(+9 — rule fires/skips/모든 트랜스폼 타입/declarative 무 lint/멀티 opaque/task-DAG/graph/empty). 서버 it 434→436(+2 e2e — opaque transform → warning 노출 / column_mapping 박힘 → 무 lint).
+  - **Builder UI 통합은 별개 슬라이스**: 현재는 dry-run 응답만 노출. 빌더 properties panel 표시 + 인라인 fix 액션은 후속.
+
 - **사용자-명시 `column_mapping` — 트랜스폼에 직접 의도 박기 (Phase CC)** [ADR-0047] — Phase AA(schema-passthrough)는 컬럼명 *보존* python을 잘 잡지만 **컬럼명 rename**(`name`→`display_name`)이나 **a→b 데이터 이동**은 정적 분석 본질적 한계. 사용자가 의도를 박을 수 있는 빠져나갈 길:
   - **트랜스폼 config에 `column_mapping` 옵셔널 필드** (TransformConfig.model_config = `extra="allow"` 활용, 모델 변경 0 / DB 마이그레이션 0).
   - 형태: `{output_col: [source_col, ...]}` — source는 현재 _Mapping의 키. 빈 리스트 = 새 컬럼(no upstream).

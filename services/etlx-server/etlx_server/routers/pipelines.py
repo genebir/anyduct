@@ -37,6 +37,7 @@ from etlx_server.audit.dependencies import get_audit_service
 from etlx_server.audit.service import AuditService
 from etlx_server.auth.schemas import (
     DryRunConnectorCheck,
+    DryRunLintWarning,
     DryRunResponse,
     PipelineCreateRequest,
     PipelineSummary,
@@ -372,6 +373,10 @@ async def dry_run_pipeline(
         connectors=[
             DryRunConnectorCheck(name=c.name, type=c.type, ok=c.ok, error=c.error)
             for c in outcome.connectors
+        ],
+        warnings=[
+            DryRunLintWarning(code=w.code, message=w.message, location=w.location)
+            for w in outcome.warnings
         ],
     )
 

@@ -10,6 +10,11 @@
 ## [Unreleased]
 
 ### Added
+- **빌더 UI에 `auto_create_if_exists` select 노출 + 엔지니어 nightly-snapshot 페르소나 (Phase AAB)** — Phase AAA의 UX 닫힘 + 페르소나 dogfood:
+  - **operators.ts 3 RDBMS sink(postgres/mysql/sqlite)에 `auto_create_if_exists` select** — skip / drop / error 옵션 + help text가 "drop은 nightly snapshot에 좋다" 가이드.
+  - **AAB1 페르소나 e2e** — 엔지니어 day-1: 소스 `(id, name)` → 싱크 자동 생성 + 데이터 정상. day-2: 소스 schema drift `(id, email)` (name 제거, email 추가) → drop이 day-1 테이블 + 데이터 모두 제거 + 새 schema로 재구축. **사용자 promise 직접 검증**: 매일 schema가 바뀌어도 운영자가 손대지 않아도 됨.
+  - 검증: 서버 it 478→479(+1 AAB1) + 코어 unchanged + web tsc clean.
+
 - **`auto_create_if_exists` — sink 자동 생성 충돌 정책 (Phase AAA)** [ADR-0071] — `auto_create_table`의 충돌 모드 확장:
   - **`SinkConfig.auto_create_if_exists`(str, default `"skip"`)** — skip(기본, BC) / drop(재구축) / error(connector 차원 raise).
   - **운영 시나리오 1 (nightly snapshot replication)**: source 스키마 매일 진화 → `drop`으로 sink 재구축. stale 컬럼/데이터 자동 정리.

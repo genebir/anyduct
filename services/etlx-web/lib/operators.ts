@@ -736,6 +736,17 @@ const SINKS: OperatorSpec[] = [
         kind: "boolean",
         help: "Read the source schema (and any rename/cast/add_constant transforms) and CREATE TABLE on this sink before the first write. Cross-DB types are translated automatically (BIGINT → INT/INTEGER, TIMESTAMPTZ → DATETIME/TEXT, etc.).",
       },
+      {
+        key: "auto_create_if_exists",
+        label: "If table exists",
+        kind: "select",
+        options: [
+          { label: "skip — use existing table as-is", value: "skip" },
+          { label: "drop — DROP and recreate (snapshot rebuild)", value: "drop" },
+          { label: "error — refuse to clobber", value: "error" },
+        ],
+        help: "Only applied when ‘Create table if missing’ is on. ‘drop’ is the right choice for nightly snapshot rebuilds where the source schema may evolve — stale columns/rows are wiped each run. Default: skip.",
+      },
     ],
   },
   {
@@ -774,6 +785,17 @@ const SINKS: OperatorSpec[] = [
         kind: "boolean",
         help: "Read the source schema (and any rename/cast/add_constant transforms) and CREATE TABLE on this sink before the first write. Cross-DB types are translated automatically (postgres BIGINT → mysql BIGINT, TIMESTAMPTZ → DATETIME, etc.).",
       },
+      {
+        key: "auto_create_if_exists",
+        label: "If table exists",
+        kind: "select",
+        options: [
+          { label: "skip — use existing table as-is", value: "skip" },
+          { label: "drop — DROP and recreate (snapshot rebuild)", value: "drop" },
+          { label: "error — refuse to clobber", value: "error" },
+        ],
+        help: "Only applied when ‘Create table if missing’ is on. ‘drop’ is the right choice for nightly snapshot rebuilds where the source schema may evolve — stale columns/rows are wiped each run. Default: skip.",
+      },
     ],
   },
   {
@@ -810,6 +832,17 @@ const SINKS: OperatorSpec[] = [
         label: "Create table if missing",
         kind: "boolean",
         help: "Read the source schema (and any rename/cast/add_constant transforms) and CREATE TABLE on this sink before the first write. Useful for postgres→sqlite or mysql→sqlite migrations — types collapse to sqlite's affinity rules automatically.",
+      },
+      {
+        key: "auto_create_if_exists",
+        label: "If table exists",
+        kind: "select",
+        options: [
+          { label: "skip — use existing table as-is", value: "skip" },
+          { label: "drop — DROP and recreate (snapshot rebuild)", value: "drop" },
+          { label: "error — refuse to clobber", value: "error" },
+        ],
+        help: "Only applied when ‘Create table if missing’ is on. ‘drop’ rebuilds the file's schema each run — good for daily snapshot caches.",
       },
     ],
   },

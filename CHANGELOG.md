@@ -10,6 +10,14 @@
 ## [Unreleased]
 
 ### Added
+- **Auto-materialize 시나리오 corpus — chain/fan-out/실패 차단 깊은 검증 (Phase GG)** [ADR-0051] — ADR-0037(D1) auto-materialize의 *interplay*(catalog 정합성 + chain 동작 + 실패 차단)를 sample data e2e로 깊게 확인:
+  - **GG1 — Happy chain (A → B)**: A가 staging 작성 → B(`auto_materialize: true`)가 자동 trigger → mart 작성. `_drain_pending_runs` helper로 큐 끝까지. 검증: A+B 각 1 run, B의 result_json.triggered_by_run=A.id, catalog에 raw→staging→mart edge 전체.
+  - **GG2 — Fan-out (A → B + C)**: B/C 둘 다 같은 dst/shared를 source + `auto_materialize`. 1 A run + 2 자동 consumer run. dst/shared의 downstream에 mart_b + mart_c.
+  - **GG3 — Failure blocks chain**: A의 custom_python이 raise → A fails. B는 0 runs. sink/mart 비어 있음. catalog dst/staging/dst/mart 둘 다 없음(Phase FF 시나리오 F와 일관).
+  - **3-layer 검증**: record(실제 sink 값) + asset(catalog edge) + run(result_json trigger lineage).
+  - **Asset key 디자인 dogfooding**: `connection/table` 키가 chain에서 어떻게 표면화되는지 코멘트로 기록 — chain pipeline 만들 때 connection 가리킬 곳 가이드.
+  - **검증**: 코어 unit 737 unchanged. 서버 it 443→446(+3 시나리오). DB 마이그레이션 0.
+
 - **column_mapping typo 검출 lint + 실패/재시도 시나리오 검증 (Phase FF)** [ADR-0050] — 신뢰성의 두 추가 차원: (a) 사용자 실수 catch + (b) 비정상 경로 카탈로그 일관성.
   - **새 lint 규칙 `column_mapping_unknown_source_column`**: linear/task-DAG에서 transform chain walk(derive_column_lineage와 동일). 각 transform의 column_mapping declaration이 그 시점 upstream mapping에 없는 source col을 참조하면 warning. 이전 transform의 rename도 정확히 반영. typo / stale 참조 silent 부정확 mapping 회피.
   - **시나리오 F: Failed run** — `custom_python`이 명시 raise → run status=failed → worker except branch가 `_persist_lineage` skip → sink/source asset row 생성 안 됨. 실패가 카탈로그 dirty하게 안 함.

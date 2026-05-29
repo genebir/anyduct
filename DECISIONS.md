@@ -1667,4 +1667,34 @@ L1 출시 직후 사용자가 5개 회신:
 
 ---
 
+## ADR-0051: Auto-materialize 시나리오 corpus — chain/fan-out/실패 차단 깊은 검증
+
+**Date**: 2026-05-29
+**Status**: Accepted
+**Context**: ADR-0037의 D1 메커니즘(asset-driven auto-materialize)은 unit으로는 잘 cover되지만, *interplay*(catalog 정합성 + chain 동작 + 실패 차단)는 dogfooding이 더 catch한다. 사용자 운영 신뢰성에 직결되는 영역. 핵심 질문 3가지:
+1. **체인이 정확히 동작?** Pipeline A 성공 → B 자동 trigger → B 성공 → catalog에 전체 chain 표시?
+2. **다중 consumer fan-out?** A 출력이 B + C 둘 다의 input인 경우 양쪽 다 trigger?
+3. **실패가 chain을 차단?** A 실패 → B 큐에 안 들어감 → catalog dirty 안 됨?
+
+**Decision**:
+1. **`services/etlx-server/tests/db/test_auto_materialize_scenarios.py`(신규)**: 3 시나리오 e2e:
+   - **GG1 — Happy chain (A → B)**: A가 `staging` 작성, B(`auto_materialize: true`)가 `staging` 읽고 `mart` 작성. `_drain_pending_runs` helper로 큐를 끝까지 비움. 검증: A + B 각각 1 run, B의 `result_json.triggered_by_run = A.id`, catalog에 raw → staging → mart edge 전체 형성.
+   - **GG2 — Fan-out (A → B + C)**: B/C 둘 다 같은 `dst/shared`를 source로 + 둘 다 `auto_materialize`. 검증: 1 A run + 2 자동 consumer run. 둘 다 trigger_by_run stamped, catalog의 `dst/shared` downstream에 mart_b + mart_c 모두 있음.
+   - **GG3 — Failure blocks chain**: A의 `custom_python`이 raise → A fails. 검증: 1 A run(fails), B는 0 runs, sink/mart 비어 있음, catalog에 `dst/staging`/`dst/mart` 둘 다 없음(Phase FF의 시나리오 F와 일관).
+2. **3-layer 검증 동일 적용**: record-level(sink 값) + asset-level(catalog edge) + run-level(`result_json` trigger lineage).
+3. **`_drain_pending_runs` helper**: claim → execute 반복으로 자동 enqueue된 후속 run까지 한 step에 처리. 운영 시나리오와 같음(worker가 무한 loop).
+4. **Asset key 디자인 dogfooding**: `dst/staging`이 A의 sink이자 B의 source. `derive_asset_key`가 `connection/table`로 키하기 때문에 cross-connection chain이 안 자연스러움. 시나리오 코드에 명시적 설명 코멘트 — 사용자 best practice 노트.
+
+**Consequences**:
+- ✅ **Auto-materialize chain 정확성 확인**: 3 패턴 모두 카탈로그가 정확하게 chain 표시, run lineage 정확.
+- ✅ **Phase FF의 실패 정책과 일관**: 실패 chain은 카탈로그 dirty 안 함 + 다음 consumer trigger 안 함. 운영자가 "어디까지 성공"을 명확히 본다.
+- ✅ **Asset key 의미 명문화**: `connection/table` 디자인 결정이 chain 시나리오에서 어떻게 표면화되는지 코멘트로 기록. 사용자가 chain pipeline 만들 때 connection을 어디 가리킬지 가이드.
+- ✅ DB 마이그레이션 0. 신규 테스트만.
+- ⚠ **Cycle 방지 / depth cap 시나리오 미포함**: `_trigger_asset_consumers`가 `trigger_chain` + `_MAX_TRIGGER_CHAIN`으로 처리하지만 unit test가 이미 cover. e2e는 옵션(향후 슬라이스).
+- ⚠ **Multi-workspace 격리는 별도 슬라이스**: chain trigger가 workspace 안에서만 일어나는 건 `_trigger_asset_consumers` 쿼리에서 `workspace_id` 필터로 보장. 별도 시나리오로 e2e 검증 가능.
+
+**검증**: 코어 unit 737 unchanged(서버 측 신규 시나리오만). 서버 it 443→446(+3 시나리오). mypy 코어 61 + 서버 100 OK. ruff clean. DB 마이그레이션 0.
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

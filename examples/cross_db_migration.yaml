@@ -1,0 +1,32 @@
+# Cross-DB migration + table replication (Phases AAA→AAG, 2026-05-29).
+#
+# Replicates a Postgres source table into a local SQLite analytics cache
+# without manually scripting the destination DDL. ``auto_create_table``
+# inspects the source schema, translates types through the canonical
+# mapping (BIGINT/NUMERIC/TIMESTAMPTZ/JSONB/VARCHAR/BOOLEAN), and emits a
+# fresh sink table when one isn't there yet.
+#
+# Re-running this pipeline is safe: ``mode: overwrite`` truncates the
+# sink before each load, and ``auto_create_if_exists: skip`` leaves the
+# existing table alone (the truncate inside the write transaction does
+# the cleanup). Flip ``auto_create_if_exists: drop`` for snapshot-style
+# replication where the upstream schema may evolve between runs.
+#
+# Pair this with ``examples/connections.example.yaml`` and run with:
+#
+#     uv run etlx validate examples/cross_db_migration.yaml \
+#         --connections examples/connections.example.yaml
+#     uv run etlx run      examples/cross_db_migration.yaml \
+#         --connections examples/connections.example.yaml
+#
+name: orders_replication
+mode: batch
+source:
+  connection: pg_oltp
+  query: SELECT id, amount, created_at, customer FROM orders
+sink:
+  connection: sqlite_analytics
+  table: orders_copy
+  mode: overwrite
+  auto_create_table: true
+  auto_create_if_exists: skip   # try also: drop (rebuild) | error (fail-loud)

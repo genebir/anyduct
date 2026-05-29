@@ -1,0 +1,18 @@
+# Companion connections file for examples/cross_db_migration.yaml.
+#
+# Secrets live behind ``!secret`` markers — provide them via the secret
+# backend you configured (Vault / AWS SM / GCP SM / file). NEVER commit
+# real credentials. See ADR-0024.
+connections:
+  - name: pg_oltp
+    type: postgres
+    config:
+      host: localhost
+      port: 5432
+      database: oltp
+      user: app_reader
+      password: !secret pg_oltp.password
+  - name: sqlite_analytics
+    type: sqlite
+    config:
+      database: /tmp/analytics.db

@@ -9,6 +9,9 @@
 
 ## [Unreleased]
 
+### Added
+- **`examples/cross_db_migration.yaml` + 동반 `connections.example.yaml` (Phase AAH)** — Phases AAA→AAG의 cross-DB migration 기능을 한 페이지 분량의 카피·페이스트 가능한 사용자용 문서 + 회귀 가드. `auto_create_table` + `auto_create_if_exists` 코멘트 가이드, `etlx validate` 명령 사용법. 신규 unit `test_example_yaml_loads.py` — 예제 YAML이 향후 config-schema 변경에 드리프트 안 하도록 lock-in. 코어 unit 804→805(+1). ruff clean.
+
 ### Changed
 - **`SinkConfig.auto_create_if_exists`를 `Literal["skip","drop","error"]`로 좁힘 (Phase AAG)** — typos(`"DROP"`/`"replace"`/`"Skip"`)가 config-load 시점에서 즉시 422로 거부됨. 기존엔 plain str 받아 들어가 connector 깊은 곳의 if_exists branch에서 "unknown" 메시지로만 실패해 운영자 디버그 비용 큼. 2 신규 unit(canonical 3종 accept + typo 3종 reject). 코어 unit 802→804(+2). mypy/ruff clean. backward-compat 완전(기존 값 그대로).
 

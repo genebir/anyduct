@@ -117,7 +117,9 @@ uv run mypy etl_plugins
 
 ## 5. 현재 단계
 
-> **최신 마일스톤 (2026-05-29): `SinkConfig.auto_create_if_exists`를 `Literal["skip","drop","error"]`로 좁힘 (Phase AAG).** typo (`"DROP"`/`"replace"`/`"Skip"`)가 config-validation 시점에서 즉시 422 거부. 기존 plain str은 connector 깊은 곳의 unknown branch에서만 실패해 운영자 디버그 비용 컸음. 2 신규 unit(canonical 3종 accept + typo 3종 reject). 코어 unit 802→804(+2). mypy/ruff clean. backward-compat 완전.
+> **최신 마일스톤 (2026-05-29): `examples/cross_db_migration.yaml` + CLI validate 회귀 가드 (Phase AAH).** Phases AAA→AAG의 cross-DB migration 기능을 카피·페이스트 가능한 한 페이지 사용자용 예제 + 회귀 가드. `auto_create_table` + `auto_create_if_exists` 코멘트 가이드 + `etlx validate` 사용법 + `connections.example.yaml` 동반(secret marker pattern). 신규 unit `test_example_yaml_loads.py`로 future config-schema 드리프트 방지. CLI 검증: "pipeline: orders_replication (mode=batch) ✓". 코어 unit 804→805(+1). ruff clean.
+>
+> **이전 마일스톤 (2026-05-29): `SinkConfig.auto_create_if_exists`를 `Literal["skip","drop","error"]`로 좁힘 (Phase AAG).** typo (`"DROP"`/`"replace"`/`"Skip"`)가 config-validation 시점에서 즉시 422 거부. 기존 plain str은 connector 깊은 곳의 unknown branch에서만 실패해 운영자 디버그 비용 컸음. 2 신규 unit(canonical 3종 accept + typo 3종 reject). 코어 unit 802→804(+2). mypy/ruff clean. backward-compat 완전.
 >
 > **이전 마일스톤 (2026-05-29): 빌더 FieldDef.showWhen — dependent field visibility (Phase AAF).** `auto_create_table` default OFF인데 `auto_create_if_exists` select 항상 노출 = 99% 사용자에게 시각적 clutter. ① `FieldBase`에 `showWhen?: { field, equals }` 추가. ② Properties panel이 노드 데이터 보고 conditional 렌더(필터 한 줄). ③ 3 RDBMS sink의 `auto_create_if_exists`에 `showWhen: { field: "auto_create_table", equals: true }` + help text 잉여 가이드 제거. **결과**: 기본 sink 패널에서 if_exists 옵션 자연히 사라짐 + 사용자가 토글하는 순간 출현. 신규 시각 컴포넌트 0. web tsc clean. 코어/서버 변화 0.
 >

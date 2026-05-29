@@ -1814,4 +1814,29 @@ L1 출시 직후 사용자가 5개 회신:
 
 ---
 
+## ADR-0056: Auto-materialize cycle 차단 — `trigger_chain` 안전성 sample-data 검증
+
+**Date**: 2026-05-29
+**Status**: Accepted
+**Context**: ADR-0037이 도입한 auto-materialize는 두 파이프라인이 서로의 출력을 읽으면 무한 loop를 만들 수 있는 잠재 위험. `_trigger_asset_consumers`가 `result_json.trigger_chain`(누적 pipeline id 목록)을 검사해서 이미 chain에 있는 pipeline은 재enqueue 안 함. 이게 핵심 안전 메커니즘이지만 unit test로 mock하는 것과 실제 worker drain loop에서 동작 확인은 다름. 운영 신뢰성 직결.
+
+**Decision**:
+1. **`test_auto_materialize_scenarios.py`에 LL1 추가** — sample-data e2e:
+   - **Setup**: A(`auto_materialize: true`, source=staging, sink=mart), B(`auto_materialize: true`, source=mart, sink=staging). 두 sink/source가 서로 cross-wired.
+   - **Trigger A only**: drain 후 정확히 A 1 run + B 1 run. 무한 loop 없음.
+   - **trigger_chain 검증**: B의 result_json.trigger_chain == [A.id] — A를 chain에 stamp해서 다음 turn에 A 재enqueue를 막음.
+2. **chain stamp의 의미 명문화**: `result_json.trigger_chain`은 누적 pipeline id 목록. worker가 새 consumer 발견할 때 `str(candidate_id) in trigger_chain` 체크 → skip.
+
+**Consequences**:
+- ✅ **운영 안전성 확인**: 잘못된 wiring(A↔B cyclic dep)이 무한 큐를 만들지 않음. drain 후 자연 종료.
+- ✅ **Audit trail**: B의 result_json.trigger_chain이 정확한 lineage 기록. "B가 왜 enqueue됐나?" "A가 trigger했음" 명확.
+- ✅ **Phase GG와 일관**: chain은 정상 path에서도 동일하게 stamp되지만 LL은 *cycle 차단* 측면에 집중.
+- ✅ DB 마이그레이션 0. 신규 e2e만.
+- ⚠ **Depth cap(`_MAX_TRIGGER_CHAIN`) e2e는 별도 슬라이스**: chain 길이가 cap 도달 시 stop + warning. unit이 cover하지만 e2e는 contrived(N 파이프라인 시드 필요). 정작 cycle break가 더 중요하고 흔한 안전 메커니즘.
+- ⚠ **Cycle은 *그래프 cycle*만 catch**: A→A 같은 self-loop도 chain으로 막힘. 더 복잡한 fan-in cycle(A,B → C, C → A,B)는 chain만으론 부족할 수 있음 — 향후 슬라이스에서 graph-level cycle detection 추가 가능.
+
+**검증**: 코어 unit 738 unchanged. 서버 it 455→456(+1 LL1). mypy 코어 61 + 서버 100 OK. ruff clean. DB 마이그레이션 0.
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

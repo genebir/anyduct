@@ -10,6 +10,13 @@
 ## [Unreleased]
 
 ### Added
+- **Auto-materialize cycle 차단 시나리오 — `trigger_chain` 안전성 (Phase LL)** [ADR-0056] — ADR-0037의 cycle 방지가 unit으로는 mock 가능, 실제 worker drain loop에서 동작 확인은 다른 차원:
+  - A(auto_materialize, staging→mart), B(auto_materialize, mart→staging). 서로 cross-wired.
+  - A 트리거 → drain → 정확히 A 1 run + B 1 run. 무한 loop 없음.
+  - B의 result_json.trigger_chain == [A.id] (audit lineage).
+  - 운영 안전성: 잘못된 wiring이 무한 큐 못 만듦.
+  - **검증**: 코어 738 unchanged. 서버 it 455→456(+1). DB 마이그레이션 0.
+
 - **Catalog REST API 시나리오 — UI 경로 e2e 검증 (Phase KK)** [ADR-0055] — worker가 쓴 카탈로그를 UI가 호출하는 REST endpoint로 조회했을 때 정확한 응답인지 e2e:
   - **KK1 — List + Lineage REST**: 2-pipeline chain(raw→staging→mart) → GET /assets에 3 rows, GET /lineage에 upstream/downstream 정확.
   - **KK2 — Materializations + Column-lineage REST**: 같은 pipeline 2번 run → /materializations에 2 entries, /column-lineage에 opaque=false + 컬럼 upstream refs `src/raw`로.

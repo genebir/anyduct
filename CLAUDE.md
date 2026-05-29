@@ -117,7 +117,9 @@ uv run mypy etl_plugins
 
 ## 5. 현재 단계
 
-> **최신 마일스톤 (2026-05-29): Catalog REST API 시나리오 — UI 경로 e2e 검증 (Phase KK, ADR-0055).** worker가 쓴 카탈로그를 UI가 호출하는 REST endpoint로 조회 정확성 검증: KK1(2-pipeline chain → list+lineage 응답 정확), KK2(2 runs → materializations 2 entries + column-lineage opaque=false), KK3(cross-ws 404 + non-member 403). `_build_app(session)`이 outer-transaction session 공유로 worker write/REST read atomicity. 서버 it 452→455(+3). 코어 738 unchanged. mypy 코어 61 + 서버 100 OK. ruff clean. DB 마이그레이션 0. UI ↔ worker shape drift 회귀 가드.
+> **최신 마일스톤 (2026-05-29): Auto-materialize cycle 차단 시나리오 — `trigger_chain` 안전성 (Phase LL, ADR-0056).** A(staging→mart) + B(mart→staging) 둘 다 auto_materialize. A 트리거 → drain → 정확히 A 1 run + B 1 run (무한 loop 없음). B의 result_json.trigger_chain == [A.id]로 cycle 차단 메커니즘 audit lineage 보존. 운영 안전성 확인 — 잘못된 wiring이 무한 큐 못 만듦. 서버 it 455→456(+1). 코어 738 unchanged. mypy 코어 61 + 서버 100 OK. ruff clean. DB 마이그레이션 0.
+>
+> **이전 마일스톤 (2026-05-29): Catalog REST API 시나리오 — UI 경로 e2e 검증 (Phase KK, ADR-0055).** worker가 쓴 카탈로그를 UI가 호출하는 REST endpoint로 조회 정확성 검증: KK1(2-pipeline chain → list+lineage 응답 정확), KK2(2 runs → materializations 2 entries + column-lineage opaque=false), KK3(cross-ws 404 + non-member 403). `_build_app(session)`이 outer-transaction session 공유로 worker write/REST read atomicity. 서버 it 452→455(+3). 코어 738 unchanged. mypy 코어 61 + 서버 100 OK. ruff clean. DB 마이그레이션 0. UI ↔ worker shape drift 회귀 가드.
 >
 > **이전 마일스톤 (2026-05-29): Cursor backfill 시나리오 — incremental sync semantics 깊은 검증 (Phase JJ, ADR-0054).** ADR-0039 backfill의 cursor range semantics(`(cursor_from, cursor_to]`)와 catalog materialization audit trail을 sample-data e2e로: JJ1(10 rows + 3-day window → 정확히 3 rows + backfill marker survive), JJ2(full+backfill → 같은 asset row + 2 materialization entries). 서버 it 450→452(+2). 코어 738 unchanged. mypy 코어 61 + 서버 100 OK. ruff clean. DB 마이그레이션 0.
 >

@@ -10,6 +10,12 @@
 ## [Unreleased]
 
 ### Added
+- **Connection 실패 시나리오 — catalog clean 정책 보장 (Phase OO)** [ADR-0059] — 운영 흔한 실패 2종에서 catalog가 항상 깨끗 유지:
+  - **OO1 — Invalid database path**: 잘못된 path → connect 실패 → run failed + error_class/error_message 채워짐 + 카탈로그 empty.
+  - **OO2 — Source table missing**: 유효한 db이지만 raw table 없음 → read 실패 → run failed + error_message에 table 정보 + 카탈로그 empty.
+  - **catalog clean 정책 통합 검증**: transform fail(FF/F) / DLQ fail(II) / connect fail(OO1) / read fail(OO2) 4가지 stage 모두 같은 posture.
+  - **검증**: 코어 738 unchanged. 서버 it 459→461(+2). DB 마이그레이션 0.
+
 - **Sensors freshness 시나리오 — 시간 기반 auto-materialize sample-data e2e (Phase NN)** [ADR-0058] — ADR-0038의 `freshness_sla_minutes` 동작을 sample-data + 시간 시뮬로:
   - **NN1 — Stale → 자동 enqueue**: SLA 60분, last_materialized_at 2시간 전 강제. `_tick_freshness` → fired=1, PENDING run에 `triggered_by: freshness` stamp, drain 시 asset refresh.
   - **NN2 — Within SLA → no fire**: SLA 60분, last_materialized_at 기본(최근). fired=0. 건강한 pipeline이 큐 storm 안 함.

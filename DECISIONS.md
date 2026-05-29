@@ -1896,4 +1896,31 @@ L1 출시 직후 사용자가 5개 회신:
 
 ---
 
+## ADR-0059: Connection 실패 시나리오 — catalog 깨끗 유지 정책 보장
+
+**Date**: 2026-05-29
+**Status**: Accepted
+**Context**: 운영 흔한 실패 2종: (1) connection의 database path가 잘못됨(typo / dev env 미배포 / 권한) → connect() 단계 실패. (2) connection은 valid하지만 source query가 존재하지 않는 table 참조(drift / dropped / wrong env) → read() 단계 실패. 둘 다 사용자 운영 일상 발생. Phase EE Scenario F(transform raise), Phase II(DLQ failure)와 *같은 catalog clean 정책*이 적용되는지 sample-data로 검증.
+
+**Decision**:
+1. **`test_connection_failure_scenarios.py`(신규)** — 2 시나리오 e2e:
+   - **OO1 — Invalid database path**: `/nope/does/not/exist/...db`로 src/dst 둘 다 가리킴. sqlite connect 실패 → worker except branch → run.status=FAILED + error_class/error_message 채워짐 + 카탈로그 empty.
+   - **OO2 — Source table missing**: sqlite 파일은 valid하지만 `raw` table 없음. read 실패 → run.status=FAILED + error_message에 "raw" 또는 "no such table". 카탈로그 empty.
+2. **검증 axis**:
+   - **Run status**: FAILED + error_class/error_message 채워짐(운영자 디버깅 정보).
+   - **Catalog state**: 양쪽 시나리오 모두 `list_for_workspace == set()` — *어떤 자산도 생성 안 됨*. 절반 만들어진 row 없음.
+3. **정책 명문화**: Phase EE F + Phase II + Phase OO 모두 같은 "no half-written catalog rows on failure" 정책. 어느 단계에서 실패하든 catalog는 항상 일관.
+
+**Consequences**:
+- ✅ **운영 흔한 실패 catalog 안전성**: connect fail / read fail 둘 다 카탈로그 더럽히지 않음.
+- ✅ **운영자 디버깅 path 명확**: error_class + error_message가 항상 채워짐 → Run 상세 페이지에서 무엇이 잘못됐는지 즉시 확인.
+- ✅ **catalog clean 정책 통합 검증**: transform fail(F) / DLQ fail(II) / connect fail(OO1) / read fail(OO2) 4가지 stage 모두 같은 posture.
+- ✅ DB 마이그레이션 0. 신규 e2e만.
+- ⚠ **write fail은 별도 슬라이스**: sink connect/write 실패 시 일부 record가 sink에 들어간 partial-success는 본 시나리오에 미포함. sqlite append 모드에서 write 도중 실패 시뮬은 별도 복잡성.
+- ⚠ **Network connection 실패(postgres / S3 / Kafka)는 미포함**: testcontainers 필요. sqlite로 catalog clean 정책의 일반성 입증 — 다른 connector도 같은 worker except path를 거치므로 동일 동작.
+
+**검증**: 코어 unit 738 unchanged. 서버 it 459→461(+2 OO1/OO2). mypy 코어 61 + 서버 100 OK. ruff clean. DB 마이그레이션 0.
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

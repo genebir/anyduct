@@ -9,6 +9,12 @@
 
 ## [Unreleased]
 
+### Added
+- **Cross-DB overwrite — idempotent re-run dogfood (Phase AAD)** — `mode=overwrite` + `auto_create_table` 조합이 분석가 시나리오(매시간 latest snapshot for dashboard)에서 idempotent 동작 확인:
+  - AAD1: 동일 source 데이터로 2-pass 실행. pass-1은 sink 자동 생성 + 데이터 write. pass-2는 sink 이미 존재(skip 분기) + overwrite가 truncate+insert로 같은 shape 재현. **결과**: 동일 (region, value) 3 rows, 중복 0, 스키마 drift 0.
+  - 운영 보장: 분석가가 "동일한 시간에 두 번 run해도 dashboard에 영향 없다" 직관 검증.
+  - 서버 it 480→481(+1 AAD1).
+
 ### Fixed
 - **Cross-DB upsert + auto_create_table — `ensure_table`가 PRIMARY KEY emit (Phase AAC, 8번째 silent miss)** [ADR-0072] — 사용자 페르소나 dogfood가 catch:
   - **Bug**: `auto_create_table=true` + `mode=upsert` + `key_columns=[id]` 조합 시 `ensure_table`이 PK 없이 plain CREATE TABLE 발행 → 첫 run의 `ON CONFLICT (id)`가 *"does not match any PRIMARY KEY or UNIQUE constraint"*로 실패. live customers cache 패턴(매 run 최신 snapshot upsert) 운영자 직관 사용 패턴.

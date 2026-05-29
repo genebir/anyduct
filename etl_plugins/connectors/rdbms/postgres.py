@@ -166,6 +166,7 @@ class PostgresConnector(BatchSource, BatchSink):
         columns: list[ColumnInfo],
         *,
         if_exists: str = "skip",  # "skip" | "drop" | "error"
+        primary_key: list[str] | None = None,
     ) -> None:
         """Create ``table`` from ``columns`` if it doesn't already exist.
 
@@ -174,6 +175,10 @@ class PostgresConnector(BatchSource, BatchSink):
         postgres's vocabulary — so a sqlite ``INTEGER`` becomes ``INTEGER``,
         a mysql ``DATETIME`` becomes ``TIMESTAMPTZ``, etc. ``schema.name``
         is honoured; a bare name lands in ``public``.
+
+        ``primary_key`` (Phase AAC, ADR-0072) — when supplied, emits a
+        ``PRIMARY KEY (...)`` table constraint. Required for upsert
+        targets so ``INSERT ... ON CONFLICT (key_columns)`` can attach.
         """
         from etl_plugins.core.type_mapping import normalize_db_type, render_canonical
 
@@ -206,6 +211,7 @@ class PostgresConnector(BatchSource, BatchSink):
                 f"ensure_table: unknown if_exists={if_exists!r} " "(use 'skip', 'drop', or 'error')"
             )
 
+        col_names = {c.name for c in columns}
         col_fragments: list[str] = []
         for c in columns:
             if not _SAFE_IDENT.match(c.name):
@@ -216,6 +222,14 @@ class PostgresConnector(BatchSource, BatchSink):
             spec = normalize_db_type(c.type or "")
             pg_type = render_canonical(spec, dialect="postgres")
             col_fragments.append(f'"{c.name}" {pg_type}')
+        if primary_key:
+            for k in primary_key:
+                if not _SAFE_IDENT.match(k):
+                    raise WriteError(f"ensure_table: invalid primary key column {k!r}")
+                if k not in col_names:
+                    raise WriteError(f"ensure_table: primary key column {k!r} not in columns")
+            pk_list = ", ".join(f'"{k}"' for k in primary_key)
+            col_fragments.append(f"PRIMARY KEY ({pk_list})")
         ddl = f'CREATE TABLE "{schema}"."{name}" ({", ".join(col_fragments)})'
         with self.connection.cursor() as cur:
             cur.execute(ddl)

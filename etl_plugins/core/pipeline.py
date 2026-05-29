@@ -1224,8 +1224,21 @@ class Pipeline:
             # write will raise a clearer "no such table" if the DDL
             # silently failed.
             cols_for_sink = projected if projected else source_columns
+            # Phase AAC (ADR-0072): when the sink is an upsert target,
+            # forward its ``key_columns`` as the table's primary key so
+            # ``ON CONFLICT`` / ``ON DUPLICATE KEY UPDATE`` has the
+            # required uniqueness constraint to attach to. Skipped for
+            # non-upsert modes — append / overwrite don't need it.
+            pk_for_sink = (
+                list(spec.key_columns) if spec.mode == "upsert" and spec.key_columns else None
+            )
             with contextlib.suppress(Exception):
-                sink.ensure_table(spec.table, cols_for_sink, if_exists=spec.auto_create_if_exists)
+                sink.ensure_table(
+                    spec.table,
+                    cols_for_sink,
+                    if_exists=spec.auto_create_if_exists,
+                    primary_key=pk_for_sink,
+                )
 
     def _run_pre_sql(self, task: Task, connectors: dict[str, Connector]) -> None:
         """Execute the task's pre-load SQL actions once, in order (ADR-0035)."""

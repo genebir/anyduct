@@ -2292,4 +2292,27 @@ L1 출시 직후 사용자가 5개 회신:
 
 ---
 
+## ADR-0072: Cross-DB upsert — `ensure_table`가 `key_columns`를 PRIMARY KEY로 emit
+
+**Date**: 2026-05-29
+**Status**: Accepted
+**Context**: Phase AAC dogfood가 발견한 8번째 silent miss. `auto_create_table=true` + `mode=upsert` + `key_columns=[id]` 조합으로 fresh sink 빌드 시:
+- `ensure_table`이 PRIMARY KEY/UNIQUE 없이 plain CREATE TABLE 발행 → 첫 write가 `ON CONFLICT (id) DO UPDATE` / `ON DUPLICATE KEY UPDATE` 시 *"ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE constraint"* 로 실패.
+- 사용자가 "live customers cache" 패턴(매 run 최신 snapshot upsert)을 만들면 첫 run부터 망가짐. 운영 직관적인 사용 패턴.
+
+**Decision**:
+1. **`SchemaWriter.ensure_table`에 `primary_key: list[str] | None = None` 추가**. None이면 기존 동작(plain CREATE TABLE).
+2. **`Pipeline._auto_create_sink_tables`가 `spec.mode == "upsert" and spec.key_columns`일 때 `primary_key=spec.key_columns` 자동 forwarding**. append/overwrite는 None 유지(불필요한 unique index 부담 회피).
+3. **3 RDBMS connector(sqlite/postgres/mysql)**: PRIMARY KEY를 column fragments 끝에 table constraint로 emit(`PRIMARY KEY (id, ...)`). 각 dialect의 identifier quote 그대로(sqlite `"id"` / postgres `"id"` / mysql `` `id` ``). PK 컬럼이 columns에 없으면 WriteError, identifier 안전성 검증.
+
+**Consequences**:
+- ✅ **Cross-DB upsert 첫 run 자동 동작** — fresh sink + upsert + key_columns 조합이 just works.
+- ✅ **BC 유지**: append/overwrite 모드는 PK 없이 그대로 생성 — 기존 동작.
+- ✅ **Index overhead 명시적**: upsert일 때만 PK 인덱스 비용 발생(append-only는 영향 0).
+- ⚠️ Composite PK도 자연 지원(`["region", "id"]`) — 운영자가 의식하지 않아도 됨.
+- ✅ **DB 마이그레이션 0**. 코어 unit 799→802(+3 sqlite primary_key 검증) + 서버 it 479→480(+1 AAC1).
+- ✅ 이번 세션 8번째 silent miss(Z/BB/II×2/MM/UU/XX/AAC) — dogfooding 가치 누적 증명.
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

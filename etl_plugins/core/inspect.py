@@ -56,6 +56,7 @@ class SchemaWriter(Protocol):
         columns: list[ColumnInfo],
         *,
         if_exists: str = "skip",  # "skip" | "drop" | "error"
+        primary_key: list[str] | None = None,
     ) -> None: ...
 
 

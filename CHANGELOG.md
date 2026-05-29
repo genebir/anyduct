@@ -9,6 +9,13 @@
 
 ## [Unreleased]
 
+### Fixed
+- **Cross-DB upsert + auto_create_table — `ensure_table`가 PRIMARY KEY emit (Phase AAC, 8번째 silent miss)** [ADR-0072] — 사용자 페르소나 dogfood가 catch:
+  - **Bug**: `auto_create_table=true` + `mode=upsert` + `key_columns=[id]` 조합 시 `ensure_table`이 PK 없이 plain CREATE TABLE 발행 → 첫 run의 `ON CONFLICT (id)`가 *"does not match any PRIMARY KEY or UNIQUE constraint"*로 실패. live customers cache 패턴(매 run 최신 snapshot upsert) 운영자 직관 사용 패턴.
+  - **보완**: `SchemaWriter.ensure_table`에 `primary_key: list[str] | None` 추가 + 런타임이 `mode='upsert'`일 때 자동 forwarding + 3 RDBMS connector(sqlite/postgres/mysql) PK constraint emit + PK 컬럼이 columns에 없으면 WriteError.
+  - **결과**: AAC1 페르소나 e2e (day-1 fresh sink 자동 PK + day-2 upsert merge, Alice updated/Carol joined/Bob unchanged, total 3 rows) green.
+  - **이번 세션 8번째 silent miss**: Z/BB/II×2/MM/UU/XX/AAC. dogfood 가치 누적 입증.
+
 ### Added
 - **빌더 UI에 `auto_create_if_exists` select 노출 + 엔지니어 nightly-snapshot 페르소나 (Phase AAB)** — Phase AAA의 UX 닫힘 + 페르소나 dogfood:
   - **operators.ts 3 RDBMS sink(postgres/mysql/sqlite)에 `auto_create_if_exists` select** — skip / drop / error 옵션 + help text가 "drop은 nightly snapshot에 좋다" 가이드.

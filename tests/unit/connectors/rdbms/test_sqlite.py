@@ -564,5 +564,59 @@ def test_ensure_table_rejects_empty_columns(db_path: Path) -> None:
         conn.ensure_table("t", [])
 
 
+# ---------- ensure_table primary_key (Phase AAC / ADR-0072, 2026-05-29) ----
+
+
+def test_ensure_table_emits_primary_key(db_path: Path) -> None:
+    """``primary_key`` declares a PRIMARY KEY constraint that sqlite's
+    ``ON CONFLICT`` clause attaches to. Without this, an auto-created
+    upsert sink fails on its very first run."""
+    from etl_plugins.core.inspect import ColumnInfo
+
+    conn = SQLiteConnector(database=str(db_path))
+    with conn:
+        conn.ensure_table(
+            "kv",
+            [
+                ColumnInfo(name="id", type="INTEGER"),
+                ColumnInfo(name="value", type="TEXT"),
+            ],
+            primary_key=["id"],
+        )
+        ddl_row = conn.connection.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='kv'"
+        ).fetchone()
+        assert "PRIMARY KEY" in ddl_row[0]
+        # Smoke: ON CONFLICT now resolves.
+        conn.connection.execute(
+            'INSERT INTO "kv" (id, value) VALUES (1, ?) ON CONFLICT (id) DO UPDATE SET value=excluded.value',
+            ("hello",),
+        )
+
+
+def test_ensure_table_rejects_pk_column_not_in_columns(db_path: Path) -> None:
+    from etl_plugins.core.inspect import ColumnInfo
+
+    conn = SQLiteConnector(database=str(db_path))
+    with conn, pytest.raises(WriteError, match="primary key column 'missing'"):
+        conn.ensure_table(
+            "t",
+            [ColumnInfo(name="id", type="INTEGER")],
+            primary_key=["missing"],
+        )
+
+
+def test_ensure_table_rejects_invalid_pk_identifier(db_path: Path) -> None:
+    from etl_plugins.core.inspect import ColumnInfo
+
+    conn = SQLiteConnector(database=str(db_path))
+    with conn, pytest.raises(WriteError, match="invalid primary key column"):
+        conn.ensure_table(
+            "t",
+            [ColumnInfo(name="id", type="INTEGER")],
+            primary_key=["id; DROP"],
+        )
+
+
 def _unused(_: Any) -> None:
     """Silence ruff F401 for the type-only Any import."""

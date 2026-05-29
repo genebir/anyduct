@@ -117,6 +117,7 @@ class SQLiteConnector(BatchSource, BatchSink):
         columns: list[ColumnInfo],
         *,
         if_exists: str = "skip",  # "skip" | "drop" | "error"
+        primary_key: list[str] | None = None,
     ) -> None:
         """Create ``table`` from ``columns`` if it doesn't already exist.
 
@@ -126,6 +127,13 @@ class SQLiteConnector(BatchSource, BatchSink):
         when ``if_exists='skip'`` (the common case for resumable jobs);
         ``'drop'`` does a fresh recreate; ``'error'`` raises if the table
         already exists.
+
+        ``primary_key`` (Phase AAC, ADR-0072) — when supplied, emits a
+        ``PRIMARY KEY (...)`` table constraint. Required for
+        ``mode='upsert'`` to work on a freshly-created table; sqlite's
+        ``ON CONFLICT`` needs a UNIQUE/PRIMARY KEY constraint on the
+        conflict-target columns. The runtime forwards this from
+        ``SinkConfig.key_columns`` automatically.
         """
         from etl_plugins.core.type_mapping import normalize_db_type, render_canonical
 
@@ -153,6 +161,7 @@ class SQLiteConnector(BatchSource, BatchSink):
                 f"ensure_table: unknown if_exists={if_exists!r} " "(use 'skip', 'drop', or 'error')"
             )
 
+        col_names = {c.name for c in columns}
         col_fragments: list[str] = []
         for c in columns:
             if not _SAFE_IDENT.match(c.name):
@@ -162,6 +171,18 @@ class SQLiteConnector(BatchSource, BatchSink):
             spec = normalize_db_type(c.type or "")
             sqlite_type = render_canonical(spec, dialect="sqlite")
             col_fragments.append(f'"{c.name}" {sqlite_type}')
+        # PRIMARY KEY (Phase AAC) — only emit when the runtime asked for
+        # one, and every named column is present in ``columns`` (silently
+        # dropping a key column would be worse than the connector being
+        # asked to write upsert without one).
+        if primary_key:
+            for k in primary_key:
+                if not _SAFE_IDENT.match(k):
+                    raise WriteError(f"ensure_table: invalid primary key column {k!r}")
+                if k not in col_names:
+                    raise WriteError(f"ensure_table: primary key column {k!r} not in columns")
+            pk_list = ", ".join(f'"{k}"' for k in primary_key)
+            col_fragments.append(f"PRIMARY KEY ({pk_list})")
         ddl = f'CREATE TABLE "{table}" ({", ".join(col_fragments)})'
         self.connection.execute(ddl)
         self.connection.commit()

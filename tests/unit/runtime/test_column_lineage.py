@@ -193,6 +193,118 @@ def test_sql_coalesce_join_emits_multi_source_upstreams() -> None:
     assert {str(u) for u in edge.upstreams} == {"wh/a:x", "wh/b:y"}
 
 
+# ---------- Phase CC: explicit column_mapping declaration ----------
+
+
+def test_column_mapping_overrides_python_opaque() -> None:
+    """Phase CC (ADR-0047, 2026-05-29): a ``column_mapping`` declaration on
+    a python transform unlocks accurate lineage. Without it the python
+    transform marks the sink opaque (and the worker's schema-passthrough
+    fallback would guess by column name). With it, we honour the user's
+    declared output → source attribution verbatim.
+    """
+    cfg = _cfg(
+        transforms=[
+            {
+                "type": "custom_python",
+                "code": "def transform(record):\n    return record\n",
+                # User declares: ``email_normalized`` comes from ``a`` (source's
+                # first column), ``tier`` is new (no upstream).
+                "column_mapping": {
+                    "email_normalized": ["a"],
+                    "tier": [],
+                },
+            }
+        ]
+    )
+    out = _edge_map(derive_column_lineage(cfg))
+    assert out == {
+        "wh/t2:email_normalized": ("wh/t1:a",),
+        "wh/t2:tier": (),
+    }
+    # The sink is *not* opaque — accurate lineage means we don't need
+    # the schema-passthrough fallback to kick in.
+    assert AssetKey.of("wh", "t2") not in derive_column_lineage(cfg).opaque_assets
+
+
+def test_column_mapping_multi_source_collapses_upstream_union() -> None:
+    """An output column declared with multiple source columns becomes a
+    multi-upstream ``ColumnEdge`` — every listed source's prior upstreams
+    are unioned (dedup'd in first-seen order)."""
+    cfg = _cfg(
+        source={"connection": "wh", "query": "SELECT a, b FROM t1"},
+        transforms=[
+            {
+                "type": "python",
+                "callable": "m:f",
+                "column_mapping": {
+                    "full": ["a", "b"],  # full = a + b
+                },
+            }
+        ],
+    )
+    lineage = derive_column_lineage(cfg)
+    [edge] = lineage.edges
+    assert str(edge.downstream) == "wh/t2:full"
+    assert {str(u) for u in edge.upstreams} == {"wh/t1:a", "wh/t1:b"}
+
+
+def test_column_mapping_is_replace_mode_not_merge() -> None:
+    """Replace-mode determinism: only the columns the user declared end up
+    in the final mapping. ``b`` was in the source but the user didn't
+    name it, so it's intentionally not in the sink's column lineage."""
+    cfg = _cfg(
+        source={"connection": "wh", "query": "SELECT a, b FROM t1"},
+        transforms=[
+            {
+                "type": "custom_python",
+                "code": "def transform(record):\n    return record\n",
+                "column_mapping": {"id": ["a"]},
+            }
+        ],
+    )
+    out = _edge_map(derive_column_lineage(cfg))
+    assert out == {"wh/t2:id": ("wh/t1:a",)}
+
+
+def test_column_mapping_unknown_source_column_yields_empty_upstream() -> None:
+    """If the user names a source column that isn't in the current mapping
+    (typo, renamed earlier in the chain), the output column exists but
+    with no upstream — same shape as ``add_constant`` so the catalog
+    still shows the column, just unattributed."""
+    cfg = _cfg(
+        transforms=[
+            {
+                "type": "custom_python",
+                "code": "def transform(record):\n    return record\n",
+                "column_mapping": {"x": ["does_not_exist"]},
+            }
+        ]
+    )
+    out = _edge_map(derive_column_lineage(cfg))
+    assert out == {"wh/t2:x": ()}
+
+
+def test_column_mapping_malformed_declaration_falls_through() -> None:
+    """A malformed declaration (not a dict, or non-list values) should not
+    corrupt the chain — fall back to the type-based handling (which for
+    python means opaque)."""
+    cfg = _cfg(
+        transforms=[
+            {
+                "type": "custom_python",
+                "code": "def transform(record):\n    return record\n",
+                "column_mapping": "not-a-dict",
+            }
+        ]
+    )
+    lineage = derive_column_lineage(cfg)
+    # The declaration was bad, so the chain proceeds. ``custom_python``
+    # without a declaration is opaque → no edges, sink in opaque_assets.
+    # (We tolerate the bad shape rather than crashing.)
+    assert AssetKey.of("wh", "t2") in lineage.opaque_assets
+
+
 def test_select_star_with_schema_resolves_columns() -> None:
     """Phase Z (2026-05-28): caller supplies a schemas map → ``SELECT *``
     expands per-column rather than marking the sink opaque. The schemas

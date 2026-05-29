@@ -10,6 +10,16 @@
 ## [Unreleased]
 
 ### Added
+- **사용자-명시 `column_mapping` — 트랜스폼에 직접 의도 박기 (Phase CC)** [ADR-0047] — Phase AA(schema-passthrough)는 컬럼명 *보존* python을 잘 잡지만 **컬럼명 rename**(`name`→`display_name`)이나 **a→b 데이터 이동**은 정적 분석 본질적 한계. 사용자가 의도를 박을 수 있는 빠져나갈 길:
+  - **트랜스폼 config에 `column_mapping` 옵셔널 필드** (TransformConfig.model_config = `extra="allow"` 활용, 모델 변경 0 / DB 마이그레이션 0).
+  - 형태: `{output_col: [source_col, ...]}` — source는 현재 _Mapping의 키. 빈 리스트 = 새 컬럼(no upstream).
+  - **`_apply_transform`이 type 분기 *전*에 `column_mapping` 우선 처리** — 모든 트랜스폼 타입(rename/cast/python/custom_python/sql_exec)에 적용 가능.
+  - **Replace 모드**(merge 아님): 명시한 출력 컬럼만 새 _Mapping에 들어감. Deterministic + 사용자가 의도를 정확히 기술. Trade-off는 verbose지만 declaration은 정적 분석 불가 트랜스폼에만 박는 거니 부담 작음.
+  - **Worker fallback과 상호작용**: column_mapping 있으면 opaque 안 됨 → schema-passthrough fallback도 안 발동. 사용자 책임 모드.
+  - **Malformed declaration**: helper가 None 시그널 → caller가 type 기반 처리로 fallback. 사용자 실수가 stale mapping 만들지 않음.
+  - **테스트 6 신규**: 코어 unit 5 (override opaque / multi-source union / replace-mode / unknown source col → empty / malformed fall-through) + e2e 1 (sqlite source + custom_python `name`→`display_name` rename + column_mapping → catalog `display_name`←`seed.name` 정확).
+  - **검증**: 코어 718→723. 서버 it 433→434. mypy 코어 60 + 서버 100. ruff clean. DB 마이그레이션 0.
+
 - **4-stage e-commerce dogfooding 시나리오 + passthrough fallback 보완 (Phase BB)** [ADR-0046 보완] — 사용자 요청 *"복잡한 워크플로우 만들어서 수행, 카탈로그도 검증"*. 4단계 실전 시나리오 통합 테스트:
   - **Stage 1**: SQL JOIN + CTE — `raw_orders` + `raw_customers` → `staging_orders_enriched`.
   - **Stage 2**: CTE + `ROW_NUMBER()` window — `staging_orders_enriched` → `mart_top_orders`.

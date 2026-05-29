@@ -743,6 +743,100 @@ async def test_executor_persists_column_lineage(session: AsyncSession, tmp_path:
     assert id_upstreams[0][0].startswith("src/")
 
 
+async def test_executor_python_rename_via_explicit_column_mapping(
+    session: AsyncSession, tmp_path: Path
+) -> None:
+    """Phase CC (ADR-0047, 2026-05-29): when the python code does something
+    the schema-passthrough fallback can't guess — here it *renames*
+    ``name`` to ``display_name`` — the user can attach a ``column_mapping``
+    declaration on the transform. The catalog then reflects the user's
+    declared output → source attribution exactly, *no* heuristic guessing.
+
+    Without ``column_mapping``: the schema-passthrough fallback would
+    silently emit empty-upstream rows for the renamed column. With it,
+    ``display_name`` correctly traces to ``seed.name``.
+    """
+    db_path = tmp_path / "rename.db"
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.execute("CREATE TABLE seed (id INTEGER, name TEXT)")
+        conn.executemany(
+            "INSERT INTO seed (id, name) VALUES (?, ?)",
+            [(1, "alice"), (2, "bob")],
+        )
+        # Sink table has the *renamed* column ``display_name`` — the python
+        # code shuffled the data there but the static analyser can't see it.
+        conn.execute("CREATE TABLE out (id INTEGER, display_name TEXT)")
+        conn.commit()
+    finally:
+        conn.close()
+
+    ws = await _seed_workspace(session, slug="we-cc-rename")
+    await _seed_connection(
+        session, workspace_id=ws.id, name="src", config={"database": str(db_path)}
+    )
+    await _seed_connection(
+        session, workspace_id=ws.id, name="dst", config={"database": str(db_path)}
+    )
+    cfg = {
+        "name": "p",
+        "source": {"connection": "src", "query": "SELECT id, name FROM seed"},
+        "transforms": [
+            {
+                "type": "custom_python",
+                "code": (
+                    "def transform(record):\n"
+                    "    d = dict(record.data)\n"
+                    "    d['display_name'] = d.pop('name')\n"
+                    "    return record.__class__(\n"
+                    "        data=d, metadata=record.metadata,\n"
+                    "        schema_version=record.schema_version)\n"
+                ),
+                # Phase CC: user-declared output → source attribution.
+                # Replace-mode: every output column the catalog should
+                # show is listed.
+                "column_mapping": {
+                    "id": ["id"],
+                    "display_name": ["name"],
+                },
+            }
+        ],
+        "sink": {"connection": "dst", "table": "out", "mode": "append"},
+    }
+    p, pv = await _seed_pipeline(session, workspace_id=ws.id, name="p", config=cfg)
+    run = await _seed_pending_run(
+        session, workspace_id=ws.id, pipeline_id=p.id, pipeline_version_id=pv.id
+    )
+    claimed = await claim_pending_run(session, worker_id="worker-CC")
+    assert claimed is not None
+    await session.commit()
+    await RunExecutor(
+        _SessionFactoryAdapter(session), StaticSecretBackend(), worker_id="w"
+    ).execute(run.id)
+
+    repo = AssetRepository(session)
+    assets = {a.asset_key: a for a in await repo.list_for_workspace(workspace_id=ws.id)}
+    out_asset = assets["dst/out"]
+    # Accurate lineage — not opaque, not heuristic.
+    assert out_asset.column_lineage_opaque is False
+    cols, upstream_map = await repo.column_lineage_for_asset(asset_id=out_asset.id)
+    by_name = {c.name: c for c in cols}
+    assert {"id", "display_name"} == set(
+        by_name
+    ), "replace-mode lineage: only the columns the user declared show up"
+    # ``display_name`` traces to ``seed.name`` thanks to the explicit
+    # mapping — schema-passthrough alone would have lost this.
+    display_ups = [
+        (up_asset.asset_key, up_col.name)
+        for up_col, up_asset in upstream_map[by_name["display_name"].id]
+    ]
+    assert ("src/seed", "name") in display_ups
+    id_ups = [
+        (up_asset.asset_key, up_col.name) for up_col, up_asset in upstream_map[by_name["id"].id]
+    ]
+    assert ("src/seed", "id") in id_ups
+
+
 async def test_executor_python_transform_falls_back_to_schema_passthrough(
     session: AsyncSession, tmp_path: Path
 ) -> None:

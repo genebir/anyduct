@@ -156,8 +156,27 @@ def _apply_transform(mapping: _Mapping, tc: TransformConfig) -> _Mapping | None:
     new output key. ``select``/``drop`` filter the output set without
     rewriting upstreams. ``cast``/``filter``/``dedupe``/``assert`` are
     structural pass-throughs.
+
+    Phase CC (ADR-0047, 2026-05-29): when the transform declares an
+    explicit ``column_mapping`` it overrides the type-based handling.
+    The declaration is the user's ground-truth for output → source
+    column attribution; we honour it verbatim. This is the only way to
+    get *accurate* (not just heuristic) lineage through a transform
+    whose body the static analyser can't read — ``python`` /
+    ``custom_python`` / ``sql_exec`` — when the python code does
+    something the schema-passthrough fallback can't guess (column
+    rename inside python, a-column-feeds-b-column moves, etc.).
     """
     data = tc.model_dump()
+    column_mapping = data.get("column_mapping")
+    if column_mapping is not None:
+        explicit = _apply_explicit_column_mapping(mapping, column_mapping)
+        if explicit is not None:
+            return explicit
+        # A malformed declaration (not a dict, etc.) → don't trust the
+        # hint, fall through to the type-based handler below. For opaque
+        # types like python that means we still end up opaque, but at
+        # least we didn't silently propagate a stale mapping.
     if tc.type == "rename":
         renames = data.get("mapping") or {}
         return {renames.get(k, k): v for k, v in mapping.items()}
@@ -178,6 +197,50 @@ def _apply_transform(mapping: _Mapping, tc: TransformConfig) -> _Mapping | None:
         return mapping
     # python / custom_python / sql_exec / anything we don't recognize → opaque.
     return None
+
+
+def _apply_explicit_column_mapping(
+    mapping: _Mapping,
+    declaration: object,
+) -> _Mapping | None:
+    """Honor a user-declared ``column_mapping`` on a transform (Phase CC).
+
+    Form: ``{output_col: [source_col_name, ...]}``. Each ``source_col_name``
+    must match a key currently in the upstream :data:`_Mapping`; the new
+    output column inherits the union of those upstreams. An empty list
+    means *"this is a new column, no upstream"* — the same semantics as
+    ``add_constant``. A malformed declaration is treated as a no-op so a
+    user mistake degrades to "lineage proceeds without the hint" rather
+    than corrupting the chain.
+
+    This is a **replace-mode** operation: only the columns listed in the
+    declaration appear in the new mapping. The user is responsible for
+    naming every output column they want the catalog to attribute. The
+    rationale is determinism — a merge mode where unlisted columns "leak
+    through from before the python ran" makes the catalog brittle when
+    code is added or removed. The trade-off is verbosity, which is fine
+    because the declaration only gets written for transforms whose body
+    the static analyser already can't read.
+    """
+    if not isinstance(declaration, dict):
+        return None  # bad shape — signal "I gave up", caller falls through
+    new_mapping: _Mapping = {}
+    for out_col, source_cols in declaration.items():
+        if not isinstance(out_col, str) or not isinstance(source_cols, list):
+            continue
+        upstreams: list[ColumnRef] = []
+        seen: set[tuple[AssetKey, str]] = set()
+        for src_col in source_cols:
+            if not isinstance(src_col, str):
+                continue
+            for ref in mapping.get(src_col, ()):
+                key = (ref.asset, ref.column)
+                if key in seen:
+                    continue
+                seen.add(key)
+                upstreams.append(ref)
+        new_mapping[out_col] = tuple(upstreams)
+    return new_mapping
 
 
 def _emit_edges(mapping: _Mapping, sink_key: AssetKey | None, edges: list[ColumnEdge]) -> None:

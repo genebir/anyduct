@@ -1532,4 +1532,46 @@ L1 출시 직후 사용자가 5개 회신:
 
 ---
 
+## ADR-0047: 사용자-명시 `column_mapping` — 트랜스폼에 직접 의도 박기
+
+**Date**: 2026-05-29
+**Status**: Accepted
+**Context**: ADR-0046(Phase AA) schema-passthrough fallback이 컬럼명 *보존* python 트랜스폼은 잘 잡지만, **컬럼명을 바꾸는** 패턴(`name` → `display_name`)이나 **a→b 데이터 이동** 같은 의도는 catch 못 한다. 정적 분석은 본질적 한계. 사용자가 정확한 카탈로그를 원할 때 빠져나갈 길이 필요.
+
+**Decision**:
+1. **트랜스폼 config의 `column_mapping` 옵셔널 필드**(`extra="allow"` 활용, 모델 변경 0):
+   ```yaml
+   transforms:
+     - type: custom_python
+       code: |
+         def transform(record):
+             d = dict(record.data)
+             d['display_name'] = d.pop('name')
+             return record.__class__(data=d, ...)
+       column_mapping:
+         id: [id]
+         display_name: [name]   # 핵심: 명시적 a→b
+   ```
+   `{output_col: [source_col, ...]}` — source_col은 현재 `_Mapping`의 키. 빈 리스트 = 새 컬럼(no upstream, `add_constant`와 동일 의미).
+2. **`column_lineage._apply_transform`이 type 분기 *전에* `column_mapping` 우선 처리**:
+   - 모든 트랜스폼 타입에 적용 가능(rename/cast/python/custom_python/sql_exec 등). 정적 분석으로 정확한 declarative transforms에서도 사용자가 override하려면 박을 수 있음.
+   - `_apply_explicit_column_mapping(mapping, declaration)`: dict이 아닌 malformed declaration → `None` 반환 시그널, caller가 type 기반 처리로 fallback.
+3. **Replace 모드 (merge 아님)**: 명시한 출력 컬럼만 새 `_Mapping`에 들어감. 명시 안 한 컬럼은 흘러나가지 않음.
+   - **Rationale**: merge 모드(명시 안 한 컬럼은 옛 mapping에서 흘러옴)는 사용자가 python 안에서 컬럼 추가/제거를 변경할 때 catalog가 stale해진다. Replace는 deterministic + 사용자가 의도를 정확히 기술.
+   - **Trade-off**: verbose — 사용자가 모든 출력 컬럼을 나열해야 함. 다만 declaration은 정적 분석 불가능한 트랜스폼에만 박는 거니 보통 부담 크지 않음.
+4. **Worker fallback과 상호작용**: `column_mapping`이 있으면 sink가 opaque가 되지 않음 → Phase AA의 schema-passthrough fallback 발동 안 함. 둘 다 한꺼번에 안 발동. 사용자가 책임 가져가는 모드.
+5. **Sink-only 컬럼 누락**: 사용자가 명시 안 한 sink 컬럼은 catalog에 없음. 명시적이지만 사용자 부담 있음. 향후 옵션으로 `column_mapping_mode: replace | merge | augment_with_passthrough` 같은 토글 가능.
+
+**Consequences**:
+- ✅ **컬럼명 rename 같은 정적 분석 불가 패턴 100% 정확** — 사용자가 의도 박으면 카탈로그가 그대로 따라감.
+- ✅ **Model 변경 0**: `TransformConfig.model_config = ConfigDict(extra="allow")` 덕분에 `column_mapping` 필드를 임의 트랜스폼에 박을 수 있음. DB 마이그레이션 0.
+- ✅ **거짓 양성 0**: 사용자 의도만 따르므로 잘못된 매핑 자동 생성 안 함.
+- ✅ **모든 트랜스폼 타입 적용**: declarative(`rename`/`cast`)도 override 가능 — 빌더에서 자동 추정한 매핑이 의도와 다르면 사용자가 명시.
+- ⚠ **Replace 모드 verbose**: 사용자가 모든 출력 컬럼 나열 책임. 명시 안 한 컬럼은 catalog에서 누락. 빌더 UI에서 "기존 컬럼 자동 포함" 도우미 가능(향후).
+- ⚠ **Type 분기 우선순위**: `column_mapping`이 declarative transforms(`rename` 등)에도 적용되니, 사용자가 의도치 않게 `rename` 트랜스폼에 `column_mapping`을 박으면 declarative 동작이 무효화됨. 빌더 UI에서 한 트랜스폼당 둘 중 하나만 노출하면 회피.
+
+**검증**: 코어 unit 718 → 723(+5 신규): override python opaque / multi-source union / replace-mode 검증 / unknown source col → empty upstream / malformed declaration fall-through. 서버 it 433 → 434(+1 e2e: custom_python rename + column_mapping → catalog 정확). mypy 코어 60 + 서버 100 OK. ruff clean. DB 마이그레이션 0.
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

@@ -74,6 +74,15 @@ export type FieldDef =
       placeholder?: string;
     })
   | (FieldBase & {
+      // Boolean toggle (Phase YY / ADR-0069, 2026-05-29). Renders a
+      // checkbox. The wire shape is plain ``true`` / ``false`` — the
+      // serializer drops the key when ``false`` so configs stay
+      // minimal (no ``auto_create_table: false`` clutter on every
+      // sink that didn't opt in).
+      kind: "boolean";
+      defaultValue?: boolean;
+    })
+  | (FieldBase & {
       kind: "select";
       options: { label: string; value: string }[];
     })
@@ -721,6 +730,12 @@ const SINKS: OperatorSpec[] = [
         placeholder: "DELETE FROM public.orders WHERE batch_date = '2026-05-21'",
         help: "Runs inside the write transaction, before insert. DELETE + insert commit together — atomic, idempotent re-runs (no duplicates, no data loss on failure).",
       },
+      {
+        key: "auto_create_table",
+        label: "Create table if missing",
+        kind: "boolean",
+        help: "Read the source schema (and any rename/cast/add_constant transforms) and CREATE TABLE on this sink before the first write. Cross-DB types are translated automatically (BIGINT → INT/INTEGER, TIMESTAMPTZ → DATETIME/TEXT, etc.).",
+      },
     ],
   },
   {
@@ -753,6 +768,12 @@ const SINKS: OperatorSpec[] = [
         placeholder: "DELETE FROM orders WHERE batch_date = '2026-05-21'",
         help: "Runs inside the write transaction, before insert (use DELETE, not TRUNCATE, on MySQL). DELETE + insert commit together — atomic, idempotent re-runs.",
       },
+      {
+        key: "auto_create_table",
+        label: "Create table if missing",
+        kind: "boolean",
+        help: "Read the source schema (and any rename/cast/add_constant transforms) and CREATE TABLE on this sink before the first write. Cross-DB types are translated automatically (postgres BIGINT → mysql BIGINT, TIMESTAMPTZ → DATETIME, etc.).",
+      },
     ],
   },
   {
@@ -783,6 +804,12 @@ const SINKS: OperatorSpec[] = [
         multiline: true,
         placeholder: "DELETE FROM orders WHERE batch_date = '2026-05-21'",
         help: "Runs inside the write transaction, before insert. DELETE + insert commit together — atomic, idempotent re-runs.",
+      },
+      {
+        key: "auto_create_table",
+        label: "Create table if missing",
+        kind: "boolean",
+        help: "Read the source schema (and any rename/cast/add_constant transforms) and CREATE TABLE on this sink before the first write. Useful for postgres→sqlite or mysql→sqlite migrations — types collapse to sqlite's affinity rules automatically.",
       },
     ],
   },

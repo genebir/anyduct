@@ -2224,4 +2224,27 @@ L1 출시 직후 사용자가 5개 회신:
 
 ---
 
+## ADR-0069: 빌더 UI에 `auto_create_table` 토글 노출 + `boolean` FieldKind
+
+**Date**: 2026-05-29
+**Status**: Accepted
+**Context**: ADR-0066/0068이 코어 기능 + 서버 e2e + REST 표면을 제공했지만 빌더 사용자(데이터 엔지니어 / 비개발 분석가)가 raw YAML로 박아야 함. UX 마지막 1마일.
+
+**Decision**:
+1. **`FieldDef`에 `kind: "boolean"` 추가** — `boolean` 토글 필드. `defaultValue` 옵셔널. wire shape는 `true` / `false` — serializer는 `false`를 dropper(`onChange(e.target.checked || undefined)` → `undefined` → n.data 안 들어감).
+2. **Properties panel renderer가 boolean kind 처리** — `<input type="checkbox">` + label. ws의 accent color 사용.
+3. **3개 RDBMS sink operators(postgres / mysql / sqlite)에 `auto_create_table` 필드 추가** — "Create table if missing" 라벨 + help text(cross-DB 타입 자동 변환 설명).
+4. **wire shape**: `false`는 config에서 누락 → 기존 SinkConfig.auto_create_table 기본값 False와 정합. 옛 파이프라인 무변경.
+
+**Consequences**:
+- ✅ **빌더 사용자가 한 클릭으로 cross-DB migration 활성화**: postgres→sqlite, mysql→postgres 등.
+- ✅ **`boolean` FieldKind는 향후 다른 토글에도 재사용 가능**: `cancel_on_failure` / `enable_dlq` / `retry` 등.
+- ✅ **타입 안전**: ts strict + Pydantic + 코어 dataclass 3-layer 일관.
+- ✅ Backward-compat: 새 필드 옵셔널 + 기본 false. 옛 파이프라인 무영향.
+- ⚠ **Mongo / S3 / Kafka sink는 미포함**: SchemaWriter 미구현. 추후 schema registry / object schema 슬라이스에서 가능.
+
+**검증**: web typecheck(tsc) clean. 코어 unit 799 unchanged. 서버 it (회귀 진행 중). DB 마이그레이션 0. backward-compat 완전 유지.
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

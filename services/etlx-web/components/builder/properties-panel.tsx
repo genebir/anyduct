@@ -515,6 +515,24 @@ function FieldInput({
       </select>
     );
   }
+  if (field.kind === "boolean") {
+    // Phase YY (ADR-0069, 2026-05-29): boolean toggle. Stores ``true`` /
+    // ``false`` in the node's data; the serialiser drops the key when
+    // ``false`` to keep configs minimal.
+    const checked =
+      typeof value === "boolean" ? value : Boolean(field.defaultValue);
+    return (
+      <label className="flex cursor-pointer items-center gap-2 text-sm text-text">
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={(e) => onChange(e.target.checked || undefined)}
+          className="h-4 w-4 cursor-pointer accent-accent"
+        />
+        <span className="select-none">{field.label}</span>
+      </label>
+    );
+  }
   if (field.kind === "number") {
     return (
       <Input

@@ -9,6 +9,14 @@
 
 ## [Unreleased]
 
+### Added
+- **빌더 UI에 `auto_create_table` 토글 노출 + boolean FieldKind (Phase YY)** [ADR-0069] — cross-DB migration의 UX 마지막 1마일:
+  - **FieldDef에 `kind: "boolean"` 신규** — defaultValue 옵셔널. wire shape true/false, false는 serializer가 drop(`onChange(e.target.checked || undefined)`).
+  - **Properties panel renderer**: `<input type="checkbox">` + label, accent color.
+  - **postgres/mysql/sqlite sink operators에 `auto_create_table` 필드** — "Create table if missing" + cross-DB 타입 변환 help text.
+  - **빌더 사용자가 한 클릭으로 cross-DB migration 활성화** — postgres→sqlite/mysql/postgres 등 일반화.
+  - **검증**: web tsc clean. 코어 799 unchanged. backward-compat(false는 config에서 누락 → 기본값과 정합).
+
 ### Fixed
 - **Transform-aware `auto_create_table` — 7번째 silent miss 보완 (Phase XX)** [ADR-0068] — 사용자 페르소나 dogfood(SCD Type 2 cross-DB)가 catch:
   - **Bug**: `auto_create_table`이 source 원본 schema로 sink 생성. transform 후 rename/add column 시 sink schema와 불일치 → write 실패('no column named region' 등).

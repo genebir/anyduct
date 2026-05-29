@@ -10,6 +10,15 @@
 ## [Unreleased]
 
 ### Added
+- **4-stage e-commerce dogfooding 시나리오 + passthrough fallback 보완 (Phase BB)** [ADR-0046 보완] — 사용자 요청 *"복잡한 워크플로우 만들어서 수행, 카탈로그도 검증"*. 4단계 실전 시나리오 통합 테스트:
+  - **Stage 1**: SQL JOIN + CTE — `raw_orders` + `raw_customers` → `staging_orders_enriched`.
+  - **Stage 2**: CTE + `ROW_NUMBER()` window — `staging_orders_enriched` → `mart_top_orders`.
+  - **Stage 3**: `custom_python` transform (passthrough fallback) — `mart_top_orders` → `report_customer_tier`. python 코드가 `tier` 컬럼 추가.
+  - **Stage 4**: `SELECT *` (SchemaInspector inject) — `raw_products` → `products_clone`.
+  - **검증 항목**: (a) 9개 asset row 모두 등록 — 5 source(raw + 중간 read-side) + 4 sink. (b) Asset DAG의 edge 일치(raw_orders+raw_customers→staging, staging→mart, mart→report, raw_products→clone). (c) **모든 sink가 `column_lineage_opaque=False`** — Phase Z/AA 약속이 4단계 통과. (d) Stage 1 multi-source column edge(`email`←raw_customers, `amount`←raw_orders 등), Stage 2 CTE+window 컬럼 trace, Stage 3 passthrough(`customer_id`+`top_amount` 자동 1:1 edge + `tier`는 empty upstream으로 row 존재), Stage 4 SELECT * 컬럼 enumerate.
+  - **Dogfooding 발견 1개**: `_augment_opaque_with_schema_passthrough`가 sink-only 컬럼(python이 추가한 `tier`)에 대해 column row 자체를 안 만들던 사용성 미스 → sink schema의 *모든* 컬럼에 대해 row 생성(intersection은 upstream attribute, sink-only는 빈 upstream)으로 보완. 카탈로그가 sink의 물리 schema와 항상 일치.
+  - **결과**: 서버 it 432→433 green. 모든 Phase X/Z/AA 기능이 실전 시나리오에서 한 번에 동작 확인.
+
 - **Schema-passthrough fallback — 어떤 트랜스폼이든 column edge 자동 생성 (Phase AA)** [ADR-0046] — 사용자 요청 *"어떤 소스던 간에 결국 소스/타겟이 있잖아. 난 자동생성하고 싶은데 전부"*. 카탈로그의 asset row + asset edge는 이미 트랜스폼 무관하게 자동, 빠진 건 column 매핑. python/custom_python/sql_exec 트랜스폼이 끼면 정적 분석 불가 → opaque로 떨어지던 마지막 빈틈을 schema 기반 보수적 휴리스틱으로 채움:
   - **`RunExecutor._augment_opaque_with_schema_passthrough`**: 1차 derive 후 opaque sink가 남으면 발동.
   - `derive_lineage`의 asset edge로 source→sink 매핑 확보 → sink + 모든 upstream source schema fetch (`ConnectionInspector.list_columns`, Phase Z의 seed schemas 재사용).

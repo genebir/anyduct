@@ -740,6 +740,17 @@ class RunExecutor:
             return set(full.get(key.path[0], {}).get(key.path[1], {}))
 
         # 5. Walk each opaque sink and emit passthrough edges where we can.
+        #
+        # Two-step emission per sink:
+        #   (a) for every shared column name → emit a ``ColumnEdge`` with
+        #       the matching source ``ColumnRef``(s) as upstream.
+        #   (b) for every sink-only column (e.g. one the python code added)
+        #       → emit a ``ColumnEdge`` with an *empty* upstream tuple.
+        #       This makes the column visible in the catalog (matching the
+        #       physical sink schema) rather than silently dropping it.
+        #
+        # The sink is only kept opaque when we can't fetch its schema at
+        # all — then we genuinely don't know what columns exist.
         new_edges = list(col_lineage.edges)
         still_opaque: list[AssetKey] = []
         for sink_key in opaque_set.values():
@@ -747,21 +758,17 @@ class RunExecutor:
             if not sink_cols:
                 still_opaque.append(sink_key)
                 continue
-            # For each shared column name, every upstream source that has
-            # that column contributes — keeps multi-source attribution.
             per_col_upstreams: dict[str, list[ColumnRef]] = defaultdict(list)
             for src_key in sink_to_sources.get(sink_key, []):
                 shared = sink_cols & _columns(src_key)
                 for col in shared:
                     per_col_upstreams[col].append(ColumnRef(src_key, col))
-            if not per_col_upstreams:
-                still_opaque.append(sink_key)
-                continue
-            for col, refs in per_col_upstreams.items():
+            for col in sink_cols:
+                upstreams = tuple(per_col_upstreams.get(col, []))
                 new_edges.append(
                     ColumnEdge(
                         downstream=ColumnRef(sink_key, col),
-                        upstreams=tuple(refs),
+                        upstreams=upstreams,
                     )
                 )
 

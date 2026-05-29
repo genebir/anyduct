@@ -1528,6 +1528,8 @@ L1 출시 직후 사용자가 5개 회신:
 
 **검증**: 코어 unit 718 (변경 없음 — 서버 측만 변경) + 서버 unit/it 431 → 432(+1 e2e: sqlite source + `custom_python` transform + sqlite sink → `column_lineage_opaque=False` + `id`/`name` 자동 1:1 edge). mypy 코어 60 + 서버 100 OK. ruff clean.
 
+**Phase BB 보완 (2026-05-29 같은 날 dogfooding 발견)**: 4-stage 복잡 시나리오로 검증하다가 `_augment_opaque_with_schema_passthrough`가 **sink-only 컬럼**(python이 새로 추가한 컬럼, e.g. `tier`)에 대해 column row 자체를 안 만들던 사용성 미스 발견. 카탈로그에서 sink 테이블을 보면 sink schema에 있는 컬럼이 다 보이는 게 자연스러움. 보완: passthrough fallback이 sink schema의 *모든* 컬럼에 대해 column row 생성, intersection 컬럼은 upstream attribute + sink-only 컬럼은 빈 upstream 튜플(기존 `add_constant`와 동일 의미). 이로써 사용자가 카탈로그에서 sink 테이블 클릭하면 실제 물리 schema와 일치하는 컬럼 리스트를 본다.
+
 ---
 
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

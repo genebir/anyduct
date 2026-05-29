@@ -1983,4 +1983,31 @@ L1 출시 직후 사용자가 5개 회신:
 
 ---
 
+## ADR-0062: K3 Sensor framework 통합 시나리오 — `asset_freshness` builtin 운영 검증
+
+**Date**: 2026-05-29
+**Status**: Accepted
+**Context**: ADR-0041 K3 sensor framework는 builtin sensors(`asset_freshness` / `file_landed` / `lineage_arrival` / `dataset_row_count`)를 unit으로 검증됨. *Real catalog + real sensor row + SensorScheduler.tick_once* 운영 시점 통합은 검증 부족. asset-axis(Phase NN)와 sensor-axis(K3) 둘 다 freshness를 다루는데 어떻게 다른지 명확화 필요.
+
+**Decision**:
+1. **`test_sensor_framework_scenarios.py`(신규)** — 2 시나리오 e2e (`asset_freshness` builtin 중심):
+   - **RR1 — Stale catalog triggers sensor**: pipeline 정상 run → catalog 등록. Asset.last_materialized_at 3시간 전 강제. SensorScheduler.tick_once → fired=1. Sensor row의 `last_check_at`/`last_triggered_at`/`last_result_json` 채워짐(`triggered: true`, message에 "stale"). PENDING run target_pipeline에 enqueue.
+   - **RR2 — Fresh asset within budget**: 같은 setup, last_materialized_at 기본(최근). tick → fired=0. `last_triggered_at` 여전히 None. `last_result_json` "fresh" message. PENDING 큐 empty.
+2. **asset-axis(NN) vs sensor-axis(K3) 구분 명문화**:
+   - **Phase NN (pipeline-axis)**: `freshness_sla_minutes` on Schedule. Scheduler._tick_freshness가 *모든* current pipeline 자동 walk. 운영자가 producer pipeline에 설정.
+   - **Phase RR (asset-axis sensor)**: `asset_freshness` sensor row + target_pipeline_id. SensorScheduler tick이 sensor table을 walk. 운영자가 consumer 입장에서 declare("이 asset이 stale하면 그때 ETL 다시 돌려라").
+3. **시간 시뮬 패턴 재사용**: Phase NN에서 도입한 `Asset.last_materialized_at` 직접 UPDATE 패턴 그대로 적용. 외부 mock 불필요.
+
+**Consequences**:
+- ✅ **K3 sensor framework 운영 신뢰성 확인**: stale/fresh 양쪽 케이스 모두 정확히 동작.
+- ✅ **Sensor row state machine 검증**: last_check_at + last_triggered_at + last_result_json 정확히 업데이트.
+- ✅ **NN(pipeline-axis) vs K3(asset-axis) 둘 다 동작 확인**: 같은 freshness 개념이지만 다른 trigger path. 운영자가 둘 중 선택 가능.
+- ✅ DB 마이그레이션 0. 신규 e2e만.
+- ⚠ **다른 builtins(file_landed / lineage_arrival / dataset_row_count) e2e 미포함**: file_landed는 파일시스템 의존, lineage_arrival은 다른 시그널 패턴. 별도 슬라이스에서 cover 가능.
+- ⚠ **Sensor poll_interval_seconds 동작 미검증**: 본 시나리오는 tick_once 직접 호출 → poll interval guard 우회. 정상 동작은 unit이 cover.
+
+**검증**: 코어 unit 738 unchanged. 서버 it 465→467(+2 RR1/RR2). mypy 코어 61 + 서버 100 OK. ruff clean. DB 마이그레이션 0.
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

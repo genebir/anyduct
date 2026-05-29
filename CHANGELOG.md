@@ -10,6 +10,12 @@
 ## [Unreleased]
 
 ### Added
+- **K3 Sensor framework 통합 시나리오 — `asset_freshness` builtin (Phase RR)** [ADR-0062] — ADR-0041 K3 sensor framework를 real catalog + real sensor row + SensorScheduler.tick_once 통합 검증:
+  - **RR1 — Stale catalog triggers sensor**: pipeline run → catalog. last_materialized_at 3시간 전 강제. tick → fired=1. Sensor row의 last_check_at/last_triggered_at/last_result_json 정확. PENDING run enqueue.
+  - **RR2 — Fresh within budget**: tick → fired=0. last_triggered_at None. last_result_json "fresh".
+  - **asset-axis(K3) vs pipeline-axis(NN/ADR-0038)** 구분 명문화: 같은 freshness지만 다른 trigger path. 운영자가 producer/consumer 입장 선택.
+  - **검증**: 코어 738 unchanged. 서버 it 465→467(+2). DB 마이그레이션 0.
+
 - **Audit trail 통합 시나리오 — data-plane events 운영 검증 (Phase QQ)** [ADR-0061] — Phase U/W의 audit events를 real run + sample data로 통합 검증:
   - **QQ1 — Single run full audit**: sqlite source + custom_python + sink. 검증: run.sql_read 1 + run.python_executed 1 + run.sql_executed 0. after_json payload(connection_type/kind/query/code_hash) 정확.
   - **QQ2 — Multi-run isolation**: 같은 pipeline 2 run → 각 run resource_id 필터로 자기 audit만. cross-run leakage 없음.

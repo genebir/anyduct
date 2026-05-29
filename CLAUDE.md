@@ -117,7 +117,9 @@ uv run mypy etl_plugins
 
 ## 5. 현재 단계
 
-> **최신 마일스톤 (2026-05-29): Pipeline evolution 시나리오 — config 변경 시 catalog 동작 명문화 (Phase PP, ADR-0060).** 운영 흔한 패턴 검증: PP1(v1 sink:stage_v1 → v2 sink:stage_v2, catalog에 둘 다 보유 + 각자 materialization 1개 + v1 자연스럽게 stale), PP2(v1 raw → v2 raw JOIN dim_country, src/dim_country 자동 등록 + edge 추가 + sink materialization 1→2). Catalog evolution 정책 명문화: 자산 immutable/append-only + 새 자산 자동 등록(Phase X 후속의 extract_referenced_tables) + edge upsert + materialization run-per-row. 서버 it 461→463(+2). 코어 738 unchanged. mypy 코어 61 + 서버 100 OK. ruff clean. DB 마이그레이션 0.
+> **최신 마일스톤 (2026-05-29): Audit trail 통합 시나리오 — data-plane events 운영 검증 (Phase QQ, ADR-0061).** Phase U/W의 run.sql_read/run.python_executed/run.sql_executed를 real run + sample data 통합 검증: QQ1(single run에서 count + payload 정확 — connection_type/kind/query/code_hash 모두), QQ2(multi-run isolation — resource_id 필터로 자기 audit만, cross-run leakage 0). 3차원 검증: count + payload + isolation. GDPR/SOX compliance 운영 워크플로(audit_log scan만으로 'run에서 무슨 query/code 돌았나' 답) 확인. 서버 it 463→465(+2). 코어 738 unchanged. mypy 코어 61 + 서버 100 OK. ruff clean. DB 마이그레이션 0.
+>
+> **이전 마일스톤 (2026-05-29): Pipeline evolution 시나리오 — config 변경 시 catalog 동작 명문화 (Phase PP, ADR-0060).** 운영 흔한 패턴 검증: PP1(v1 sink:stage_v1 → v2 sink:stage_v2, catalog에 둘 다 보유 + 각자 materialization 1개 + v1 자연스럽게 stale), PP2(v1 raw → v2 raw JOIN dim_country, src/dim_country 자동 등록 + edge 추가 + sink materialization 1→2). Catalog evolution 정책 명문화: 자산 immutable/append-only + 새 자산 자동 등록(Phase X 후속의 extract_referenced_tables) + edge upsert + materialization run-per-row. 서버 it 461→463(+2). 코어 738 unchanged. mypy 코어 61 + 서버 100 OK. ruff clean. DB 마이그레이션 0.
 >
 > **이전 마일스톤 (2026-05-29): Connection 실패 시나리오 — catalog clean 정책 보장 (Phase OO, ADR-0059).** 운영 흔한 실패 2종: OO1(invalid db path → connect 실패), OO2(source table missing → read 실패). 둘 다 run.status=FAILED + error_class/error_message 채워짐 + 카탈로그 empty. transform fail(FF/F) + DLQ fail(II) + connect fail(OO1) + read fail(OO2) 4-stage 모두 같은 "no half-written catalog rows" posture 통합 검증. 서버 it 459→461(+2). 코어 738 unchanged. mypy 코어 61 + 서버 100 OK. ruff clean. DB 마이그레이션 0.
 >

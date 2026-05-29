@@ -1959,4 +1959,28 @@ L1 출시 직후 사용자가 5개 회신:
 
 ---
 
+## ADR-0061: Audit trail 통합 시나리오 — data-plane events 운영 시점 검증
+
+**Date**: 2026-05-29
+**Status**: Accepted
+**Context**: Phase U/W(ADR-0041 W)가 도입한 data-plane audit events(`run.sql_read` / `run.sql_executed` / `run.python_executed`)는 unit으로 isolated 검증됨. 하지만 *operator workflow*는 "이 run의 audit_log를 보고 정확히 무엇이 일어났는지 안다"는 것. 운영 시점에 events 조합이 정확히 emit되는지 sample-data + real run으로 검증 부족.
+
+**Decision**:
+1. **`test_audit_trail_scenarios.py`(신규)** — 2 시나리오 e2e:
+   - **QQ1 — Single run full data-plane audit**: sqlite source SELECT + custom_python transform + sqlite sink. 검증: `run.sql_read` 정확히 1 + `run.python_executed` 정확히 1 + `run.sql_executed` 0(sql_exec transform 없음). 각 row의 `after_json` 페이로드(connection_type / kind / query / code_hash) 정확.
+   - **QQ2 — Multi-run isolation**: 같은 pipeline 2 run → 각 run의 resource_id로 필터하면 자기 audit row만. 시간순(`created_at`) 정확.
+2. **검증 axis 3차원**: (a) event count(정확히 1번씩 emit, 누락/중복 없음), (b) payload(after_json의 field name/value 정확), (c) isolation(resource_id 필터 = run.id, cross-run leakage 없음).
+
+**Consequences**:
+- ✅ **Operator workflow 신뢰성**: audit_log scan만으로 "이 run에서 어떤 query 실행됐고 어떤 code 돌았나" 정확히 답 가능. GDPR/SOX compliance 충족.
+- ✅ **Phase U/W의 unit + integration 양면 검증**: isolated unit + real run integration 둘 다.
+- ✅ **Cross-run leakage 없음 입증**: 두 run의 audit 분리 명확. multi-tenant + multi-run 환경에서 forensic 안전.
+- ✅ DB 마이그레이션 0. 신규 e2e만.
+- ⚠ **Stream pipeline audit는 별도 슬라이스**: 본 시나리오는 batch만. Stream의 audit emit 패턴이 batch와 다르면 별도 검증 필요.
+- ⚠ **Control-plane audit(workspace/connection/pipeline create/update)는 별도 e2e**: REST API layer 호출 필요(기존 router 테스트가 cover). 본 슬라이스는 data-plane에 집중.
+
+**검증**: 코어 unit 738 unchanged. 서버 it 463→465(+2 QQ1/QQ2). mypy 코어 61 + 서버 100 OK. ruff clean. DB 마이그레이션 0.
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

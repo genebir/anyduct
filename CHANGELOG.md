@@ -10,6 +10,13 @@
 ## [Unreleased]
 
 ### Added
+- **Audit trail 통합 시나리오 — data-plane events 운영 검증 (Phase QQ)** [ADR-0061] — Phase U/W의 audit events를 real run + sample data로 통합 검증:
+  - **QQ1 — Single run full audit**: sqlite source + custom_python + sink. 검증: run.sql_read 1 + run.python_executed 1 + run.sql_executed 0. after_json payload(connection_type/kind/query/code_hash) 정확.
+  - **QQ2 — Multi-run isolation**: 같은 pipeline 2 run → 각 run resource_id 필터로 자기 audit만. cross-run leakage 없음.
+  - **3차원 검증**: count(누락/중복 없음) + payload(field 정확) + isolation(run 격리).
+  - **GDPR/SOX compliance**: audit_log scan만으로 "이 run에서 무슨 query 돌고 무슨 code 실행됐나" 정확히 답 가능.
+  - **검증**: 코어 738 unchanged. 서버 it 463→465(+2). DB 마이그레이션 0.
+
 - **Pipeline evolution 시나리오 — config 변경 시 catalog 동작 명문화 (Phase PP)** [ADR-0060] — 운영자가 pipeline config 변경 시 catalog가 어떻게 변화를 반영하는지:
   - **PP1 — Sink table rename**: v1 sink:stage_v1 → v2 sink:stage_v2. catalog에 *둘 다* 보유, 각자 materialization 1개. v1은 자연스럽게 stale(last_materialized_at 안 갱신).
   - **PP2 — Source JOIN dimension 추가**: v1 raw만 → v2 raw JOIN dim_country. v2 run 후 src/dim_country 자동 등록(Phase X 후속) + edge 자동 추가. Sink는 동일 identity라 materialization 1→2.

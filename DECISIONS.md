@@ -2161,9 +2161,33 @@ L1 출시 직후 사용자가 5개 회신:
 
 **검증**:
 - 코어 unit **799** (+61: type_mapping 50+ + sqlite ensure_table 6 + 기타).
-- 서버 it (조회 중).
+- 서버 it 472→473(+1 sqlite→sqlite e2e auto_create_table).
 - 통합 it **2 신규**(postgres↔sqlite 양방향 cross-DB, testcontainers postgres).
 - mypy 코어 62 + 서버 100 OK. ruff clean. DB 마이그레이션 0(metadata DB 무변경). backward-compat 완전 유지.
+
+---
+
+## ADR-0067: Engineer cross-DB onboarding journey — REST 전 path UX 검증
+
+**Date**: 2026-05-29
+**Status**: Accepted
+**Context**: ADR-0066이 코어 메커니즘 + 통합 it cross-DB 양방향을 입증. 그러나 *사용자(엔지니어)* 입장에서 REST를 통해 cross-DB pipeline을 만들고 실행하는 전체 흐름이 자연스러운지는 별도 검증. Phase TT/UU 페르소나 패턴의 4번째 페르소나 = **데이터 엔지니어 cross-DB**.
+
+**Decision**:
+1. **`test_cross_db_engineer_journey_scenario.py`(신규)** — WW1: 엔지니어가 REST로 cross-DB pipeline 운영:
+   - **Source warehouse**: sqlite + 의도적 mixed vendor 타입(`BIGINT/NUMERIC(10,2)/TIMESTAMPTZ/JSONB/VARCHAR(64)`).
+   - **REST 흐름**: `POST /auth/login` → `POST /workspaces` → `POST /connections × 2` → `POST /pipelines`(sink에 `auto_create_table: True`) → `POST /dry-run`(ok=True + warnings 필드) → `POST /trigger` → drain → `GET /runs/{rid}`(SUCCEEDED + records_written=2) → sqlite 파일에서 `PRAGMA table_info` 직접 확인 → `GET /assets` 카탈로그 확인.
+   - **타입 affinity 결과 검증**: `id INTEGER` + `amount NUMERIC(10,2)` + `created_at TEXT` + `payload TEXT` + `customer TEXT`(VARCHAR(64) length 드롭).
+2. **검증 axis**: REST 응답 shape + sink 파일 실제 DDL + 카탈로그 asset_key 3-layer 일관성.
+
+**Consequences**:
+- ✅ **엔지니어 페르소나 cross-DB UX 검증**: ADR-0066 기능이 REST 표면에 자연 노출 + 사용자 흐름이 끊김 없음.
+- ✅ **사용자 페르소나 시리즈 4번째**: 운영자(TT) + 분석가(UU) + 관리자(VV 폐기) + **엔지니어 cross-DB(WW)**. 핵심 페르소나 모두 sample-data e2e로 커버.
+- ✅ **REST surface area 변경 없음**: SinkConfig.auto_create_table는 Pipeline config의 옵셔널 필드라 REST 응답 schema에는 영향 없음. UI도 추가 작업 없이 YAML/Builder에서 사용 가능.
+- ✅ DB 마이그레이션 0. 신규 e2e만.
+- ⚠ **빌더 UI에서 toggle 노출은 별도 슬라이스**: 현재는 raw config 텍스트로만 박을 수 있음. 빌더 properties panel에 체크박스 추가는 web 슬라이스로.
+
+**검증**: 코어 unit 799 unchanged. 서버 it 473→474(+1 WW1). mypy 코어 62 + 서버 100 OK. ruff clean. DB 마이그레이션 0.
 
 ---
 

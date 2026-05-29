@@ -10,6 +10,12 @@
 ## [Unreleased]
 
 ### Added
+- **Engineer cross-DB onboarding journey — REST UX 검증 (Phase WW)** [ADR-0067] — 사용자 페르소나 시리즈 4번째(데이터 엔지니어 cross-DB):
+  - **WW1**: REST 전 path로 cross-DB pipeline. Source sqlite(mixed vendor types) → POST /auth/login → /workspaces → /connections × 2 → /pipelines(sink.auto_create_table=true) → /dry-run → /trigger → drain → /runs/{rid} 성공 → sqlite PRAGMA로 타입 affinity 확인 → /assets 카탈로그 확인.
+  - **3-layer 검증**: REST 응답 shape + sink 파일 실제 DDL + 카탈로그 asset_key 일관성.
+  - **REST schema 변경 0**: auto_create_table는 PipelineConfig 옵셔널 필드라 응답 schema 무영향.
+  - **검증**: 코어 799 unchanged. 서버 it 473→474(+1). DB 마이그레이션 0.
+
 - **Cross-DB replication — type mapping + 자동 sink table 생성 (Phase VV)** [ADR-0066] — 사용자 요청 *"DB 간 마이그레이션 + 테이블 복제, 데이터 타입 DB별로 매핑"*. 새 기능:
   - **`etl_plugins/core/type_mapping.py`(신규)**: `CanonicalType` enum 13개 + `TypeSpec` + `normalize_db_type` + `render_canonical`. dialect 매핑 테이블(sqlite/postgres/mysql). 새 dialect는 한 entry로 추가.
   - **`SchemaWriter` Protocol** (`etl_plugins/core/inspect.py`): SchemaInspector의 dual. `ensure_table(table, columns, *, if_exists)` capability.

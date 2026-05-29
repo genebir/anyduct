@@ -10,6 +10,8 @@
 ## [Unreleased]
 
 ### Changed
+- **`SinkConfig.auto_create_if_exists`를 `Literal["skip","drop","error"]`로 좁힘 (Phase AAG)** — typos(`"DROP"`/`"replace"`/`"Skip"`)가 config-load 시점에서 즉시 422로 거부됨. 기존엔 plain str 받아 들어가 connector 깊은 곳의 if_exists branch에서 "unknown" 메시지로만 실패해 운영자 디버그 비용 큼. 2 신규 unit(canonical 3종 accept + typo 3종 reject). 코어 unit 802→804(+2). mypy/ruff clean. backward-compat 완전(기존 값 그대로).
+
 - **빌더 FieldDef.showWhen — dependent field visibility (Phase AAF)** — `auto_create_table` default OFF + `auto_create_if_exists` select 항상 노출 = 99% 사용자에게 clutter. ① `FieldBase`에 `showWhen?: { field, equals }` 추가. ② Properties panel이 노드 데이터를 보고 conditional 렌더. ③ 3 RDBMS sink(postgres/mysql/sqlite)의 `auto_create_if_exists` field를 `showWhen: { field: "auto_create_table", equals: true }`로 설정. ④ help text에서 "Only applied when '...' is on" 잉여 가이드 제거 — UI 자체가 사라지므로 불필요. **결과**: 기본 sink 패널에서 if_exists 옵션 사라짐 + 사용자가 `auto_create_table` 켜는 순간 자연히 출현. 신규 시각 컴포넌트 0(필터 한 줄). web tsc clean. 코어/서버 변화 0.
 
 ### Added

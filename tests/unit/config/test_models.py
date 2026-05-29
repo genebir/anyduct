@@ -95,6 +95,34 @@ def test_sink_extra_options_allowed() -> None:
     assert s.model_dump().get("buffer") == {"max_records": 100}
 
 
+def test_sink_auto_create_if_exists_accepts_canonical_values() -> None:
+    """Phase AAG (2026-05-29): the Literal narrowing lets these
+    canonical values through."""
+    for v in ("skip", "drop", "error"):
+        s = SinkConfig.model_validate(
+            {"connection": "sf", "auto_create_table": True, "auto_create_if_exists": v}
+        )
+        assert s.auto_create_if_exists == v
+
+
+def test_sink_auto_create_if_exists_rejects_typos() -> None:
+    """Phase AAG: typos like ``"DROP"`` or ``"replace"`` used to slip
+    through ``str`` and fail deep at runtime. Pydantic Literal
+    validation now catches them at config-load time."""
+    import pytest
+    from pydantic import ValidationError
+
+    for typo in ("DROP", "replace", "Skip"):
+        with pytest.raises(ValidationError):
+            SinkConfig.model_validate(
+                {
+                    "connection": "sf",
+                    "auto_create_table": True,
+                    "auto_create_if_exists": typo,
+                }
+            )
+
+
 # ---------- PipelineConfig ----------
 
 

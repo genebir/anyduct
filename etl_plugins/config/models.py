@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -77,7 +77,7 @@ class SinkConfig(BaseModel):
     # from the current source schema (DESTRUCTIVE — use for nightly
     # snapshot-style replication or dev sandboxes); ``error`` fails the
     # run so an operator can resolve the conflict by hand.
-    auto_create_if_exists: str = "skip"
+    auto_create_if_exists: Literal["skip", "drop", "error"] = "skip"
 
 
 class TransformConfig(BaseModel):

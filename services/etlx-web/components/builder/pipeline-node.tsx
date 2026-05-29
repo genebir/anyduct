@@ -30,8 +30,13 @@ export function PipelineNode({ id, data }: NodeProps) {
   // summary text ("Set: connection, table") AND the warning chrome, so
   // the analyst sees exactly what's blocking the node without opening
   // the properties drawer (Phase L1 audit fix 2026-05-26).
+  //
+  // Phase AAF (2026-05-29): also honour ``showWhen`` — a hidden field
+  // can't possibly block the user, so don't shout "incomplete" at them
+  // for something they can't see.
   const missingRequired = op.fields
     .filter((f) => f.required)
+    .filter((f) => !f.showWhen || d.values[f.showWhen.field] === f.showWhen.equals)
     .filter((f) => {
       const v = d.values[f.key];
       return v === undefined || v === null || v === "";

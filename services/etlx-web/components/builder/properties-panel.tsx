@@ -275,9 +275,13 @@ export function PropertiesPanel({
           it explicitly, and tell the user where to look (the form
           field below has a red border to match). */}
       {(() => {
+        // Phase AAF (2026-05-29): mirror pipeline-node.tsx — only
+        // consider visible required fields. A hidden field can't be
+        // the "next step" the user has to take.
         const firstMissing = op.fields.find(
           (f) =>
             f.required &&
+            (!f.showWhen || node.data[f.showWhen.field] === f.showWhen.equals) &&
             (node.data[f.key] === undefined ||
               node.data[f.key] === null ||
               node.data[f.key] === ""),

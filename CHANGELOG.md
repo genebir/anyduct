@@ -10,6 +10,13 @@
 ## [Unreleased]
 
 ### Added
+- **Cron schedule 시나리오 — 시간 기반 trigger family 3축 완성 (Phase SS)** [ADR-0063] — Step 9.2 cron scheduler를 sample-data + 시간 시뮬:
+  - **SS1 — Due cron fires + drain**: cron_expr='* * * * *' + schedules.created_at 2분 전 강제. tick_once → fired=1. drain → records sink로 + run.schedule_id 채워짐.
+  - **SS2 — Inactive schedule skipped**: is_active=False → fired=0, runs 비어 있음.
+  - **시간 기반 trigger 3축 명문화**: pipeline-axis(NN, producer) + asset-axis(RR/K3, consumer) + operator-axis(SS/cron, operator). 운영 자동화 핵심이 sample-data e2e로 통합 입증.
+  - **시간 시뮬 패턴**: schedules.created_at 직접 UPDATE로 first-firing base 과거로. NN의 last_materialized_at 패턴 확장.
+  - **검증**: 코어 738 unchanged. 서버 it 467→469(+2). DB 마이그레이션 0.
+
 - **K3 Sensor framework 통합 시나리오 — `asset_freshness` builtin (Phase RR)** [ADR-0062] — ADR-0041 K3 sensor framework를 real catalog + real sensor row + SensorScheduler.tick_once 통합 검증:
   - **RR1 — Stale catalog triggers sensor**: pipeline run → catalog. last_materialized_at 3시간 전 강제. tick → fired=1. Sensor row의 last_check_at/last_triggered_at/last_result_json 정확. PENDING run enqueue.
   - **RR2 — Fresh within budget**: tick → fired=0. last_triggered_at None. last_result_json "fresh".

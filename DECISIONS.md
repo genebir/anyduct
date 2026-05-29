@@ -2010,4 +2010,33 @@ L1 출시 직후 사용자가 5개 회신:
 
 ---
 
+## ADR-0063: Cron schedule 시나리오 — 시간 기반 trigger family 3축 완성
+
+**Date**: 2026-05-29
+**Status**: Accepted
+**Context**: Step 9.2 / ADR-0021의 cron scheduler가 도입됐지만 sample-data e2e 미검증. 시간 기반 trigger family 3축 중 마지막. Phase NN(pipeline-axis freshness) + Phase RR(asset-axis sensor) + 본 슬라이스(operator-axis cron)이 모두 sample-data로 검증되면 시간 기반 자동화의 핵심 메커니즘 e2e 통합 완성.
+
+**Decision**:
+1. **`test_schedule_cron_scenarios.py`(신규)** — 2 시나리오 e2e:
+   - **SS1 — Due cron fires + drain to sink**: cron_expr='* * * * *'(매분), schedule.created_at 2분 전 강제. Scheduler.tick_once 호출 → `_compute_next_firing` 평가(croniter base = last_scheduled or created_at) → next_fire가 1분 전 → 즉시 due → fired=1. drain → records sink로 정상 write + run.schedule_id 채워짐.
+   - **SS2 — Inactive schedule skipped**: 같은 setup, is_active=False → `_load_due_schedules`가 skip → fired=0, runs 비어 있음.
+2. **시간 시뮬 패턴 확장**: Phase NN의 `last_materialized_at` 직접 UPDATE에 이어 본 슬라이스는 `schedules.created_at` 직접 UPDATE로 first-firing base를 과거로. 외부 mock 없이 시간 의존 로직 검증.
+3. **시간 기반 trigger family 3축 명문화**:
+   - **Pipeline-axis (NN/ADR-0038)**: Schedule.freshness_sla_minutes. *Producer* 입장. Scheduler._tick_freshness가 모든 current pipeline walk.
+   - **Asset-axis (RR/K3)**: Sensor.config(asset_key, max_age_minutes). *Consumer* 입장. SensorScheduler가 sensor table walk.
+   - **Operator-axis (SS/cron)**: Schedule.cron_expr. *Operator* 입장 (정시 실행). Scheduler.tick_once가 schedule table walk.
+
+**Consequences**:
+- ✅ **시간 기반 trigger 3축 모두 e2e 검증**: 운영 자동화 핵심이 sample-data로 통합 입증.
+- ✅ **schedule.created_at rewind 패턴 확립**: cron `_compute_next_firing`의 base 계산을 시간 mock 없이 시뮬.
+- ✅ **운영자 일시 중지 동작 확인**: is_active=False로 schedule pause 가능 + 안전.
+- ✅ Run.schedule_id stamp 확인 — 어느 schedule이 enqueue했는지 audit lineage 유지.
+- ✅ DB 마이그레이션 0. 신규 e2e만.
+- ⚠ **No-catchup vs catchup-ish 정책 e2e 미포함**: 현재 tick당 1 missed cron만 enqueue (ADR-9.2의 trade-off). 별도 시나리오에서 검증 가능.
+- ⚠ **multi-replica `FOR UPDATE SKIP LOCKED` 미검증**: 본 시나리오는 single-replica. 분산 환경의 동시 lock은 향후 슬라이스.
+
+**검증**: 코어 unit 738 unchanged. 서버 it 467→469(+2 SS1/SS2). mypy 코어 61 + 서버 100 OK. ruff clean. DB 마이그레이션 0.
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

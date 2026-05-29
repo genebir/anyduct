@@ -210,6 +210,10 @@ def _build_task(
             task.pre_sql.append(SqlAction(connection=conn_name, statement=statement))
         else:
             task.transform(build_transform(tc))
+            # Phase XX (ADR-0068): keep the raw spec alongside the
+            # compiled callable so ``_auto_create_sink_tables`` can
+            # project source columns through the declarative chain.
+            task.transform_specs.append(tc.model_dump())
     return task
 
 

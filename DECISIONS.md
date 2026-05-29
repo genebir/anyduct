@@ -2191,4 +2191,37 @@ L1 출시 직후 사용자가 5개 회신:
 
 ---
 
+## ADR-0068: Transform-aware `auto_create_table` — 7번째 silent miss 보완
+
+**Date**: 2026-05-29
+**Status**: Accepted
+**Context**: 사용자 페르소나 *"엔지니어가 cross-DB pipeline에 SCD Type 2 transform 추가 시나리오"* (XX1)를 작성하다 발견된 7번째 silent miss: ADR-0066의 `auto_create_table`이 *source 원본* schema로 sink 테이블 생성. transform이 rename/drop/add column하면 sink에 post-transform 컬럼이 없어 write 실패 (`no column named region`).
+
+**Decision**:
+1. **`Task.transform_specs: list[dict]` 필드 추가** — compiled callable(`Task.transforms`) 옆에 raw `TransformConfig.model_dump()` 보관. introspection-only 용도.
+2. **builder가 `task.transform_specs.append(tc.model_dump())`** — `build_transform` 호출과 함께. sql_exec(pre_sql로 빠짐)은 제외.
+3. **새 helper `_project_columns_through_transforms(source_columns, task)`** — declarative chain 시뮬레이션:
+   - `rename`: key swap + type 보존.
+   - `add_constant`: 새 컬럼 + TEXT fallback type.
+   - `cast`: target type으로 update.
+   - `drop`: key 제거.
+   - `select`: keep listed만.
+   - `filter` / `dedupe` / `assert`: row-level, no shape change.
+   - `python` / `custom_python` / `sql_exec` / unknown: return `[]` → caller가 source verbatim fallback (Phase VV 동작 보존).
+4. **`Pipeline._auto_create_sink_tables`가 projected columns 사용** — empty list면 source columns로 fallback.
+
+**Consequences**:
+- ✅ **Cross-DB + transform 패턴 정상 동작**: SCD Type 2 / rename / add column 모두 sink 자동 DDL 정확.
+- ✅ **Phase VV backward-compat 완전 유지**: opaque transform(python 등)은 옛 동작(source verbatim) 그대로.
+- ✅ **새 declarative transform 타입은 helper에 case 추가하면 자동 처리** — 확장성.
+- ✅ **사용자 페르소나 dogfooding이 또 catch**: 단순 cross-DB 복제 + transform 조합 운영 패턴이 단위 테스트로는 못 잡힌 silent miss를 시나리오로 catch.
+- ✅ 이번 세션 **7번째 silent miss**: Z/BB/II×2/MM/UU/XX. dogfood 정량적 가치 누적.
+- ✅ DB 마이그레이션 0. Task dataclass에 필드 추가만, builder 한 줄, runtime helper 1개.
+- ⚠ **opaque transform이 컬럼을 추가하는 케이스는 여전히 cover 안 됨**: python transform이 add/rename하면 source verbatim fallback → write 실패. `column_mapping` declaration이 있을 때만 활용 가능(향후 슬라이스).
+- ⚠ **`add_constant`의 type은 항상 TEXT**: literal value type 추론 안 함. 사용자가 `cast` 후속으로 type 지정.
+
+**검증**: 코어 unit 799 unchanged. 서버 it 474→475(+1 XX1 — transform-aware auto-create 동작). mypy 코어 62 + 서버 100 OK. ruff clean. DB 마이그레이션 0.
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

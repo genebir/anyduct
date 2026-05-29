@@ -9,6 +9,14 @@
 
 ## [Unreleased]
 
+### Fixed
+- **Transform-aware `auto_create_table` — 7번째 silent miss 보완 (Phase XX)** [ADR-0068] — 사용자 페르소나 dogfood(SCD Type 2 cross-DB)가 catch:
+  - **Bug**: `auto_create_table`이 source 원본 schema로 sink 생성. transform 후 rename/add column 시 sink schema와 불일치 → write 실패('no column named region' 등).
+  - **보완**: `Task.transform_specs: list[dict]` + builder가 raw TransformConfig 보관 + `_project_columns_through_transforms` helper(rename/add_constant/cast/drop/select/filter/dedupe/assert 모두 처리) + opaque transform(python 등)은 source verbatim fallback(Phase VV 동작 유지).
+  - **결과**: SCD Type 2 migration 정상 동작 — source country → sink region, 새 effective_from/is_current 컬럼 자동 추가.
+  - **이번 세션 7번째 silent miss**: Z/BB/II×2/MM/UU/XX. dogfood 가치 누적 입증.
+  - **검증**: 코어 unit 799 unchanged. 서버 it 474→475(+1 XX1). DB 마이그레이션 0.
+
 ### Added
 - **Engineer cross-DB onboarding journey — REST UX 검증 (Phase WW)** [ADR-0067] — 사용자 페르소나 시리즈 4번째(데이터 엔지니어 cross-DB):
   - **WW1**: REST 전 path로 cross-DB pipeline. Source sqlite(mixed vendor types) → POST /auth/login → /workspaces → /connections × 2 → /pipelines(sink.auto_create_table=true) → /dry-run → /trigger → drain → /runs/{rid} 성공 → sqlite PRAGMA로 타입 affinity 확인 → /assets 카탈로그 확인.

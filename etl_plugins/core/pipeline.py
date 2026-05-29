@@ -185,6 +185,11 @@ class Task:
     # the field must exist on every emitted record's ``data``.
     cursor_column: str | None = None
     transforms: list[TransformFn] = field(default_factory=list)
+    # Original TransformConfig dumps for introspection-only callers (e.g.
+    # ``_auto_create_sink_tables`` projecting columns through declarative
+    # transforms). ``transforms`` holds the compiled callables; we keep
+    # the raw specs alongside so we don't have to re-parse the config.
+    transform_specs: list[dict[str, Any]] = field(default_factory=list)
     # SQL statements run once before the load (ADR-0035) — e.g. a DELETE to make
     # an append re-runnable (delete-then-insert). Run in order, before reading.
     pre_sql: list[SqlAction] = field(default_factory=list)
@@ -293,6 +298,78 @@ class RunResult:
     # Per-task terminal state (ADR-0028). Empty for non-DAG runs; otherwise maps
     # task name → success / failed / skipped / upstream_failed.
     task_states: dict[str, str] = field(default_factory=dict)
+
+
+def _project_columns_through_transforms(source_columns: list[Any], task: Task) -> list[Any]:
+    """Phase XX (ADR-0068): simulate the declarative transform chain
+    over the source column list to obtain the *post-transform* column
+    schema. Used by :meth:`Pipeline._auto_create_sink_tables` so the
+    sink table is created with the columns the write will actually
+    produce — not the verbatim source columns.
+
+    Handled transform types: ``rename`` (key swap), ``add_constant``
+    (append new column with ``TEXT`` fallback type), ``cast`` (no shape
+    change), ``drop`` (key removal), ``select`` (keep listed columns
+    only), ``filter`` / ``dedupe`` / ``assert`` (row-level, no shape
+    change). Any other transform (``python`` / ``custom_python`` /
+    ``sql_exec`` / unknown) is treated as opaque — we return ``[]`` so
+    the caller falls back to the raw source columns. That preserves the
+    Phase VV behaviour for opaque chains.
+    """
+    from etl_plugins.core.inspect import ColumnInfo
+
+    by_name: dict[str, ColumnInfo] = {c.name: c for c in source_columns}
+    order: list[str] = [c.name for c in source_columns]
+
+    # ``Task.transforms`` holds the compiled callables; the original
+    # config sits on ``task.transform_specs`` (set by the builder for
+    # exactly this kind of introspection). When unavailable, no chain
+    # is applied — caller falls back to raw source columns.
+    specs: list[dict[str, Any]] = list(getattr(task, "transform_specs", []) or [])
+    if not specs:
+        return source_columns
+
+    for spec in specs:
+        ttype = spec.get("type")
+        if ttype == "rename":
+            mapping = spec.get("mapping") or {}
+            new_order: list[str] = []
+            new_by_name: dict[str, ColumnInfo] = {}
+            for name in order:
+                new_name = mapping.get(name, name)
+                col = by_name[name]
+                new_by_name[new_name] = ColumnInfo(name=new_name, type=col.type)
+                new_order.append(new_name)
+            order, by_name = new_order, new_by_name
+        elif ttype == "drop":
+            gone = set(spec.get("columns") or [])
+            order = [n for n in order if n not in gone]
+            by_name = {n: by_name[n] for n in order}
+        elif ttype == "select":
+            keep = set(spec.get("columns") or [])
+            order = [n for n in order if n in keep]
+            by_name = {n: by_name[n] for n in order}
+        elif ttype == "add_constant":
+            col_name = spec.get("column")
+            if col_name and col_name not in by_name:
+                # We don't know the literal's vendor type — default to
+                # TEXT, which any sink accepts. The user can declare a
+                # ``cast`` after the ``add_constant`` if they want a
+                # specific type.
+                by_name[col_name] = ColumnInfo(name=col_name, type="TEXT")
+                order.append(col_name)
+        elif ttype == "cast":
+            casts = spec.get("columns") or {}
+            for col_name, target_type in casts.items():
+                if col_name in by_name:
+                    by_name[col_name] = ColumnInfo(name=col_name, type=str(target_type))
+        elif ttype in {"filter", "dedupe", "assert"}:
+            continue  # row-level; no shape change
+        else:
+            # Unknown or opaque transform — bail out so caller falls
+            # back to raw source columns (Phase VV behaviour).
+            return []
+    return [by_name[n] for n in order]
 
 
 def _toposort_nodes(by_id: dict[str, GraphNode], edges: list[GraphEdge]) -> list[str]:
@@ -1076,24 +1153,32 @@ class Pipeline:
         source: Connector,
         sinks: list[tuple[SinkSpec, BatchSink]],
     ) -> None:
-        """Phase VV (ADR-0066): create any sink tables flagged with
-        ``auto_create_table=True`` from the source's schema.
+        """Phase VV (ADR-0066) + Phase XX (ADR-0068): create any sink
+        tables flagged with ``auto_create_table=True``, anticipating
+        the *post-transform* shape.
 
-        This is the cross-DB replication path. The flow is:
+        Walk:
 
         1. find the source's table name (``task.source_options['table']``
            or the first ``FROM`` clause of ``task.query``);
-        2. ask the source for its columns via the optional
+        2. ask the source for its raw columns via the optional
            :class:`SchemaInspector` capability;
-        3. for each ``auto_create_table`` sink, call its
-           :class:`SchemaWriter.ensure_table` with the columns. The
-           sink's own implementation translates the vendor type strings
-           through :mod:`etl_plugins.core.type_mapping`.
+        3. **Phase XX**: simulate the declarative transform chain
+           (``rename`` / ``add_constant`` / ``cast`` / ``drop`` /
+           ``select``) over those columns to get the *projected*
+           column set + type per column. Non-declarative transforms
+           (``python`` / ``custom_python`` / ``sql_exec``) preserve
+           whatever they don't explicitly touch — we keep the columns
+           we know about and let the eventual write surface
+           mismatches.
+        4. call :class:`SchemaWriter.ensure_table` with the projected
+           columns. The sink renders vendor types through
+           :mod:`etl_plugins.core.type_mapping`.
 
-        Best-effort: missing capabilities, an un-parseable query, or a
-        non-existent source table degrade to "no auto-create" rather
-        than raising. The sink ``write`` later in the pipeline will
-        produce a much more useful error than a half-built schema.
+        Best-effort everywhere: missing capabilities, un-parseable
+        query, missing source table all degrade to "no auto-create"
+        rather than raising. A failed write later in the pipeline gives
+        the user a much clearer error than a half-built schema would.
         """
         from etl_plugins.core.inspect import SchemaInspector, SchemaWriter
 
@@ -1116,11 +1201,13 @@ class Pipeline:
             return
 
         try:
-            columns = source.list_columns(src_table)
+            source_columns = source.list_columns(src_table)
         except Exception:
             return
-        if not columns:
+        if not source_columns:
             return
+
+        projected = _project_columns_through_transforms(source_columns, task)
 
         for spec, sink in wanted:
             if not isinstance(sink, SchemaWriter):
@@ -1131,8 +1218,9 @@ class Pipeline:
             # the run before a write has even been tried. The sink's
             # write will raise a clearer "no such table" if the DDL
             # silently failed.
+            cols_for_sink = projected if projected else source_columns
             with contextlib.suppress(Exception):
-                sink.ensure_table(spec.table, columns)
+                sink.ensure_table(spec.table, cols_for_sink)
 
     def _run_pre_sql(self, task: Task, connectors: dict[str, Connector]) -> None:
         """Execute the task's pre-load SQL actions once, in order (ADR-0035)."""

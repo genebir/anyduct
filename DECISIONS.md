@@ -1602,4 +1602,39 @@ L1 출시 직후 사용자가 5개 회신:
 
 ---
 
+## ADR-0049: 확장 dogfood 시나리오 corpus — 실전 패턴 5종 sample-data e2e
+
+**Date**: 2026-05-29
+**Status**: Accepted
+**Context**: 사용자 요청 *"테스트를 중점적으로 해서 항상 샘플 데이터를 생성해서 기능이 정상적인지 좀 깊게 테스트"*. Phase BB의 4-stage e-commerce는 headline shapes를 한 번 통과시켰지만, 실전 warehouse가 매일 쓰는 다양한 패턴(SCD/Fan-out/Aggregation chain/Self-join/Schema evolution)에서 모든 Phase X/Z/AA/CC 메커니즘이 정상 동작하는지 깊게 확인 필요.
+
+**Decision**:
+1. **`services/etlx-server/tests/db/test_extended_workflow_scenarios.py`(신규)** — 실전 warehouse 패턴 5종 e2e:
+   - **Scenario A: SCD Type 2 dimension** — `customers_history`에 `effective_from`(alias→raw col) + `effective_to`/`is_current`(리터럴) 추가. literal 컬럼이 정확히 empty upstream으로 catalog에 표시되는지 검증.
+   - **Scenario B: Fan-out by status** — `raw_orders` → `confirmed_orders` + `cancelled_orders` 두 sink로 `when` 술어 routing(ADR-0027). 양쪽 sink 모두 asset edge + per-column lineage 정확.
+   - **Scenario C: Aggregation chain** — 3-stage `raw_sales` → `daily_sales` → `monthly_sales`. `SUM(amount)` GROUP BY가 정확히 base table column에 attribute. CTE 거치지 않고 직접 GROUP BY인 경우도 정확.
+   - **Scenario D: Self-join (employee hierarchy)** — 같은 `employees` 테이블의 두 alias(`e`/`m`)가 모두 단일 base asset으로 매핑. `manager_name`도 `employees.name`으로 trace.
+   - **Scenario E: Schema evolution** — sink 테이블에 `ALTER TABLE ADD COLUMN` 후 재실행 → passthrough fallback이 새 컬럼을 empty upstream으로 자동 등록(Phase BB sink-only column 보완 검증).
+2. **각 시나리오의 검증 깊이** (3-layer):
+   - **Record-level**: 실제 sink 테이블 SELECT으로 row 수 + 값 비교.
+   - **Asset-level**: 모든 asset row 등록 + asset DAG edge 정확.
+   - **Column-level**: per-column upstream attribution이 base table까지 정확.
+3. **샘플 데이터 패턴**: 5-20 rows per 시나리오 — failure 시 reasonable counter-example을 print, 빠른 디버깅.
+4. **단일 sqlite 파일로 src + dst connection 양쪽 운영** — 한 시나리오 내에서 cross-pipeline asset dedup도 자연 검증.
+
+**Consequences**:
+- ✅ **5종 실전 패턴이 정확히 동작 확인됨**: SCD Type 2 / Fan-out / Aggregation chain / Self-join / Schema evolution.
+- ✅ **모든 Phase X/Z/AA/CC 메커니즘 깊은 검증**: literal column trace / 다중 sink edge / GROUP BY chain / alias resolver / sink-only column emission 등 각 메커니즘이 실전에서 동작.
+- ✅ **Record-level 정확성 확인**: 단지 lineage만이 아니라 실제 데이터 transformation도 sample data로 검증 — "lineage가 맞다고 표시되는데 실제론 데이터가 빠짐" 같은 silent bug 방지.
+- ✅ **회귀 가드**: 향후 column_lineage 코드 변경 시 5개 시나리오 중 어느 하나라도 깨지면 즉시 catch.
+- ✅ DB 마이그레이션 0. 신규 테스트 파일만.
+- ⚠ **Fan-out 시 sink schema에 routing-key column 보존 필요**: `when: data['status']==...`가 row를 보려면 sink schema에 status 포함. 실전에선 routing 후 `drop` transform 추가하는 패턴 흔함(시나리오는 lineage 검증에 집중하고자 단순화).
+- ⚠ **Cross-connection asset row 분리**: `src/raw_sales`와 `src/daily_sales` 같은 read-side asset이 sink connection과 별도 row로 등록. 카탈로그가 의도된 동작이며 cross-pipeline lineage가 정확히 연결됨(Aggregation chain에서 검증).
+
+**Dogfooding 발견 1개 (시나리오 B)**: 처음에 sink schema가 source projection의 일부만 가지면 sqlite append sink가 "no column named status" 실패. 실전 패턴 반영해서 sink schema에 routing key 포함하도록 시나리오 보강. 사용자 측 best practice 노트로 코멘트 남김.
+
+**검증**: 코어 unit 732 (변경 없음 — 서버 측 신규 테스트만). 서버 it 436→441(+5 e2e 시나리오). mypy 코어 61 + 서버 100 OK. ruff clean. DB 마이그레이션 0.
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

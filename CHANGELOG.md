@@ -10,6 +10,17 @@
 ## [Unreleased]
 
 ### Added
+- **확장 dogfood 시나리오 corpus — 실전 패턴 5종 sample-data e2e (Phase EE)** [ADR-0049] — 사용자 요청 *"테스트를 중점적으로 해서 항상 샘플 데이터를 생성해서 기능이 정상적인지 좀 깊게 테스트"*. Phase BB의 4-stage 시나리오를 깊이로 확장:
+  - **Scenario A — SCD Type 2 dimension**: `customers_history`에 `effective_from`(alias→raw col) + `effective_to`/`is_current`(리터럴). 리터럴 컬럼이 정확히 empty upstream으로 catalog 등록.
+  - **Scenario B — Fan-out by status**: 한 source query → `when` 술어로 confirmed/cancelled 두 sink 분기(ADR-0027). 양쪽 모두 asset edge + per-column lineage 정확.
+  - **Scenario C — Aggregation chain (3-stage)**: `raw_sales` → `daily_sales` → `monthly_sales`. `SUM(amount)` GROUP BY chain이 base table `amount`로 정확 trace.
+  - **Scenario D — Self-join (employee hierarchy)**: 같은 `employees` 테이블의 두 alias가 단일 base asset으로 매핑. `manager_name`도 `employees.name`으로 정확.
+  - **Scenario E — Schema evolution**: sink `ALTER TABLE ADD COLUMN` 후 재실행 → Phase BB의 sink-only column 자동 등록.
+  - **3-layer 검증**: record-level(실제 row 값 비교) + asset-level(asset row + edge) + column-level(per-column upstream attribution).
+  - **샘플 데이터**: 5-20 rows per 시나리오 — 디버깅 쉬움.
+  - **Dogfooding 발견**: Scenario B 초기에 sink schema 부족 → routing key 보존 필요 발견 + 코멘트로 best practice 노트 남김.
+  - **검증**: 코어 unit 732 unchanged + 서버 it 436→441(+5 e2e). 모든 Phase X/Z/AA/CC 메커니즘 실전 깊이 검증. DB 마이그레이션 0.
+
 - **Pipeline lint — dry-run에서 column_mapping 권장 advisory warning 노출 (Phase DD)** [ADR-0048] — Phase CC의 `column_mapping`은 opt-in이라 사용자가 *알아야* 채택률 올라감. dry-run 단계에서 자동 안내:
   - **`etl_plugins/runtime/lint.py`(신규) `lint_pipeline(cfg) -> list[LintWarning]`** — pure function, 모든 shape(linear/task-DAG/graph) 순회. 코어에 두어 라이브러리 단독 사용자도 활용.
   - **`LintWarning(code, message, location)`** — `code`는 stable identifier(UI 필터 키), `location`은 `tasks.0.transforms.2` 같은 path(builder가 jump).

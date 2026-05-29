@@ -10,6 +10,13 @@
 ## [Unreleased]
 
 ### Added
+- **Catalog REST API 시나리오 — UI 경로 e2e 검증 (Phase KK)** [ADR-0055] — worker가 쓴 카탈로그를 UI가 호출하는 REST endpoint로 조회했을 때 정확한 응답인지 e2e:
+  - **KK1 — List + Lineage REST**: 2-pipeline chain(raw→staging→mart) → GET /assets에 3 rows, GET /lineage에 upstream/downstream 정확.
+  - **KK2 — Materializations + Column-lineage REST**: 같은 pipeline 2번 run → /materializations에 2 entries, /column-lineage에 opaque=false + 컬럼 upstream refs `src/raw`로.
+  - **KK3 — Cross-workspace 404 + non-member 403**: ws_a 유저가 ws_b asset id로 요청 → 404. 비멤버 → 403. ACL 일관.
+  - **App fixture**: `_build_app(session)`이 `get_session`을 outer-transaction session으로 override → worker write/REST read가 같은 atomicity.
+  - **검증**: 코어 738 unchanged. 서버 it 452→455(+3). DB 마이그레이션 0.
+
 - **Cursor backfill 시나리오 — incremental sync semantics 깊은 검증 (Phase JJ)** [ADR-0054] — ADR-0039 backfill의 cursor range semantics(`(cursor_from, cursor_to]`)와 catalog materialization audit trail을 sample-data e2e로:
   - **JJ1 — Backfill respects bounds**: 10 rows(day 1~10), backfill('2026-05-02', '2026-05-05') → 정확히 3 rows(day 3/4/5)만 sink로. records_read=3 + records_written=3. backfill marker가 run.result_json에 survive.
   - **JJ2 — Full run + backfill catalog**: full(no cursor bounds, 10 rows) → backfill(day 7-10, 4 rows). 결과: 14 rows append + catalog에 *같은 asset row* + 2개의 materialization entries(audit trail).

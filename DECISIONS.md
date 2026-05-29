@@ -1788,4 +1788,30 @@ L1 출시 직후 사용자가 5개 회신:
 
 ---
 
+## ADR-0055: Catalog REST API 시나리오 — UI 경로 e2e 검증
+
+**Date**: 2026-05-29
+**Status**: Accepted
+**Context**: 카탈로그 동작은 worker 단의 e2e(EE/GG/HH/II/JJ)에서 검증됐지만 **UI가 실제로 호출하는 REST endpoint**를 통해서 동일한 데이터를 *조회*했을 때 정확한 응답이 오는지는 분리된 검증. 기존 `test_assets_router.py`는 `AssetRepository.persist_run_lineage`로 직접 seed → 응답 검증. **운영 시나리오와 다름**: worker가 쓴 catalog row를 UI가 읽음. serialization mismatch / shape drift가 worker↔API 사이에서 발생할 수 있음.
+
+**Decision**:
+1. **`test_catalog_api_scenarios.py`(신규)** — 3 시나리오, worker로 카탈로그 seed + REST로 조회:
+   - **KK1 — List + Lineage REST**: 2-pipeline chain(raw→staging→mart) run → `GET /workspaces/{ws}/assets` 응답에 3 rows, `GET /assets/{staging_id}/lineage` 응답에 upstream=[raw], downstream=[mart].
+   - **KK2 — Materializations + Column-lineage REST**: 같은 pipeline 2번 run → `/materializations` 응답에 2 entries, `/column-lineage` 응답에 `opaque=false` + columns의 upstream refs가 `src/raw`의 같은 이름 컬럼을 가리킴.
+   - **KK3 — Cross-workspace 404 + non-member 403**: ws_a 유저(`u_a`)가 ws_b의 asset id를 ws_a URL로 요청 → 404. ws_a 비멤버(`u_b`)가 ws_a의 list 요청 → 403. 워크스페이스 context guard와 resource resolver 둘 다 정상 동작.
+2. **App fixture pattern**: `_build_app(session)` 헬퍼가 `get_session` dependency를 outer transaction의 session으로 override. worker가 같은 session에서 write → REST handler가 같은 session에서 read → conftest의 outer-transaction이 양쪽 unified atomicity 제공.
+3. **3-layer 검증**: catalog repo(직접 확인) + REST 응답(HTTP layer) + 권한 model(403/404)를 한 흐름에서 검증.
+
+**Consequences**:
+- ✅ **UI 경로의 정확성 입증**: 운영자가 UI에서 자산 클릭 → API → DB → 응답이 worker write와 일치. shape drift 회귀 가드.
+- ✅ **ACL 동작 확인**: 워크스페이스 격리(Phase HH)가 REST layer까지 일관 — non-member는 403 빠른 차단, member의 cross-ws asset id는 404. UI 보안 경계 명확.
+- ✅ **Materialization audit trail UI access**: 운영자가 "이 자산 언제 새로 고쳐졌나?" REST로 답 가능 — 2개 run이면 2개 entry 시간순.
+- ✅ DB 마이그레이션 0. 신규 e2e만.
+- ⚠ **HTTP 시나리오는 conftest의 outer-transaction에 의존**: production에서는 worker/REST가 다른 session pool. 다행히 둘 다 같은 PostgreSQL 인스턴스 가리키니까 logical isolation 동일.
+- ⚠ **Cross-workspace 404의 정확한 차단 위치**: 현재 ws_a URL + ws_b asset id 조합은 404(`_resolve_or_404`). production 환경에서 ws_b URL에 ws_a asset id 조합은 다른 분기 — 모든 8가지 cross-axis 조합 e2e는 별도 슬라이스(현재는 가장 중요한 2가지만).
+
+**검증**: 코어 unit 738 unchanged. 서버 it 452→455(+3). mypy 코어 61 + 서버 100 OK. ruff clean. DB 마이그레이션 0.
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

@@ -1697,4 +1697,31 @@ L1 출시 직후 사용자가 5개 회신:
 
 ---
 
+## ADR-0052: Multi-workspace 격리 시나리오 — 멀티 테넌트 신뢰성 깊은 검증
+
+**Date**: 2026-05-29
+**Status**: Accepted
+**Context**: 워커의 `_trigger_asset_consumers`와 `AssetRepository.list_for_workspace`는 둘 다 `workspace_id` 필터를 갖고 있지만, **현실 멀티 테넌트** 상황(매 고객마다 `"src"`/`"dst"` 같은 connection 이름 재사용 + `"orders"` 같은 흔한 테이블 이름)에서 *진짜로* 격리되는지 sample-data e2e로 확인 안 됨. 신뢰성 차원에서 핵심 질문 2가지:
+1. **Auto-materialize trigger가 workspace 경계를 안 넘는가?** ws_a의 producer가 ws_b의 consumer에 영향 주지 않음?
+2. **Catalog row가 workspace 격리되는가?** 동일 `asset_key` 문자열(예: `"dst/staging"`)이 양쪽 ws에 있어도 각각 다른 row?
+
+**Decision**:
+1. **`test_multi_workspace_isolation_scenarios.py`(신규)**: 2 시나리오 e2e:
+   - **HH1 — Auto-materialize는 workspace-scoped**: 두 워크스페이스가 같은 connection name(`"src"`/`"dst"`) + 같은 table name(`raw`/`staging`/`mart`)을 쓰지만 각자 다른 sqlite 파일(per-tenant data). ws_a의 producer만 큐 → drain 후 정확히 ws_a producer + ws_a consumer 2 runs. ws_b는 0 runs. Data-plane(sqlite 파일)도 격리 확인.
+   - **HH2 — Catalog row가 workspace-scoped**: 두 ws 양쪽에 같은 cfg로 pipeline run. `list_for_workspace(ws_a)` vs `list_for_workspace(ws_b)`이 같은 `asset_key` 문자열을 반환하지만 **row id가 다름**. `upstream` 조회가 자기 ws의 row만 반환 (disjoint id 집합 검증).
+2. **3-layer 검증**: data(sqlite)/run(Run rows)/catalog(AssetRepository) 모두에서 격리.
+3. **테스트 helper `_seed_two_ws_warehouse`**: 같은 schema의 두 sqlite 파일을 서로 다른 sample rows로 시드 → consumer가 *자기* data만 처리했는지 확인 가능.
+
+**Consequences**:
+- ✅ **멀티 테넌트 안전성 확인**: 같은 connection/table 이름이 두 ws에 공존해도 carrying-edge crossing 없음. SaaS 운영의 핵심 신뢰성.
+- ✅ **Catalog의 워크스페이스 분리 보장**: `asset_key` 문자열이 동일해도 각 ws가 독립 row를 보유 — UI에서 워크스페이스 전환 시 다른 사용자의 catalog가 새지 않음.
+- ✅ **Phase GG의 auto-materialize chain 시나리오와 일관**: chain은 workspace 안에서만 동작하는 게 정책상 보장 + e2e 검증.
+- ✅ DB 마이그레이션 0. 신규 테스트만.
+- ⚠ **DB-level row-level security 없음**: workspace_id 필터는 application layer(쿼리). DB role/RLS를 PostgreSQL에 따로 적용한다면 별도 슬라이스. 현재는 코드 신뢰 모델.
+- ⚠ **Connection secret 공유 가정 없음**: 두 워크스페이스가 같은 connection name을 써도 각자의 `Connection.config_json`은 독립. 사용자가 한 ws의 secret을 다른 ws에서 읽을 수 없음(Connection table은 `workspace_id` PK + FK).
+
+**검증**: 코어 unit 737 unchanged. 서버 it 446→448(+2 시나리오). mypy 코어 61 + 서버 100 OK. ruff clean. DB 마이그레이션 0.
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

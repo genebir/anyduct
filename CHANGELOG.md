@@ -10,6 +10,12 @@
 ## [Unreleased]
 
 ### Added
+- **Multi-workspace 격리 시나리오 — 멀티 테넌트 신뢰성 깊은 검증 (Phase HH)** [ADR-0052] — 같은 connection name + 같은 table name이 두 워크스페이스에 공존해도 격리 보장 e2e 검증:
+  - **HH1 — Auto-materialize는 workspace-scoped**: 두 ws가 같은 connection name(src/dst) + 같은 table name(raw/staging/mart)을 쓰지만 per-tenant sqlite. ws_a producer만 큐 → drain 후 ws_a 2 runs, ws_b 0 runs. data-plane도 격리.
+  - **HH2 — Catalog row가 workspace-scoped**: 같은 asset_key 문자열이 양쪽에 있어도 row id가 다름. upstream 조회가 자기 ws만 반환(disjoint id 집합).
+  - **3-layer 검증**: data(sqlite) + run(Run rows) + catalog(AssetRepository) 모두에서 격리.
+  - **검증**: 코어 unit 737 unchanged. 서버 it 446→448(+2). DB 마이그레이션 0. SaaS 멀티 테넌트 운영 신뢰성 확인.
+
 - **Auto-materialize 시나리오 corpus — chain/fan-out/실패 차단 깊은 검증 (Phase GG)** [ADR-0051] — ADR-0037(D1) auto-materialize의 *interplay*(catalog 정합성 + chain 동작 + 실패 차단)를 sample data e2e로 깊게 확인:
   - **GG1 — Happy chain (A → B)**: A가 staging 작성 → B(`auto_materialize: true`)가 자동 trigger → mart 작성. `_drain_pending_runs` helper로 큐 끝까지. 검증: A+B 각 1 run, B의 result_json.triggered_by_run=A.id, catalog에 raw→staging→mart edge 전체.
   - **GG2 — Fan-out (A → B + C)**: B/C 둘 다 같은 dst/shared를 source + `auto_materialize`. 1 A run + 2 자동 consumer run. dst/shared의 downstream에 mart_b + mart_c.

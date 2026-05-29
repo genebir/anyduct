@@ -9,7 +9,13 @@
 
 ## [Unreleased]
 
-### Added
+### Added/Fixed
+- **Analyst exploration journey + AssetSummary 누락 필드 보완 (Phase UU)** [ADR-0065] — 두 번째 사용자 페르소나(분석가). Viewer 권한으로 catalog 탐색 5-step:
+  - **UU1 — Analyst catalog 탐색**: Owner가 2-stage chain 실행 → 분석가가 list → lineage → column drill-down → materializations → Viewer-금지 action 403.
+  - **Dogfooding 발견 + 보완 (6번째 silent miss)**: `AssetSummary`에 `column_lineage_opaque` 필드 누락. UI 목록에서 traceability badge 한눈에 못 보고 매번 column-lineage 호출 필요 → bad UX. ADR-0041 J2가 컬럼은 추가했지만 schema 안 노출.
+  - **보완**: `AssetSummary.column_lineage_opaque: bool = False` 추가. `from_attributes=True`로 자동 populate. backward-compat.
+  - **검증**: 코어 738 unchanged. 서버 it 471→472(+1). DB 마이그레이션 0. **이번 세션 6번째 silent miss** catch.
+
 - **Operator onboarding journey — UX-first 전체 흐름 e2e (Phase TT)** [ADR-0064] — 사용자 요청 "UX 고려, 사용자 페르소나로 전체 점검". 신규 운영자의 first-15-minutes path:
   - **TT1 — 운영자 신규 가입부터 첫 catalog까지 10-step REST journey**: /auth/login → /workspaces (auto-Owner) → /connections × 2 → /connections/test → /pipelines → /dry-run → /trigger → drain → /runs/{rid} → /assets → /audit. 각 단계 status code + 응답 shape(id/slug/records_written/connectors/asset_key/after_json) + 흐름 일관성(ID carry, token 재사용) 검증.
   - **TT2 — 데이터 엔지니어 페르소나, custom_python + Phase DD nudge UX**: dry-run 응답에 `column_mapping_recommended` warning + location='transforms.0' + message에 "column_mapping" 단어. run 자체는 ok 유지.

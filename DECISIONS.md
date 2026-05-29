@@ -2080,4 +2080,39 @@ L1 출시 직후 사용자가 5개 회신:
 
 ---
 
+## ADR-0065: Analyst exploration journey + AssetSummary 누락 필드 보완
+
+**Date**: 2026-05-29
+**Status**: Accepted
+**Context**: Phase TT(운영자 페르소나)에 이어 두 번째 사용자 페르소나 — **분석가**. 자산을 만들지 않지만 매일 catalog를 둘러보고 lineage를 추적하는 사용자. Viewer 권한으로 catalog 탐색 흐름이 자연스러운지 dogfood. *분석가가 어디서 막히나? 한눈에 보고 싶은 정보가 빠졌나?*
+
+**Decision**:
+1. **`test_analyst_exploration_journey_scenario.py`(신규)** — UU1: 분석가 catalog 탐색 5-step:
+   - **Setup**: Owner가 2-stage chain(raw → staging → mart) 실행 → 자산 + materialization 채워짐.
+   - **Step 1**: `GET /workspaces/{ws}/assets` — Viewer가 자산 목록 둘러봄. 응답에 `column_lineage_opaque` badge field 있어야 traceability를 한눈에 확인 가능.
+   - **Step 2**: `GET /assets/{id}/lineage` — upstream/downstream으로 "한 클릭 위/아래" 탐색.
+   - **Step 3**: `GET /assets/{id}/column-lineage` — `mart.amount`가 어디서 왔나 column drill-down.
+   - **Step 4**: `GET /assets/{id}/materializations` — 마지막 새로고침 시각 + records_written.
+   - **Step 5**: Viewer가 forbidden action(POST /pipelines) 시도 → 403 (UI가 "Locked" badge 결정).
+
+2. **Dogfooding 발견 + 보완 — `AssetSummary`에 `column_lineage_opaque` 추가** (6번째 silent UX miss):
+   - **Bug**: `GET /workspaces/{ws}/assets` 응답에 `column_lineage_opaque` 없음. 분석가가 목록에서 "이 자산 traceable?" 한눈에 못 봄. 매 자산마다 column-lineage 엔드포인트 호출 필요 → bad UX.
+   - **Root cause**: ADR-0041 J2가 `Asset.column_lineage_opaque` 컬럼은 추가했지만 API summary schema에는 안 노출. 단위 테스트는 mock으로 동작 검증 → catch 못 함.
+   - **보완**: `AssetSummary.column_lineage_opaque: bool = False` 필드 추가. `from_attributes=True` 덕분에 Asset row에서 자동 populate. Backward-compat(기본값 False).
+
+3. **사용자 페르소나 확장**: TT(운영자) + UU(분석가) → 매 페르소나가 다른 미스를 catch. 향후 다른 페르소나(관리자, 컴플라이언스 담당자)는 별도 슬라이스.
+
+**Consequences**:
+- ✅ **분석가 UX 동작 확인**: catalog 탐색 + lineage drill-down + materialization audit + ACL 경계 모두 자연 흐름.
+- ✅ **6번째 silent UX bug catch + 보완**: 응답에 필드 누락. UI가 자산 목록에서 "traceable" badge 표시 가능 → 분석가가 매번 drill-down 안 해도 됨.
+- ✅ **사용자 페르소나 시리즈 확립**: TT + UU 패턴이 향후 페르소나 e2e 템플릿. 비슷한 미스 다른 영역에서도 catch 기대.
+- ✅ **이번 세션 6번째 silent miss** (Z COUNT(*) / BB sink-only / II DLQ × 2 / MM lineage var / UU AssetSummary). dogfood + 사용자 페르소나 점검 가치 입증 누적.
+- ✅ DB 마이그레이션 0. schema 필드 추가만, 기본값 backward-compat.
+- ⚠ **다른 페르소나는 별도 슬라이스**: 관리자(membership/secret), 컴플라이언스(audit query 깊은 사용), 데이터 엔지니어(빌더+config 작성). 각자 별 e2e로 cover.
+- ⚠ **Viewer ACL 경계 검증은 1개만**: 모든 Viewer-금지 action(POST/PATCH/DELETE/trigger 등)에 대한 매트릭스 검증은 별도 ACL 슬라이스로.
+
+**검증**: 코어 unit 738 unchanged. 서버 it 471→472(+1 UU1). mypy 코어 61 + 서버 100 OK. ruff clean. DB 마이그레이션 0. backward-compat 유지.
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

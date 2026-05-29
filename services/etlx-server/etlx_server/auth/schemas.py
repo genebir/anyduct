@@ -180,7 +180,14 @@ class ConnectionTestResult(BaseModel):
 
 
 class AssetSummary(BaseModel):
-    """One row of ``GET /workspaces/{ws}/assets`` (ADR-0036)."""
+    """One row of ``GET /workspaces/{ws}/assets`` (ADR-0036).
+
+    ``column_lineage_opaque`` (Phase UU, 2026-05-29): exposed so the
+    list view can show a "traceable" badge per asset without forcing
+    a per-row hit on ``/column-lineage``. The flag is already on the
+    ``Asset`` model (ADR-0041 J2); we just hadn't surfaced it in the
+    summary schema. Analyst dogfooding caught the omission.
+    """
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -188,6 +195,7 @@ class AssetSummary(BaseModel):
     asset_key: str
     kind: str | None = None
     last_materialized_at: datetime | None = None
+    column_lineage_opaque: bool = False
 
 
 class AssetRef(BaseModel):

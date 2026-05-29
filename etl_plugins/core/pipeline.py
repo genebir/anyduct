@@ -96,6 +96,9 @@ class SinkSpec:
     # creates the sink table from the source's schema before the first
     # write — translated through :mod:`etl_plugins.core.type_mapping`.
     auto_create_table: bool = False
+    # Phase AAA (ADR-0071, 2026-05-29): forwarded to
+    # ``SchemaWriter.ensure_table(if_exists=...)``.
+    auto_create_if_exists: str = "skip"
 
 
 @dataclass(frozen=True)
@@ -204,6 +207,7 @@ class Task:
     # ``SinkConfig.auto_create_table`` so single-sink configs also opt
     # into cross-DB schema replication.
     sink_auto_create_table: bool = False
+    sink_auto_create_if_exists: str = "skip"
     # Fan-out targets (ADR-0026). When non-empty these take precedence over the
     # flat ``sink*`` fields and the source is re-read once per sink.
     sinks: list[SinkSpec] = field(default_factory=list)
@@ -237,6 +241,7 @@ class Task:
                 options=self.sink_options,
                 pre_sql=self.sink_pre_sql,
                 auto_create_table=self.sink_auto_create_table,
+                auto_create_if_exists=self.sink_auto_create_if_exists,
             )
         ]
 
@@ -1220,7 +1225,7 @@ class Pipeline:
             # silently failed.
             cols_for_sink = projected if projected else source_columns
             with contextlib.suppress(Exception):
-                sink.ensure_table(spec.table, cols_for_sink)
+                sink.ensure_table(spec.table, cols_for_sink, if_exists=spec.auto_create_if_exists)
 
     def _run_pre_sql(self, task: Task, connectors: dict[str, Connector]) -> None:
         """Execute the task's pre-load SQL actions once, in order (ADR-0035)."""

@@ -10,6 +10,13 @@
 ## [Unreleased]
 
 ### Added
+- **`auto_create_if_exists` — sink 자동 생성 충돌 정책 (Phase AAA)** [ADR-0071] — `auto_create_table`의 충돌 모드 확장:
+  - **`SinkConfig.auto_create_if_exists`(str, default `"skip"`)** — skip(기본, BC) / drop(재구축) / error(connector 차원 raise).
+  - **운영 시나리오 1 (nightly snapshot replication)**: source 스키마 매일 진화 → `drop`으로 sink 재구축. stale 컬럼/데이터 자동 정리.
+  - **운영 시나리오 2 (strict 보호)**: `error`로 충돌 시 raw `ensure_table` 호출 차단.
+  - **빌더 3 path 모두 forwarding** — single-sink / fan-out / graph.
+  - **검증**: AAA1 drop은 stale `batch` 컬럼 제거 + 새 데이터 정상 + AAA2 error는 런타임 best-effort 시맨틱(원본 보호) 명문화. 서버 it 476→478(+2).
+
 - **Cross-DB fan-out — sink별 `auto_create_table` 독립 동작 검증 (Phase ZZ)** [ADR-0070] — 운영 흔한 fan-out 패턴:
   - ZZ1: source orders → 2 sinks(analytics with auto_create + warehouse 기존 테이블). analytics는 자동 생성(id, amount), warehouse는 untouched(id, amount, batch 그대로).
   - Sink별 flag 독립 적용 + 기존 테이블 보호 확인.

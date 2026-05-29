@@ -2268,4 +2268,28 @@ L1 출시 직후 사용자가 5개 회신:
 
 ---
 
+## ADR-0071: `auto_create_if_exists` — sink 자동 생성 충돌 정책
+
+**Date**: 2026-05-29
+**Status**: Accepted
+**Context**: ADR-0066/0068의 `auto_create_table`은 "테이블 없으면 만든다(skip if exists)"만 처리. 운영 현실에서는 두 가지 다른 요구가 추가됨:
+1. **Nightly snapshot replication** — source 스키마가 매일 진화. sink는 append가 아니라 *재구축* 되어야 함. 어제의 stale 컬럼이 남으면 안 됨.
+2. **Strict 보호** — 같은 이름의 기존 테이블이 있으면 자동 생성을 *거부*하고 운영자가 수동 처리하도록 강제.
+
+**Decision**: `SinkConfig.auto_create_if_exists`(str, default `"skip"`) 도입.
+- `"skip"` (기본, BC) — 테이블 있으면 그대로 사용.
+- `"drop"` — 테이블 있으면 `DROP TABLE` 후 새 스키마로 재생성.
+- `"error"` — connector 차원에서 raise. 단, 런타임의 `_auto_create_sink_tables`는 `contextlib.suppress`로 감싸 best-effort이므로 *런타임에서는* 무력화 — 원본 테이블이 그대로 유지된다. raw script(`ensure_table` 직접 호출)에 대한 가드 의미만 가짐.
+- 3 RDBMS connector(sqlite/postgres/mysql) `ensure_table`이 이미 if_exists 파라미터 지원(ADR-0066). 빌더 단방향 forwarding(single-sink/fan-out/graph 3 path)으로 wired.
+
+**Consequences**:
+- ✅ **Snapshot/scratch sink 재구축** — 일일 백필이나 explore용 sandbox에 적합한 동작.
+- ✅ **BC 유지** — default `"skip"`이라 기존 YAML/UI 영향 없음.
+- ⚠️ `"error"` 모드의 *런타임* 시맨틱은 best-effort 정책에 가려져 "원본 그대로"로 떨어진다 — 운영자가 sink 충돌을 확실히 막으려면 별도 pre-check transform("Assert table doesn't exist")이 필요. AAB+ 슬라이스에서 후속.
+- ✅ **DB 마이그레이션 0**. 신규 e2e 2(AAA1=drop / AAA2=error 현재 시맨틱 문서화).
+
+**검증**: 서버 it 476→478(+2 AAA1/AAA2). 코어 unit 799 green. mypy/ruff clean.
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

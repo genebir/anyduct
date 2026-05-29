@@ -71,6 +71,13 @@ class SinkConfig(BaseModel):
     # round-trips cleanly. Default ``False`` keeps the existing behaviour
     # (sink table must already exist).
     auto_create_table: bool = False
+    # Phase AAA (ADR-0071, 2026-05-29): collision policy used when
+    # ``auto_create_table`` is True and the sink table already exists.
+    # ``skip`` (default) leaves the existing table; ``drop`` rebuilds
+    # from the current source schema (DESTRUCTIVE — use for nightly
+    # snapshot-style replication or dev sandboxes); ``error`` fails the
+    # run so an operator can resolve the conflict by hand.
+    auto_create_if_exists: str = "skip"
 
 
 class TransformConfig(BaseModel):

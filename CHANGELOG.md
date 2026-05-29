@@ -10,6 +10,14 @@
 ## [Unreleased]
 
 ### Added
+- **Operator onboarding journey — UX-first 전체 흐름 e2e (Phase TT)** [ADR-0064] — 사용자 요청 "UX 고려, 사용자 페르소나로 전체 점검". 신규 운영자의 first-15-minutes path:
+  - **TT1 — 운영자 신규 가입부터 첫 catalog까지 10-step REST journey**: /auth/login → /workspaces (auto-Owner) → /connections × 2 → /connections/test → /pipelines → /dry-run → /trigger → drain → /runs/{rid} → /assets → /audit. 각 단계 status code + 응답 shape(id/slug/records_written/connectors/asset_key/after_json) + 흐름 일관성(ID carry, token 재사용) 검증.
+  - **TT2 — 데이터 엔지니어 페르소나, custom_python + Phase DD nudge UX**: dry-run 응답에 `column_mapping_recommended` warning + location='transforms.0' + message에 "column_mapping" 단어. run 자체는 ok 유지.
+  - **사용자 페르소나 정의**: TT1(운영자 day-1 sqlite), TT2(엔지니어 python 첫 사용 → UX nudge 적시 표시).
+  - **검증 3 axis**: status code + 응답 shape + 흐름 일관성.
+  - **UX 회귀 가드**: 응답 shape 변경 시(예: records_written 누락) onboarding e2e가 즉시 catch.
+  - **검증**: 코어 738 unchanged. 서버 it 469→471(+2). DB 마이그레이션 0.
+
 - **Cron schedule 시나리오 — 시간 기반 trigger family 3축 완성 (Phase SS)** [ADR-0063] — Step 9.2 cron scheduler를 sample-data + 시간 시뮬:
   - **SS1 — Due cron fires + drain**: cron_expr='* * * * *' + schedules.created_at 2분 전 강제. tick_once → fired=1. drain → records sink로 + run.schedule_id 채워짐.
   - **SS2 — Inactive schedule skipped**: is_active=False → fired=0, runs 비어 있음.

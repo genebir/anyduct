@@ -2039,4 +2039,45 @@ L1 출시 직후 사용자가 5개 회신:
 
 ---
 
+## ADR-0064: Operator onboarding journey — UX-first 전체 흐름 e2e 검증
+
+**Date**: 2026-05-29
+**Status**: Accepted
+**Context**: 사용자 요청 *"UX를 고려해서 사용자 페르소나로 전체적인 점검을 항상 포함"*. 기존 시나리오들은 *기술적 isolated*(각 메커니즘별)였지만, 운영자 입장의 *first 15 minutes* 흐름(가입 → 첫 ETL 실행 → catalog 확인)이 끊김 없이 자연스러운지는 별도 검증 필요. 신규 운영자 입장에서 *어디서 막히나? 응답이 명확한가?* 페르소나 점검 자동화.
+
+**Decision**:
+1. **`test_onboarding_journey_scenario.py`(신규)** — 2 시나리오, 두 사용자 페르소나:
+   - **TT1 — 운영자 신규 가입부터 첫 catalog까지 10-step REST journey**:
+     1. POST /auth/login → access_token
+     2. POST /workspaces (auto-Owner) → id/slug/name 확인
+     3. POST /workspaces/{ws}/connections × 2 (src + dst, sqlite) → 201
+     4. GET /workspaces/{ws}/connections → ids 회수
+     5. POST /workspaces/{ws}/connections/{id}/test → ok=True
+     6. POST /workspaces/{ws}/pipelines → 201 + id
+     7. POST /pipelines/{id}/dry-run → ok=True + connectors 둘 다 ✓ + warnings 필드 존재
+     8. POST /pipelines/{id}/trigger → 202 + run id
+     9. (worker drain)
+     10. GET /workspaces/{ws}/runs/{rid} → status=succeeded + records_written=3 + pipeline_version_id
+     11. GET /workspaces/{ws}/assets → src/raw_orders + dst/clean_orders
+     12. GET /audit?action=run.sql_read → 정확히 1 row + after_json.{query/connection/connection_type}
+   - **TT2 — 데이터 엔지니어가 custom_python 첫 사용 → Phase DD 안내 동작**: 같은 흐름이지만 transforms에 `custom_python` 추가. dry-run 응답에 `column_mapping_recommended` warning + `location='transforms.0'` + message에 "column_mapping" 단어. run 자체는 ok 유지.
+2. **검증 axis 3가지**:
+   - **Status code**: 각 단계 예상 코드(201/200/202).
+   - **응답 shape**: UI가 navigation에 쓰는 load-bearing field 모두 존재(id/slug/name/records_written/connectors[].ok/warnings/asset_key/after_json.query).
+   - **흐름 일관성**: ID가 이전 단계 → 다음 단계로 자연 carry. 토큰 한 번 받고 끝까지 재사용.
+3. **사용자 페르소나 정의**: TT1은 "운영자 day-1 sqlite 점검 흐름", TT2는 "데이터 엔지니어가 python 코드 박을 때 UX nudge가 적시에 뜨는지". 이후 시나리오들은 다른 페르소나(분석가 / 관리자) 별로 추가 가능.
+
+**Consequences**:
+- ✅ **UX 회귀 가드**: 응답 shape 변경 시(예: `records_written` 누락) onboarding e2e가 즉시 catch.
+- ✅ **사용자 흐름의 끊김 입증**: 10-step REST path가 사용자가 멈출 곳 없이 자연 흐름. token 한 번 + 각 단계 응답에 다음 ID 포함.
+- ✅ **Phase DD lint nudge가 적시에 dry-run 응답에 노출**: 데이터 엔지니어가 python 박는 즉시 "column_mapping 추가하세요" 응답 안내 → 의식적 결정 유도.
+- ✅ **사용자 요구사항 응답**: "UX 고려, 사용자 페르소나로 전체 점검, dogfooding sample data" 모두 1 슬라이스에서 만족.
+- ✅ DB 마이그레이션 0. 신규 e2e만.
+- ⚠ **다른 페르소나 별도 슬라이스**: 분석가(low-code 빌더 UI 흐름), 관리자(membership/secret 관리), 컴플라이언스 담당자(audit query 깊은 사용). 각자 별 e2e로 cover 가능.
+- ⚠ **에러 경로 별도 슬라이스**: dry-run 실패 / trigger 시 시크릿 없음 / 권한 부족 등은 별도 onboarding-error journey 시나리오로.
+
+**검증**: 코어 unit 738 unchanged. 서버 it 469→471(+2 TT1/TT2). mypy 코어 61 + 서버 100 OK. ruff clean. DB 마이그레이션 0.
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

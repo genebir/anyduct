@@ -297,23 +297,34 @@ export function PropertiesPanel({
       })()}
 
       <div className="flex flex-col gap-4">
-        {op.fields.map((field) => (
-          <FieldEditor
-            key={`${node.id}:${field.key}`}
-            field={field}
-            value={node.data[field.key]}
-            connections={matchingConnections}
-            pipelines={pipelines}
-            workspaceId={workspaceId}
-            connectionId={selectedConnectionId}
-            columnsConnectionId={columnsCtx.connectionId}
-            columnsTable={columnsCtx.table}
-            t={t}
-            onChange={(v) =>
-              onChange(node.id, { ...node.data, [field.key]: v })
-            }
-          />
-        ))}
+        {op.fields
+          .filter((field) => {
+            // Phase AAF (2026-05-29): conditional visibility. The
+            // ``showWhen`` predicate keeps dependent fields out of the
+            // panel until their controlling field is set — e.g.
+            // ``auto_create_if_exists`` only renders once
+            // ``auto_create_table`` is on, so off-by-default toggles
+            // don't drag their settings along as clutter.
+            if (!field.showWhen) return true;
+            return node.data[field.showWhen.field] === field.showWhen.equals;
+          })
+          .map((field) => (
+            <FieldEditor
+              key={`${node.id}:${field.key}`}
+              field={field}
+              value={node.data[field.key]}
+              connections={matchingConnections}
+              pipelines={pipelines}
+              workspaceId={workspaceId}
+              connectionId={selectedConnectionId}
+              columnsConnectionId={columnsCtx.connectionId}
+              columnsTable={columnsCtx.table}
+              t={t}
+              onChange={(v) =>
+                onChange(node.id, { ...node.data, [field.key]: v })
+              }
+            />
+          ))}
       </div>
     </aside>
   );

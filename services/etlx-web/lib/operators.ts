@@ -50,6 +50,12 @@ interface FieldBase {
    *  warning when left empty. Connections + a transform's core input are
    *  the usual ones. */
   required?: boolean;
+  /** Phase AAF (2026-05-29): conditional visibility. When set, the field
+   *  is rendered only if ``nodeData[showWhen.field] === showWhen.equals``.
+   *  Used to hide ``auto_create_if_exists`` unless ``auto_create_table``
+   *  is on — the latter defaults to off, so leaving the if_exists
+   *  select visible would be clutter for the 99% who don't auto-create. */
+  showWhen?: { field: string; equals: unknown };
 }
 
 export type FieldDef =
@@ -740,12 +746,13 @@ const SINKS: OperatorSpec[] = [
         key: "auto_create_if_exists",
         label: "If table exists",
         kind: "select",
+        showWhen: { field: "auto_create_table", equals: true },
         options: [
           { label: "skip — use existing table as-is", value: "skip" },
           { label: "drop — DROP and recreate (snapshot rebuild)", value: "drop" },
           { label: "error — refuse to clobber", value: "error" },
         ],
-        help: "Only applied when ‘Create table if missing’ is on. ‘drop’ is the right choice for nightly snapshot rebuilds where the source schema may evolve — stale columns/rows are wiped each run. Default: skip.",
+        help: "‘drop’ is the right choice for nightly snapshot rebuilds where the source schema may evolve — stale columns/rows are wiped each run. Default: skip.",
       },
     ],
   },
@@ -789,12 +796,13 @@ const SINKS: OperatorSpec[] = [
         key: "auto_create_if_exists",
         label: "If table exists",
         kind: "select",
+        showWhen: { field: "auto_create_table", equals: true },
         options: [
           { label: "skip — use existing table as-is", value: "skip" },
           { label: "drop — DROP and recreate (snapshot rebuild)", value: "drop" },
           { label: "error — refuse to clobber", value: "error" },
         ],
-        help: "Only applied when ‘Create table if missing’ is on. ‘drop’ is the right choice for nightly snapshot rebuilds where the source schema may evolve — stale columns/rows are wiped each run. Default: skip.",
+        help: "‘drop’ is the right choice for nightly snapshot rebuilds where the source schema may evolve — stale columns/rows are wiped each run. Default: skip.",
       },
     ],
   },

@@ -117,7 +117,9 @@ uv run mypy etl_plugins
 
 ## 5. 현재 단계
 
-> **최신 마일스톤 (2026-05-29): Cross-DB cross-vendor testcontainers — postgres↔sqlite upsert + drop (Phase AAE).** 실제 Docker postgres로 AAA/AAC 회귀 가드: ① AAE1 postgres→sqlite upsert(BIGINT id + VARCHAR(64) name → ensure_table(primary_key=['id']) → 2-pass upsert idempotent merge) — AAC가 sqlite-only 검증이었던 것을 cross-vendor로 확장. ② AAE2 sqlite→postgres drop — schema drift(legacy_col→current_col)에 if_exists='drop' 재구축 + day-1 컬럼 사라짐. Phase VV 옆에 +2 = cross-vendor 통합 it 4종 회귀 가드. 이번 슬라이스 코어 변화 0. 코어 unit 802 unchanged. mypy/ruff clean.
+> **최신 마일스톤 (2026-05-29): 빌더 FieldDef.showWhen — dependent field visibility (Phase AAF).** `auto_create_table` default OFF인데 `auto_create_if_exists` select 항상 노출 = 99% 사용자에게 시각적 clutter. ① `FieldBase`에 `showWhen?: { field, equals }` 추가. ② Properties panel이 노드 데이터 보고 conditional 렌더(필터 한 줄). ③ 3 RDBMS sink의 `auto_create_if_exists`에 `showWhen: { field: "auto_create_table", equals: true }` + help text 잉여 가이드 제거. **결과**: 기본 sink 패널에서 if_exists 옵션 자연히 사라짐 + 사용자가 토글하는 순간 출현. 신규 시각 컴포넌트 0. web tsc clean. 코어/서버 변화 0.
+>
+> **이전 마일스톤 (2026-05-29): Cross-DB cross-vendor testcontainers — postgres↔sqlite upsert + drop (Phase AAE).** 실제 Docker postgres로 AAA/AAC 회귀 가드: ① AAE1 postgres→sqlite upsert(BIGINT id + VARCHAR(64) name → ensure_table(primary_key=['id']) → 2-pass upsert idempotent merge) — AAC가 sqlite-only 검증이었던 것을 cross-vendor로 확장. ② AAE2 sqlite→postgres drop — schema drift(legacy_col→current_col)에 if_exists='drop' 재구축 + day-1 컬럼 사라짐. Phase VV 옆에 +2 = cross-vendor 통합 it 4종 회귀 가드. 이번 슬라이스 코어 변화 0. 코어 unit 802 unchanged. mypy/ruff clean.
 >
 > **이전 마일스톤 (2026-05-29): Cross-DB overwrite + auto_create — idempotent re-run dogfood (Phase AAD).** 분석가 페르소나(매시간 dashboard latest snapshot 패턴): `mode=overwrite` + `auto_create_table` 조합 2-pass 실행. pass-1 sink 자동 생성 + write, pass-2 sink 존재(skip 분기) + overwrite가 truncate+insert로 idempotent 재현. 동일 (region, value) 3 rows, 중복 0, 스키마 drift 0. 운영 보장: "동일 시간 두 번 run → dashboard 영향 없다". 이번 슬라이스 코어 변화 0 — 기존 SinkConfig + ensure_table(skip) + overwrite mode 조합이 sample-data로 명문화. 서버 it 480→481(+1). 코어 802 unchanged. DB 마이그레이션 0.
 >

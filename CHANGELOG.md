@@ -9,6 +9,9 @@
 
 ## [Unreleased]
 
+### Changed
+- **빌더 FieldDef.showWhen — dependent field visibility (Phase AAF)** — `auto_create_table` default OFF + `auto_create_if_exists` select 항상 노출 = 99% 사용자에게 clutter. ① `FieldBase`에 `showWhen?: { field, equals }` 추가. ② Properties panel이 노드 데이터를 보고 conditional 렌더. ③ 3 RDBMS sink(postgres/mysql/sqlite)의 `auto_create_if_exists` field를 `showWhen: { field: "auto_create_table", equals: true }`로 설정. ④ help text에서 "Only applied when '...' is on" 잉여 가이드 제거 — UI 자체가 사라지므로 불필요. **결과**: 기본 sink 패널에서 if_exists 옵션 사라짐 + 사용자가 `auto_create_table` 켜는 순간 자연히 출현. 신규 시각 컴포넌트 0(필터 한 줄). web tsc clean. 코어/서버 변화 0.
+
 ### Added
 - **Cross-DB cross-vendor upsert/drop testcontainers e2e (Phase AAE)** — 실제 postgres↔sqlite로 AAA(drop) + AAC(upsert PK) 회귀 가드:
   - **AAE1 (postgres→sqlite upsert)**: postgres BIGINT id + VARCHAR(64) name → sqlite `ensure_table(primary_key=['id'])` → 2-pass upsert(idempotent merge). AAC가 sqlite-only 검증이었던 것을 postgres 소스 cross-vendor로 확장.

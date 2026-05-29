@@ -10,6 +10,12 @@
 ## [Unreleased]
 
 ### Added
+- **Cross-DB cross-vendor upsert/drop testcontainers e2e (Phase AAE)** — 실제 postgres↔sqlite로 AAA(drop) + AAC(upsert PK) 회귀 가드:
+  - **AAE1 (postgres→sqlite upsert)**: postgres BIGINT id + VARCHAR(64) name → sqlite `ensure_table(primary_key=['id'])` → 2-pass upsert(idempotent merge). AAC가 sqlite-only 검증이었던 것을 postgres 소스 cross-vendor로 확장.
+  - **AAE2 (sqlite→postgres drop)**: sqlite source의 schema drift(legacy_col → current_col)에 postgres sink가 `if_exists='drop'`로 재구축. day-1 컬럼 사라짐 + day-2 데이터 정상.
+  - Phase VV의 기존 2 testcontainer 테스트 옆에 AAE 2개 추가 = 통합 it 4종 cross-vendor 회귀 가드.
+  - 검증: 통합 it 2→4(+2 AAE1/AAE2 via real Docker postgres).
+
 - **Cross-DB overwrite — idempotent re-run dogfood (Phase AAD)** — `mode=overwrite` + `auto_create_table` 조합이 분석가 시나리오(매시간 latest snapshot for dashboard)에서 idempotent 동작 확인:
   - AAD1: 동일 source 데이터로 2-pass 실행. pass-1은 sink 자동 생성 + 데이터 write. pass-2는 sink 이미 존재(skip 분기) + overwrite가 truncate+insert로 같은 shape 재현. **결과**: 동일 (region, value) 3 rows, 중복 0, 스키마 drift 0.
   - 운영 보장: 분석가가 "동일한 시간에 두 번 run해도 dashboard에 영향 없다" 직관 검증.

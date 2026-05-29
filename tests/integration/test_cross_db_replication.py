@@ -203,3 +203,132 @@ def test_sqlite_to_postgres_auto_create_table_and_replicate(
         # Teardown so the next test session starts fresh.
         with psycopg.connect(**pg_raw_kwargs, autocommit=True) as conn, conn.cursor() as cur:
             cur.execute(f"DROP TABLE IF EXISTS {pg_table}")
+
+
+@pytest.mark.it
+def test_postgres_to_sqlite_auto_create_with_upsert_pk(
+    pg_raw_kwargs: dict[str, Any],
+    pg_conn_params: dict[str, Any],
+    tmp_path: Path,
+) -> None:
+    """Phase AAC across vendors: postgres-source → sqlite-sink with
+    ``mode='upsert'`` + ``auto_create_table`` + ``key_columns=['id']``.
+    The sink's ``ensure_table`` must emit a PRIMARY KEY constraint so
+    sqlite's ``ON CONFLICT (id)`` resolves on the very first call —
+    exactly the failure dogfooding caught.
+    """
+    pg_table = "pg2sqlite_upsert_src"
+    sqlite_path = tmp_path / "cache.db"
+
+    with psycopg.connect(**pg_raw_kwargs, autocommit=True) as conn, conn.cursor() as cur:
+        cur.execute(f"DROP TABLE IF EXISTS {pg_table}")
+        cur.execute(f"CREATE TABLE {pg_table} (id BIGINT PRIMARY KEY, name VARCHAR(64))")
+        cur.execute(f"INSERT INTO {pg_table} VALUES (1, 'alice'), (2, 'bob')")
+
+    pg = PostgresConnector(**pg_conn_params)
+    with pg:
+        cols = pg.list_columns(pg_table)
+        records = list(pg.read(query=f"SELECT id, name FROM {pg_table}"))
+
+    sink = SQLiteConnector(database=str(sqlite_path))
+    with sink:
+        # Emulate the runtime: when sink mode is upsert, forward the key
+        # columns as the table's primary key (Phase AAC).
+        sink.ensure_table("customers_cache", cols, primary_key=["id"])
+        n = sink.write(
+            iter(records),
+            table="customers_cache",
+            mode="upsert",
+            key_columns=["id"],
+        )
+        assert n == 2
+
+        # A second upsert pass — same payload, same shape, no
+        # duplicates. This is what would have raised before AAC.
+        with pg:
+            again = list(pg.read(query=f"SELECT id, name FROM {pg_table}"))
+        n2 = sink.write(
+            iter(again),
+            table="customers_cache",
+            mode="upsert",
+            key_columns=["id"],
+        )
+        assert n2 == 2
+
+    out = sqlite3.connect(str(sqlite_path))
+    try:
+        rows = sorted(out.execute("SELECT id, name FROM customers_cache").fetchall())
+    finally:
+        out.close()
+    assert rows == [(1, "alice"), (2, "bob")]
+
+
+@pytest.mark.it
+def test_sqlite_to_postgres_drop_rebuilds_sink_schema(
+    pg_raw_kwargs: dict[str, Any],
+    pg_conn_params: dict[str, Any],
+    tmp_path: Path,
+) -> None:
+    """Phase AAA across vendors: sqlite source whose schema mutated
+    between day-1 and day-2; postgres sink with
+    ``auto_create_if_exists='drop'`` rebuilds each run. After day-2,
+    the postgres table has *only* the new column set."""
+    pg_table = "sqlite2pg_drop_sink"
+
+    # Day 1 — source has (id, legacy_col).
+    src_db = tmp_path / "src.db"
+    raw = sqlite3.connect(str(src_db))
+    try:
+        raw.execute("CREATE TABLE inventory (id INTEGER, legacy_col TEXT)")
+        raw.executemany(
+            "INSERT INTO inventory VALUES (?, ?)",
+            [(1, "old-a"), (2, "old-b")],
+        )
+        raw.commit()
+    finally:
+        raw.close()
+
+    src = SQLiteConnector(database=str(src_db))
+    sink = PostgresConnector(**pg_conn_params)
+    try:
+        with src:
+            cols1 = src.list_columns("inventory")
+            records1 = list(src.read(query="SELECT id, legacy_col FROM inventory"))
+        with sink:
+            sink.execute_statement(f"DROP TABLE IF EXISTS {pg_table}")
+            sink.ensure_table(pg_table, cols1)
+            sink.write(iter(records1), table=pg_table)
+
+        # Day 2 — upstream replaced legacy_col with current_col.
+        raw = sqlite3.connect(str(src_db))
+        try:
+            raw.execute("DROP TABLE inventory")
+            raw.execute("CREATE TABLE inventory (id INTEGER, current_col TEXT)")
+            raw.executemany(
+                "INSERT INTO inventory VALUES (?, ?)",
+                [(10, "new-x"), (20, "new-y")],
+            )
+            raw.commit()
+        finally:
+            raw.close()
+        with src:
+            cols2 = src.list_columns("inventory")
+            records2 = list(src.read(query="SELECT id, current_col FROM inventory"))
+        with sink:
+            sink.ensure_table(pg_table, cols2, if_exists="drop")
+            sink.write(iter(records2), table=pg_table)
+
+            # Read back via psycopg — assert only the new column survives.
+            with psycopg.connect(**pg_raw_kwargs) as conn, conn.cursor() as cur:
+                cur.execute(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_name = %s ORDER BY ordinal_position",
+                    (pg_table,),
+                )
+                col_names = [row[0] for row in cur.fetchall()]
+                assert col_names == ["id", "current_col"]
+                cur.execute(f"SELECT id, current_col FROM {pg_table} ORDER BY id")
+                assert cur.fetchall() == [(10, "new-x"), (20, "new-y")]
+    finally:
+        with psycopg.connect(**pg_raw_kwargs, autocommit=True) as conn, conn.cursor() as cur:
+            cur.execute(f"DROP TABLE IF EXISTS {pg_table}")

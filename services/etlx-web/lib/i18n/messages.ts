@@ -207,6 +207,9 @@ export const en = {
   "migrations.destSchemaHelp":
     "Defaults to the source schema. The runtime auto-creates it on the destination if it doesn't already exist.",
   "migrations.tablesToReplicate": "Tables to replicate",
+  // Phase ACI (2026-06-01) — table picker search (>10 tables)
+  "migrations.tablesSearchPlaceholder": "Filter tables…",
+  "migrations.tablesSearchNoMatch": "No tables match.",
   "migrations.selectAll": "Select all",
   "migrations.deselectAll": "Deselect all",
   "migrations.selectAtLeastOne": "Pick at least one table",
@@ -1317,6 +1320,9 @@ export const ko: Messages = {
   "migrations.destSchemaHelp":
     "비워두면 소스 스키마와 동일한 이름을 사용합니다. 도착지에 없으면 자동 생성됩니다.",
   "migrations.tablesToReplicate": "복제할 테이블",
+  // Phase ACI (2026-06-01) — 테이블 검색 (10개 초과 시)
+  "migrations.tablesSearchPlaceholder": "테이블 검색…",
+  "migrations.tablesSearchNoMatch": "조건과 일치하는 테이블이 없습니다.",
   "migrations.selectAll": "전체 선택",
   "migrations.deselectAll": "전체 해제",
   "migrations.selectAtLeastOne": "테이블을 1개 이상 선택하세요",

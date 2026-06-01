@@ -264,6 +264,19 @@ export function MigrationForm({
       );
   }, [form, sourceTables]);
 
+  /** Phase ACI (2026-06-01) — table picker search within a schema.
+   *  A schema mode picker for an enterprise schema (50+ tables) is
+   *  hard to scan; this lets the user type a substring to narrow
+   *  the visible list. Empty value = show all. */
+  const [tableSearch, setTableSearch] = useState("");
+  const visibleTables = useMemo(() => {
+    const q = tableSearch.trim().toLowerCase();
+    if (!q) return tablesInSchema;
+    return tablesInSchema.filter(({ parsed }) =>
+      parsed.name.toLowerCase().includes(q),
+    );
+  }, [tablesInSchema, tableSearch]);
+
   const allSchemas = useMemo(() => {
     const s = new Set<string>();
     for (const q of sourceTables) {
@@ -518,6 +531,17 @@ export function MigrationForm({
                         : t("migrations.selectAll")}
                     </button>
                   </div>
+                  {/* Phase ACI (2026-06-01) — schema mode table search.
+                      Hidden when there are 10 or fewer tables — at
+                      that size scanning is faster than typing. */}
+                  {tablesInSchema.length > 10 ? (
+                    <Input
+                      value={tableSearch}
+                      onChange={(e) => setTableSearch(e.target.value)}
+                      placeholder={t("migrations.tablesSearchPlaceholder")}
+                      className="text-xs"
+                    />
+                  ) : null}
                   <div className="max-h-56 overflow-y-auto rounded-md border border-border-subtle">
                     {!sourceConnRow ? (
                       <p className="px-3 py-3 text-xs text-text-muted">
@@ -535,9 +559,13 @@ export function MigrationForm({
                             })
                           : t("migrations.typeSchemaFirst")}
                       </p>
+                    ) : visibleTables.length === 0 ? (
+                      <p className="px-3 py-3 text-xs text-text-muted">
+                        {t("migrations.tablesSearchNoMatch")}
+                      </p>
                     ) : (
                       <ul className="divide-y divide-border-subtle">
-                        {tablesInSchema.map(({ qualified, parsed }) => {
+                        {visibleTables.map(({ qualified, parsed }) => {
                           const checked = f.selectedTables.includes(qualified);
                           return (
                             <li key={qualified}>

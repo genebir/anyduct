@@ -271,3 +271,86 @@ def test_column_mapping_consistency_skips_graph_shape() -> None:
     )
     typos = [w for w in lint_pipeline(cfg) if w.code == "column_mapping_unknown_source_column"]
     assert typos == []
+
+
+# ---------- auto_create_table_planned (Phase AAK, 2026-05-29) ----------
+
+
+def _planned(cfg: PipelineConfig) -> list[object]:
+    return [w for w in lint_pipeline(cfg) if w.code == "auto_create_table_planned"]
+
+
+def test_auto_create_table_off_emits_no_warning() -> None:
+    cfg = _cfg()
+    assert _planned(cfg) == []
+
+
+def test_auto_create_table_on_with_skip_emits_friendly_message() -> None:
+    cfg = _cfg(sink={"connection": "wh", "table": "t2", "auto_create_table": True})
+    warnings = _planned(cfg)
+    assert len(warnings) == 1
+    w = warnings[0]
+    assert "first run" in w.message  # type: ignore[attr-defined]
+    assert "'t2'" in w.message  # type: ignore[attr-defined]
+    assert w.location == "sink"  # type: ignore[attr-defined]
+
+
+def test_auto_create_table_on_with_drop_warns_about_rebuild() -> None:
+    cfg = _cfg(
+        sink={
+            "connection": "wh",
+            "table": "t2",
+            "auto_create_table": True,
+            "auto_create_if_exists": "drop",
+        }
+    )
+    warnings = _planned(cfg)
+    assert len(warnings) == 1
+    assert "rebuild" in warnings[0].message  # type: ignore[attr-defined]
+
+
+def test_auto_create_table_fanout_warns_per_sink() -> None:
+    cfg = _cfg(
+        sink=None,
+        sinks=[
+            {"connection": "wh", "table": "a", "auto_create_table": True},
+            {"connection": "wh", "table": "b"},
+            {"connection": "wh", "table": "c", "auto_create_table": True},
+        ],
+    )
+    warnings = _planned(cfg)
+    # Two of the three sinks opted in — one warning each.
+    assert len(warnings) == 2
+    locations = {w.location for w in warnings}  # type: ignore[attr-defined]
+    assert locations == {"sinks.0", "sinks.2"}
+
+
+def test_auto_create_table_graph_shape_warns_at_node() -> None:
+    cfg = PipelineConfig.model_validate(
+        {
+            "name": "p",
+            "graph": {
+                "nodes": [
+                    {
+                        "id": "s",
+                        "type": "source",
+                        "connection": "wh",
+                        "query": "SELECT a, b FROM t1",
+                    },
+                    {
+                        "id": "k",
+                        "type": "sink",
+                        "connection": "wh",
+                        "table": "out",
+                        "auto_create_table": True,
+                        "auto_create_if_exists": "drop",
+                    },
+                ],
+                "edges": [{"from_node": "s", "to_node": "k"}],
+            },
+        }
+    )
+    warnings = _planned(cfg)
+    assert len(warnings) == 1
+    assert warnings[0].location == "graph.nodes.k"  # type: ignore[attr-defined]
+    assert "rebuild" in warnings[0].message  # type: ignore[attr-defined]

@@ -10,6 +10,14 @@
 ## [Unreleased]
 
 ### Added
+- **`auto_create_table_planned` 린트 규칙 — dry-run 안내 메시지 (Phase AAK)** — Phase DD 패턴 확장:
+  - **새 lint rule**: 각 sink에 `auto_create_table=true`가 있으면 dry-run에서 안내 메시지("sink will create table 't2' on first run if it's missing").
+  - `auto_create_if_exists='drop'`은 "sink will rebuild table on every run"으로 별도 문구(rebuild 시맨틱 명시).
+  - `auto_create_if_exists='error'`는 "fail the next run if the table already exists"로 안전 가이드.
+  - linear / fan-out / graph 3 shape 모두 walk.
+  - **운영 UX**: 사용자가 Trigger 누르기 전 Dry Run에서 무엇이 일어날지 정확히 미리 봄. "이게 진짜 create 할까?" 의문 해소.
+  - 검증: 코어 unit 805→810(+5: off/skip/drop/fanout/graph). 신규 시각 컴포넌트 0(기존 DryRunPanel warnings 영역에 자동 노출).
+
 - **Cross-DB `auto_create_table` → 카탈로그 REST 자동 등록 dogfood (Phase AAJ)** — auto-created sink가 catalog REST에서 first-class 자산으로 보임을 분석가 페르소나 e2e 검증. ① products(src/products) → products_cache(dst/products_cache, auto_create) 흐름 run. ② `GET /workspaces/{ws}/assets`에서 두 자산 모두 노출. ③ `GET /assets/{sink_id}/lineage`로 upstream `src/products`. ④ `GET /assets/{sink_id}/materializations`로 run 기록. ⑤ **컬럼 lineage도 traceable 유지** — `column_lineage_opaque=False` + 각 sink 컬럼이 1:1로 source 컬럼 추적. auto-create이 컬럼 추적성을 silently regress 시키지 않음(Phase Z/AA/BB lock-in). **운영 보장**: auto-created 테이블이 runtime-only 사이드 이펙트가 아니라 카탈로그 first-class 시민. 서버 it 481→482(+1). 코어 805 unchanged.
 
 ### Added

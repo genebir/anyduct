@@ -90,6 +90,13 @@ def lint_pipeline(cfg: PipelineConfig) -> list[LintWarning]:
     # source chain reports its "upstream mapping" at a transform node.
     warnings.extend(_lint_column_mapping_consistency(cfg))
 
+    # Phase AAK (2026-05-29): surface every sink that the runtime will
+    # try to auto-create on first run. Dry-run is the natural place for
+    # this — the operator clicks "Dry Run" to predict what will happen,
+    # and "I will create table X" deserves to land there alongside the
+    # connector health checks.
+    warnings.extend(_lint_auto_create_table_planned(cfg))
+
     return warnings
 
 
@@ -200,6 +207,81 @@ def _lint_column_mapping_consistency(cfg: PipelineConfig) -> list[LintWarning]:
                 break
             mapping = next_mapping
 
+    return warnings
+
+
+def _lint_auto_create_table_planned(cfg: PipelineConfig) -> list[LintWarning]:
+    """Phase AAK (2026-05-29): emit one info-style warning per sink
+    that has ``auto_create_table=True``. Helps the operator see, from
+    the dry-run, that the runtime will create a table on first run —
+    no surprises on Trigger.
+
+    Walks every shape so a graph-mode sink shows up the same as a
+    linear sink. ``auto_create_if_exists`` is included in the message
+    so the operator confirms which collision mode they picked
+    (skip / drop / error).
+    """
+
+    def _message(table: str | None, if_exists: str) -> str:
+        target = f"'{table}'" if table else "<unset table>"
+        if if_exists == "drop":
+            return (
+                f"sink will rebuild table {target} on every run "
+                "(auto_create_table=true, auto_create_if_exists='drop')"
+            )
+        if if_exists == "error":
+            return (
+                f"sink will create table {target} on first run, but "
+                "fail the next run if the table already exists "
+                "(auto_create_table=true, auto_create_if_exists='error')"
+            )
+        return (
+            f"sink will create table {target} on first run if it's "
+            "missing (auto_create_table=true)"
+        )
+
+    warnings: list[LintWarning] = []
+    if cfg.graph is not None:
+        for node in cfg.graph.nodes:
+            if node.type != "sink":
+                continue
+            extras = node.model_dump()
+            if not extras.get("auto_create_table"):
+                continue
+            warnings.append(
+                LintWarning(
+                    code="auto_create_table_planned",
+                    message=_message(
+                        node.table,
+                        str(extras.get("auto_create_if_exists") or "skip"),
+                    ),
+                    location=f"graph.nodes.{node.id}",
+                )
+            )
+        return warnings
+
+    # Linear / task-DAG shape.
+    has_explicit_tasks = bool(cfg.tasks)
+    for task_idx, task in enumerate(cfg.effective_tasks()):
+        for sink_idx, sink in enumerate(task.effective_sinks()):
+            if not sink.auto_create_table:
+                continue
+            if has_explicit_tasks:
+                if task.sinks:
+                    location = f"tasks.{task_idx}.sinks.{sink_idx}"
+                else:
+                    location = f"tasks.{task_idx}.sink"
+            else:
+                # Single-task legacy shape — the sink lives at the top
+                # level. Match the locator the rest of the file uses.
+                location = "sinks." + str(sink_idx) if cfg.sinks else "sink"
+            warnings.append(
+                LintWarning(
+                    code="auto_create_table_planned",
+                    message=_message(sink.table, sink.auto_create_if_exists),
+                    location=location,
+                )
+            )
     return warnings
 
 

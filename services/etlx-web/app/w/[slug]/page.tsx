@@ -364,7 +364,9 @@ export default function WorkspaceHomePage() {
               title={t("overview.recentFailures")}
               hint={t("overview.recentFailuresHint")}
               viewAllLabel={t("overview.viewAll")}
-              link={ws ? `/w/${ws.slug}/runs` : null}
+              /* Phase ABZ (2026-06-01) — pre-apply status=failed so
+                 the link is "see all failures", not "see all runs". */
+              link={ws ? `/w/${ws.slug}/runs?status=failed` : null}
             />
             {runs === null ? (
               <div className="py-8 text-center text-sm text-text-muted">

@@ -117,7 +117,24 @@ uv run mypy etl_plugins
 
 ## 5. 현재 단계
 
-> **최신 마일스톤 (2026-06-01): 마이그레이션 surface 완결 (Phase AAR → ABA).** Vertica/MSSQL 추가(AAQ) 직후 cross-DB 마이그레이션이 본격 활용되면서 사용자 요청 + dogfood 발견 이슈 14 슬라이스로 보강:
+> **최신 마일스톤 (2026-06-01): Persona dogfood UX 폴리시 (Phase ABG → ABQ).** AAR→ABA의 마이그레이션 surface 위에 운영자 페르소나 흐름을 직접 dogfooding하며 발견한 11 슬라이스로 마감. 핵심 dogfood 발견: 사용자 워크스페이스에 70 마이그레이션 중 62개가 한 번도 실행 안 됨 + 0 스케줄 → "방금 만든 뒤 next step?" UX gap이 다수 노출. 단위 슬라이스:
+> - **ABG**: Runs 페이지 Trigger 컬럼 (manual vs schedule chip — schedule_id/triggered_by_user_id 분기).
+> - **ABH**: /assets 페이지 search + kind 필터 (6th list surface 균일화).
+> - **ABI**: 마이그레이션 list에 "Last run" 축 필터 (never/failed/ok) — 'forgot to run' bulk catch + 'fix what's broken' triage.
+> - **ABJ**: 대시보드 마이그레이션 카드에 `neverRun` 신호 (24h 활동 0 + never_run > 0 → "{n} never run" sub-line).
+> - **ABK**: Retry 버튼 클릭 시 새 run으로 자동 이동 (운영자 모니터링 의도와 정렬).
+> - **ABL**: runs banner + 컨텍스트 메뉴 + run detail '파이프라인 열기' → 마이그레이션이면 /migrations/[id] 자동 분기 (`migrationSummaryOf` predicate 공유).
+> - **ABM**: 마이그레이션 bulk-create 후 `?lastRun=never` URL preset → 'never run' 자동 적용 → AAW bulk Run now 일직선 흐름.
+> - **ABN**: Audit page 액션 dropdown production coverage (DB DISTINCT scan, 9종→27종, pipeline.triggers_set/connection.delete/schedule.toggled 등 그룹화).
+> - **ABO**: 마이그레이션 strategy chip hover tooltip (snapshot/append/mirror/custom 각 1줄 동작 설명).
+> - **ABP**: 마이그레이션 detail에 Dry run 버튼 (Run now 옆) — `DryRunService` 재사용으로 connection/secret/connector 인스턴스화 검증.
+> - **ABQ**: 마이그레이션 list bulk Dry run (Run now 전 typo catch). action bar 순서 = Clear → Dry run → Run now → Schedule → Delete = 운영자 mental model 안전→실행→자동화→정리.
+>
+> **Live dogfood 검증**: vertica → postgres 마이그레이션 (`BDA_BI_DB.TB_BCDBAS601` 등 7종 schema mode) 실제 DB INSERT runs 통한 20행/6000행/1000행 write 모두 성공. AAR transaction recovery fix가 production worker에서 동작 입증.
+>
+> 결과: 한 운영자 흐름 = 대시보드 'never run' 신호 → 카드 클릭 → list (사전 적용된 'Last run: never' 필터) → 'Select all visible' → bulk Dry run (검증) → bulk Run now (실행) → bulk Schedule (자동화) — 모두 한 surface. 신규 시각 컴포넌트 0(span/chip/icon 재사용). 코어/서버 변화 0 (web tsc clean 매 슬라이스). i18n 신규 키 ~30개 (en/ko). 다음 axis: DLQ UI / K4 graph 백필 / Snowflake/BigQuery connectors / config viewer for failed runs.
+>
+> **이전 마일스톤 (2026-06-01): 마이그레이션 surface 완결 (Phase AAR → ABA).** Vertica/MSSQL 추가(AAQ) 직후 cross-DB 마이그레이션이 본격 활용되면서 사용자 요청 + dogfood 발견 이슈 14 슬라이스로 보강:
 > - **AAR**: postgres `current transaction is aborted` root cause — `_auto_create_sink_tables`의 `contextlib.suppress`가 DDL 실패 삼킴 → transaction abort 상태 poison. 명시적 try/except + rollback + `postgres.ensure_table`이 schema-qualified 받으면 `CREATE SCHEMA IF NOT EXISTS` 먼저 emit. 사용자의 vertica → postgres(`BDA_BI_DB.TB_BCDBAS601`) 실패가 즉시 해결. + Pipelines 탭에서 마이그레이션 숨김 + 생성 후 리스트로 redirect.
 > - **AAS family**: 스키마 단위 마이그레이션 — multi-select picker로 N개 한 번에 생성(`buildBulkMigrationConfigs`) + dropdown 소스 선택(typo 차단) + `makeNode`가 operators.ts의 `defaultValue`를 자동 주입(템플릿 default 누락 fix) + **템플릿 기능 완전 제거**(빈 그래프로 시작).
 > - **AAT–ABA**: 리스트 검색/필터(name + From/To/Strategy + Schedule status) + Run now 버튼 + Last run 컬럼(workspace-wide runs 단일 fetch) + Schedule chip 컬럼(N+1 per pipeline, 10s 폴링, soft-fail) + 임계값 5 below 검색바 숨김.

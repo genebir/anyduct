@@ -249,6 +249,13 @@ export default function MigrationsPage() {
   const [filterSchedule, setFilterSchedule] = useState<
     "" | "active" | "paused" | "none"
   >("");
+  /** Phase ABI (2026-06-01) — "Last run" axis filter. Persona
+   *  dogfood found 62/70 migrations un-run after a bulk schema-mode
+   *  create — operators need a one-click way to surface "needs
+   *  first run" + "fix last failure" subsets without scrolling. */
+  const [filterLastRun, setFilterLastRun] = useState<
+    "" | "never" | "failed" | "ok"
+  >("");
   /** Phase AAW (2026-06-01) — multi-select + bulk delete for the
    *  schema-mode case where users mass-create 20+ migrations and
    *  need to clean up some of them. */
@@ -574,6 +581,13 @@ export default function MigrationsPage() {
         if (filterSchedule === "paused" && (!r.schedule || r.schedule.is_active))
           return false;
       }
+      if (filterLastRun) {
+        if (filterLastRun === "never" && r.lastRun !== null) return false;
+        if (filterLastRun === "failed" && r.lastRun?.status !== "failed")
+          return false;
+        if (filterLastRun === "ok" && r.lastRun?.status !== "succeeded")
+          return false;
+      }
       return true;
     });
   }, [
@@ -583,6 +597,7 @@ export default function MigrationsPage() {
     filterTo,
     filterStrategy,
     filterSchedule,
+    filterLastRun,
   ]);
 
   const columns = buildColumns(t);
@@ -708,11 +723,27 @@ export default function MigrationsPage() {
               <option value="paused">{t("migrations.filterSchedulePaused")}</option>
               <option value="none">{t("migrations.filterScheduleNone")}</option>
             </select>
+            {/* Phase ABI (2026-06-01) — Last run axis: never / failed / ok. */}
+            <select
+              value={filterLastRun}
+              onChange={(e) =>
+                setFilterLastRun(
+                  e.target.value as "" | "never" | "failed" | "ok",
+                )
+              }
+              className="h-10 rounded-md border border-border-subtle bg-elevated px-2 text-sm text-text focus-visible:border-accent focus-visible:outline-none"
+            >
+              <option value="">{t("migrations.filterLastRunAll")}</option>
+              <option value="never">{t("migrations.filterLastRunNever")}</option>
+              <option value="failed">{t("migrations.filterLastRunFailed")}</option>
+              <option value="ok">{t("migrations.filterLastRunOk")}</option>
+            </select>
             {search ||
             filterFrom ||
             filterTo ||
             filterStrategy ||
-            filterSchedule ? (
+            filterSchedule ||
+            filterLastRun ? (
               <Button
                 variant="ghost"
                 size="sm"
@@ -722,6 +753,7 @@ export default function MigrationsPage() {
                   setFilterTo("");
                   setFilterStrategy("");
                   setFilterSchedule("");
+                  setFilterLastRun("");
                 }}
               >
                 {t("migrations.clearFilters")}

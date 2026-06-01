@@ -254,6 +254,11 @@ export const en = {
   "migrations.filterScheduleActive": "Schedule: active",
   "migrations.filterSchedulePaused": "Schedule: paused",
   "migrations.filterScheduleNone": "Schedule: none",
+  // Phase ABI (2026-06-01) — last-run axis filter
+  "migrations.filterLastRunAll": "All last runs",
+  "migrations.filterLastRunNever": "Last run: never",
+  "migrations.filterLastRunFailed": "Last run: failed",
+  "migrations.filterLastRunOk": "Last run: ok",
   // sensors page (ADR-0041 K3c)
   "sensors.new": "New sensor",
   "sensors.newTitle": "New sensor",
@@ -1279,6 +1284,11 @@ export const ko: Messages = {
   "migrations.filterScheduleActive": "스케줄: 활성",
   "migrations.filterSchedulePaused": "스케줄: 일시정지",
   "migrations.filterScheduleNone": "스케줄: 없음",
+  // Phase ABI (2026-06-01) — 마지막 실행 축 필터
+  "migrations.filterLastRunAll": "모든 실행 상태",
+  "migrations.filterLastRunNever": "마지막 실행: 없음",
+  "migrations.filterLastRunFailed": "마지막 실행: 실패",
+  "migrations.filterLastRunOk": "마지막 실행: 성공",
   "nav.sensors": "센서",
   // 센서 페이지 (ADR-0041 K3c)
   "sensors.new": "새 센서",

@@ -132,21 +132,30 @@ export default function WorkspaceHomePage() {
     let total24h = 0;
     let succeeded24h = 0;
     let inFlight = 0;
+    // Phase ABI/ABJ (2026-06-01) — track which migrations have *ever*
+    // been run. Persona dogfood showed 62/70 sitting un-run after a
+    // bulk schema-mode create — surfacing that count makes the gap
+    // visible at-a-glance on the dashboard (otherwise the success
+    // rate sub-line shows nothing because there's no 24h activity).
+    const ranAtLeastOnce = new Set<string>();
     if (runs) {
       const cutoff = Date.now() - ONE_DAY_MS;
       for (const r of runs) {
         if (!migrationIds.has(r.pipeline_id)) continue;
+        ranAtLeastOnce.add(r.pipeline_id);
         if (new Date(r.created_at).getTime() < cutoff) continue;
         total24h += 1;
         if (r.status === "succeeded") succeeded24h += 1;
         if (r.status === "pending" || r.status === "running") inFlight += 1;
       }
     }
+    const neverRun = migrationIds.size - ranAtLeastOnce.size;
     return {
       count: migrationIds.size,
       total24h,
       succeeded24h,
       inFlight,
+      neverRun,
     };
   }, [pipelines, runs]);
 
@@ -215,7 +224,14 @@ export default function WorkspaceHomePage() {
                           100,
                       ),
                     })
-                : undefined
+                : // Phase ABJ (2026-06-01) — when nothing's run in the
+                  // last 24h, surface "N migrations never run" so the
+                  // operator sees the backlog. Silent when caught up.
+                  migrationStats && migrationStats.neverRun > 0
+                  ? t("overview.migrationsNeverRun", {
+                      n: migrationStats.neverRun,
+                    })
+                  : undefined
             }
           />
           <StatCard

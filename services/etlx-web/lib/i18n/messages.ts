@@ -931,6 +931,12 @@ export const en = {
   "schedules.toggleFailed": "Toggle failed.",
   "schedules.deleted": "Deleted {name}",
   "schedules.deleteFailed": "Couldn't delete schedule.",
+  // Phase ABE (2026-06-01) — list search + status filter
+  "schedules.searchPlaceholder": "Search by name, pipeline, or cron…",
+  "schedules.filterStatusAll": "All statuses",
+  "schedules.filterStatusActive": "Active",
+  "schedules.filterStatusPaused": "Paused",
+  "schedules.searchNoMatch": "No schedules match the current search and filters.",
   // schedule form
   "schedForm.newTitle": "New schedule",
   "schedForm.newDesc":
@@ -1914,6 +1920,12 @@ export const ko: Messages = {
   "schedules.toggleFailed": "전환에 실패했습니다.",
   "schedules.deleted": "{name} 삭제됨",
   "schedules.deleteFailed": "스케줄을 삭제할 수 없습니다.",
+  // Phase ABE (2026-06-01) — 리스트 검색 + 상태 필터
+  "schedules.searchPlaceholder": "이름/파이프라인/cron으로 검색…",
+  "schedules.filterStatusAll": "모든 상태",
+  "schedules.filterStatusActive": "활성",
+  "schedules.filterStatusPaused": "일시정지",
+  "schedules.searchNoMatch": "현재 검색/필터에 일치하는 스케줄이 없습니다.",
   "schedForm.newTitle": "새 스케줄",
   "schedForm.newDesc":
     "크론 스케줄러는 다음 발화 시각이 지날 때마다 새 실행 행을 큐에 넣습니다 (catchup 없음).",

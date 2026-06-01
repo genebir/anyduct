@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import {
   CalendarClockIcon,
@@ -14,6 +14,7 @@ import { toast } from "sonner";
 import { Header } from "@/components/shell/header";
 import { Card, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -98,6 +99,28 @@ export default function SchedulesPage() {
   const [pendingDelete, setPendingDelete] = useState<ScheduleRow | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [toggling, setToggling] = useState<string | null>(null);
+  /** Phase ABE (2026-06-01) — list-level search + active filter. */
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"" | "active" | "paused">(
+    "",
+  );
+
+  const filteredRows = useMemo(() => {
+    if (!rows) return null;
+    const term = search.trim().toLowerCase();
+    return rows.filter((r) => {
+      if (
+        term &&
+        !r.name.toLowerCase().includes(term) &&
+        !r.pipeline_name.toLowerCase().includes(term) &&
+        !(r.cron_expr ?? "").toLowerCase().includes(term)
+      )
+        return false;
+      if (statusFilter === "active" && !r.is_active) return false;
+      if (statusFilter === "paused" && r.is_active) return false;
+      return true;
+    });
+  }, [rows, search, statusFilter]);
 
   async function refresh(workspaceId: string) {
     try {
@@ -235,10 +258,51 @@ export default function SchedulesPage() {
           />
         ) : null}
 
+        {/* Phase ABE (2026-06-01) — search + status filter. Hidden
+            below 5 rows so a fresh workspace stays uncluttered. */}
+        {rows !== null && rows.length > 5 ? (
+          <div className="grid items-end gap-2 sm:grid-cols-[1fr_auto_auto]">
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={t("schedules.searchPlaceholder")}
+            />
+            <select
+              value={statusFilter}
+              onChange={(e) =>
+                setStatusFilter(e.target.value as "" | "active" | "paused")
+              }
+              className="h-10 rounded-md border border-border-subtle bg-elevated px-2 text-sm text-text focus-visible:border-accent focus-visible:outline-none"
+            >
+              <option value="">{t("schedules.filterStatusAll")}</option>
+              <option value="active">{t("schedules.filterStatusActive")}</option>
+              <option value="paused">{t("schedules.filterStatusPaused")}</option>
+            </select>
+            {search || statusFilter ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setSearch("");
+                  setStatusFilter("");
+                }}
+              >
+                {t("common.clear")}
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
+
         <Card>
           {rows === null ? (
             <div className="py-12 text-center text-sm text-text-muted">
               {t("common.loading")}
+            </div>
+          ) : filteredRows !== null && filteredRows.length === 0 ? (
+            <div className="py-8 text-center text-sm text-text-muted">
+              {search || statusFilter
+                ? t("schedules.searchNoMatch")
+                : t("common.loading")}
             </div>
           ) : (
             <DataTable
@@ -298,7 +362,7 @@ export default function SchedulesPage() {
                   ),
                 },
               ]}
-              rows={rows}
+              rows={filteredRows ?? []}
               emptyState={
                 <EmptyState
                   icon={<CalendarClockIcon size={36} strokeWidth={1.5} />}

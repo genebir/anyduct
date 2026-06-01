@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { CableIcon, PencilIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { toast } from "sonner";
@@ -8,6 +8,7 @@ import { Header } from "@/components/shell/header";
 import { Card } from "@/components/ui/card";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ConnectionForm } from "@/components/connections/connection-form";
@@ -61,6 +62,30 @@ export default function ConnectionsPage() {
     null,
   );
   const [deleting, setDeleting] = useState(false);
+  /** Phase ABB (2026-06-01) — search + type filter mirror the
+   *  migration list UX. Stays hidden when the list is short. */
+  const [search, setSearch] = useState("");
+  const [typeFilter, setTypeFilter] = useState("");
+
+  const distinctTypes = useMemo(() => {
+    if (!rows) return [];
+    return [...new Set(rows.map((r) => r.type))].sort();
+  }, [rows]);
+
+  const filteredRows = useMemo(() => {
+    if (!rows) return [];
+    const term = search.trim().toLowerCase();
+    return rows.filter((r) => {
+      if (
+        term &&
+        !r.name.toLowerCase().includes(term) &&
+        !r.type.toLowerCase().includes(term)
+      )
+        return false;
+      if (typeFilter && r.type !== typeFilter) return false;
+      return true;
+    });
+  }, [rows, search, typeFilter]);
 
   async function refresh(workspaceId: string) {
     try {
@@ -169,10 +194,51 @@ export default function ConnectionsPage() {
           />
         ) : null}
 
+        {/* Phase ABB (2026-06-01) — search + type filter. Hidden
+            when the list is short so a fresh workspace doesn't look
+            cluttered. */}
+        {rows !== null && rows.length > 5 ? (
+          <div className="grid items-end gap-2 sm:grid-cols-[1fr_auto_auto]">
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={t("connections.searchPlaceholder")}
+            />
+            <select
+              value={typeFilter}
+              onChange={(e) => setTypeFilter(e.target.value)}
+              className="h-10 rounded-md border border-border-subtle bg-elevated px-2 text-sm text-text focus-visible:border-accent focus-visible:outline-none"
+            >
+              <option value="">{t("connections.filterTypeAll")}</option>
+              {distinctTypes.map((tp) => (
+                <option key={tp} value={tp}>
+                  {tp}
+                </option>
+              ))}
+            </select>
+            {search || typeFilter ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setSearch("");
+                  setTypeFilter("");
+                }}
+              >
+                {t("connections.clearFilters")}
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
+
         <Card>
           {rows === null ? (
             <div className="py-12 text-center text-sm text-text-muted">
               {t("common.loading")}
+            </div>
+          ) : filteredRows.length === 0 && (search || typeFilter) ? (
+            <div className="py-8 text-center text-sm text-text-muted">
+              {t("connections.filterNoMatch")}
             </div>
           ) : (
             <DataTable
@@ -222,7 +288,7 @@ export default function ConnectionsPage() {
                   ),
                 },
               ]}
-              rows={rows}
+              rows={filteredRows}
               emptyState={
                 <EmptyState
                   icon={<CableIcon size={36} strokeWidth={1.5} />}

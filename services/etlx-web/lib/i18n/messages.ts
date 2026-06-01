@@ -402,6 +402,12 @@ export const en = {
   "connections.colConnector": "Connector",
   "connections.colSecrets": "Secrets", // pragma: allowlist secret
   "connections.refs": "{count} ref(s)",
+  // Phase ABB (2026-06-01) — search + type filter
+  "connections.searchPlaceholder": "Search connections by name or type…",
+  "connections.filterTypeAll": "All types",
+  "connections.clearFilters": "Clear filters",
+  "connections.filterNoMatch":
+    "No connections match the current search and filters.",
   "connections.connected": "{name} connected",
   "connections.testErrorNamed": "{name}: {error}",
   "connections.unknownError": "unknown error",
@@ -1384,6 +1390,11 @@ export const ko: Messages = {
   "connections.deleteDesc":
     "시크릿 {count}개가 백엔드에서 제거됩니다. 이 연결을 이름으로 참조하는 파이프라인은 대체 연결을 만들기 전까지 실패합니다.",
   "connections.colConnector": "커넥터",
+  // Phase ABB (2026-06-01) — 검색 + 필터
+  "connections.searchPlaceholder": "이름이나 타입으로 검색…",
+  "connections.filterTypeAll": "모든 타입",
+  "connections.clearFilters": "필터 초기화",
+  "connections.filterNoMatch": "현재 검색/필터에 일치하는 연결이 없습니다.",
   "connections.colSecrets": "시크릿",
   "connections.refs": "참조 {count}개",
   "connections.connected": "{name} 연결됨",

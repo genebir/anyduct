@@ -430,6 +430,8 @@ export const en = {
   // Phase ACC (2026-06-01) — JsonBlock copy feedback
   "audit.jsonCopied": "Copied JSON to clipboard",
   "audit.jsonCopyFailed": "Couldn't copy — browser blocked clipboard",
+  // Phase ACF (2026-06-01) — click-to-filter resource id
+  "audit.filterByResourceTitle": "Filter the audit log to this resource",
   "audit.loadFailed": "Couldn't load audit log.",
 
   // connections
@@ -1533,6 +1535,8 @@ export const ko: Messages = {
   // Phase ACC (2026-06-01) — JsonBlock copy feedback
   "audit.jsonCopied": "JSON을 클립보드에 복사했습니다",
   "audit.jsonCopyFailed": "복사 실패 — 브라우저가 클립보드 접근을 막았습니다",
+  // Phase ACF (2026-06-01) — 리소스 id 클릭으로 필터 적용
+  "audit.filterByResourceTitle": "이 리소스로 감사 로그 필터",
   "audit.loadFailed": "감사 로그를 불러올 수 없습니다.",
 
   "connections.new": "새 연결",

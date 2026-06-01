@@ -240,6 +240,11 @@ export default function AuditPage() {
                     youLabel={t("audit.you")}
                     currentUserId={currentUser?.id ?? null}
                     t={t}
+                    onFilterResource={(rt, rid) => {
+                      setResourceType(rt);
+                      setResourceId(rid);
+                      setOffset(0);
+                    }}
                     open={!!expanded[row.id]}
                     onToggle={() =>
                       setExpanded((prev) => ({
@@ -299,6 +304,7 @@ function AuditRow({
   afterLabel,
   youLabel,
   currentUserId,
+  onFilterResource,
   t,
 }: {
   row: AuditLogEntry;
@@ -309,6 +315,10 @@ function AuditRow({
   afterLabel: string;
   youLabel: string;
   currentUserId: string | null;
+  /** Phase ACF (2026-06-01) — click the resource id chip to scope
+   *  the page filter to this resource's events. Sidesteps copy-paste
+   *  of the UUID into the filter input. */
+  onFilterResource: (resourceType: string, resourceId: string) => void;
   t: (k: keyof import("@/lib/i18n/messages").Messages) => string;
 }) {
   const hasDiff =
@@ -341,9 +351,17 @@ function AuditRow({
         <span className="truncate text-sm text-text">
           <code className="text-text-secondary">{row.resource_type}</code>
           {row.resource_id ? (
-            <code className="ml-2 text-text-muted">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation(); // don't toggle the row
+                onFilterResource(row.resource_type, row.resource_id!);
+              }}
+              className="ml-2 inline-block rounded-sm px-1 font-mono text-xs text-text-muted hover:bg-overlay hover:text-accent"
+              title={t("audit.filterByResourceTitle")}
+            >
               {row.resource_id.slice(0, 8)}…
-            </code>
+            </button>
           ) : null}
         </span>
         <span className="truncate text-right font-mono text-xs text-text-muted">

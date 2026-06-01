@@ -157,6 +157,18 @@ export interface WorkspaceVariableEntry {
   description: string | null;
 }
 
+/** Phase ABR (2026-06-01) — one entry of the versions list. The
+ *  ``config_json`` mirrors what the worker executed, regardless of
+ *  later edits on the pipeline. Used by the run-detail "Config that
+ *  ran" panel. */
+export interface PipelineVersionEntry {
+  id: string;
+  version: number;
+  is_current: boolean;
+  config_json: Record<string, unknown>;
+  created_at: string;
+}
+
 export interface PipelineSummary {
   id: string;
   workspace_id: string;
@@ -430,6 +442,13 @@ export const pipelinesApi = {
     api<DryRunResponse>(
       `/workspaces/${workspaceId}/pipelines/${id}/dry-run`,
       { method: "POST", json: {} },
+    ),
+  /** Phase ABR (2026-06-01) — versions list. Used by the run-detail
+   *  page to show the *exact* config the run executed (the current
+   *  pipeline may have been edited since). */
+  listVersions: (workspaceId: string, id: string) =>
+    api<PipelineVersionEntry[]>(
+      `/workspaces/${workspaceId}/pipelines/${id}/versions`,
     ),
   delete: (workspaceId: string, id: string) =>
     api<void>(`/workspaces/${workspaceId}/pipelines/${id}`, {

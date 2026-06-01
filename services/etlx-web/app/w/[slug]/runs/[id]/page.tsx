@@ -25,6 +25,7 @@ import {
   type LogLevel,
   type NodeRunEntry,
   type PipelineSummary,
+  type PipelineVersionEntry,
   type RunDetail,
   type RunLogEntry,
   type RunMetricEntry,
@@ -75,6 +76,13 @@ export default function RunDetailPage() {
   // generic editor. One-shot fetch per run since pipeline identity
   // doesn't change mid-run.
   const [pipeline, setPipeline] = useState<PipelineSummary | null>(null);
+  // Phase ABR (2026-06-01) — the *exact* version that ran. The
+  // pipeline's current config may have been edited since this run,
+  // so debugging a failure requires the config AS IT WAS, not as
+  // it is now.
+  const [ranVersion, setRanVersion] = useState<PipelineVersionEntry | null>(
+    null,
+  );
   const [logs, setLogs] = useState<RunLogEntry[] | null>(null);
   const [metrics, setMetrics] = useState<RunMetricEntry[] | null>(null);
   const [nodeRuns, setNodeRuns] = useState<NodeRunEntry[] | null>(null);
@@ -154,6 +162,22 @@ export default function RunDetailPage() {
           .get(workspaceId, r.pipeline_id)
           .then((p) => {
             if (!cancelled) setPipeline(p);
+          })
+          .catch(() => {
+            /* best-effort */
+          });
+      }
+      // Phase ABR (2026-06-01) — fetch versions ONCE per run and pick
+      // the one matching ``pipeline_version_id``. Versions are
+      // immutable so this never needs to re-fetch.
+      if (!cancelled && r.pipeline_id && r.pipeline_version_id && !ranVersion) {
+        const targetVid = r.pipeline_version_id;
+        void pipelinesApi
+          .listVersions(workspaceId, r.pipeline_id)
+          .then((versions) => {
+            if (cancelled) return;
+            const match = versions.find((v) => v.id === targetVid);
+            if (match) setRanVersion(match);
           })
           .catch(() => {
             /* best-effort */
@@ -584,6 +608,16 @@ export default function RunDetailPage() {
                 </div>
               </Card>
             ) : null}
+            {/* Phase ABR (2026-06-01) — "Config that ran" panel. The
+                pipeline may have been edited between this run and
+                now, so debugging needs the config AS IT WAS. Toggle
+                kept collapsed by default — the JSON is verbose and
+                most of the time the operator just wants the error +
+                logs. */}
+            <ConfigPanel
+              ranVersion={ranVersion}
+              t={t}
+            />
           </div>
         </div>
         ) : null}
@@ -758,6 +792,68 @@ function Summary({
         <Field label={t("runDetail.heartbeat")} value={fmt(run.heartbeat_at)} />
       ) : null}
     </dl>
+  );
+}
+
+/** Phase ABR (2026-06-01) — collapsible "Config that ran" card.
+ *  Pinned to the EXACT version that executed (not the pipeline's
+ *  current head) so debug context survives edits.
+ *
+ *  Copy-to-clipboard is the main interaction: operators usually
+ *  paste the JSON into a diff tool to compare with the head, or
+ *  into an issue.  */
+function ConfigPanel({
+  ranVersion,
+  t,
+}: {
+  ranVersion: PipelineVersionEntry | null;
+  t: Translate;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  if (!ranVersion) {
+    return null;
+  }
+  const pretty = JSON.stringify(ranVersion.config_json, null, 2);
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(pretty);
+      toast.success(t("runDetail.configCopied"));
+    } catch {
+      toast.error(t("runDetail.configCopyFailed"));
+    }
+  }
+  return (
+    <Card>
+      <CardHeader
+        title={t("runDetail.configThatRan")}
+        description={t("runDetail.configVersionLabel", {
+          n: ranVersion.version,
+        })}
+        action={
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => void copy()}
+              className="rounded-sm border border-border-subtle bg-overlay px-2 py-1 text-xs text-text-secondary hover:text-text"
+            >
+              {t("runDetail.copy")}
+            </button>
+            <button
+              type="button"
+              onClick={() => setExpanded((v) => !v)}
+              className="rounded-sm border border-border-subtle bg-overlay px-2 py-1 text-xs text-text-secondary hover:text-text"
+            >
+              {expanded ? t("runDetail.collapse") : t("runDetail.expand")}
+            </button>
+          </div>
+        }
+      />
+      {expanded ? (
+        <pre className="max-h-[400px] overflow-auto rounded-md border border-border-subtle bg-bg p-3 font-mono text-[11px] text-text-secondary">
+          {pretty}
+        </pre>
+      ) : null}
+    </Card>
   );
 }
 

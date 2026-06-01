@@ -907,6 +907,14 @@ export const en = {
   "runDetail.cancelConfirmRunningDesc":
     "The worker will stop after the current node finishes. Records already written stay written.",
   "runDetail.summary": "Summary",
+  // Phase ABR (2026-06-01) — config-that-ran panel
+  "runDetail.configThatRan": "Config that ran",
+  "runDetail.configVersionLabel": "Version {n} — pinned, may differ from current pipeline",
+  "runDetail.copy": "Copy",
+  "runDetail.expand": "Show",
+  "runDetail.collapse": "Hide",
+  "runDetail.configCopied": "Copied config JSON to clipboard",
+  "runDetail.configCopyFailed": "Couldn't copy — your browser blocked clipboard access",
   "runDetail.metrics": "Metrics",
   "runDetail.points": "{count} point(s)",
   "runDetail.started": "Started",
@@ -1943,6 +1951,14 @@ export const ko: Messages = {
   "runDetail.cancelConfirmRunningDesc":
     "워커가 현재 노드를 마친 뒤 중단합니다. 이미 기록된 레코드는 그대로 남습니다.",
   "runDetail.summary": "요약",
+  // Phase ABR (2026-06-01) — 실행 시점 config 패널
+  "runDetail.configThatRan": "실행된 config",
+  "runDetail.configVersionLabel": "Version {n} — 고정됨, 현재 pipeline과 다를 수 있음",
+  "runDetail.copy": "복사",
+  "runDetail.expand": "보기",
+  "runDetail.collapse": "숨기기",
+  "runDetail.configCopied": "config JSON을 클립보드에 복사했습니다",
+  "runDetail.configCopyFailed": "복사 실패 — 브라우저가 클립보드 접근을 막았습니다",
   "runDetail.metrics": "메트릭",
   "runDetail.points": "{count}개 포인트",
   "runDetail.started": "시작",

@@ -10,6 +10,15 @@
 ## [Unreleased]
 
 ### Added
+- **마이그레이션 리스트 bulk Run now (Phase AAX, 2026-06-01)** — 스키마 모드로 N개 만든 후 한꺼번에 trigger해서 검증하는 흐름:
+  - AAW의 bulk actions bar에 **Run selected** 버튼 추가.
+  - 선택한 N개 순차적으로 `pipelinesApi.trigger` 호출. 한 행 실패해도 나머지 진행.
+  - **세 가지 결과 카운트**: ok / fail / skipped(저장 안 된 마이그레이션 = `!current_version`).
+  - **Optimistic update**: 각 trigger 응답을 `lastRunByPipeline` Map에 즉시 삽입 → Last run 컬럼이 차례로 갱신(폴링 안 기다림).
+  - **상호 disabled**: bulk Run 중엔 Delete + Clear 모두 disabled. Delete 중엔 Run disabled.
+  - 모두 성공 → `bulkRunQueued` toast / 일부 실패 → `bulkRunPartial` 요약.
+  - 검증: web tsc clean. 코어/서버 변화 0. i18n en/ko 각 3 신규 키.
+
 - **마이그레이션 리스트 multi-select + bulk delete (Phase AAW, 2026-06-01)** — 스키마 모드로 N개 만들고 일부를 정리하는 흐름에 필수:
   - **체크박스 컬럼**: 각 행에 인디비주얼 + header에 "보이는 전체 선택" 토글(filteredRows 기준).
   - **Bulk actions bar**: 선택 ≥1일 때만 노출(`bg-accent/5 border-accent/40`). "{n}개 선택됨" + Clear selection + Delete selected.

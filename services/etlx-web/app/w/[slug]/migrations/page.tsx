@@ -210,6 +210,57 @@ export default function MigrationsPage() {
     });
   }
 
+  /** Phase AAX (2026-06-01) — bulk Run now. After schema-mode mass
+   *  creation the operator often wants to validate everything at
+   *  once. We trigger sequentially so per-row failures surface
+   *  with the offending migration's name instead of vanishing into
+   *  a Promise.all rejection. */
+  const [bulkRunning, setBulkRunning] = useState(false);
+
+  async function onBulkRunNow() {
+    if (!ws || selectedIds.size === 0) return;
+    setBulkRunning(true);
+    let ok = 0;
+    let fail = 0;
+    let skipped = 0;
+    const ids = [...selectedIds];
+    for (const id of ids) {
+      const row = migrationRows.find((r) => r.id === id);
+      if (!row) {
+        skipped += 1;
+        continue;
+      }
+      if (!row.current_version) {
+        skipped += 1;
+        toast.error(`${row.name}: ${t("migrations.saveBeforeRun")}`);
+        continue;
+      }
+      try {
+        const r = await pipelinesApi.trigger(ws.id, id);
+        // Optimistic: paint the new run on this row so the list
+        // updates without waiting for the next poll tick.
+        setLastRunByPipeline((prev) => {
+          const next = new Map(prev);
+          next.set(id, r);
+          return next;
+        });
+        ok += 1;
+      } catch (err) {
+        fail += 1;
+        const m = err instanceof ApiError ? err.message : String(err);
+        toast.error(`${row.name}: ${m}`);
+      }
+    }
+    setBulkRunning(false);
+    if (fail === 0 && skipped === 0) {
+      toast.success(t("migrations.bulkRunQueued", { n: ok }));
+    } else {
+      toast.warning(
+        t("migrations.bulkRunPartial", { ok, fail: fail + skipped }),
+      );
+    }
+  }
+
   async function onBulkDelete() {
     if (!ws || selectedIds.size === 0) return;
     setBulkDeleting(true);
@@ -505,7 +556,7 @@ export default function MigrationsPage() {
 
         {/* Phase AAW (2026-06-01) — bulk actions bar surfaces only
             when at least one row is selected so it doesn't claim
-            space in the default view. */}
+            space in the default view. AAX added bulk Run now. */}
         {selectedIds.size > 0 ? (
           <div className="flex items-center justify-between gap-3 rounded-md border border-accent/40 bg-accent/5 px-3 py-2">
             <span className="text-xs text-text">
@@ -516,14 +567,26 @@ export default function MigrationsPage() {
                 variant="ghost"
                 size="sm"
                 onClick={() => setSelectedIds(new Set())}
+                disabled={bulkRunning || bulkDeleting}
               >
                 {t("migrations.clearSelection")}
               </Button>
               <Button
                 variant="ghost"
                 size="sm"
+                loading={bulkRunning}
+                disabled={bulkDeleting}
+                onClick={() => void onBulkRunNow()}
+              >
+                <PlayIcon size={14} />
+                {t("migrations.runSelected")}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={() => setConfirmBulkDelete(true)}
                 className="hover:text-error"
+                disabled={bulkRunning}
               >
                 <Trash2Icon size={14} />
                 {t("migrations.deleteSelected")}

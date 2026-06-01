@@ -228,6 +228,11 @@ export const en = {
   "migrations.bulkDeleteConfirm":
     "This will permanently delete the {n} selected migration pipeline(s). Their run history stays in the audit log.",
   "migrations.bulkDeleted": "Deleted {n} migrations",
+  // Phase AAX (2026-06-01) — bulk Run now
+  "migrations.runSelected": "Run selected",
+  "migrations.bulkRunQueued": "{n} migrations queued",
+  "migrations.bulkRunPartial":
+    "{ok} queued, {fail} skipped or failed (check the toasts for which ones).",
   // sensors page (ADR-0041 K3c)
   "sensors.new": "New sensor",
   "sensors.newTitle": "New sensor",
@@ -1197,6 +1202,11 @@ export const ko: Messages = {
   "migrations.bulkDeleteConfirm":
     "선택한 {n}개의 마이그레이션 파이프라인이 영구 삭제됩니다. 실행 기록은 audit log에 그대로 유지됩니다.",
   "migrations.bulkDeleted": "마이그레이션 {n}개 삭제됨",
+  // Phase AAX (2026-06-01) — 일괄 Run now
+  "migrations.runSelected": "선택 실행",
+  "migrations.bulkRunQueued": "마이그레이션 {n}개 대기열에 등록됨",
+  "migrations.bulkRunPartial":
+    "{ok}개 등록, {fail}개 건너뜀/실패 (toast에서 확인).",
   "nav.sensors": "센서",
   // 센서 페이지 (ADR-0041 K3c)
   "sensors.new": "새 센서",

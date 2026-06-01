@@ -23,9 +23,9 @@ import { toast } from "sonner";
 import { Header } from "@/components/shell/header";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { StatusBadge } from "@/components/ui/status-badge";
+import { CronInput } from "@/components/schedules/cron-input";
 import {
   ApiError,
   connectionsApi,
@@ -526,29 +526,27 @@ function ScheduleCard({
           </div>
         ) : null}
       </div>
-      <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-end">
-        <label className="flex flex-1 flex-col gap-1">
-          <span className="text-xs text-text-secondary">
-            {tx("migrations.scheduleCronLabel")}
-          </span>
-          <Input
-            value={draft}
-            onChange={(e) => onDraft(e.target.value)}
-            placeholder="0 2 * * *   (예: 매일 02:00)"
-            disabled={!loaded || saving}
-          />
-        </label>
-        <Button
-          onClick={onSave}
-          loading={saving}
-          disabled={!loaded || !draft.trim()}
-        >
-          {schedule ? tx("migrations.scheduleUpdate") : tx("migrations.scheduleEnable")}
-        </Button>
+      <div className="mt-3 flex flex-col gap-2">
+        <span className="text-xs text-text-secondary">
+          {tx("migrations.scheduleCronLabel")}
+        </span>
+        {/* CronInput already ships preset chips + cronstrue
+            description + next-firing preview (Step 10.4 / cron
+            builder). Re-using it keeps the migration surface
+            consistent with the global Schedules page UX. */}
+        <CronInput value={draft} onChange={onDraft} disabled={!loaded || saving} />
+        <div className="flex justify-end">
+          <Button
+            onClick={onSave}
+            loading={saving}
+            disabled={!loaded || !draft.trim()}
+          >
+            {schedule
+              ? tx("migrations.scheduleUpdate")
+              : tx("migrations.scheduleEnable")}
+          </Button>
+        </div>
       </div>
-      <p className="mt-2 text-xs text-text-muted">
-        {tx("migrations.scheduleHint")}
-      </p>
     </Card>
   );
 }

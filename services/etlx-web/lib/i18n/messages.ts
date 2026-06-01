@@ -447,6 +447,10 @@ export const en = {
   "connections.testErrorNamed": "{name}: {error}",
   "connections.unknownError": "unknown error",
   "connections.testFailed": "Test failed unexpectedly.",
+  // Phase ABS (2026-06-01) — per-row test result chip (session-scope)
+  "connections.testResultOk": "ok",
+  "connections.testResultOkTitle": "Last test in this session: succeeded",
+  "connections.testResultFail": "fail",
   "connections.deleted": "Deleted {name}",
   "connections.loadFailed": "Couldn't load connections.",
   "connections.deleteFailed": "Couldn't delete connection.",
@@ -1505,6 +1509,10 @@ export const ko: Messages = {
   "connections.testErrorNamed": "{name}: {error}",
   "connections.unknownError": "알 수 없는 오류",
   "connections.testFailed": "테스트가 예기치 않게 실패했습니다.",
+  // Phase ABS (2026-06-01) — 행별 테스트 결과 chip (세션 한정)
+  "connections.testResultOk": "성공",
+  "connections.testResultOkTitle": "이 세션의 마지막 테스트: 성공",
+  "connections.testResultFail": "실패",
   "connections.deleted": "{name} 삭제됨",
   "connections.loadFailed": "연결을 불러올 수 없습니다.",
   "connections.deleteFailed": "연결을 삭제할 수 없습니다.",

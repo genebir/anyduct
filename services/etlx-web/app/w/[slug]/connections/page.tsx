@@ -24,9 +24,43 @@ type FormState =
   | { kind: "create" }
   | { kind: "edit"; row: ConnectionSummary };
 
-function buildColumns(t: Translate): Column<ConnectionSummary>[] {
+/** Phase ABS (2026-06-01) — transient per-row test result. Session-
+ *  scope (no server persistence) so the row visually flags the
+ *  latest test outcome without polluting backend audit. */
+type TestState = { kind: "ok"; at: number } | { kind: "fail"; at: number; error: string } | null;
+
+function buildColumns(
+  t: Translate,
+  testResults: Map<string, TestState>,
+): Column<ConnectionSummary>[] {
   return [
-    { key: "name", header: t("common.name"), cell: (r) => r.name },
+    {
+      key: "name",
+      header: t("common.name"),
+      cell: (r) => {
+        const tr = testResults.get(r.id);
+        return (
+          <div className="flex items-center gap-2">
+            <span>{r.name}</span>
+            {tr?.kind === "ok" ? (
+              <span
+                className="inline-flex h-4 items-center gap-1 rounded-sm bg-success/15 px-1 text-[10px] uppercase tracking-wider text-success"
+                title={t("connections.testResultOkTitle")}
+              >
+                {t("connections.testResultOk")}
+              </span>
+            ) : tr?.kind === "fail" ? (
+              <span
+                className="inline-flex h-4 items-center gap-1 rounded-sm bg-error/15 px-1 text-[10px] uppercase tracking-wider text-error"
+                title={tr.error}
+              >
+                {t("connections.testResultFail")}
+              </span>
+            ) : null}
+          </div>
+        );
+      },
+    },
     {
       key: "type",
       header: t("connections.colConnector"),
@@ -57,6 +91,13 @@ export default function ConnectionsPage() {
   const { t } = useLocale();
   const [rows, setRows] = useState<ConnectionSummary[] | null>(null);
   const [testing, setTesting] = useState<string | null>(null);
+  /** Phase ABS (2026-06-01) — session-scope per-row test outcomes.
+   *  Toast is transient; this gives the table a glanceable indicator
+   *  ("green" / "red") so the operator can scan the list afterwards
+   *  without re-running tests. Cleared on page reload (intentional). */
+  const [testResults, setTestResults] = useState<Map<string, TestState>>(
+    new Map(),
+  );
   const [form, setForm] = useState<FormState>({ kind: "closed" });
   const [pendingDelete, setPendingDelete] = useState<ConnectionSummary | null>(
     null,
@@ -111,18 +152,34 @@ export default function ConnectionsPage() {
       const result = await connectionsApi.test(ws.id, row.id);
       if (result.ok) {
         toast.success(t("connections.connected", { name: row.name }));
+        setTestResults((prev) => {
+          const next = new Map(prev);
+          next.set(row.id, { kind: "ok", at: Date.now() });
+          return next;
+        });
       } else {
+        const errMsg = result.error ?? t("connections.unknownError");
         toast.error(
           t("connections.testErrorNamed", {
             name: row.name,
-            error: result.error ?? t("connections.unknownError"),
+            error: errMsg,
           }),
         );
+        setTestResults((prev) => {
+          const next = new Map(prev);
+          next.set(row.id, { kind: "fail", at: Date.now(), error: errMsg });
+          return next;
+        });
       }
     } catch (err) {
-      toast.error(
-        err instanceof ApiError ? err.message : t("connections.testFailed"),
-      );
+      const errMsg =
+        err instanceof ApiError ? err.message : t("connections.testFailed");
+      toast.error(errMsg);
+      setTestResults((prev) => {
+        const next = new Map(prev);
+        next.set(row.id, { kind: "fail", at: Date.now(), error: errMsg });
+        return next;
+      });
     } finally {
       setTesting(null);
     }
@@ -243,7 +300,7 @@ export default function ConnectionsPage() {
           ) : (
             <DataTable
               columns={[
-                ...buildColumns(t),
+                ...buildColumns(t, testResults),
                 {
                   key: "actions",
                   header: "",

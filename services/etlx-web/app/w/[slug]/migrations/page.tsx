@@ -18,7 +18,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import {
   ArrowRightLeftIcon,
   CalendarClockIcon,
@@ -252,10 +252,18 @@ export default function MigrationsPage() {
   /** Phase ABI (2026-06-01) — "Last run" axis filter. Persona
    *  dogfood found 62/70 migrations un-run after a bulk schema-mode
    *  create — operators need a one-click way to surface "needs
-   *  first run" + "fix last failure" subsets without scrolling. */
+   *  first run" + "fix last failure" subsets without scrolling.
+   *  Phase ABM (2026-06-01) — URL-syncable via ``?lastRun=`` so the
+   *  post-bulk-create navigation can preset it ("you just created
+   *  N — here they are, ready to Run"). */
+  const searchParams = useSearchParams();
+  const initialLastRun = (() => {
+    const v = searchParams.get("lastRun");
+    return v === "never" || v === "failed" || v === "ok" ? v : "";
+  })();
   const [filterLastRun, setFilterLastRun] = useState<
     "" | "never" | "failed" | "ok"
-  >("");
+  >(initialLastRun);
   /** Phase AAW (2026-06-01) — multi-select + bulk delete for the
    *  schema-mode case where users mass-create 20+ migrations and
    *  need to clean up some of them. */

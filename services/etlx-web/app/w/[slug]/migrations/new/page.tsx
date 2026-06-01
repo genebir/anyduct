@@ -69,6 +69,7 @@ export default function NewMigrationPage() {
       return;
     }
     setSubmitting(true);
+    let bulkCreated = false;
     try {
       if (form.mode === "schema") {
         // Phase AAS (2026-06-01) — schema-level: emit one pipeline
@@ -97,6 +98,7 @@ export default function NewMigrationPage() {
         } else {
           toast.warning(t("migrations.bulkPartial", { ok, fail }));
         }
+        bulkCreated = ok > 0;
       } else {
         const config = buildMigrationConfig(name.trim(), form);
         await pipelinesApi.create(ws.id, {
@@ -107,7 +109,15 @@ export default function NewMigrationPage() {
       }
       // Phase AAR (2026-06-01) — land on the list so the operator
       // sees the new rows in context (Last run / Strategy badge).
-      router.push(`/w/${slug}/migrations`);
+      // Phase ABM (2026-06-01) — when at least one bulk row was
+      // created, also preset the ``lastRun=never`` filter so the
+      // operator lands directly on the new rows ready to bulk-Run
+      // (vs scrolling the workspace-wide list for them).
+      router.push(
+        bulkCreated
+          ? `/w/${slug}/migrations?lastRun=never`
+          : `/w/${slug}/migrations`,
+      );
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : String(err));
     } finally {

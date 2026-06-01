@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import {
   ArrowLeftIcon,
   BanIcon,
@@ -63,6 +63,7 @@ const LEVEL_CLASSES: Record<LogLevel, string> = {
 
 export default function RunDetailPage() {
   const { slug, id } = useParams<{ slug: string; id: string }>();
+  const router = useRouter();
   const ws = useWorkspaceFromSlug(slug);
   const { t } = useLocale();
   const [run, setRun] = useState<RunDetail | null>(null);
@@ -263,6 +264,14 @@ export default function RunDetailPage() {
     try {
       const fresh = await runsApi.retry(ws.id, run.id);
       toast.success(t("runDetail.retryQueued", { id: fresh.id.slice(0, 8) }));
+      // Phase ABK (2026-06-01) — auto-navigate to the new run. The
+      // operator clicks Retry to *monitor* the next attempt, not to
+      // dwell on the failed one. Without this they have to find the
+      // new run on the runs list themselves. Stay on the failed page
+      // only if the retry API somehow returns the same id (defensive).
+      if (fresh.id !== run.id) {
+        router.push(`/w/${slug}/runs/${fresh.id}`);
+      }
     } catch (err) {
       toast.error(
         err instanceof ApiError ? err.message : t("runDetail.retryFailed"),

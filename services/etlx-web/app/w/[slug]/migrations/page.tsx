@@ -244,6 +244,11 @@ export default function MigrationsPage() {
   const [filterFrom, setFilterFrom] = useState("");
   const [filterTo, setFilterTo] = useState("");
   const [filterStrategy, setFilterStrategy] = useState("");
+  /** Phase ABA (2026-06-01) — schedule status filter, reusing the
+   *  AAZ ``scheduleByPipeline`` data so no extra fetch is needed. */
+  const [filterSchedule, setFilterSchedule] = useState<
+    "" | "active" | "paused" | "none"
+  >("");
   /** Phase AAW (2026-06-01) — multi-select + bulk delete for the
    *  schema-mode case where users mass-create 20+ migrations and
    *  need to clean up some of them. */
@@ -562,9 +567,23 @@ export default function MigrationsPage() {
       if (filterTo && r.migration.sinkConnection !== filterTo) return false;
       if (filterStrategy && r.migration.strategy !== filterStrategy)
         return false;
+      if (filterSchedule) {
+        if (filterSchedule === "none" && r.schedule !== null) return false;
+        if (filterSchedule === "active" && (!r.schedule || !r.schedule.is_active))
+          return false;
+        if (filterSchedule === "paused" && (!r.schedule || r.schedule.is_active))
+          return false;
+      }
       return true;
     });
-  }, [migrationRows, search, filterFrom, filterTo, filterStrategy]);
+  }, [
+    migrationRows,
+    search,
+    filterFrom,
+    filterTo,
+    filterStrategy,
+    filterSchedule,
+  ]);
 
   const columns = buildColumns(t);
   // Phase AAW (2026-06-01) — checkbox column injected as the first
@@ -634,7 +653,7 @@ export default function MigrationsPage() {
             hidden until there are enough migrations to need it so a
             fresh workspace doesn't look noisy. */}
         {migrationRows.length > 5 ? (
-          <div className="grid items-end gap-2 sm:grid-cols-[1fr_auto_auto_auto_auto]">
+          <div className="grid items-end gap-2 sm:grid-cols-[1fr_auto_auto_auto_auto_auto]">
             <Input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -675,7 +694,25 @@ export default function MigrationsPage() {
               <option value="mirror">{t("migrations.strategyMirror")}</option>
               <option value="custom">custom</option>
             </select>
-            {search || filterFrom || filterTo || filterStrategy ? (
+            <select
+              value={filterSchedule}
+              onChange={(e) =>
+                setFilterSchedule(
+                  e.target.value as "" | "active" | "paused" | "none",
+                )
+              }
+              className="h-10 rounded-md border border-border-subtle bg-elevated px-2 text-sm text-text focus-visible:border-accent focus-visible:outline-none"
+            >
+              <option value="">{t("migrations.filterScheduleAll")}</option>
+              <option value="active">{t("migrations.filterScheduleActive")}</option>
+              <option value="paused">{t("migrations.filterSchedulePaused")}</option>
+              <option value="none">{t("migrations.filterScheduleNone")}</option>
+            </select>
+            {search ||
+            filterFrom ||
+            filterTo ||
+            filterStrategy ||
+            filterSchedule ? (
               <Button
                 variant="ghost"
                 size="sm"
@@ -684,6 +721,7 @@ export default function MigrationsPage() {
                   setFilterFrom("");
                   setFilterTo("");
                   setFilterStrategy("");
+                  setFilterSchedule("");
                 }}
               >
                 {t("migrations.clearFilters")}
@@ -769,6 +807,7 @@ export default function MigrationsPage() {
                   setFilterFrom("");
                   setFilterTo("");
                   setFilterStrategy("");
+                  setFilterSchedule("");
                 }}
               >
                 {t("migrations.clearFilters")}

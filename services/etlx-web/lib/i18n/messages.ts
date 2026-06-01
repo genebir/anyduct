@@ -244,6 +244,11 @@ export const en = {
   // Phase AAZ (2026-06-01) — schedule indicator on the list
   "migrations.colSchedule": "Schedule",
   "migrations.scheduleNone": "—",
+  // Phase ABA (2026-06-01) — schedule filter
+  "migrations.filterScheduleAll": "All schedules",
+  "migrations.filterScheduleActive": "Schedule: active",
+  "migrations.filterSchedulePaused": "Schedule: paused",
+  "migrations.filterScheduleNone": "Schedule: none",
   // sensors page (ADR-0041 K3c)
   "sensors.new": "New sensor",
   "sensors.newTitle": "New sensor",
@@ -1229,6 +1234,11 @@ export const ko: Messages = {
   // Phase AAZ (2026-06-01) — 리스트의 스케줄 표시
   "migrations.colSchedule": "스케줄",
   "migrations.scheduleNone": "—",
+  // Phase ABA (2026-06-01) — 스케줄 필터
+  "migrations.filterScheduleAll": "모든 스케줄",
+  "migrations.filterScheduleActive": "스케줄: 활성",
+  "migrations.filterSchedulePaused": "스케줄: 일시정지",
+  "migrations.filterScheduleNone": "스케줄: 없음",
   "nav.sensors": "센서",
   // 센서 페이지 (ADR-0041 K3c)
   "sensors.new": "새 센서",

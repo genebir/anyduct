@@ -31,8 +31,11 @@ import { ApiError, pipelinesApi, type PipelineSummary } from "@/lib/api";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import { useLocale } from "@/components/providers/locale-provider";
 import type { Messages } from "@/lib/i18n/messages";
-import { linearToGraph, serializeGraph } from "@/lib/pipeline-config";
-import { PIPELINE_TEMPLATES, findTemplate } from "@/lib/pipeline-templates";
+import {
+  DEFAULT_DLQ,
+  DEFAULT_RETRY,
+  serializeGraph,
+} from "@/lib/pipeline-config";
 import { migrationSummaryOf } from "@/lib/migration-utils";
 import { cn } from "@/lib/cn";
 
@@ -112,7 +115,6 @@ export default function PipelinesPage() {
   const [triggering, setTriggering] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
-  const [templateId, setTemplateId] = useState("blank");
   const [submitting, setSubmitting] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<PipelineSummary | null>(
     null,
@@ -147,14 +149,20 @@ export default function PipelinesPage() {
     if (!ws || !newName.trim()) return;
     setSubmitting(true);
     try {
-      const tmpl = findTemplate(templateId) ?? findTemplate("blank")!;
-      // Graph-only mode (2026-05-26): templates still ship as linear
-      // `BuilderState`, but we lift them into a graph + emit graph config
-      // so the next page (the editor) opens straight into the canvas.
-      const config = serializeGraph(linearToGraph(tmpl.build()), {
-        name: newName.trim(),
-        mode: tmpl.mode,
-      });
+      // Phase AAS follow-up 3 (2026-06-01) — user request "그냥 템플릿
+      // 기능은 지워줘. 필요없을 것 같아". Create-from-template was
+      // removed; a fresh pipeline is just an empty graph + the user's
+      // chosen name + batch mode. The editor's empty-canvas overlay
+      // (Phase L1) walks them through dragging the first source.
+      const config = serializeGraph(
+        { nodes: [], edges: [] },
+        {
+          name: newName.trim(),
+          mode: "batch",
+          retry: { ...DEFAULT_RETRY },
+          dlq: { ...DEFAULT_DLQ },
+        },
+      );
       const created = await pipelinesApi.create(ws.id, {
         name: newName.trim(),
         config,
@@ -237,41 +245,6 @@ export default function PipelinesPage() {
                 autoFocus
               />
             </label>
-
-            <div className="mt-5">
-              <span className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
-                {t("tpl.choose")}
-              </span>
-              <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                {PIPELINE_TEMPLATES.map((tmpl) => (
-                  <button
-                    key={tmpl.id}
-                    type="button"
-                    onClick={() => setTemplateId(tmpl.id)}
-                    className={cn(
-                      "flex flex-col gap-1 rounded-md border p-3 text-left transition duration-150",
-                      templateId === tmpl.id
-                        ? "border-accent bg-overlay"
-                        : "border-border-subtle hover:border-border-strong hover:bg-overlay",
-                    )}
-                  >
-                    <span className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-text">
-                        {t(tmpl.labelKey)}
-                      </span>
-                      {tmpl.mode === "stream" ? (
-                        <span className="rounded-sm bg-info/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-info">
-                          stream
-                        </span>
-                      ) : null}
-                    </span>
-                    <span className="text-[11px] text-text-muted">
-                      {t(tmpl.descKey)}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
 
             <div className="mt-5 flex items-center justify-between gap-3">
               <p className="text-xs text-text-muted">

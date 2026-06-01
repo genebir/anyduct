@@ -9,6 +9,14 @@
 
 ## [Unreleased]
 
+### Removed
+- **파이프라인 템플릿 기능 제거 (Phase AAS follow-up 3, 2026-06-01)** — 사용자 *"그냥 템플릿 기능은 지워줘. 필요없을 것 같아"*.
+  - `lib/pipeline-templates.ts` 통째로 삭제(`PIPELINE_TEMPLATES` / `findTemplate` / `PipelineTemplate`).
+  - `app/w/[slug]/pipelines/page.tsx` create 흐름: 7개 카드 picker UI 제거. 새 파이프라인은 빈 그래프(`{nodes:[], edges:[]}`)로 생성 → 빌더의 empty-canvas 안내(Phase L1)로 자연스럽게 이어짐.
+  - i18n 17 키 en/ko 제거(`tpl.choose / blank / dbCopy / dbMigrateCross / dbFiltered / apiToTable / dbToS3 / streamLoad` + 각자 Desc).
+  - `templateId` state / `findTemplate` 호출 / `linearToGraph` 임포트 제거.
+  - 검증: web tsc clean. 코어/서버 변화 0. 신규 시각 컴포넌트 0.
+
 ### Fixed
 - **파이프라인 템플릿이 적용이 다 안되는 문제 (Phase AAS follow-up 2, 2026-06-01)** — 사용자 *"파이프라인 템플릿이 적용이 다 안되는데"*. Root cause: `makeNode`가 `data: {}` 빈 객체로 노드 생성 → operators.ts의 `fields[].defaultValue`는 인풋 렌더 시 fallback으로만 쓰일 뿐 `node.data`에 절대 안 들어감. 따라서 ① 템플릿이 override 안 한 default가 모두 누락된 채 wire로 나가고, ② 사용자가 인풋 안 만지면 UI엔 placeholder 보이지만 저장되는 값은 빈 키.
   - **수정**: `makeNode`가 spec.fields를 walk해 `defaultValue !== undefined`인 모든 키를 `node.data`에 주입. 템플릿 overrides는 `state()` helper에서 그 뒤에 merge되어 여전히 win.

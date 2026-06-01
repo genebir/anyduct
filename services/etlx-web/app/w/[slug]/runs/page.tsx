@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
@@ -194,6 +194,15 @@ export default function RunsPage() {
   // Status filter — URL-synced via ``?status=`` so shared links land on
   // the same view. ``null`` means the filter is off (show all).
   const statusFilter = (search.get("status") as RunStatus | null) ?? null;
+  /** Phase ACA (2026-06-01) — Trigger filter ("manual" or
+   *  "scheduled"). Client-side because the server endpoint takes a
+   *  single ``schedule_id``, not a "scheduled or not" flag.
+   *  URL-synced via ``?trigger=`` for share-link parity with status. */
+  const triggerFilterRaw = search.get("trigger");
+  const triggerFilter: "manual" | "scheduled" | null =
+    triggerFilterRaw === "manual" || triggerFilterRaw === "scheduled"
+      ? triggerFilterRaw
+      : null;
   const ws = useWorkspaceFromSlug(slug);
   const { t } = useLocale();
   // Phase ABU (2026-06-01) — pass to buildColumns for "by you" chip.
@@ -216,7 +225,7 @@ export default function RunsPage() {
   useEffect(() => {
     setLimit(PAGE_SIZE);
     setMaxedOut(false);
-  }, [pipelineFilter, statusFilter]);
+  }, [pipelineFilter, statusFilter, triggerFilter]);
 
   /** Update the ``?status=`` URL param (preserve any ``?pipeline=``).
    *  Empty value clears the filter. */
@@ -225,6 +234,18 @@ export default function RunsPage() {
       const params = new URLSearchParams(search.toString());
       if (next) params.set("status", next);
       else params.delete("status");
+      const qs = params.toString();
+      router.push(qs ? `/w/${slug}/runs?${qs}` : `/w/${slug}/runs`);
+    },
+    [router, search, slug],
+  );
+
+  /** Phase ACA — URL-sync writer for the trigger filter. */
+  const setTriggerFilter = useCallback(
+    (next: "" | "manual" | "scheduled") => {
+      const params = new URLSearchParams(search.toString());
+      if (next) params.set("trigger", next);
+      else params.delete("trigger");
       const qs = params.toString();
       router.push(qs ? `/w/${slug}/runs?${qs}` : `/w/${slug}/runs`);
     },
@@ -298,6 +319,19 @@ export default function RunsPage() {
     setTimeout(() => setLoadingMore(false), 0);
   }, []);
 
+  // Phase ACA — apply trigger filter client-side over the server's
+  // pre-filtered (status, pipeline) rows.
+  const filteredRows = useMemo(() => {
+    if (!rows) return null;
+    if (!triggerFilter) return rows;
+    if (triggerFilter === "scheduled") {
+      return rows.filter((r) => r.schedule_id !== null);
+    }
+    // manual: triggered_by_user_id non-null AND schedule_id null
+    return rows.filter(
+      (r) => r.schedule_id === null && r.triggered_by_user_id !== null,
+    );
+  }, [rows, triggerFilter]);
   const pipelineNameById = new Map(pipelines.map((p) => [p.id, p.name]));
   // Phase ABL (2026-06-01) — migration-aware "Open pipeline" link. The
   // generic pipeline editor is wrong for migrations: that surface is
@@ -326,6 +360,25 @@ export default function RunsPage() {
           // <select> styled to match Input — keeps the runs page free
           // of a heavier dropdown primitive while still being clearly
           // interactive (pointer cursor inherited from globals.css).
+          // Phase ACA (2026-06-01) — trigger filter joins the row.
+          <div className="flex items-center gap-3">
+            {/* Phase ACA — Trigger filter (manual / scheduled). */}
+            <label className="flex items-center gap-1.5 text-xs text-text-secondary">
+              <span className="text-text-muted">{t("runs.triggerFilterLabel")}</span>
+              <select
+                value={triggerFilter ?? ""}
+                onChange={(e) =>
+                  setTriggerFilter(
+                    e.target.value as "" | "manual" | "scheduled",
+                  )
+                }
+                className="h-8 rounded-md border border-border-subtle bg-elevated px-2 text-sm text-text focus-visible:border-accent focus-visible:outline-none"
+              >
+                <option value="">{t("runs.triggerFilterAll")}</option>
+                <option value="manual">{t("runs.triggerFilterManual")}</option>
+                <option value="scheduled">{t("runs.triggerFilterScheduled")}</option>
+              </select>
+            </label>
           <label className="flex items-center gap-1.5 text-xs text-text-secondary">
             <span className="text-text-muted">{t("runs.statusFilterLabel")}</span>
             <select
@@ -340,6 +393,7 @@ export default function RunsPage() {
               ))}
             </select>
           </label>
+          </div>
         }
       />
       {/* Pipeline filter banner — shown when arriving from the pipeline
@@ -389,7 +443,7 @@ export default function RunsPage() {
                 pipelineNameById,
                 currentUser?.id ?? null,
               )}
-              rows={rows}
+              rows={filteredRows ?? []}
               onRowClick={(row) => {
                 if (ws) router.push(`/w/${ws.slug}/runs/${row.id}`);
               }}

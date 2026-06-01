@@ -876,6 +876,11 @@ export const en = {
   "runs.loadFailed": "Couldn't load runs.",
   // Phase S (2026-05-28) — runs list filter + pagination.
   "runs.statusFilterLabel": "Status:",
+  // Phase ACA (2026-06-01) — trigger filter
+  "runs.triggerFilterLabel": "Trigger:",
+  "runs.triggerFilterAll": "Any",
+  "runs.triggerFilterManual": "Manual",
+  "runs.triggerFilterScheduled": "Scheduled",
   "runs.statusFilterAll": "All",
   // Phase T (2026-05-28) — workspace dashboard polish.
   "overview.inFlightCount": "{n} in flight",
@@ -1952,6 +1957,11 @@ export const ko: Messages = {
   "runs.loadFailed": "실행 기록을 불러올 수 없습니다.",
   // Phase S (2026-05-28) — 실행 목록 필터 + 페이지네이션.
   "runs.statusFilterLabel": "상태:",
+  // Phase ACA (2026-06-01) — 트리거 필터
+  "runs.triggerFilterLabel": "트리거:",
+  "runs.triggerFilterAll": "전체",
+  "runs.triggerFilterManual": "수동",
+  "runs.triggerFilterScheduled": "스케줄",
   "runs.statusFilterAll": "전체",
   // Phase T (2026-05-28) — 워크스페이스 대시보드 강화.
   "overview.inFlightCount": "{n}건 진행 중",

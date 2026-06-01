@@ -98,11 +98,17 @@ async def _login(client: httpx.AsyncClient, *, email: str) -> str:
 
 
 async def _audit_rows(session: AsyncSession, *, resource_id: UUID) -> list[AuditLog]:
+    # Phase AAV follow-up (2026-06-01) — secondary ``id`` sort so two
+    # audit rows written within the same microsecond don't reorder.
+    # ``AuditLogRepository.query`` already does this; the test helper
+    # should mirror it so create/delete flips don't flake. UUIDv7 IDs
+    # are time-ordered, so an ascending ID secondary preserves
+    # insertion order.
     await session.commit()
     result = await session.execute(
         select(AuditLog)
         .where(AuditLog.resource_id == str(resource_id))
-        .order_by(AuditLog.created_at)
+        .order_by(AuditLog.created_at, AuditLog.id)
     )
     return list(result.scalars().all())
 

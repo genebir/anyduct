@@ -185,6 +185,27 @@ export function MigrationForm({
             onChange({ ...form, keyColumns: id.name });
           }
         }
+        // Phase ACH (2026-06-01) — same idea for append's cursor
+        // column. Prefer ``updated_at`` (most accurate watermark),
+        // fall back to ``created_at`` (acceptable for insert-only
+        // tables), then any column whose name ends in ``_at``.
+        if (
+          form.strategy === "append" &&
+          !form.cursorColumn.trim() &&
+          resp.columns.length > 0
+        ) {
+          const ci = (n: string) => (c: { name: string }) =>
+            c.name.toLowerCase() === n;
+          const updated = resp.columns.find(ci("updated_at"));
+          const created = resp.columns.find(ci("created_at"));
+          const anyAt = resp.columns.find((c) =>
+            c.name.toLowerCase().endsWith("_at"),
+          );
+          const pick = updated ?? created ?? anyAt;
+          if (pick) {
+            onChange({ ...form, cursorColumn: pick.name });
+          }
+        }
       } catch (err) {
         if (cancelled) return;
         setSourceColumns([]);

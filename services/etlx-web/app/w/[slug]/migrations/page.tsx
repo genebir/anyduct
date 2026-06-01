@@ -43,6 +43,7 @@ import {
   schedulesApi,
   type PipelineSummary,
   type RunSummary,
+  type ScheduleSummary,
 } from "@/lib/api";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import { useLocale } from "@/components/providers/locale-provider";
@@ -60,6 +61,7 @@ type Translate = (
 type Row = PipelineSummary & {
   migration: MigrationSummary;
   lastRun: RunSummary | null;
+  schedule: ScheduleSummary | null;
 };
 
 const RUNS_POLL_MS = 5_000;
@@ -171,6 +173,43 @@ function buildColumns(t: Translate): Column<Row>[] {
           </span>
         ),
     },
+    {
+      // Phase AAZ (2026-06-01) — schedule indicator. Surfaces
+      // whether each migration is automated or manual-only without
+      // making the operator click into the detail page.
+      key: "schedule",
+      className: "w-32",
+      header: t("migrations.colSchedule"),
+      cell: (r) => {
+        if (!r.schedule) {
+          return (
+            <span className="text-xs text-text-muted">
+              {t("migrations.scheduleNone")}
+            </span>
+          );
+        }
+        const active = r.schedule.is_active;
+        return (
+          <span
+            className={`inline-flex h-5 items-center gap-1 rounded-sm px-1.5 text-[11px] ${
+              active
+                ? "bg-accent/15 text-accent"
+                : "bg-warning/15 text-warning"
+            }`}
+            title={
+              r.schedule.cron_expr
+                ? `${r.schedule.cron_expr}${
+                    active ? "" : " (paused)"
+                  }`
+                : undefined
+            }
+          >
+            <CalendarClockIcon size={12} />
+            <span className="font-mono">{r.schedule.cron_expr ?? "—"}</span>
+          </span>
+        );
+      },
+    },
   ];
 }
 
@@ -184,6 +223,14 @@ export default function MigrationsPage() {
    *  reload. */
   const [lastRunByPipeline, setLastRunByPipeline] = useState<
     Map<string, RunSummary>
+  >(new Map());
+  /** Phase AAZ (2026-06-01) — schedule status per pipeline. We
+   *  fetch schedules per migration in parallel (N+1 over the list,
+   *  acceptable for the typical <100 migrations workspace) so the
+   *  list shows a ⏰ chip indicating active / paused / no schedule
+   *  without forcing the operator into the detail page. */
+  const [scheduleByPipeline, setScheduleByPipeline] = useState<
+    Map<string, ScheduleSummary | null>
   >(new Map());
   /** Phase AAR follow-up (2026-06-01) — user request "마이그레이션
    *  목록에서 실행을 할 수가 없네". The pipeline_id whose Run button is
@@ -429,6 +476,40 @@ export default function MigrationsPage() {
     };
   }, [ws]);
 
+  // Phase AAZ (2026-06-01) — schedules per migration row. Poll
+  // cadence matches runs so the post-bulk-schedule state lands in
+  // sync. N+1 over the migration list; for a typical workspace
+  // (<100 migrations) this is fine. Soft-fail per pipeline so a
+  // single 5xx doesn't blank the column.
+  useEffect(() => {
+    if (!ws || !rows) return;
+    let cancelled = false;
+    const migrationIds = rows
+      .filter((p) => migrationSummaryOf(p.current_config_json))
+      .map((p) => p.id);
+    if (migrationIds.length === 0) return;
+    const fetchAll = async () => {
+      const out = new Map<string, ScheduleSummary | null>();
+      await Promise.all(
+        migrationIds.map(async (pid) => {
+          try {
+            const list = await schedulesApi.list(ws.id, pid);
+            out.set(pid, list[0] ?? null);
+          } catch {
+            out.set(pid, null);
+          }
+        }),
+      );
+      if (!cancelled) setScheduleByPipeline(out);
+    };
+    void fetchAll();
+    const handle = setInterval(() => void fetchAll(), RUNS_POLL_MS * 2);
+    return () => {
+      cancelled = true;
+      clearInterval(handle);
+    };
+  }, [ws, rows]);
+
   // Client-side filter — keeps the page a pure view of the pipelines
   // list. No server endpoint changes.
   const migrationRows = useMemo<Row[]>(() => {
@@ -441,11 +522,12 @@ export default function MigrationsPage() {
           ...p,
           migration,
           lastRun: lastRunByPipeline.get(p.id) ?? null,
+          schedule: scheduleByPipeline.get(p.id) ?? null,
         });
       }
     }
     return out;
-  }, [rows, lastRunByPipeline]);
+  }, [rows, lastRunByPipeline, scheduleByPipeline]);
 
   // Phase AAT (2026-06-01) — fan-out of distinct values for the
   // filter dropdowns. Computed off ``migrationRows`` so the available

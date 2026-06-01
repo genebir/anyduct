@@ -241,6 +241,9 @@ export const en = {
   "migrations.bulkScheduleConfirm":
     "Apply this cron to all {n} selected migrations. Existing schedules are updated; new ones are created.",
   "migrations.bulkScheduled": "Scheduled {n} migrations",
+  // Phase AAZ (2026-06-01) — schedule indicator on the list
+  "migrations.colSchedule": "Schedule",
+  "migrations.scheduleNone": "—",
   // sensors page (ADR-0041 K3c)
   "sensors.new": "New sensor",
   "sensors.newTitle": "New sensor",
@@ -1223,6 +1226,9 @@ export const ko: Messages = {
   "migrations.bulkScheduleConfirm":
     "선택한 {n}개 마이그레이션에 이 cron을 적용합니다. 이미 스케줄이 있으면 업데이트, 없으면 새로 생성합니다.",
   "migrations.bulkScheduled": "마이그레이션 {n}개 스케줄됨",
+  // Phase AAZ (2026-06-01) — 리스트의 스케줄 표시
+  "migrations.colSchedule": "스케줄",
+  "migrations.scheduleNone": "—",
   "nav.sensors": "센서",
   // 센서 페이지 (ADR-0041 K3c)
   "sensors.new": "새 센서",

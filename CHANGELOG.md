@@ -10,6 +10,14 @@
 ## [Unreleased]
 
 ### Added
+- **마이그레이션 리스트에 schedule indicator chip (Phase AAZ, 2026-06-01)** — bulk schedule(AAY) 후 시각적 confirmation:
+  - 새 컬럼 **Schedule**: 행마다 `⏰ <cron_expr>` chip(active=accent 색 / paused=warning 색). 스케줄 없으면 `—`.
+  - **tooltip**으로 전체 cron 표시(긴 표현식 대응).
+  - **N+1 fetch**: `schedulesApi.list` 마이그레이션마다 Promise.all 병렬. 일반적 워크스페이스(<100 마이그레이션)에서 acceptable. 10초 폴링.
+  - **soft-fail per pipeline**: 한 schedule 가져오기 실패해도 다른 행 영향 없음.
+  - 검증: web tsc clean. 코어/서버 변화 0. i18n en/ko 각 2 신규 키.
+
+### Added
 - **마이그레이션 리스트 bulk schedule (Phase AAY, 2026-06-01)** — 선택한 N개 마이그레이션에 한 번에 cron 적용:
   - bulk actions bar에 **Schedule selected** 버튼 추가(CalendarClockIcon).
   - **CronInput 통합 dialog**: ConfirmDialog의 `body` slot에 `CronInput` — preset chips + cronstrue 자연어 설명 + 다음 firing 미리보기 모두 가능.

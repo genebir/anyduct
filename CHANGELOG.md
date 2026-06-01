@@ -10,6 +10,16 @@
 ## [Unreleased]
 
 ### Added
+- **마이그레이션 리스트 bulk schedule (Phase AAY, 2026-06-01)** — 선택한 N개 마이그레이션에 한 번에 cron 적용:
+  - bulk actions bar에 **Schedule selected** 버튼 추가(CalendarClockIcon).
+  - **CronInput 통합 dialog**: ConfirmDialog의 `body` slot에 `CronInput` — preset chips + cronstrue 자연어 설명 + 다음 firing 미리보기 모두 가능.
+  - **idempotent update**: 이미 스케줄 있으면 `schedulesApi.update`로 cron 변경, 없으면 `schedulesApi.create`. 운영자가 "다시 적용" 자연 흐름.
+  - **자동 이름**: `{migration_name} (auto)` — 글로벌 Schedules 페이지에서 식별 가능.
+  - **순차 적용**: 한 행 실패해도 나머지 진행. ok / fail 카운트 + 실패 행 toast.
+  - **ConfirmDialog 확장**: 신규 `body?: ReactNode` slot + `confirmDisabled?: boolean` prop. 향후 다른 dialog에서도 임의 form/body 지원.
+  - 검증: web tsc clean. 코어/서버 변화 0. i18n en/ko 각 4 신규 키.
+
+### Added
 - **마이그레이션 리스트 bulk Run now (Phase AAX, 2026-06-01)** — 스키마 모드로 N개 만든 후 한꺼번에 trigger해서 검증하는 흐름:
   - AAW의 bulk actions bar에 **Run selected** 버튼 추가.
   - 선택한 N개 순차적으로 `pipelinesApi.trigger` 호출. 한 행 실패해도 나머지 진행.

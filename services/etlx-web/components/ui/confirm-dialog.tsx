@@ -16,20 +16,27 @@ export function ConfirmDialog({
   open,
   title,
   description,
+  body,
   confirmLabel = "Confirm",
   cancelLabel = "Cancel",
   destructive = false,
   loading = false,
+  confirmDisabled = false,
   onConfirm,
   onCancel,
 }: {
   open: boolean;
   title: ReactNode;
   description?: ReactNode;
+  /** Optional rich content rendered between the description and the
+   *  action buttons — e.g. an input or a CronInput when the dialog
+   *  collects a value (Phase AAY). */
+  body?: ReactNode;
   confirmLabel?: string;
   cancelLabel?: string;
   destructive?: boolean;
   loading?: boolean;
+  confirmDisabled?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
@@ -71,6 +78,7 @@ export function ConfirmDialog({
         {description ? (
           <p className="mt-2 text-sm text-text-secondary">{description}</p>
         ) : null}
+        {body ? <div className="mt-4">{body}</div> : null}
         <div className="mt-6 flex justify-end gap-2">
           <Button variant="ghost" onClick={onCancel} disabled={loading}>
             {cancelLabel}
@@ -79,6 +87,7 @@ export function ConfirmDialog({
             variant={destructive ? "destructive" : "primary"}
             onClick={onConfirm}
             loading={loading}
+            disabled={confirmDisabled}
           >
             {confirmLabel}
           </Button>

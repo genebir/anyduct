@@ -235,6 +235,12 @@ export const en = {
     "{ok} queued, {fail} skipped or failed (check the toasts for which ones).",
   "migrations.viewAllRuns": "View all runs",
   "migrations.viewFailures": "View failures",
+  // Phase AAY (2026-06-01) — bulk schedule
+  "migrations.scheduleSelected": "Schedule selected",
+  "migrations.bulkScheduleTitle": "Schedule selected migrations",
+  "migrations.bulkScheduleConfirm":
+    "Apply this cron to all {n} selected migrations. Existing schedules are updated; new ones are created.",
+  "migrations.bulkScheduled": "Scheduled {n} migrations",
   // sensors page (ADR-0041 K3c)
   "sensors.new": "New sensor",
   "sensors.newTitle": "New sensor",
@@ -1211,6 +1217,12 @@ export const ko: Messages = {
     "{ok}개 등록, {fail}개 건너뜀/실패 (toast에서 확인).",
   "migrations.viewAllRuns": "전체 실행 기록",
   "migrations.viewFailures": "실패만 보기",
+  // Phase AAY (2026-06-01) — 일괄 스케줄
+  "migrations.scheduleSelected": "선택 스케줄",
+  "migrations.bulkScheduleTitle": "선택한 마이그레이션 스케줄 설정",
+  "migrations.bulkScheduleConfirm":
+    "선택한 {n}개 마이그레이션에 이 cron을 적용합니다. 이미 스케줄이 있으면 업데이트, 없으면 새로 생성합니다.",
+  "migrations.bulkScheduled": "마이그레이션 {n}개 스케줄됨",
   "nav.sensors": "센서",
   // 센서 페이지 (ADR-0041 K3c)
   "sensors.new": "새 센서",

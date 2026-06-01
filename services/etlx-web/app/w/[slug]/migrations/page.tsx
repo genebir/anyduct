@@ -21,6 +21,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import {
   ArrowRightLeftIcon,
+  CalendarClockIcon,
   EditIcon,
   PlayIcon,
   PlusIcon,
@@ -33,11 +34,13 @@ import { Input } from "@/components/ui/input";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { CronInput } from "@/components/schedules/cron-input";
 import { StatusBadge } from "@/components/ui/status-badge";
 import {
   ApiError,
   pipelinesApi,
   runsApi,
+  schedulesApi,
   type PipelineSummary,
   type RunSummary,
 } from "@/lib/api";
@@ -216,6 +219,59 @@ export default function MigrationsPage() {
    *  with the offending migration's name instead of vanishing into
    *  a Promise.all rejection. */
   const [bulkRunning, setBulkRunning] = useState(false);
+  /** Phase AAY (2026-06-01) — bulk schedule. Selected migrations
+   *  share a cron; we POST one schedule per pipeline so each row
+   *  ends up with its own (auto)-named schedule visible on the
+   *  global Schedules page. */
+  const [confirmBulkSchedule, setConfirmBulkSchedule] = useState(false);
+  const [bulkScheduleCron, setBulkScheduleCron] = useState("0 3 * * *");
+  const [bulkScheduling, setBulkScheduling] = useState(false);
+
+  async function onBulkSchedule() {
+    if (!ws || selectedIds.size === 0) return;
+    const expr = bulkScheduleCron.trim();
+    if (!expr) {
+      toast.error(t("migrations.scheduleCronRequired"));
+      return;
+    }
+    setBulkScheduling(true);
+    let ok = 0;
+    let fail = 0;
+    const ids = [...selectedIds];
+    for (const id of ids) {
+      const row = migrationRows.find((r) => r.id === id);
+      try {
+        // Update first if a schedule already exists (idempotent UX —
+        // operators expect bulk schedule to just apply the cron).
+        const existing = await schedulesApi.list(ws.id, id);
+        if (existing.length > 0) {
+          await schedulesApi.update(ws.id, id, existing[0].id, {
+            cron_expr: expr,
+            is_active: true,
+          });
+        } else {
+          await schedulesApi.create(ws.id, id, {
+            name: `${row?.name ?? id.slice(0, 8)} (auto)`,
+            mode: "batch",
+            cron_expr: expr,
+            is_active: true,
+          });
+        }
+        ok += 1;
+      } catch (err) {
+        fail += 1;
+        const m = err instanceof ApiError ? err.message : String(err);
+        toast.error(`${row?.name ?? id}: ${m}`);
+      }
+    }
+    setBulkScheduling(false);
+    setConfirmBulkSchedule(false);
+    if (fail === 0) {
+      toast.success(t("migrations.bulkScheduled", { n: ok }));
+    } else {
+      toast.warning(t("migrations.bulkPartial", { ok, fail }));
+    }
+  }
 
   async function onBulkRunNow() {
     if (!ws || selectedIds.size === 0) return;
@@ -575,7 +631,7 @@ export default function MigrationsPage() {
                 variant="ghost"
                 size="sm"
                 loading={bulkRunning}
-                disabled={bulkDeleting}
+                disabled={bulkDeleting || bulkScheduling}
                 onClick={() => void onBulkRunNow()}
               >
                 <PlayIcon size={14} />
@@ -584,9 +640,18 @@ export default function MigrationsPage() {
               <Button
                 variant="ghost"
                 size="sm"
+                onClick={() => setConfirmBulkSchedule(true)}
+                disabled={bulkRunning || bulkDeleting || bulkScheduling}
+              >
+                <CalendarClockIcon size={14} />
+                {t("migrations.scheduleSelected")}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={() => setConfirmBulkDelete(true)}
                 className="hover:text-error"
-                disabled={bulkRunning}
+                disabled={bulkRunning || bulkScheduling}
               >
                 <Trash2Icon size={14} />
                 {t("migrations.deleteSelected")}
@@ -683,6 +748,23 @@ export default function MigrationsPage() {
         loading={bulkDeleting}
         onConfirm={() => void onBulkDelete()}
         onCancel={() => setConfirmBulkDelete(false)}
+      />
+      <ConfirmDialog
+        open={confirmBulkSchedule}
+        title={t("migrations.bulkScheduleTitle")}
+        description={t("migrations.bulkScheduleConfirm", { n: selectedIds.size })}
+        body={
+          <CronInput
+            value={bulkScheduleCron}
+            onChange={setBulkScheduleCron}
+            disabled={bulkScheduling}
+          />
+        }
+        confirmLabel={t("migrations.scheduleEnable")}
+        loading={bulkScheduling}
+        confirmDisabled={!bulkScheduleCron.trim()}
+        onConfirm={() => void onBulkSchedule()}
+        onCancel={() => setConfirmBulkSchedule(false)}
       />
     </>
   );

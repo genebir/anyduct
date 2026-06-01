@@ -825,6 +825,8 @@ export const en = {
   "runs.filteredByPipeline": "Showing runs for pipeline: {name}",
   "runs.clearFilter": "Clear filter",
   "runs.openPipeline": "Open pipeline →",
+  // Phase ABL (2026-06-01) — migration-aware destination label
+  "runs.openMigration": "Open migration →",
   // Row right-click menu (2026-05-26 user request)
   "runs.menuOpen": "Open run detail",
   "runs.menuOpenPipeline": "Open pipeline",
@@ -1840,6 +1842,8 @@ export const ko: Messages = {
   "runs.filteredByPipeline": "{name} 파이프라인의 실행 기록만 표시 중",
   "runs.clearFilter": "필터 해제",
   "runs.openPipeline": "파이프라인 열기 →",
+  // Phase ABL (2026-06-01) — 마이그레이션 행이면 목적지를 바꿔준다
+  "runs.openMigration": "마이그레이션 열기 →",
   // 행 우클릭 메뉴 (2026-05-26 사용자 요청)
   "runs.menuOpen": "실행 상세 열기",
   "runs.menuOpenPipeline": "파이프라인 열기",

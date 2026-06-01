@@ -34,6 +34,7 @@ import {
   type RunStatus,
   type RunSummary,
 } from "@/lib/api";
+import { migrationSummaryOf } from "@/lib/migration-utils";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import { useLocale } from "@/components/providers/locale-provider";
 import type { Messages } from "@/lib/i18n/messages";
@@ -287,6 +288,14 @@ export default function RunsPage() {
   }, []);
 
   const pipelineNameById = new Map(pipelines.map((p) => [p.id, p.name]));
+  // Phase ABL (2026-06-01) — migration-aware "Open pipeline" link. The
+  // generic pipeline editor is wrong for migrations: that surface is
+  // managed under /w/.../migrations/[id], not /pipelines/[id]/edit.
+  // Detect via the same ``migrationSummaryOf`` predicate the rest of
+  // the app uses so this stays consistent with the migration tab.
+  const isMigrationById = new Map(
+    pipelines.map((p) => [p.id, migrationSummaryOf(p.current_config_json) !== null]),
+  );
   const filteredPipelineName = pipelineFilter
     ? pipelineNameById.get(pipelineFilter) ?? pipelineFilter.slice(0, 8) + "…"
     : null;
@@ -333,10 +342,16 @@ export default function RunsPage() {
           <div className="flex items-center gap-2">
             {ws && pipelineFilter ? (
               <Link
-                href={`/w/${ws.slug}/pipelines/${pipelineFilter}/edit`}
+                href={
+                  isMigrationById.get(pipelineFilter)
+                    ? `/w/${ws.slug}/migrations/${pipelineFilter}`
+                    : `/w/${ws.slug}/pipelines/${pipelineFilter}/edit`
+                }
                 className="text-xs text-accent hover:underline"
               >
-                {t("runs.openPipeline")}
+                {isMigrationById.get(pipelineFilter)
+                  ? t("runs.openMigration")
+                  : t("runs.openPipeline")}
               </Link>
             ) : null}
             <Link

@@ -233,6 +233,8 @@ export const en = {
   "migrations.bulkRunQueued": "{n} migrations queued",
   "migrations.bulkRunPartial":
     "{ok} queued, {fail} skipped or failed (check the toasts for which ones).",
+  "migrations.viewAllRuns": "View all runs",
+  "migrations.viewFailures": "View failures",
   // sensors page (ADR-0041 K3c)
   "sensors.new": "New sensor",
   "sensors.newTitle": "New sensor",
@@ -1207,6 +1209,8 @@ export const ko: Messages = {
   "migrations.bulkRunQueued": "마이그레이션 {n}개 대기열에 등록됨",
   "migrations.bulkRunPartial":
     "{ok}개 등록, {fail}개 건너뜀/실패 (toast에서 확인).",
+  "migrations.viewAllRuns": "전체 실행 기록",
+  "migrations.viewFailures": "실패만 보기",
   "nav.sensors": "센서",
   // 센서 페이지 (ADR-0041 K3c)
   "sensors.new": "새 센서",

@@ -378,6 +378,7 @@ export default function MigrationDetailPage() {
             <RecentRunsCard
               runs={runs}
               slug={slug}
+              pipelineId={pipeline?.id ?? id}
               t={t}
               emptyHint={t("migrations.runsEmpty")}
               title={t("migrations.recentRuns")}
@@ -402,21 +403,47 @@ export default function MigrationDetailPage() {
 function RecentRunsCard({
   runs,
   slug,
+  pipelineId,
   t,
   title,
   emptyHint,
 }: {
   runs: RunSummary[] | null;
   slug: string;
+  pipelineId: string;
   t: (k: never) => string;
   title: string;
   emptyHint: string;
 }) {
   const tx = t as unknown as (k: string) => string;
+  // Phase AAX follow-up (2026-06-01) — "View all" link in the
+  // header drops the operator on the runs page already filtered to
+  // this pipeline. The recent-runs panel is intentionally bounded
+  // (5 rows) so digging deeper has to leave the migration page.
+  const hasFailed =
+    Array.isArray(runs) && runs.some((r) => r.status === "failed");
   return (
     <Card>
-      <div className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
-        {title}
+      <div className="flex items-baseline justify-between gap-2">
+        <div className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
+          {title}
+        </div>
+        <div className="flex gap-2">
+          {hasFailed ? (
+            <Link
+              href={`/w/${slug}/runs?pipeline=${pipelineId}&status=failed`}
+              className="text-xs text-error hover:underline"
+            >
+              {tx("migrations.viewFailures")}
+            </Link>
+          ) : null}
+          <Link
+            href={`/w/${slug}/runs?pipeline=${pipelineId}`}
+            className="text-xs text-text-muted hover:text-accent hover:underline"
+          >
+            {tx("migrations.viewAllRuns")}
+          </Link>
+        </div>
       </div>
       <div className="mt-3">
         {runs === null ? (

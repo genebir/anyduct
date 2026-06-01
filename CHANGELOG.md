@@ -10,6 +10,21 @@
 ## [Unreleased]
 
 ### Added
+- **Migration 폼을 마이그레이션-shaped으로 재설계 (Phase AAN3)** — 사용자 *"명확하게 마이그레이션 같이 만들어줘. 지금 형태는 ETL과 별 차이가 없잖아"*. AAN2의 ETL-shaped 폼(쿼리/모드/if_exists)을 마이그레이션 mental model로 재구성:
+  - **테이블 picker** (쿼리 textarea 제거) — 소스 connection 선택 시 `connectionsApi.tables`로 datalist 자동 채움. 사용자가 *"이 테이블을 복제한다"*는 사고 그대로.
+  - **Source → Destination 카드** 좌우 + 가운데 ▶ 화살표(`ArrowRightIcon`). 한눈에 방향 인식.
+  - **Strategy radio** — mode/if_exists/key_columns 기술 라벨 대신 3가지 humanised 선택지:
+    - **Full snapshot**: `mode=overwrite + auto_create_if_exists=drop` (매 실행 재구축, schema-drift 허용)
+    - **Append new rows**: `mode=append + cursor_column` (커서 이후 신규만)
+    - **Live mirror**: `mode=upsert + key_columns` (PK 자동 emit)
+  - **소스 스키마 미리보기** — `connectionsApi.columns`로 컬럼/타입 + (mirror 모드) PK 컬럼 배지. soft-fail(스키마 못 읽어도 폼 안 막힘).
+  - **`migration-config.ts` 재설계**: `MigrationStrategy` enum + `strategyToSinkShape()` (strategy → mode + if_exists + key_columns 매핑) + `parseSelectStarTable()` (`SELECT * FROM <table>` 추출). Pure functions.
+  - **list page 컬럼 재구성**: "이름 / 도착지 / 모드 / if_exists" → "이름 / **From → To** / Strategy chip". 화살표 시각화 + tone-aware strategy 색.
+  - **safe-exit**: 손으로 JOIN/WHERE/computed column이 들어간 쿼리는 table picker로 round-trip 못 하므로 detail 페이지가 "open in pipelines" 안내.
+  - i18n en/ko 각 22 추가 키.
+  - 검증: web tsc clean. 코어 unit 812 + 서버 it 482 회귀 0.
+
+### Added
 - **Migration 자체를 빌더와 분리 — 전용 form + new/edit 페이지 (Phase AAN2)** — 사용자 추가 요청 *"빌더로 연결되는 게 아니라 마이그레이션 자체를 따로 빼줘"*. 이전 AAN은 graph 빌더로 라우팅했으나, 이제 마이그레이션 전용 단순 폼:
   - **`/w/[slug]/migrations/new`**: 빌더 우회 새 마이그레이션 생성 폼.
   - **`/w/[slug]/migrations/[id]`**: 전용 detail/edit/delete 페이지.

@@ -20,13 +20,19 @@
  */
 
 export interface MigrationSummary {
+  /** Where the source data comes from. */
+  sourceConnection: string | null;
   /** Where the auto-created destination lives — connection name + table. */
   sinkConnection: string | null;
   sinkTable: string | null;
-  /** Append / overwrite / upsert. */
+  /** Append / overwrite / upsert (raw sink mode for back-compat). */
   sinkMode: string | null;
   /** skip / drop / error — visible to the operator on the migration row. */
   ifExists: "skip" | "drop" | "error";
+  /** Humanised strategy (Phase AAN3) inferred from mode + if_exists.
+   *  ``"custom"`` falls through for shapes the migration form
+   *  doesn't generate (e.g. mode=overwrite + if_exists=skip). */
+  strategy: "snapshot" | "append" | "mirror" | "custom";
   /** Convenience flag — false when ``current_config_json`` was null. */
   hasAnyAutoCreate: boolean;
 }
@@ -85,12 +91,29 @@ export function migrationSummaryOf(
   // Multi-sink fan-out is uncommon in migration patterns; if it
   // happens, a future slice can paint a per-sink breakdown.
   const first = sinks[0];
+  const ifExists = pickIfExists(first);
+  const mode = typeof first.mode === "string" ? first.mode : null;
+  // Phase AAN3: humanise the mode+if_exists pair into a single
+  // user-friendly strategy label that matches the form's radio.
+  let strategy: MigrationSummary["strategy"] = "custom";
+  if (mode === "overwrite" && ifExists === "drop") strategy = "snapshot";
+  else if (mode === "upsert") strategy = "mirror";
+  else if (mode === "append") strategy = "append";
+
+  // Pull the source connection too — list rows want to render
+  // "src → dst" not just "dst".
+  const src = config.source as Record<string, unknown> | undefined;
+  const sourceConnection =
+    src && typeof src.connection === "string" ? src.connection : null;
+
   return {
+    sourceConnection,
     sinkConnection:
       typeof first.connection === "string" ? first.connection : null,
     sinkTable: typeof first.table === "string" ? first.table : null,
-    sinkMode: typeof first.mode === "string" ? first.mode : null,
-    ifExists: pickIfExists(first),
+    sinkMode: mode,
+    ifExists,
+    strategy,
     hasAnyAutoCreate: true,
   };
 }

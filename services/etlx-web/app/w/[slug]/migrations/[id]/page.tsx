@@ -141,7 +141,7 @@ export default function MigrationDetailPage() {
           ) : null
         }
       />
-      <main className="mx-auto w-full max-w-3xl flex-1 space-y-6 overflow-y-auto px-6 py-8">
+      <main className="mx-auto w-full max-w-4xl flex-1 space-y-6 overflow-y-auto px-6 py-8">
         {outsideMigrationShape && pipeline ? (
           <Card>
             <p className="text-sm text-text-secondary">
@@ -157,6 +157,7 @@ export default function MigrationDetailPage() {
           </Card>
         ) : (
           <MigrationForm
+            workspaceId={ws?.id ?? ""}
             name={pipeline?.name ?? ""}
             onNameChange={() => {
               /* Name is locked on edit — rename lives on the

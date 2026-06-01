@@ -41,17 +41,29 @@ type Translate = (
 
 type Row = PipelineSummary & { migration: MigrationSummary };
 
-function ifExistsLabel(
-  m: MigrationSummary,
+function strategyChip(
+  s: MigrationSummary["strategy"],
   t: Translate,
-): { label: string; tone: "muted" | "warn" | "error" } {
-  if (m.ifExists === "drop") {
-    return { label: t("migrations.ifExistsDrop"), tone: "warn" };
+): { label: string; cls: string } {
+  if (s === "snapshot") {
+    return {
+      label: t("migrations.strategySnapshot"),
+      cls: "bg-warning/15 text-warning",
+    };
   }
-  if (m.ifExists === "error") {
-    return { label: t("migrations.ifExistsError"), tone: "error" };
+  if (s === "append") {
+    return {
+      label: t("migrations.strategyAppend"),
+      cls: "bg-info/15 text-info",
+    };
   }
-  return { label: t("migrations.ifExistsSkip"), tone: "muted" };
+  if (s === "mirror") {
+    return {
+      label: t("migrations.strategyMirror"),
+      cls: "bg-accent/15 text-accent",
+    };
+  }
+  return { label: "custom", cls: "bg-overlay text-text-muted" };
 }
 
 function buildColumns(t: Translate): Column<Row>[] {
@@ -69,36 +81,35 @@ function buildColumns(t: Translate): Column<Row>[] {
       ),
     },
     {
-      key: "sink",
-      header: t("migrations.colSink"),
+      // Phase AAN3 — direction column reads as "src → dst" so the
+      // migration intent is the first thing the operator sees.
+      key: "direction",
+      header: `${t("migrations.from")} → ${t("migrations.to")}`,
       cell: (r) => (
-        <div className="font-mono text-xs text-text-secondary">
-          {r.migration.sinkConnection ?? "—"}
-          {r.migration.sinkTable ? ` / ${r.migration.sinkTable}` : ""}
+        <div className="flex items-center gap-1.5 text-xs">
+          <span className="font-mono text-text-secondary">
+            {r.migration.sourceConnection ?? "—"}
+          </span>
+          <span className="text-accent">→</span>
+          <span className="font-mono text-text-secondary">
+            {r.migration.sinkConnection ?? "—"}
+            {r.migration.sinkTable ? ` / ${r.migration.sinkTable}` : ""}
+          </span>
         </div>
       ),
     },
     {
-      key: "mode",
-      header: t("migrations.colMode"),
-      cell: (r) => (
-        <span className="inline-flex h-5 items-center rounded-sm bg-overlay px-1.5 text-[11px] uppercase text-text-muted">
-          {r.migration.sinkMode ?? "append"}
-        </span>
-      ),
-    },
-    {
-      key: "if_exists",
-      header: t("migrations.colIfExists"),
+      key: "strategy",
+      header: t("migrations.colStrategy"),
       cell: (r) => {
-        const { label, tone } = ifExistsLabel(r.migration, t);
-        const cls =
-          tone === "warn"
-            ? "text-warning"
-            : tone === "error"
-              ? "text-error"
-              : "text-text-muted";
-        return <span className={`text-xs ${cls}`}>{label}</span>;
+        const { label, cls } = strategyChip(r.migration.strategy, t);
+        return (
+          <span
+            className={`inline-flex h-5 items-center rounded-sm px-1.5 text-[11px] font-medium ${cls}`}
+          >
+            {label}
+          </span>
+        );
       },
     },
   ];

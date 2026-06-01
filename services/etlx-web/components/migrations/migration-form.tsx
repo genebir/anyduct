@@ -1,37 +1,37 @@
 "use client";
 
 /**
- * MigrationForm — dedicated, builder-free form for cross-DB
- * migrations (Phase AAN2, 2026-05-29).
+ * MigrationForm — Phase AAN3 (2026-05-29).
  *
- * The migration surface is intentionally narrower than the graph
- * builder: one source connection, one source query, one sink
- * connection, one sink table, and the few knobs that make
- * cross-DB replication safe (mode, key_columns when upserting,
- * auto_create_if_exists). No transforms, no fan-out, no joins —
- * users who need those graduate to the pipelines builder.
+ * Migration-shaped, not ETL-shaped. The user picks a *table* to
+ * copy (not a query), picks one of three humanised strategies (not
+ * a sink mode + if-exists matrix), and sees a live source schema
+ * preview so they know what's about to land on the destination.
  *
- * The form is presentational only: it doesn't load or save, it
- * just renders the data + validation and emits ``onChange`` /
- * ``onSubmit``. The new + edit pages own the lifecycle.
+ * Layout reads left-to-right: SOURCE card → arrow → DESTINATION
+ * card. Strategy and schema preview sit below. The visual
+ * differentiation from the pipelines builder is the whole point —
+ * a migration is "copy this table over there", not "extract,
+ * transform, load".
  */
 
 import type { FormEvent } from "react";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { ArrowRightIcon } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { useLocale } from "@/components/providers/locale-provider";
-import type { ConnectionSummary } from "@/lib/api";
+import { ApiError, connectionsApi, type ConnectionSummary } from "@/lib/api";
 import {
   MIGRATION_SUPPORTED_TYPES,
-  type IfExists,
   type MigrationFormData,
-  type SinkMode,
+  type MigrationStrategy,
   validateMigrationForm,
 } from "@/lib/migration-config";
 
 interface Props {
+  workspaceId: string;
   name: string;
   onNameChange: (v: string) => void;
   /** ``null`` while the parent is loading. We render disabled
@@ -40,9 +40,6 @@ interface Props {
   form: MigrationFormData | null;
   onChange: (next: MigrationFormData) => void;
   connections: ConnectionSummary[];
-  /** Pass ``true`` to disable the name input (e.g. on edit page —
-   *  rename is a separate concern; keep this form focused on the
-   *  migration contract itself). */
   nameLocked?: boolean;
   submitting: boolean;
   onSubmit: () => void;
@@ -50,9 +47,33 @@ interface Props {
   submitLabel: string;
 }
 
-const SINK_MODES: SinkMode[] = ["append", "overwrite", "upsert"];
+const STRATEGIES: MigrationStrategy[] = ["snapshot", "append", "mirror"];
+
+function strategyLabel(
+  s: MigrationStrategy,
+  t: (k: never) => string,
+): { label: string; desc: string } {
+  const tx = t as unknown as (k: string) => string;
+  if (s === "snapshot") {
+    return {
+      label: tx("migrations.strategySnapshot"),
+      desc: tx("migrations.strategySnapshotDesc"),
+    };
+  }
+  if (s === "append") {
+    return {
+      label: tx("migrations.strategyAppend"),
+      desc: tx("migrations.strategyAppendDesc"),
+    };
+  }
+  return {
+    label: tx("migrations.strategyMirror"),
+    desc: tx("migrations.strategyMirrorDesc"),
+  };
+}
 
 export function MigrationForm({
+  workspaceId,
   name,
   onNameChange,
   form,
@@ -67,13 +88,84 @@ export function MigrationForm({
   const { t } = useLocale();
 
   // Only RDBMS connections — the ones whose connector implements
-  // ``SchemaWriter`` so ``auto_create_table`` actually does
-  // something.
+  // ``SchemaWriter`` (``ensure_table``).
   const supportedConnections = useMemo(
     () =>
       connections.filter((c) => MIGRATION_SUPPORTED_TYPES.has(c.type)),
     [connections],
   );
+
+  const connByName = useMemo(() => {
+    const m = new Map<string, ConnectionSummary>();
+    for (const c of supportedConnections) m.set(c.name, c);
+    return m;
+  }, [supportedConnections]);
+
+  // Source-tables introspection (Phase AAN3) — populate the table
+  // picker so the user picks rather than types. ADR-0033.
+  const sourceConnRow = form
+    ? connByName.get(form.sourceConnection) ?? null
+    : null;
+  const [sourceTables, setSourceTables] = useState<string[]>([]);
+  const [tablesLoading, setTablesLoading] = useState(false);
+  useEffect(() => {
+    if (!sourceConnRow) {
+      setSourceTables([]);
+      return;
+    }
+    let cancelled = false;
+    setTablesLoading(true);
+    (async () => {
+      try {
+        const resp = await connectionsApi.tables(workspaceId, sourceConnRow.id);
+        if (!cancelled) setSourceTables(resp.tables);
+      } catch {
+        if (!cancelled) setSourceTables([]); // soft-fail; users can type anyway
+      } finally {
+        if (!cancelled) setTablesLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [sourceConnRow, workspaceId]);
+
+  // Source-columns preview (Phase AAN3) — show the user what's
+  // about to land on the destination. Soft-fail: an unknown schema
+  // doesn't block the form.
+  const [sourceColumns, setSourceColumns] = useState<
+    { name: string; type: string }[]
+  >([]);
+  const [columnsState, setColumnsState] =
+    useState<"idle" | "loading" | "ok" | "fail">("idle");
+  useEffect(() => {
+    if (!sourceConnRow || !form?.sourceTable) {
+      setSourceColumns([]);
+      setColumnsState("idle");
+      return;
+    }
+    let cancelled = false;
+    setColumnsState("loading");
+    (async () => {
+      try {
+        const resp = await connectionsApi.columns(
+          workspaceId,
+          sourceConnRow.id,
+          form.sourceTable,
+        );
+        if (cancelled) return;
+        setSourceColumns(resp.columns);
+        setColumnsState("ok");
+      } catch (err) {
+        if (cancelled) return;
+        setSourceColumns([]);
+        setColumnsState(err instanceof ApiError ? "fail" : "fail");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [sourceConnRow, form?.sourceTable, workspaceId]);
 
   const errors = form ? validateMigrationForm(form) : {};
 
@@ -94,18 +186,18 @@ export function MigrationForm({
   const disabled = !form || submitting;
   const f = form ?? {
     sourceConnection: "",
-    sourceQuery: "",
+    sourceTable: "",
     sinkConnection: "",
     sinkTable: "",
-    sinkMode: "overwrite" as SinkMode,
+    strategy: "snapshot" as MigrationStrategy,
     keyColumns: "",
-    autoCreateTable: true,
-    ifExists: "skip" as IfExists,
+    cursorColumn: "",
   };
 
   return (
-    <Card>
-      <form onSubmit={handleSubmit} className="flex flex-col gap-5">
+    <form onSubmit={handleSubmit} className="flex flex-col gap-6">
+      {/* Name */}
+      <Card>
         <label className="flex flex-col gap-1.5">
           <span className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
             {t("common.name")}
@@ -117,62 +209,95 @@ export function MigrationForm({
             disabled={disabled || !!nameLocked}
           />
         </label>
+      </Card>
 
-        <fieldset className="flex flex-col gap-3 rounded-md border border-border-subtle p-4">
-          <legend className="px-1 text-xs font-semibold uppercase tracking-wider text-text-secondary">
-            {t("migrations.formSource")}
-          </legend>
-          <label className="flex flex-col gap-1.5">
-            <span className="text-xs text-text-secondary">
-              {t("migrations.formConnection")}
-            </span>
-            <select
-              value={f.sourceConnection}
-              onChange={(e) => field("sourceConnection", e.target.value)}
-              disabled={disabled}
-              className="h-10 rounded-md border border-border-subtle bg-elevated px-2 text-sm text-text focus-visible:border-accent focus-visible:outline-none"
-            >
-              <option value="">{t("builder.selectConnection")}</option>
-              {supportedConnections.map((c) => (
-                <option key={c.id} value={c.name}>
-                  {c.name} ({c.type})
-                </option>
-              ))}
-            </select>
-            {errors.sourceConnection ? (
-              <span className="text-xs text-error">
-                {t("migrations.errRequired")}
-              </span>
-            ) : null}
-          </label>
-          <label className="flex flex-col gap-1.5">
-            <span className="text-xs text-text-secondary">
-              {t("migrations.formQuery")}
-            </span>
-            <textarea
-              value={f.sourceQuery}
-              onChange={(e) => field("sourceQuery", e.target.value)}
-              disabled={disabled}
-              rows={3}
-              placeholder="SELECT id, amount, created_at FROM orders"
-              className="rounded-md border border-border-subtle bg-elevated px-3 py-2 font-mono text-sm text-text focus-visible:border-accent focus-visible:outline-none"
-            />
-            {errors.sourceQuery ? (
-              <span className="text-xs text-error">
-                {t("migrations.errRequired")}
-              </span>
-            ) : null}
-          </label>
-        </fieldset>
-
-        <fieldset className="flex flex-col gap-3 rounded-md border border-border-subtle p-4">
-          <legend className="px-1 text-xs font-semibold uppercase tracking-wider text-text-secondary">
-            {t("migrations.formSink")}
-          </legend>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="flex flex-col gap-1.5">
+      {/* Direction — Source → Destination cards side by side */}
+      <div className="grid items-stretch gap-3 sm:grid-cols-[1fr_auto_1fr]">
+        {/* SOURCE */}
+        <Card>
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-accent">
+            {t("migrations.from")}
+          </div>
+          <div className="mt-3 flex flex-col gap-3">
+            <label className="flex flex-col gap-1">
               <span className="text-xs text-text-secondary">
-                {t("migrations.formConnection")}
+                {t("migrations.fromConnection")}
+              </span>
+              <select
+                value={f.sourceConnection}
+                onChange={(e) => {
+                  if (!form) return;
+                  // Reset table when the connection changes — the
+                  // old table doesn't exist on the new connection.
+                  onChange({
+                    ...form,
+                    sourceConnection: e.target.value,
+                    sourceTable: "",
+                  });
+                }}
+                disabled={disabled}
+                className="h-10 rounded-md border border-border-subtle bg-elevated px-2 text-sm text-text focus-visible:border-accent focus-visible:outline-none"
+              >
+                <option value="">{t("builder.selectConnection")}</option>
+                {supportedConnections.map((c) => (
+                  <option key={c.id} value={c.name}>
+                    {c.name} ({c.type})
+                  </option>
+                ))}
+              </select>
+              {errors.sourceConnection ? (
+                <span className="text-xs text-error">
+                  {t("migrations.errRequired")}
+                </span>
+              ) : null}
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-xs text-text-secondary">
+                {t("migrations.pickTable")}
+              </span>
+              <input
+                list="src-tables-list"
+                value={f.sourceTable}
+                onChange={(e) => field("sourceTable", e.target.value)}
+                disabled={disabled || !sourceConnRow}
+                placeholder={
+                  sourceConnRow
+                    ? tablesLoading
+                      ? "…"
+                      : sourceTables[0] ?? "public.orders"
+                    : t("migrations.pickConnFirst")
+                }
+                className="h-10 rounded-md border border-border-subtle bg-elevated px-3 text-sm text-text focus-visible:border-accent focus-visible:outline-none"
+              />
+              <datalist id="src-tables-list">
+                {sourceTables.map((tab) => (
+                  <option key={tab} value={tab} />
+                ))}
+              </datalist>
+              {errors.sourceTable ? (
+                <span className="text-xs text-error">
+                  {t("migrations.errRequired")}
+                </span>
+              ) : null}
+            </label>
+          </div>
+        </Card>
+
+        {/* arrow */}
+        <div className="flex items-center justify-center px-1 text-accent">
+          <ArrowRightIcon size={28} aria-hidden />
+          <span className="sr-only">{t("migrations.directionArrow")}</span>
+        </div>
+
+        {/* DESTINATION */}
+        <Card>
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-accent">
+            {t("migrations.to")}
+          </div>
+          <div className="mt-3 flex flex-col gap-3">
+            <label className="flex flex-col gap-1">
+              <span className="text-xs text-text-secondary">
+                {t("migrations.toConnection")}
               </span>
               <select
                 value={f.sinkConnection}
@@ -193,100 +318,182 @@ export function MigrationForm({
                 </span>
               ) : null}
             </label>
-            <label className="flex flex-col gap-1.5">
+            <label className="flex flex-col gap-1">
               <span className="text-xs text-text-secondary">
-                {t("migrations.formTable")}
+                {t("migrations.destTable")}
               </span>
               <Input
                 value={f.sinkTable}
                 onChange={(e) => field("sinkTable", e.target.value)}
                 disabled={disabled}
-                placeholder="orders_copy"
+                placeholder={f.sourceTable || "orders_copy"}
               />
+              <span className="text-xs text-text-muted">
+                {t("migrations.destTableHelp")}
+              </span>
               {errors.sinkTable ? (
                 <span className="text-xs text-error">
                   {t("migrations.errRequired")}
                 </span>
               ) : null}
             </label>
-            <label className="flex flex-col gap-1.5">
-              <span className="text-xs text-text-secondary">
-                {t("migrations.formMode")}
-              </span>
-              <select
-                value={f.sinkMode}
-                onChange={(e) =>
-                  field("sinkMode", e.target.value as SinkMode)
-                }
-                disabled={disabled}
-                className="h-10 rounded-md border border-border-subtle bg-elevated px-2 text-sm text-text focus-visible:border-accent focus-visible:outline-none"
-              >
-                {SINK_MODES.map((m) => (
-                  <option key={m} value={m}>
-                    {m}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="flex flex-col gap-1.5">
-              <span className="text-xs text-text-secondary">
-                {t("migrations.formIfExists")}
-              </span>
-              <select
-                value={f.ifExists}
-                onChange={(e) =>
-                  field("ifExists", e.target.value as IfExists)
-                }
-                disabled={disabled}
-                className="h-10 rounded-md border border-border-subtle bg-elevated px-2 text-sm text-text focus-visible:border-accent focus-visible:outline-none"
-              >
-                <option value="skip">{t("migrations.ifExistsSkip")}</option>
-                <option value="drop">{t("migrations.ifExistsDrop")}</option>
-                <option value="error">{t("migrations.ifExistsError")}</option>
-              </select>
-            </label>
           </div>
-          {f.sinkMode === "upsert" ? (
-            <label className="flex flex-col gap-1.5">
-              <span className="text-xs text-text-secondary">
-                {t("migrations.formKeyColumns")}
-              </span>
-              <Input
-                value={f.keyColumns}
-                onChange={(e) => field("keyColumns", e.target.value)}
-                disabled={disabled}
-                placeholder="id"
-              />
-              <span className="text-xs text-text-muted">
-                {t("migrations.formKeyColumnsHelp")}
-              </span>
-              {errors.keyColumns ? (
-                <span className="text-xs text-error">
-                  {t("migrations.errRequired")}
-                </span>
-              ) : null}
-            </label>
-          ) : null}
-        </fieldset>
+        </Card>
+      </div>
 
-        <div className="flex justify-end gap-2">
-          <Button
-            type="button"
-            variant="ghost"
-            onClick={onCancel}
-            disabled={submitting}
-          >
-            {t("common.cancel")}
-          </Button>
-          <Button
-            type="submit"
-            loading={submitting}
-            disabled={disabled}
-          >
-            {submitLabel}
-          </Button>
+      {/* STRATEGY — humanised radio */}
+      <Card>
+        <div className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
+          {t("migrations.strategy")}
         </div>
-      </form>
-    </Card>
+        <div className="mt-3 flex flex-col gap-2">
+          {STRATEGIES.map((s) => {
+            const { label, desc } = strategyLabel(s, t as never);
+            const checked = f.strategy === s;
+            return (
+              <label
+                key={s}
+                className={`flex cursor-pointer items-start gap-3 rounded-md border p-3 transition ${
+                  checked
+                    ? "border-accent bg-overlay"
+                    : "border-border-subtle hover:border-border-strong"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="strategy"
+                  className="mt-1 h-4 w-4 cursor-pointer accent-accent"
+                  checked={checked}
+                  onChange={() => field("strategy", s)}
+                  disabled={disabled}
+                />
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-sm font-medium text-text">{label}</span>
+                  <span className="text-xs text-text-muted">{desc}</span>
+                </div>
+              </label>
+            );
+          })}
+        </div>
+
+        {f.strategy === "append" ? (
+          <label className="mt-4 flex flex-col gap-1">
+            <span className="text-xs text-text-secondary">
+              {t("migrations.cursorColumn")}
+            </span>
+            <Input
+              value={f.cursorColumn}
+              onChange={(e) => field("cursorColumn", e.target.value)}
+              disabled={disabled}
+              placeholder="updated_at"
+            />
+            <span className="text-xs text-text-muted">
+              {t("migrations.cursorColumnHelp")}
+            </span>
+            {errors.cursorColumn ? (
+              <span className="text-xs text-error">
+                {t("migrations.errRequired")}
+              </span>
+            ) : null}
+          </label>
+        ) : null}
+
+        {f.strategy === "mirror" ? (
+          <label className="mt-4 flex flex-col gap-1">
+            <span className="text-xs text-text-secondary">
+              {t("migrations.keyColumnsLabel")}
+            </span>
+            <Input
+              value={f.keyColumns}
+              onChange={(e) => field("keyColumns", e.target.value)}
+              disabled={disabled}
+              placeholder="id"
+            />
+            <span className="text-xs text-text-muted">
+              {t("migrations.keyColumnsHelp")}
+            </span>
+            {errors.keyColumns ? (
+              <span className="text-xs text-error">
+                {t("migrations.errRequired")}
+              </span>
+            ) : null}
+          </label>
+        ) : null}
+      </Card>
+
+      {/* SCHEMA PREVIEW — only when we have a source connection + table */}
+      {sourceConnRow && f.sourceTable ? (
+        <Card>
+          <div className="flex items-baseline justify-between">
+            <div className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
+              {t("migrations.schemaPreview")}
+            </div>
+            {columnsState === "ok" ? (
+              <span className="text-xs text-text-muted">
+                {t("migrations.schemaPreviewHint", {
+                  n: sourceColumns.length,
+                })}
+              </span>
+            ) : null}
+          </div>
+          <div className="mt-3 max-h-56 overflow-y-auto rounded-md border border-border-subtle">
+            {columnsState === "loading" ? (
+              <p className="px-3 py-4 text-xs text-text-muted">
+                {t("migrations.schemaLoading")}
+              </p>
+            ) : columnsState === "fail" ? (
+              <p className="px-3 py-4 text-xs text-warning">
+                {t("migrations.schemaLoadFailed")}
+              </p>
+            ) : columnsState === "ok" && sourceColumns.length > 0 ? (
+              <table className="w-full text-xs">
+                <tbody>
+                  {sourceColumns.map((c) => {
+                    const isPk =
+                      f.strategy === "mirror" &&
+                      f.keyColumns
+                        .split(",")
+                        .map((s) => s.trim())
+                        .includes(c.name);
+                    return (
+                      <tr
+                        key={c.name}
+                        className="border-b border-border-subtle last:border-0"
+                      >
+                        <td className="px-3 py-1.5 font-mono text-text">
+                          {c.name}
+                          {isPk ? (
+                            <span className="ml-2 inline-flex h-4 items-center rounded-sm bg-accent/15 px-1 text-[10px] font-semibold uppercase text-accent">
+                              PK
+                            </span>
+                          ) : null}
+                        </td>
+                        <td className="px-3 py-1.5 font-mono text-text-muted">
+                          {c.type}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            ) : null}
+          </div>
+        </Card>
+      ) : null}
+
+      <div className="flex justify-end gap-2">
+        <Button
+          type="button"
+          variant="ghost"
+          onClick={onCancel}
+          disabled={submitting}
+        >
+          {t("common.cancel")}
+        </Button>
+        <Button type="submit" loading={submitting} disabled={disabled}>
+          {submitLabel}
+        </Button>
+      </div>
+    </form>
   );
 }

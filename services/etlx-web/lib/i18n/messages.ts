@@ -124,8 +124,43 @@ export const en = {
   "migrations.deleteConfirm":
     "This will delete the migration pipeline. Runs and history stay in the audit log.",
   "migrations.notMigration":
-    "This pipeline has a richer shape (graph mode, transforms, or fan-out). Open it in the pipelines builder instead.",
+    "This pipeline has a richer shape (graph mode, transforms, fan-out, or a custom query). Open it in the pipelines builder instead.",
   "migrations.openInPipelines": "Open in pipelines",
+  // Phase AAN3 (2026-05-29) — migration-shaped form: table picker +
+  // strategy + schema preview, NOT a generic ETL form.
+  "migrations.from": "From",
+  "migrations.to": "To",
+  "migrations.fromConnection": "Source connection",
+  "migrations.toConnection": "Destination connection",
+  "migrations.pickTable": "Pick a table to copy",
+  "migrations.pickConnFirst": "Pick a source connection first",
+  "migrations.destTable": "Destination table name",
+  "migrations.destTableHelp":
+    "Will be created on the destination if it doesn't exist. Types translate across DBs automatically.",
+  "migrations.strategy": "Strategy",
+  "migrations.strategySnapshot": "Full snapshot",
+  "migrations.strategySnapshotDesc":
+    "Drop and rebuild the destination each run. Safe re-runs, schema drift tolerated.",
+  "migrations.strategyAppend": "Append new rows",
+  "migrations.strategyAppendDesc":
+    "Only rows newer than the cursor. History preserved on the destination.",
+  "migrations.strategyMirror": "Live mirror",
+  "migrations.strategyMirrorDesc":
+    "Upsert by key. Existing rows update in place; new rows insert.",
+  "migrations.cursorColumn": "Cursor column",
+  "migrations.cursorColumnHelp":
+    "A monotonically-increasing column (id, updated_at). The runtime tracks its high-water mark per run.",
+  "migrations.keyColumnsLabel": "Primary key columns",
+  "migrations.keyColumnsHelp":
+    "Comma-separated. Become the PRIMARY KEY on the destination so upserts have something to anchor on.",
+  "migrations.schemaPreview": "Source schema",
+  "migrations.schemaPreviewHint":
+    "{n} columns will be replicated. The runtime translates DB-specific types automatically.",
+  "migrations.schemaLoadFailed":
+    "Couldn't read the source schema. The migration will still run — types will be inferred at write time.",
+  "migrations.schemaLoading": "Reading source schema…",
+  "migrations.directionArrow": "to",
+  "migrations.colStrategy": "Strategy",
   // sensors page (ADR-0041 K3c)
   "sensors.new": "New sensor",
   "sensors.newTitle": "New sensor",
@@ -1009,8 +1044,42 @@ export const ko: Messages = {
   "migrations.deleteConfirm":
     "이 마이그레이션 파이프라인이 삭제됩니다. 실행 기록과 audit log는 그대로 유지됩니다.",
   "migrations.notMigration":
-    "이 파이프라인은 더 복잡한 형태입니다(graph 모드/transform/fan-out). 파이프라인 빌더에서 여세요.",
+    "이 파이프라인은 더 복잡한 형태입니다(graph 모드/transform/fan-out/커스텀 쿼리). 파이프라인 빌더에서 여세요.",
   "migrations.openInPipelines": "파이프라인에서 열기",
+  // Phase AAN3 — 마이그레이션 전용 폼 (테이블 picker + strategy + 스키마 미리보기)
+  "migrations.from": "출발",
+  "migrations.to": "도착",
+  "migrations.fromConnection": "소스 연결",
+  "migrations.toConnection": "도착지 연결",
+  "migrations.pickTable": "복제할 테이블 선택",
+  "migrations.pickConnFirst": "먼저 소스 연결을 선택하세요",
+  "migrations.destTable": "도착지 테이블 이름",
+  "migrations.destTableHelp":
+    "도착지에 없으면 자동 생성됩니다. DB 간 타입 변환은 자동 처리됩니다.",
+  "migrations.strategy": "방식",
+  "migrations.strategySnapshot": "전체 스냅샷",
+  "migrations.strategySnapshotDesc":
+    "매 실행마다 도착지를 drop 후 재구축. 재실행 안전, 스키마 변경 허용.",
+  "migrations.strategyAppend": "신규 행 추가",
+  "migrations.strategyAppendDesc":
+    "커서 이후의 새 행만 복제. 도착지에 이력 보존.",
+  "migrations.strategyMirror": "실시간 미러",
+  "migrations.strategyMirrorDesc":
+    "키로 upsert. 기존 행은 갱신, 새 행은 추가.",
+  "migrations.cursorColumn": "커서 컬럼",
+  "migrations.cursorColumnHelp":
+    "단조 증가 컬럼(id, updated_at 등). 런타임이 실행마다 최댓값을 기록합니다.",
+  "migrations.keyColumnsLabel": "PRIMARY KEY 컬럼",
+  "migrations.keyColumnsHelp":
+    "쉼표 구분. 도착지의 PRIMARY KEY가 되어 upsert가 충돌 컬럼으로 사용합니다.",
+  "migrations.schemaPreview": "소스 스키마",
+  "migrations.schemaPreviewHint":
+    "{n}개 컬럼이 복제됩니다. DB별 타입은 런타임이 자동 변환합니다.",
+  "migrations.schemaLoadFailed":
+    "소스 스키마를 읽지 못했습니다. 마이그레이션은 정상 실행되며, 타입은 write 시점에 추론됩니다.",
+  "migrations.schemaLoading": "소스 스키마 읽는 중…",
+  "migrations.directionArrow": "→",
+  "migrations.colStrategy": "방식",
   "nav.sensors": "센서",
   // 센서 페이지 (ADR-0041 K3c)
   "sensors.new": "새 센서",

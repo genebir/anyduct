@@ -89,8 +89,9 @@ export default function NewMigrationPage() {
         title={t("migrations.formTitleNew")}
         subtitle={t("migrations.formSubtitleNew")}
       />
-      <main className="mx-auto w-full max-w-3xl flex-1 space-y-6 overflow-y-auto px-6 py-8">
+      <main className="mx-auto w-full max-w-4xl flex-1 space-y-6 overflow-y-auto px-6 py-8">
         <MigrationForm
+          workspaceId={ws?.id ?? ""}
           name={name}
           onNameChange={setName}
           form={form}

@@ -188,6 +188,10 @@ export const en = {
   "migrations.bulkCreated": "{n} migrations created",
   "migrations.bulkPartial":
     "{ok} created, {fail} failed (check the toasts for which ones).",
+  "migrations.pickSchema": "Pick a schema",
+  "migrations.noTablesFound": "No tables found on this connection",
+  "migrations.noSchemasFound":
+    "No schemas found on this connection — the introspector couldn't enumerate any.",
   // sensors page (ADR-0041 K3c)
   "sensors.new": "New sensor",
   "sensors.newTitle": "New sensor",
@@ -1134,6 +1138,10 @@ export const ko: Messages = {
   "migrations.bulkCreated": "마이그레이션 {n}개 생성됨",
   "migrations.bulkPartial":
     "{ok}개 생성, {fail}개 실패 (실패 항목은 toast에서 확인).",
+  "migrations.pickSchema": "스키마 선택",
+  "migrations.noTablesFound": "이 연결에서 테이블을 찾지 못했습니다.",
+  "migrations.noSchemasFound":
+    "이 연결에서 스키마를 찾지 못했습니다.",
   "nav.sensors": "센서",
   // 센서 페이지 (ADR-0041 K3c)
   "sensors.new": "새 센서",

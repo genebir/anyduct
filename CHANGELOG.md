@@ -9,6 +9,15 @@
 
 ## [Unreleased]
 
+### Changed
+- **소스 테이블 / 스키마를 dropdown으로 선택 (Phase AAS follow-up)** — 사용자 *"직접 테이블명을 입력하는 게 아니라 드롭다운 혹은 라디오 버튼으로 선택해서 할 수 있도록 해줘"*.
+  - **Single mode**: source 테이블 — `<input list>` + datalist (free text 허용) → `<select>` (introspected 목록만). 임의 이름 입력 → 오타로 4xx 떨어지는 사례 차단.
+  - **Schema mode**: source schema — 동일하게 `<select>` 변환.
+  - 빈 상태(connection 안 골랐을 때 / 로딩 중 / introspect 결과 0개) 모두 친화적 placeholder 메시지.
+  - **Destination 측은 그대로 free text** — 도착지는 자동 생성되니까 유연성 보존.
+  - i18n 3 신규 키 en/ko(`pickSchema`/`noTablesFound`/`noSchemasFound`).
+  - 검증: web tsc clean. 코어/서버 변화 0.
+
 ### Added
 - **스키마 단위 마이그레이션 (Phase AAS, 2026-06-01)** — 사용자 *"스키마 단위로 마이그레이션 할 수 있도록 추가해줘"*. 한 스키마의 N개 테이블을 한 번에 등록:
   - **Mode 토글**: Single table (기존) / Entire schema. 폼 상단에 segmented control.

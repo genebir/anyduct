@@ -353,25 +353,35 @@ export function MigrationForm({
                 <span className="text-xs text-text-secondary">
                   {t("migrations.pickTable")}
                 </span>
-                <input
-                  list="src-tables-list"
+                {/* Phase AAS follow-up (2026-06-01) — user request
+                    "직접 테이블명 입력 말고 드롭다운으로 선택할 수
+                    있도록". Free-text + datalist let the user type
+                    typos that don't exist on the source; a real
+                    ``<select>`` constrains them to the introspected
+                    list. Loaded source tables (``sourceTables``)
+                    already come from ``connectionsApi.tables`` which
+                    is the runtime's source of truth. */}
+                <select
                   value={f.sourceTable}
                   onChange={(e) => field("sourceTable", e.target.value)}
-                  disabled={disabled || !sourceConnRow}
-                  placeholder={
-                    sourceConnRow
-                      ? tablesLoading
-                        ? "…"
-                        : sourceTables[0] ?? "public.orders"
-                      : t("migrations.pickConnFirst")
-                  }
-                  className="h-10 rounded-md border border-border-subtle bg-elevated px-3 text-sm text-text focus-visible:border-accent focus-visible:outline-none"
-                />
-                <datalist id="src-tables-list">
+                  disabled={disabled || !sourceConnRow || tablesLoading}
+                  className="h-10 rounded-md border border-border-subtle bg-elevated px-2 text-sm text-text focus-visible:border-accent focus-visible:outline-none"
+                >
+                  <option value="">
+                    {!sourceConnRow
+                      ? t("migrations.pickConnFirst")
+                      : tablesLoading
+                        ? t("migrations.schemaLoading")
+                        : sourceTables.length === 0
+                          ? t("migrations.noTablesFound")
+                          : t("migrations.pickTable")}
+                  </option>
                   {sourceTables.map((tab) => (
-                    <option key={tab} value={tab} />
+                    <option key={tab} value={tab}>
+                      {tab}
+                    </option>
                   ))}
-                </datalist>
+                </select>
                 {errors.sourceTable ? (
                   <span className="text-xs text-error">
                     {t("migrations.errRequired")}
@@ -384,8 +394,7 @@ export function MigrationForm({
                   <span className="text-xs text-text-secondary">
                     {t("migrations.sourceSchema")}
                   </span>
-                  <input
-                    list="src-schemas-list"
+                  <select
                     value={f.sourceSchema}
                     onChange={(e) => {
                       if (!form) return;
@@ -401,21 +410,24 @@ export function MigrationForm({
                         sinkSchema: form.sinkSchema || e.target.value,
                       });
                     }}
-                    disabled={disabled || !sourceConnRow}
-                    placeholder={
-                      sourceConnRow
-                        ? tablesLoading
-                          ? "…"
-                          : allSchemas[0] ?? "public"
-                        : t("migrations.pickConnFirst")
-                    }
-                    className="h-10 rounded-md border border-border-subtle bg-elevated px-3 text-sm text-text focus-visible:border-accent focus-visible:outline-none"
-                  />
-                  <datalist id="src-schemas-list">
+                    disabled={disabled || !sourceConnRow || tablesLoading}
+                    className="h-10 rounded-md border border-border-subtle bg-elevated px-2 text-sm text-text focus-visible:border-accent focus-visible:outline-none"
+                  >
+                    <option value="">
+                      {!sourceConnRow
+                        ? t("migrations.pickConnFirst")
+                        : tablesLoading
+                          ? t("migrations.schemaLoading")
+                          : allSchemas.length === 0
+                            ? t("migrations.noSchemasFound")
+                            : t("migrations.pickSchema")}
+                    </option>
                     {allSchemas.map((s) => (
-                      <option key={s} value={s} />
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
                     ))}
-                  </datalist>
+                  </select>
                   {errors.sourceSchema ? (
                     <span className="text-xs text-error">
                       {t("migrations.errRequired")}

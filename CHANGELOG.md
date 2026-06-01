@@ -10,6 +10,13 @@
 ## [Unreleased]
 
 ### Added
+- **빌더 "Cross-DB Migration" 스타터 템플릿 (Phase AAI)** — 사용자가 "DB 간 마이그레이션" 패턴을 한 클릭으로 시작:
+  - 새 템플릿 `db-migrate-cross`: postgres source + sqlite sink, **`auto_create_table=true` 사전 설정**(사용자가 토글 발견할 필요 0).
+  - `state()` helper에 per-node `overrides` 인자 추가 — 템플릿이 노드별 field defaults 지정 가능.
+  - i18n 4 신규 키 en/ko(`tpl.dbMigrateCross/Desc`). 설명: "Postgres → SQLite. 싱크 테이블을 자동 생성하고 타입을 자동 변환".
+  - 사용자 promise: AAA→AAH의 cross-DB 기능을 가장 짧은 path로 다음 사용자에게 노출.
+  - 검증: web tsc clean. 코어/서버 변화 0.
+
 - **`examples/cross_db_migration.yaml` + 동반 `connections.example.yaml` (Phase AAH)** — Phases AAA→AAG의 cross-DB migration 기능을 한 페이지 분량의 카피·페이스트 가능한 사용자용 문서 + 회귀 가드. `auto_create_table` + `auto_create_if_exists` 코멘트 가이드, `etlx validate` 명령 사용법. 신규 unit `test_example_yaml_loads.py` — 예제 YAML이 향후 config-schema 변경에 드리프트 안 하도록 lock-in. 코어 unit 804→805(+1). ruff clean.
 
 ### Changed

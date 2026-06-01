@@ -318,6 +318,9 @@ export const en = {
   "tpl.blankDesc": "Empty Postgres → Postgres pipeline to build from scratch.",
   "tpl.dbCopy": "Copy DB → DB",
   "tpl.dbCopyDesc": "Read a table from one database and write it to another.",
+  "tpl.dbMigrateCross": "Cross-DB migration",
+  "tpl.dbMigrateCrossDesc":
+    "Postgres → SQLite with auto-created destination table. Types translate automatically (BIGINT → INTEGER, TIMESTAMPTZ → TEXT, …).",
   "tpl.dbFiltered": "Filtered copy",
   "tpl.dbFilteredDesc": "Read, keep only matching rows, then write.",
   "tpl.apiToTable": "API → table",
@@ -1149,6 +1152,9 @@ export const ko: Messages = {
   "tpl.blankDesc": "처음부터 만드는 빈 Postgres → Postgres 파이프라인.",
   "tpl.dbCopy": "DB → DB 복사",
   "tpl.dbCopyDesc": "한 데이터베이스의 테이블을 읽어 다른 곳에 씁니다.",
+  "tpl.dbMigrateCross": "DB 간 마이그레이션",
+  "tpl.dbMigrateCrossDesc":
+    "Postgres → SQLite. 싱크 테이블을 자동 생성하고 타입을 자동 변환합니다(BIGINT → INTEGER, TIMESTAMPTZ → TEXT 등).",
   "tpl.dbFiltered": "필터링 복사",
   "tpl.dbFilteredDesc": "읽은 뒤 조건에 맞는 행만 남겨서 씁니다.",
   "tpl.apiToTable": "API → 테이블",

@@ -18,11 +18,12 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { PlayIcon, Trash2Icon } from "lucide-react";
+import { CalendarClockIcon, PlayIcon, Trash2Icon } from "lucide-react";
 import { toast } from "sonner";
 import { Header } from "@/components/shell/header";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { StatusBadge } from "@/components/ui/status-badge";
 import {
@@ -30,9 +31,11 @@ import {
   connectionsApi,
   pipelinesApi,
   runsApi,
+  schedulesApi,
   type ConnectionSummary,
   type PipelineSummary,
   type RunSummary,
+  type ScheduleSummary,
 } from "@/lib/api";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import { useLocale } from "@/components/providers/locale-provider";
@@ -88,19 +91,37 @@ export default function MigrationDetailPage() {
   // sees the migration in motion without leaving the page.
   const [runs, setRuns] = useState<RunSummary[] | null>(null);
   const [triggering, setTriggering] = useState(false);
+  // Phase AAU (2026-06-01) — quick schedule. One migration ⇒ at most
+  // one cron schedule for our UX; the underlying server supports
+  // many, but the migration surface is narrower on purpose. We pick
+  // the first (or null) and present it as a single toggle + cron
+  // input on the detail page.
+  const [schedule, setSchedule] = useState<ScheduleSummary | null>(null);
+  const [scheduleLoaded, setScheduleLoaded] = useState(false);
+  const [scheduleDraft, setScheduleDraft] = useState("");
+  const [savingSchedule, setSavingSchedule] = useState(false);
 
   useEffect(() => {
     if (!ws || !id) return;
     let cancelled = false;
     (async () => {
       try {
-        const [p, cs] = await Promise.all([
+        const [p, cs, scheds] = await Promise.all([
           pipelinesApi.get(ws.id, id),
           connectionsApi.list(ws.id),
+          // Phase AAU (2026-06-01) — load any existing schedule so
+          // the operator sees the current automation state at a
+          // glance. Soft-fail (empty array on error) so a network
+          // wobble doesn't block the form.
+          schedulesApi.list(ws.id, id).catch(() => [] as ScheduleSummary[]),
         ]);
         if (cancelled) return;
         setPipeline(p);
         setConnections(cs);
+        const first = scheds[0] ?? null;
+        setSchedule(first);
+        setScheduleDraft(first?.cron_expr ?? "");
+        setScheduleLoaded(true);
         const parsed = parseMigrationConfig(p.current_config_json);
         if (!parsed) {
           setOutsideMigrationShape(true);
@@ -182,6 +203,73 @@ export default function MigrationDetailPage() {
       toast.error(err instanceof ApiError ? err.message : String(err));
     } finally {
       setTriggering(false);
+    }
+  }
+
+  async function onSaveSchedule() {
+    if (!ws || !pipeline) return;
+    const expr = scheduleDraft.trim();
+    if (!expr) {
+      toast.error(t("migrations.scheduleCronRequired"));
+      return;
+    }
+    setSavingSchedule(true);
+    try {
+      if (schedule) {
+        const updated = await schedulesApi.update(ws.id, pipeline.id, schedule.id, {
+          cron_expr: expr,
+        });
+        setSchedule(updated);
+        toast.success(t("migrations.scheduleSaved"));
+      } else {
+        const created = await schedulesApi.create(ws.id, pipeline.id, {
+          // Auto-name from the pipeline so the schedules table stays
+          // navigable from the global schedules page.
+          name: `${pipeline.name} (auto)`,
+          mode: "batch",
+          cron_expr: expr,
+          is_active: true,
+        });
+        setSchedule(created);
+        toast.success(t("migrations.scheduleSaved"));
+      }
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : String(err));
+    } finally {
+      setSavingSchedule(false);
+    }
+  }
+
+  async function onToggleSchedule() {
+    if (!ws || !pipeline || !schedule) return;
+    setSavingSchedule(true);
+    try {
+      const updated = await schedulesApi.toggle(ws.id, pipeline.id, schedule.id);
+      setSchedule(updated);
+      toast.success(
+        updated.is_active
+          ? t("migrations.scheduleActivated")
+          : t("migrations.schedulePaused"),
+      );
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : String(err));
+    } finally {
+      setSavingSchedule(false);
+    }
+  }
+
+  async function onClearSchedule() {
+    if (!ws || !pipeline || !schedule) return;
+    setSavingSchedule(true);
+    try {
+      await schedulesApi.delete(ws.id, pipeline.id, schedule.id);
+      setSchedule(null);
+      setScheduleDraft("");
+      toast.success(t("migrations.scheduleCleared"));
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : String(err));
+    } finally {
+      setSavingSchedule(false);
     }
   }
 
@@ -276,6 +364,17 @@ export default function MigrationDetailPage() {
               onCancel={() => router.push(`/w/${slug}/migrations`)}
               submitLabel={t("common.save")}
             />
+            <ScheduleCard
+              loaded={scheduleLoaded}
+              schedule={schedule}
+              draft={scheduleDraft}
+              onDraft={setScheduleDraft}
+              saving={savingSchedule}
+              onSave={() => void onSaveSchedule()}
+              onToggle={() => void onToggleSchedule()}
+              onClear={() => void onClearSchedule()}
+              t={t}
+            />
             <RecentRunsCard
               runs={runs}
               slug={slug}
@@ -352,6 +451,104 @@ function RecentRunsCard({
           </ul>
         )}
       </div>
+    </Card>
+  );
+}
+
+function ScheduleCard({
+  loaded,
+  schedule,
+  draft,
+  onDraft,
+  saving,
+  onSave,
+  onToggle,
+  onClear,
+  t,
+}: {
+  loaded: boolean;
+  schedule: ScheduleSummary | null;
+  draft: string;
+  onDraft: (v: string) => void;
+  saving: boolean;
+  onSave: () => void;
+  onToggle: () => void;
+  onClear: () => void;
+  t: (k: never) => string;
+}) {
+  const tx = t as unknown as (k: string) => string;
+  return (
+    <Card>
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <CalendarClockIcon
+            size={16}
+            className={
+              schedule?.is_active
+                ? "text-accent"
+                : schedule
+                  ? "text-warning"
+                  : "text-text-muted"
+            }
+          />
+          <div className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
+            {tx("migrations.schedule")}
+          </div>
+          {schedule ? (
+            <span
+              className={`inline-flex h-4 items-center rounded-sm px-1 text-[10px] font-semibold uppercase ${
+                schedule.is_active
+                  ? "bg-accent/15 text-accent"
+                  : "bg-warning/15 text-warning"
+              }`}
+            >
+              {schedule.is_active
+                ? tx("migrations.scheduleActive")
+                : tx("migrations.schedulePausedChip")}
+            </span>
+          ) : null}
+        </div>
+        {schedule ? (
+          <div className="flex gap-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onToggle}
+              loading={saving}
+            >
+              {schedule.is_active
+                ? tx("migrations.schedulePause")
+                : tx("migrations.scheduleResume")}
+            </Button>
+            <Button variant="ghost" size="sm" onClick={onClear} loading={saving}>
+              {tx("migrations.scheduleClear")}
+            </Button>
+          </div>
+        ) : null}
+      </div>
+      <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-end">
+        <label className="flex flex-1 flex-col gap-1">
+          <span className="text-xs text-text-secondary">
+            {tx("migrations.scheduleCronLabel")}
+          </span>
+          <Input
+            value={draft}
+            onChange={(e) => onDraft(e.target.value)}
+            placeholder="0 2 * * *   (예: 매일 02:00)"
+            disabled={!loaded || saving}
+          />
+        </label>
+        <Button
+          onClick={onSave}
+          loading={saving}
+          disabled={!loaded || !draft.trim()}
+        >
+          {schedule ? tx("migrations.scheduleUpdate") : tx("migrations.scheduleEnable")}
+        </Button>
+      </div>
+      <p className="mt-2 text-xs text-text-muted">
+        {tx("migrations.scheduleHint")}
+      </p>
     </Card>
   );
 }

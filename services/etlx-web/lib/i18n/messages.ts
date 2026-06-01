@@ -201,6 +201,23 @@ export const en = {
   "migrations.filterNoMatch": "No matches",
   "migrations.filterNoMatchDesc":
     "No migrations match the current search and filters. Try widening them or clearing all.",
+  // Phase AAU (2026-06-01) — quick schedule on the detail page
+  "migrations.schedule": "Schedule",
+  "migrations.scheduleActive": "active",
+  "migrations.schedulePausedChip": "paused",
+  "migrations.scheduleCronLabel": "Cron expression",
+  "migrations.scheduleEnable": "Enable schedule",
+  "migrations.scheduleUpdate": "Update schedule",
+  "migrations.schedulePause": "Pause",
+  "migrations.scheduleResume": "Resume",
+  "migrations.scheduleClear": "Clear",
+  "migrations.scheduleHint":
+    "Standard 5-field cron. The scheduler queues a run each time the cron fires (subject to current connector and pipeline state).",
+  "migrations.scheduleCronRequired": "Enter a cron expression first.",
+  "migrations.scheduleSaved": "Schedule saved",
+  "migrations.scheduleActivated": "Schedule activated",
+  "migrations.schedulePaused": "Schedule paused",
+  "migrations.scheduleCleared": "Schedule cleared",
   // sensors page (ADR-0041 K3c)
   "sensors.new": "New sensor",
   "sensors.newTitle": "New sensor",
@@ -1143,6 +1160,23 @@ export const ko: Messages = {
   "migrations.filterNoMatch": "검색 결과 없음",
   "migrations.filterNoMatchDesc":
     "현재 검색/필터에 일치하는 마이그레이션이 없습니다. 조건을 줄이거나 초기화하세요.",
+  // Phase AAU (2026-06-01) — detail 페이지 schedule
+  "migrations.schedule": "스케줄",
+  "migrations.scheduleActive": "활성",
+  "migrations.schedulePausedChip": "일시정지",
+  "migrations.scheduleCronLabel": "Cron 표현식",
+  "migrations.scheduleEnable": "스케줄 활성화",
+  "migrations.scheduleUpdate": "스케줄 업데이트",
+  "migrations.schedulePause": "일시정지",
+  "migrations.scheduleResume": "재개",
+  "migrations.scheduleClear": "삭제",
+  "migrations.scheduleHint":
+    "표준 5필드 cron. 스케줄러가 firing마다 run을 큐에 추가합니다(현재 connector / pipeline 상태에 따라).",
+  "migrations.scheduleCronRequired": "cron 표현식을 먼저 입력하세요.",
+  "migrations.scheduleSaved": "스케줄 저장됨",
+  "migrations.scheduleActivated": "스케줄 활성화됨",
+  "migrations.schedulePaused": "스케줄 일시정지됨",
+  "migrations.scheduleCleared": "스케줄 삭제됨",
   "nav.sensors": "센서",
   // 센서 페이지 (ADR-0041 K3c)
   "sensors.new": "새 센서",

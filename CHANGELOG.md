@@ -10,6 +10,15 @@
 ## [Unreleased]
 
 ### Added
+- **마이그레이션 detail에 Quick Schedule (Phase AAU, 2026-06-01)** — 마이그레이션을 자동 실행 흐름에 한 화면에서 묶기:
+  - **`ScheduleCard`**: detail 페이지 양식 옆에 cron 입력 + Enable/Update/Pause/Resume/Clear 액션. `schedulesApi`(이미 존재) 위에 얇은 wrapper.
+  - **상태 chip**: `active` / `paused` / 없음(없음 상태) — 아이콘 색까지 신호화.
+  - **단일 schedule 가정**: 운영 모델 단순화 — 마이그레이션 1건은 schedule 1건. 더 복잡한 흐름은 글로벌 Schedules 페이지에서.
+  - **자동 이름**: 마이그레이션 이름 + " (auto)" 자동 부여 → Schedules 글로벌 페이지에서 추적 가능.
+  - **lifecycle**: detail page load 시 `Promise.all`에 `schedulesApi.list` 추가, soft-fail(empty array on error). `setScheduleLoaded` 플래그로 disabled 처리.
+  - i18n en/ko 각 15 신규 키.
+  - 검증: web tsc clean. 코어/서버 변화 0.
+
 - **마이그레이션 리스트 검색 + From/To/Strategy 필터 (Phase AAT, 2026-06-01)** — 스키마 단위 일괄 생성으로 마이그레이션이 빠르게 누적될 수 있어 navigability 보강:
   - **검색 input**: 이름(name) + 설명(description) substring case-insensitive.
   - **From 필터**: 데이터에 실제로 존재하는 source connections만 dropdown(orphaned 옵션 0).

@@ -843,6 +843,9 @@ export const en = {
   "runs.triggerScheduleTitle": "Auto-fired by a cron schedule",
   "runs.triggerManual": "manual",
   "runs.triggerManualTitle": "User-triggered (Run now)",
+  // Phase ABU (2026-06-01) — friendly self-actor on manual trigger
+  "runs.triggerManualByYou": "by you",
+  "runs.triggerManualByYouTitle": "You triggered this run manually (Run now)",
   "runs.emptyTitle": "No runs yet",
   "runs.emptyDesc":
     "Trigger a pipeline manually or wait for a scheduled run. This view updates every five seconds.",
@@ -1896,6 +1899,9 @@ export const ko: Messages = {
   "runs.triggerScheduleTitle": "cron 스케줄이 자동 발화",
   "runs.triggerManual": "수동",
   "runs.triggerManualTitle": "사용자가 수동 실행 (Run now)",
+  // Phase ABU (2026-06-01) — 본인이 친 수동 실행 친화 표시
+  "runs.triggerManualByYou": "내가 실행",
+  "runs.triggerManualByYouTitle": "내가 'Run now'로 수동 실행했음",
   "runs.emptyTitle": "아직 실행이 없습니다",
   "runs.emptyDesc":
     "파이프라인을 수동으로 실행하거나 예약된 실행을 기다리세요. 이 화면은 5초마다 갱신됩니다.",

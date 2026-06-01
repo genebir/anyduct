@@ -35,6 +35,7 @@ import {
   type RunSummary,
 } from "@/lib/api";
 import { migrationSummaryOf } from "@/lib/migration-utils";
+import { useCurrentUser } from "@/components/providers/auth-provider";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import { useLocale } from "@/components/providers/locale-provider";
 import type { Messages } from "@/lib/i18n/messages";
@@ -57,6 +58,9 @@ function formatDuration(s: number | null): string {
 function buildColumns(
   t: Translate,
   pipelineNameById: Map<string, string>,
+  /** Phase ABU (2026-06-01) — used to render "by you" when the
+   *  signed-in user fired the run, mirroring ABT on the audit log. */
+  currentUserId: string | null,
 ): Column<RunSummary>[] {
   return [
     {
@@ -100,13 +104,18 @@ function buildColumns(
           );
         }
         if (r.triggered_by_user_id) {
+          const byYou = r.triggered_by_user_id === currentUserId;
           return (
             <span
               className="inline-flex h-5 items-center gap-1 rounded-sm bg-overlay px-1.5 text-[11px] text-text-secondary"
-              title={t("runs.triggerManualTitle")}
+              title={
+                byYou
+                  ? t("runs.triggerManualByYouTitle")
+                  : t("runs.triggerManualTitle")
+              }
             >
               <HandIcon size={11} />
-              {t("runs.triggerManual")}
+              {byYou ? t("runs.triggerManualByYou") : t("runs.triggerManual")}
             </span>
           );
         }
@@ -187,6 +196,8 @@ export default function RunsPage() {
   const statusFilter = (search.get("status") as RunStatus | null) ?? null;
   const ws = useWorkspaceFromSlug(slug);
   const { t } = useLocale();
+  // Phase ABU (2026-06-01) — pass to buildColumns for "by you" chip.
+  const currentUser = useCurrentUser();
   const [rows, setRows] = useState<RunSummary[] | null>(null);
   const [pipelines, setPipelines] = useState<PipelineSummary[]>([]);
   // Visible row count (grows on Load more). Polling re-fetches with
@@ -373,7 +384,11 @@ export default function RunsPage() {
             </div>
           ) : (
             <DataTable
-              columns={buildColumns(t, pipelineNameById)}
+              columns={buildColumns(
+                t,
+                pipelineNameById,
+                currentUser?.id ?? null,
+              )}
               rows={rows}
               onRowClick={(row) => {
                 if (ws) router.push(`/w/${ws.slug}/runs/${row.id}`);

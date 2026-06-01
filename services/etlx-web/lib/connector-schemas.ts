@@ -248,10 +248,68 @@ const KAFKA: ConnectorSchema = {
   ],
 };
 
+// Phase AAQ (2026-05-29) — Vertica analytical column-store.
+const VERTICA: ConnectorSchema = {
+  type: "vertica",
+  label: "Vertica",
+  description:
+    "vertica-python-backed batch source + sink for the Vertica analytical column-store.",
+  fields: [
+    { key: "host", label: "Host", type: "string", required: true, defaultValue: "localhost" },
+    { key: "port", label: "Port", type: "number", defaultValue: 5433 },
+    { key: "database", label: "Database", type: "string", required: true },
+    { key: "user", label: "User", type: "string", required: true },
+    {
+      key: "password",
+      label: "Password",
+      type: "password",
+      isSecret: true,
+      help: "Stored in the secret backend; never written to the metadata DB.",
+    },
+    {
+      key: "ssl",
+      label: "SSL",
+      type: "string",
+      defaultValue: "false",
+      help: "'true' or 'false' — wrap the wire connection in TLS.",
+    },
+  ],
+};
+
+// Phase AAQ (2026-05-29) — SQL Server / Azure SQL.
+const MSSQL: ConnectorSchema = {
+  type: "mssql",
+  label: "SQL Server",
+  description:
+    "pymssql-backed batch source + sink for Microsoft SQL Server and Azure SQL.",
+  fields: [
+    { key: "host", label: "Host", type: "string", required: true, defaultValue: "localhost" },
+    { key: "port", label: "Port", type: "number", defaultValue: 1433 },
+    { key: "database", label: "Database", type: "string", required: true },
+    { key: "user", label: "User", type: "string", required: true },
+    {
+      key: "password",
+      label: "Password",
+      type: "password",
+      isSecret: true,
+      help: "Stored in the secret backend; never written to the metadata DB.",
+    },
+    {
+      key: "tds_version",
+      label: "TDS version",
+      type: "string",
+      defaultValue: "7.4",
+      help: "FreeTDS protocol — 7.4 covers SQL Server 2012+ and Azure SQL.",
+    },
+  ],
+};
+
 export const CONNECTOR_SCHEMAS: ConnectorSchema[] = [
   POSTGRES,
   MYSQL,
   SQLITE,
+  VERTICA,
+  MSSQL,
   MONGODB,
   S3,
   KAFKA,

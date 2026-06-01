@@ -102,10 +102,26 @@ _VENDOR_TO_CANONICAL: dict[str, CanonicalType] = {
     # ---- DECIMAL -----
     "decimal": CanonicalType.DECIMAL,
     "numeric": CanonicalType.DECIMAL,
+    # MSSQL currency types — DECIMAL preserves precision better than
+    # silently demoting to DOUBLE.
+    "money": CanonicalType.DECIMAL,
+    "smallmoney": CanonicalType.DECIMAL,
     # ---- STRINGS -----
     "varchar": CanonicalType.VARCHAR,
     "character varying": CanonicalType.VARCHAR,
     "char": CanonicalType.VARCHAR,
+    # Phase AAQ — MSSQL unicode variants. Length round-trips via the
+    # VARCHAR canonical (NVARCHAR(255) → VARCHAR canonical → renders
+    # back as NVARCHAR(255) in MSSQL or VARCHAR(255) elsewhere).
+    "nvarchar": CanonicalType.VARCHAR,
+    "nchar": CanonicalType.VARCHAR,
+    "ntext": CanonicalType.TEXT,
+    # MSSQL's GUIDs are 36-char strings on the wire — TEXT preserves
+    # them across DBs without forcing every dialect to ship a UUID type.
+    "uniqueidentifier": CanonicalType.TEXT,
+    # Phase AAQ — Vertica's large-text type. Length-unbounded so we
+    # collapse to TEXT rather than VARCHAR.
+    "long varchar": CanonicalType.TEXT,
     "text": CanonicalType.TEXT,
     "longtext": CanonicalType.TEXT,
     "mediumtext": CanonicalType.TEXT,
@@ -113,12 +129,18 @@ _VENDOR_TO_CANONICAL: dict[str, CanonicalType] = {
     # ---- BOOLEAN -----
     "boolean": CanonicalType.BOOLEAN,
     "bool": CanonicalType.BOOLEAN,
+    # MSSQL's boolean column type.
+    "bit": CanonicalType.BOOLEAN,
     # ---- TIME -----
     "timestamp": CanonicalType.TIMESTAMP,
     "timestamp with time zone": CanonicalType.TIMESTAMP,
     "timestamp without time zone": CanonicalType.TIMESTAMP,
     "timestamptz": CanonicalType.TIMESTAMP,
     "datetime": CanonicalType.TIMESTAMP,
+    # MSSQL temporal types.
+    "datetime2": CanonicalType.TIMESTAMP,
+    "datetimeoffset": CanonicalType.TIMESTAMP,
+    "smalldatetime": CanonicalType.TIMESTAMP,
     "date": CanonicalType.DATE,
     # ---- JSON -----
     "json": CanonicalType.JSON,
@@ -216,6 +238,56 @@ _DIALECT_DDL: dict[str, dict[CanonicalType, str]] = {
         CanonicalType.DATE: "DATE",
         CanonicalType.JSON: "JSON",
         CanonicalType.BLOB: "BLOB",
+    },
+    # Vertica (Phase AAQ, 2026-05-29) — column-oriented analytical DB.
+    # Type vocabulary is close to postgres with a few twists:
+    #   * TIMESTAMPTZ exists but the canonical name is TIMESTAMP WITH TZ;
+    #     "TIMESTAMPTZ" is also accepted, we pick the shorter form.
+    #   * No native JSON column; the standard pattern is to store JSON
+    #     payloads in VARCHAR/LONG VARCHAR and parse downstream.
+    #   * BOOLEAN is first-class.
+    #   * VARBYTES is the BLOB equivalent.
+    "vertica": {
+        CanonicalType.INTEGER: "INTEGER",
+        CanonicalType.BIGINT: "BIGINT",
+        CanonicalType.SMALLINT: "SMALLINT",
+        CanonicalType.REAL: "FLOAT",
+        CanonicalType.DOUBLE: "DOUBLE PRECISION",
+        CanonicalType.DECIMAL: "NUMERIC",
+        # LONG VARCHAR holds up to 32MB — closest to TEXT in semantics.
+        CanonicalType.TEXT: "LONG VARCHAR",
+        CanonicalType.VARCHAR: "VARCHAR",
+        CanonicalType.BOOLEAN: "BOOLEAN",
+        CanonicalType.TIMESTAMP: "TIMESTAMPTZ",
+        CanonicalType.DATE: "DATE",
+        # No native JSON — JSON payloads live in LONG VARCHAR.
+        CanonicalType.JSON: "LONG VARCHAR",
+        CanonicalType.BLOB: "VARBINARY",
+    },
+    # MSSQL (Phase AAQ, 2026-05-29) — SQL Server / Azure SQL.
+    # Type vocabulary picks the safe, modern subset:
+    #   * NVARCHAR(MAX) for TEXT to dodge SQL Server's deprecated TEXT type.
+    #   * BIT for BOOLEAN.
+    #   * DATETIME2 for TIMESTAMP (DATETIME is legacy + lower precision).
+    #   * NVARCHAR(MAX) for JSON (SQL Server has JSON helpers over plain
+    #     NVARCHAR, no dedicated column type).
+    #   * VARBINARY(MAX) for BLOB.
+    "mssql": {
+        CanonicalType.INTEGER: "INT",
+        CanonicalType.BIGINT: "BIGINT",
+        CanonicalType.SMALLINT: "SMALLINT",
+        CanonicalType.REAL: "REAL",
+        CanonicalType.DOUBLE: "FLOAT",
+        CanonicalType.DECIMAL: "DECIMAL",
+        # Use NVARCHAR(MAX) — SQL Server's modern unicode "large text"
+        # column. The plain ``TEXT`` type is deprecated.
+        CanonicalType.TEXT: "NVARCHAR(MAX)",
+        CanonicalType.VARCHAR: "NVARCHAR",
+        CanonicalType.BOOLEAN: "BIT",
+        CanonicalType.TIMESTAMP: "DATETIME2",
+        CanonicalType.DATE: "DATE",
+        CanonicalType.JSON: "NVARCHAR(MAX)",
+        CanonicalType.BLOB: "VARBINARY(MAX)",
     },
 }
 

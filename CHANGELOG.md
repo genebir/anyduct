@@ -10,6 +10,17 @@
 ## [Unreleased]
 
 ### Added
+- **Vertica + SQL Server (MSSQL) 커넥터 추가 — 마이그레이션 5×5 매트릭스 (Phase AAQ)** [ADR-0073] — 사용자 *"연결 유형 좀 더 추가해줘. vertica 포함해주고. 그에 따른 테이블 복사 및 마이그레이션도 확장되어야해"*:
+  - **신규 커넥터 2종**: `vertica.py` (vertica-python, postgres-flavoured, MERGE-upsert), `mssql.py` (pymssql, square-bracket identifier, native MERGE). 둘 다 BatchSource/Sink/SchemaInspector/SchemaWriter/SqlExecutor 풀 구현. `auto_create_table + primary_key` (ADR-0072) 자동 지원.
+  - **Lazy import**: 모듈은 driver 미설치 환경에서도 import 가능. `connect()` 호출 시점에만 명확한 ConnectError.
+  - **`core/type_mapping.py`** 확장: vertica/mssql dialect render table. 신규 vendor 인식 — `nvarchar/nchar/ntext/bit/datetime2/datetimeoffset/smalldatetime/money/uniqueidentifier/long varchar`. JSON는 dialect별 안전 매핑(vertica=LONG VARCHAR, mssql=NVARCHAR(MAX)).
+  - **Web operators.ts**: `source:vertica/sink:vertica/source:mssql/sink:mssql` 4종 — 기존 sink와 동일 필드 셋(connection/table/mode/key_columns/pre_sql/auto_create_table/auto_create_if_exists).
+  - **`migration-config.ts MIGRATION_SUPPORTED_TYPES`**: 두 신규 type 포함 → 마이그레이션 폼 dropdown 노출 + 5×5 = 25 페어 가능.
+  - **`connector-schemas.ts`**: connection 생성 폼 — vertica(host/port/database/user/password/ssl), mssql(host/port/database/user/password/tds_version).
+  - **`pyproject.toml`**: `[vertica]` (vertica-python>=1.4), `[mssql]` (pymssql>=2.3) extras + entry-points 등록.
+  - **server `_SQL_CONNECTION_TYPES`** audit set 확장 (audit log SQL 분류 정확).
+  - **검증**: 38 신규 type_mapping unit (코어 unit 812→850). mypy/ruff/tsc clean. backward-compat 완전.
+
 - **Migrations 리스트에 최근 실행 상태 컬럼 — health at a glance (Phase AAP)** — 운영자가 클릭 없이 모든 마이그레이션의 건강 상태 한눈에 확인:
   - 새 컬럼 **Last run**: `StatusBadge` (succeeded/failed/running/...) + 상대 시간(`5m`/`3h`/`2d`).
   - 실행 없는 마이그레이션은 `Never run` 명시(빈 칸이 아니라 명시적 안내).

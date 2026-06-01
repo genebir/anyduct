@@ -2315,4 +2315,37 @@ L1 출시 직후 사용자가 5개 회신:
 
 ---
 
+## ADR-0073: Vertica + MSSQL 커넥터 — 마이그레이션 대상 dialect 확장
+
+**Date**: 2026-05-29
+**Status**: Accepted
+**Context**: 사용자 *"연결 유형 좀 더 추가해줘. vertica 포함해주고. 그에 따른 테이블 복사 및 마이그레이션도 확장되어야해"*. 기존 RDBMS 커넥터는 postgres / mysql / sqlite 3종 — 엔터프라이즈에서 흔한 SQL Server (MSSQL) 와 분석용 column-store인 Vertica가 빠져 있어 cross-DB migration 활용성에 제약.
+
+**Decision**:
+1. **신규 커넥터 2종** (`etl_plugins/connectors/rdbms/`):
+   - `vertica.py` — `vertica-python` 클라이언트, postgres-flavoured SQL. UPSERT는 `MERGE`로 emulate.
+   - `mssql.py` — `pymssql`(FreeTDS) 클라이언트, square-bracket identifier. UPSERT는 native `MERGE`.
+   - 둘 다 **lazy import** — 모듈은 driver 없어도 로드, `connect()`에서 명확한 `ConnectError`.
+   - `BatchSource + BatchSink + SchemaInspector + SchemaWriter + SqlExecutor` 풀 구현 (다른 RDBMS와 contract 동일).
+   - `auto_create_table` + `primary_key` (ADR-0072) 자동 지원.
+2. **`core/type_mapping.py` dialect 추가**:
+   - `vertica`: BIGINT/NUMERIC 그대로, TEXT/JSON → LONG VARCHAR(JSON 컬럼 없음), BOOLEAN/DATE 1급, BLOB → VARBINARY.
+   - `mssql`: TEXT → NVARCHAR(MAX), BOOLEAN → BIT, TIMESTAMP → DATETIME2, BLOB → VARBINARY(MAX).
+   - vendor 파싱 확장: `nvarchar`/`nchar`/`ntext`/`bit`/`datetime2`/`datetimeoffset`/`money`/`uniqueidentifier`/`long varchar` 등 → 적절한 canonical.
+3. **`pyproject.toml`**: `[vertica]` (`vertica-python>=1.4`), `[mssql]` (`pymssql>=2.3`) extras + entry-points 등록.
+4. **Web operators.ts**: `source:vertica`/`source:mssql`/`sink:vertica`/`sink:mssql` 4종 추가 — 기존 RDBMS sink 필드와 동일(connection/table/mode/key_columns/pre_sql/auto_create_table/auto_create_if_exists).
+5. **`migration-config.ts` `MIGRATION_SUPPORTED_TYPES`**: vertica + mssql 포함 → 마이그레이션 폼이 두 신규 type의 connection을 source/sink로 노출.
+6. **`connector-schemas.ts`**: 연결 생성 폼에 host/port/database/user/password (vertica는 ssl, mssql은 tds_version) 추가.
+7. **server `_SQL_CONNECTION_TYPES`** (audit): vertica + mssql 추가 (run.sql_read/sql_executed audit 정확성).
+
+**Consequences**:
+- ✅ **마이그레이션 매트릭스 5×5 = 25 페어**(이전 3×3 = 9) — postgres ↔ vertica ↔ mssql ↔ mysql ↔ sqlite 모든 방향.
+- ✅ **lazy import 패턴**: 사용자가 `[vertica]` extra 안 깔아도 import 안 깨짐 — 운영 friction 감소.
+- ✅ 코어 unit 812→850(+38 type_mapping × 2 dialect). 서버 it 485 (worker test 기존 1건 검정 위닝 갱신).
+- ✅ mypy/ruff clean. DB 마이그레이션 0. backward-compat 완전(기존 3 RDBMS dialect 영향 0).
+- ⚠️ **testcontainers integration 미포함** — Vertica/MSSQL는 무거운 Docker 이미지(license 게이트) — testcontainers 추가는 별 슬라이스.
+- ⚠️ **MERGE upsert는 한 행씩 실행** — 배치 MERGE는 후속 슬라이스 후보.
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

@@ -23,13 +23,15 @@
 export type MigrationStrategy = "snapshot" | "append" | "mirror";
 
 /** RDBMS connector types that implement ``SchemaWriter``
- *  (``ensure_table``) — Phase VV / ADR-0066. ``auto_create_table``
- *  only does anything on these, so the form filters connections to
- *  this set. */
+ *  (``ensure_table``) — Phase VV / ADR-0066, Phase AAQ adds Vertica
+ *  + MSSQL. ``auto_create_table`` only does anything on these, so
+ *  the migration form filters connections to this set. */
 export const MIGRATION_SUPPORTED_TYPES = new Set([
   "postgres",
   "mysql",
   "sqlite",
+  "vertica",
+  "mssql",
 ]);
 
 export interface MigrationFormData {

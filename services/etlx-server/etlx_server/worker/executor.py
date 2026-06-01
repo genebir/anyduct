@@ -997,7 +997,16 @@ class RunExecutor:
         # HTTP/Kafka/S3 sources whose ``query`` field means something
         # different (path / topic / prefix) don't get mislabelled.
         # Future slices can add run.http_read / run.kafka_read.
-        _SQL_CONNECTION_TYPES = {"postgres", "mysql", "sqlite"}  # noqa: N806 — const-style local for clarity
+        # Phase AAQ (2026-05-29) adds Vertica + MSSQL — both RDBMS,
+        # both implement the SQL audit contract via the same
+        # query-string semantics.
+        _SQL_CONNECTION_TYPES = {  # noqa: N806 — const-style local for clarity
+            "postgres",
+            "mysql",
+            "sqlite",
+            "vertica",
+            "mssql",
+        }
         connection_type_by_name: dict[str, str] = {}
         try:
             conn_names = referenced_connection_names(cfg)

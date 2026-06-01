@@ -1774,8 +1774,12 @@ async def test_audit_skips_run_sql_read_for_non_sql_connection_types(
     from etlx_server.worker.executor import RunExecutor
 
     # The relevant logic is the ``_SQL_CONNECTION_TYPES`` constant +
-    # the early return in _record_sql_read; assert the constant is
-    # what we expect so a future widening (e.g. snowflake) doesn't
-    # silently change the contract for existing connection types.
+    # the early return in _record_sql_read; assert each canonical
+    # SQL type appears in the constant so a future widening (e.g.
+    # snowflake) is a deliberate edit + the existing types stay
+    # covered.
+    #
+    # Phase AAQ (2026-05-29) widened the set to include Vertica + MSSQL.
     src = inspect.getsource(RunExecutor._record_data_operations)
-    assert '_SQL_CONNECTION_TYPES = {"postgres", "mysql", "sqlite"}' in src
+    for expected in ("postgres", "mysql", "sqlite", "vertica", "mssql"):
+        assert f'"{expected}"' in src, f"_SQL_CONNECTION_TYPES missing {expected}"

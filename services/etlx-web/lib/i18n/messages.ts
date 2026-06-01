@@ -899,6 +899,10 @@ export const en = {
   "assets.emptyDesc":
     "Run a pipeline — the worker records the tables/topics it reads and writes here, with lineage between them.",
   "assets.loadFailed": "Couldn't load assets.",
+  // Phase ABH (2026-06-01) — list search/filter
+  "assets.searchPlaceholder": "Search by asset key…",
+  "assets.filterKindAll": "All kinds",
+  "assets.searchNoMatch": "No assets match this filter.",
   "assets.backAria": "Back to catalog",
   "assets.lineage": "Lineage",
   "assets.upstream": "Upstream",
@@ -1899,6 +1903,10 @@ export const ko: Messages = {
   "assets.emptyDesc":
     "파이프라인을 실행하세요 — 워커가 읽고 쓴 테이블/토픽과 그 사이 리니지를 여기에 기록합니다.",
   "assets.loadFailed": "자산을 불러올 수 없습니다.",
+  // Phase ABH (2026-06-01) — 리스트 검색/필터
+  "assets.searchPlaceholder": "asset key로 검색…",
+  "assets.filterKindAll": "모든 종류",
+  "assets.searchNoMatch": "조건과 일치하는 자산이 없습니다.",
   "assets.backAria": "카탈로그로",
   "assets.lineage": "리니지",
   "assets.upstream": "상류(Upstream)",

@@ -112,6 +112,19 @@ export default function PipelinesPage() {
     if (rows === null) return null;
     return rows.filter((p) => migrationSummaryOf(p.current_config_json) === null);
   }, [rows]);
+  /** Phase ABD (2026-06-01) — name/description search, same UX as
+   *  migrations/connections/sensors. */
+  const [search, setSearch] = useState("");
+  const filteredRows = useMemo(() => {
+    if (visibleRows === null) return null;
+    const term = search.trim().toLowerCase();
+    if (!term) return visibleRows;
+    return visibleRows.filter(
+      (p) =>
+        p.name.toLowerCase().includes(term) ||
+        (p.description ?? "").toLowerCase().includes(term),
+    );
+  }, [visibleRows, search]);
   const [triggering, setTriggering] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
@@ -265,10 +278,34 @@ export default function PipelinesPage() {
             </div>
           </Card>
         ) : null}
+        {/* Phase ABD (2026-06-01) — search box. Hidden below 5 rows
+            so a fresh workspace stays uncluttered. */}
+        {visibleRows !== null && visibleRows.length > 5 ? (
+          <div className="grid items-end gap-2 sm:grid-cols-[1fr_auto]">
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={t("pipelines.searchPlaceholder")}
+            />
+            {search ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setSearch("")}
+              >
+                {t("common.clear")}
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
         <Card>
           {visibleRows === null ? (
             <div className="py-12 text-center text-sm text-text-muted">
               {t("common.loading")}
+            </div>
+          ) : filteredRows !== null && filteredRows.length === 0 && search ? (
+            <div className="py-8 text-center text-sm text-text-muted">
+              {t("pipelines.searchNoMatch")}
             </div>
           ) : (
             <DataTable
@@ -340,7 +377,7 @@ export default function PipelinesPage() {
                   ),
                 },
               ]}
-              rows={visibleRows}
+              rows={filteredRows ?? []}
               onRowContextMenu={(row, e) => {
                 rowMenuTargetRef.current = row;
                 rowMenu.openOnEvent(e);

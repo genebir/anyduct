@@ -19,6 +19,7 @@ export const en = {
   "common.edit": "Edit",
   "common.create": "Create",
   "common.close": "Close",
+  "common.clear": "Clear",
   "common.showLess": "Show less",
   "common.showMore": "Show more",
   "common.copy": "Copy to clipboard",
@@ -488,6 +489,9 @@ export const en = {
     "Batch runs on a trigger or cron schedule; stream runs continuously (e.g. Kafka). Mode is fixed after creation.",
 
   "pipelines.openBuilder": "Open builder",
+  // Phase ABD (2026-06-01) — pipelines list search
+  "pipelines.searchPlaceholder": "Search pipelines by name or description…",
+  "pipelines.searchNoMatch": "No pipelines match your search.",
   "pipelines.deleteAria": "Delete {name}",
   "pipelines.viewRunsAria": "View runs for {name}",
   "pipelines.viewRunsTitle": "View this pipeline's run history",
@@ -1027,6 +1031,7 @@ export const ko: Messages = {
   "common.edit": "편집",
   "common.create": "생성",
   "common.close": "닫기",
+  "common.clear": "지우기",
   "common.showLess": "접기",
   "common.showMore": "더 보기",
   "common.copy": "클립보드에 복사",
@@ -1477,6 +1482,9 @@ export const ko: Messages = {
     "배치는 트리거나 크론 스케줄로 실행되고, 스트림은 연속 실행됩니다(예: Kafka). 모드는 생성 후 변경할 수 없습니다.",
 
   "pipelines.openBuilder": "빌더 열기",
+  // Phase ABD (2026-06-01) — 파이프라인 리스트 검색
+  "pipelines.searchPlaceholder": "이름이나 설명으로 검색…",
+  "pipelines.searchNoMatch": "검색에 일치하는 파이프라인이 없습니다.",
   "pipelines.deleteAria": "{name} 삭제",
   "pipelines.viewRunsAria": "{name} 실행 기록 보기",
   "pipelines.viewRunsTitle": "이 파이프라인의 실행 기록 보기",

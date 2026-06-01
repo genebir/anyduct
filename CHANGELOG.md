@@ -10,6 +10,11 @@
 ## [Unreleased]
 
 ### Fixed
+- **서버 startup connector 사전 로드 + connection form host field re-fill 제거 (Phase AAQ post-mortem 2)** — 사용자 두 신고:
+  - **(1) "test_vertica: RegistryError: Connector 'vertica' not registered" 계속 발생** — 실행 중인 worker/scheduler 프로세스가 옛 코드 + 옛 entry_points로 동작 → `_load_builtin` fallback이 거기까지 도달 못함. **방어**: app_factory lifespan + worker/scheduler/sensor-scheduler/stream-worker CLI 진입점 모두에 `_preload_builtin_connectors()` 추가 — startup 시 `ConnectorRegistry.list_connectors()` 호출 → 빌트인 9종 모두 명시적으로 module-path import. stdout에 "loaded connectors (9): http, kafka, mongodb, mssql, mysql, postgres, s3, sqlite, vertica" 출력해 사용자가 boot time에 직접 확인 가능.
+  - **(2) "connection 생성할 때 host 부분 다 지우면 localhost가 또 새로 써져서 쓰기 불편해"** — 원인: text input의 `onChange(e.target.value || undefined)` + 부모의 `values[key] ?? defaultValue` 조합. 빈 문자열이 falsy라 `||`가 `undefined`로 collapse → 부모 render가 default("localhost")로 fall through. **수정**: text/password/number input 모두 `onChange(e.target.value)`로 직접 forward — 빈 string이 *defined* 상태로 state에 남음, `??` 안 발동. `buildCreateBody`는 여전히 empty를 "omit key"로 처리(connector 생성자 default가 자연 적용) — wire shape 동일, UX surprise 0.
+  - 검증: web tsc clean. 코어/서버 회귀 0(854 + 485).
+
 - **`ConnectorRegistry` 빌트인 fallback — stale `entry_points` 대응 (Phase AAQ post-mortem)** — 사용자가 새 커넥터(vertica) 사용 시 `RegistryError: Connector 'vertica' not registered. Available: ['http','kafka','mongodb','mysql','postgres','s3','sqlite']` 발생. 원인: 실행 중인 dev 서버 프로세스가 pyproject.toml 변경 *전*에 시작 → 옛 `entry_points.txt` 메타데이터 기반으로 vertica/mssql 보이지 않음.
   - **방어 코드**: `_BUILTIN_MODULES` 매핑 + `_load_builtin(name)` — entry_points로 못 찾으면 module path로 직접 import 시도 (decorator가 등록). 외부 플러그인은 entry_points 유지(기존 동작 동일).
   - **`list_connectors`**도 빌트인 전체 로드 — `etlx list-connectors` 가 stale install에서도 exhaustive.

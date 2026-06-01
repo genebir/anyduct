@@ -15,6 +15,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 
+import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -41,6 +42,8 @@ from etlx_server.routers import sensors as sensors_router
 from etlx_server.routers import variables as variables_router
 from etlx_server.routers import workspaces as workspaces_router
 from etlx_server.settings import Settings, get_settings
+
+logger = structlog.get_logger(__name__)
 
 Lifespan = Callable[[FastAPI], AbstractAsyncContextManager[None]]
 
@@ -103,6 +106,22 @@ def _build_secret_backend(settings: Settings) -> SecretBackend:
 def _build_lifespan(settings: Settings) -> Lifespan:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        # Phase AAQ post-mortem (2026-05-29) — pre-load every built-in
+        # connector at server startup so the registry is fully populated
+        # even when the installed ``entry_points`` metadata is stale
+        # (the user-visible symptom was Vertica + MSSQL silently missing
+        # from ``Available`` despite a successful ``pyproject.toml``
+        # edit). The fallback inside ``ConnectorRegistry.list_connectors``
+        # imports each builtin module by path, so a missing extra is a
+        # warning, not a crash.
+        from etl_plugins.core.registry import ConnectorRegistry
+
+        loaded = ConnectorRegistry.list_connectors()
+        logger.info(
+            "connector registry loaded",
+            extra={"connectors": loaded, "count": len(loaded)},
+        )
+
         # Open one async engine per app instance; share via app.state so
         # endpoints/deps can pull it through `Depends(get_engine)` without
         # touching module globals.

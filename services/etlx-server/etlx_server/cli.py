@@ -94,6 +94,25 @@ def _install_openlineage_emitter() -> OpenLineageEmitter | None:
     return emitter
 
 
+def _preload_builtin_connectors() -> list[str]:
+    """Phase AAQ post-mortem (2026-05-29) — pre-load every built-in
+    connector at process startup so the registry is populated even
+    when the installed ``entry_points`` metadata is stale (e.g. the
+    operator edited ``pyproject.toml`` and added a new RDBMS but
+    didn't reinstall). Soft-fails per-connector if its optional extra
+    isn't installed (``logger.warning`` inside :meth:`_load_builtin`).
+
+    Called from every long-running CLI command — worker / scheduler /
+    sensor-scheduler / stream-worker — so they all see Vertica + MSSQL
+    + future RDBMS additions without depending on entry_points
+    discovery."""
+    from etl_plugins.core.registry import ConnectorRegistry
+
+    loaded = ConnectorRegistry.list_connectors()
+    typer.echo(f"loaded connectors ({len(loaded)}): {', '.join(loaded)}")
+    return loaded
+
+
 def _database_url() -> str:
     url = os.environ.get("DATABASE_URL")
     if not url:
@@ -803,6 +822,7 @@ def worker_run_cmd(
     # logs via ctx.logger / structlog.get_logger() lands in ``run_logs``
     # whenever a recorder is active for that run_id (Step 9.3c).
     configure_logging(level=log_level, json=True, extra_processors=[log_processor])
+    _preload_builtin_connectors()
     wid = worker_id or f"worker-{uuid.uuid4().hex[:12]}"
 
     async def _run() -> None:
@@ -880,6 +900,7 @@ def reaper_run_cmd(
         level=getattr(logging, log_level.upper(), logging.INFO),
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    _preload_builtin_connectors()
 
     async def _run() -> None:
         engine = make_engine(_database_url())
@@ -930,6 +951,7 @@ def scheduler_run_cmd(
         level=getattr(logging, log_level.upper(), logging.INFO),
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    _preload_builtin_connectors()
 
     async def _run() -> None:
         engine = make_engine(_database_url())
@@ -1005,6 +1027,7 @@ def sensor_scheduler_run_cmd(
         level=getattr(logging, log_level.upper(), logging.INFO),
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    _preload_builtin_connectors()
 
     async def _run() -> None:
         engine = make_engine(_database_url())
@@ -1092,6 +1115,7 @@ def stream_worker_run_cmd(
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     configure_logging(level=log_level, json=True, extra_processors=[log_processor])
+    _preload_builtin_connectors()
     wid = worker_id or f"stream-worker-{uuid.uuid4().hex[:12]}"
 
     async def _run() -> None:

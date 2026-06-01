@@ -212,6 +212,16 @@ function FieldInput({
   value: FieldValue;
   onChange: (v: FieldValue) => void;
 }) {
+  // Phase AAQ post-mortem (2026-05-29) — keep the user's cleared
+  // value as an empty string instead of collapsing to ``undefined``.
+  // The form's render reads ``values[field.key] ?? defaultValue``,
+  // so an ``undefined`` from a cleared input re-applied the schema
+  // default ("host" snapping back to "localhost") on every keystroke
+  // — surprising and annoying. An empty string is *defined*, so the
+  // ``??`` keeps it; ``buildCreateBody`` still treats empty as
+  // "omit the key" so the runtime falls back to its connector
+  // default at construction time. Same effect on the wire, much
+  // less surprise in the UI.
   if (field.type === "number") {
     return (
       <Input
@@ -221,7 +231,7 @@ function FieldInput({
         required={field.required}
         onChange={(e) => {
           const v = e.target.value;
-          onChange(v === "" ? undefined : Number(v));
+          onChange(v === "" ? "" : Number(v));
         }}
       />
     );
@@ -234,7 +244,7 @@ function FieldInput({
         placeholder={field.placeholder ?? "••••••••"}
         required={field.required}
         autoComplete="new-password"
-        onChange={(e) => onChange(e.target.value || undefined)}
+        onChange={(e) => onChange(e.target.value)}
       />
     );
   }
@@ -243,7 +253,7 @@ function FieldInput({
       value={(value as string) ?? ""}
       placeholder={field.placeholder}
       required={field.required}
-      onChange={(e) => onChange(e.target.value || undefined)}
+      onChange={(e) => onChange(e.target.value)}
     />
   );
 }

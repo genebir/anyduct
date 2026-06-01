@@ -19,7 +19,12 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
-import { ArrowRightLeftIcon, EditIcon, PlusIcon } from "lucide-react";
+import {
+  ArrowRightLeftIcon,
+  EditIcon,
+  PlayIcon,
+  PlusIcon,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Header } from "@/components/shell/header";
 import { Button } from "@/components/ui/button";
@@ -174,6 +179,35 @@ export default function MigrationsPage() {
   const [lastRunByPipeline, setLastRunByPipeline] = useState<
     Map<string, RunSummary>
   >(new Map());
+  /** Phase AAR follow-up (2026-06-01) — user request "마이그레이션
+   *  목록에서 실행을 할 수가 없네". The pipeline_id whose Run button is
+   *  currently pending so we can paint a spinner without locking the
+   *  whole table. */
+  const [triggeringId, setTriggeringId] = useState<string | null>(null);
+
+  async function onTrigger(row: PipelineSummary) {
+    if (!ws) return;
+    if (!row.current_version) {
+      toast.error(t("migrations.saveBeforeRun"));
+      return;
+    }
+    setTriggeringId(row.id);
+    try {
+      const r = await pipelinesApi.trigger(ws.id, row.id);
+      toast.success(t("migrations.runQueued"));
+      // Optimistic: paint the new run in the Last run column so the
+      // operator sees feedback before the next poll tick.
+      setLastRunByPipeline((prev) => {
+        const next = new Map(prev);
+        next.set(row.id, r);
+        return next;
+      });
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : String(err));
+    } finally {
+      setTriggeringId(null);
+    }
+  }
 
   useEffect(() => {
     if (!ws) return;
@@ -288,17 +322,37 @@ export default function MigrationsPage() {
               {
                 key: "actions",
                 header: "",
-                className: "w-32 text-right",
+                className: "w-56 text-right",
                 cell: (r) => (
-                  <Link
-                    href={`/w/${slug}/migrations/${r.id}`}
-                    aria-label={t("common.edit")}
-                  >
-                    <Button size="sm" variant="secondary">
-                      <EditIcon size={14} />
-                      {t("common.edit")}
+                  <div className="flex justify-end gap-1">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      loading={triggeringId === r.id}
+                      disabled={!r.current_version || triggeringId !== null}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void onTrigger(r);
+                      }}
+                      title={
+                        r.current_version
+                          ? t("migrations.runNow")
+                          : t("migrations.saveBeforeRun")
+                      }
+                    >
+                      <PlayIcon size={14} />
+                      {t("migrations.runNow")}
                     </Button>
-                  </Link>
+                    <Link
+                      href={`/w/${slug}/migrations/${r.id}`}
+                      aria-label={t("common.edit")}
+                    >
+                      <Button size="sm" variant="secondary">
+                        <EditIcon size={14} />
+                        {t("common.edit")}
+                      </Button>
+                    </Link>
+                  </div>
                 ),
               },
             ]}

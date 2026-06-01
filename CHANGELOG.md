@@ -9,6 +9,14 @@
 
 ## [Unreleased]
 
+### Added
+- **마이그레이션 목록에서 즉시 실행 (Phase AAR follow-up 2)** — 사용자 *"마이그레이션 목록에서 실행을 할 수가 없네"*. Detail 페이지 들어가지 않고 list 행에서 바로 Run 가능:
+  - 각 행 actions 컬럼에 `Run now` 버튼 추가 — `pipelinesApi.trigger(ws.id, row.id)` 호출.
+  - `current_version` 없으면 disabled + tooltip 안내(`saveBeforeRun`). 다른 행이 진행 중이면 모든 Run 버튼 disabled(double-fire 방지).
+  - 누른 행에만 spinner 표시(`triggeringId === r.id`).
+  - **Optimistic update**: 응답으로 받은 Run을 `lastRunByPipeline` Map에 즉시 삽입 → Last run 컬럼이 다음 5초 폴링 기다리지 않고 즉시 갱신.
+  - 검증: web tsc clean. 코어/서버 변화 0.
+
 ### Fixed
 - **마이그레이션 transaction-aborted 버그 + 마이그레이션 ↔ 파이프라인 surface 분리 (Phase AAR)** — 사용자 3건 신고:
   - **(1) 마이그레이션 실패 root cause**: `mig` 파이프라인이 `postgres write failed: current transaction is aborted` 로 죽음. 원인: `_auto_create_sink_tables`의 `contextlib.suppress(Exception)`이 CREATE TABLE 실패를 삼킴 → postgres 트랜잭션은 aborted 상태로 남음 → 이어지는 sink.write의 모든 SQL 거부. 사용자 setup이 vertica(`test_verti`, `BDA_BI_DB.TB_BCDBAS601`) → postgres(`test`)였는데 destination에 `BDA_BI_DB` schema 없음 → CREATE 실패. **수정 (A)**: `_auto_create_sink_tables`가 명시적 `try/except` + structlog warning + `conn.rollback()` 호출. 다음 stage가 깨끗한 transaction 위에서 시작. **수정 (B)**: `postgres.ensure_table`이 schema-qualified table 받으면 `CREATE SCHEMA IF NOT EXISTS` 먼저 emit — cross-DB migration이 schema 자동 생성까지 처리.

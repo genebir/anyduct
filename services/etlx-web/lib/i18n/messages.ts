@@ -245,6 +245,10 @@ export const en = {
   // Phase AAZ (2026-06-01) — schedule indicator on the list
   "migrations.colSchedule": "Schedule",
   "migrations.scheduleNone": "—",
+  // Phase ABF (2026-06-01) — schema preview: per-column dest type
+  "migrations.colColumn": "Column",
+  "migrations.colSourceType": "Source type",
+  "migrations.colDestType": "{dialect} type",
   // Phase ABA (2026-06-01) — schedule filter
   "migrations.filterScheduleAll": "All schedules",
   "migrations.filterScheduleActive": "Schedule: active",
@@ -1256,6 +1260,10 @@ export const ko: Messages = {
   // Phase AAZ (2026-06-01) — 리스트의 스케줄 표시
   "migrations.colSchedule": "스케줄",
   "migrations.scheduleNone": "—",
+  // Phase ABF (2026-06-01) — 스키마 미리보기에 도착지 타입 컬럼
+  "migrations.colColumn": "컬럼",
+  "migrations.colSourceType": "소스 타입",
+  "migrations.colDestType": "{dialect} 타입",
   // Phase ABA (2026-06-01) — 스케줄 필터
   "migrations.filterScheduleAll": "모든 스케줄",
   "migrations.filterScheduleActive": "스케줄: 활성",

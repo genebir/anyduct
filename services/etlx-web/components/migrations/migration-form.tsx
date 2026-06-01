@@ -31,6 +31,7 @@ import {
   parseQualifiedTable,
   validateMigrationForm,
 } from "@/lib/migration-config";
+import { translateType } from "@/lib/cross-db-type-mapping";
 
 interface Props {
   workspaceId: string;
@@ -108,6 +109,13 @@ export function MigrationForm({
   const sourceConnRow = form
     ? connByName.get(form.sourceConnection) ?? null
     : null;
+  // Phase ABF (2026-06-01) — destination dialect for the schema
+  // preview's "→ dest type" column. ``null`` when the user hasn't
+  // picked a destination yet; the preview hides the column then.
+  const sinkConnRow = form
+    ? connByName.get(form.sinkConnection) ?? null
+    : null;
+  const sinkDialect = sinkConnRow?.type ?? "";
   const [sourceTables, setSourceTables] = useState<string[]>([]);
   const [tablesLoading, setTablesLoading] = useState(false);
   useEffect(() => {
@@ -697,6 +705,21 @@ export function MigrationForm({
               </p>
             ) : columnsState === "ok" && sourceColumns.length > 0 ? (
               <table className="w-full text-xs">
+                {sinkDialect ? (
+                  <thead>
+                    <tr className="border-b border-border-subtle">
+                      <th className="px-3 py-1 text-left text-[10px] font-semibold uppercase text-text-muted">
+                        {t("migrations.colColumn")}
+                      </th>
+                      <th className="px-3 py-1 text-left text-[10px] font-semibold uppercase text-text-muted">
+                        {t("migrations.colSourceType")}
+                      </th>
+                      <th className="px-3 py-1 text-left text-[10px] font-semibold uppercase text-text-muted">
+                        {t("migrations.colDestType", { dialect: sinkDialect })}
+                      </th>
+                    </tr>
+                  </thead>
+                ) : null}
                 <tbody>
                   {sourceColumns.map((c) => {
                     const isPk =
@@ -705,6 +728,9 @@ export function MigrationForm({
                         .split(",")
                         .map((s) => s.trim())
                         .includes(c.name);
+                    const destType = sinkDialect
+                      ? translateType(c.type, sinkDialect)
+                      : null;
                     return (
                       <tr
                         key={c.name}
@@ -721,6 +747,11 @@ export function MigrationForm({
                         <td className="px-3 py-1.5 font-mono text-text-muted">
                           {c.type}
                         </td>
+                        {sinkDialect ? (
+                          <td className="px-3 py-1.5 font-mono text-accent">
+                            {destType}
+                          </td>
+                        ) : null}
                       </tr>
                     );
                   })}

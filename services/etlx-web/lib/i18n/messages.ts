@@ -148,6 +148,15 @@ export const en = {
   "migrations.strategyMirror": "Live mirror",
   "migrations.strategyMirrorDesc":
     "Upsert by key. Existing rows update in place; new rows insert.",
+  // Phase ABO (2026-06-01) — tooltip text (one-line) for the list chip
+  "migrations.strategySnapshotTitle":
+    "Drop & rebuild the destination each run — schema drift OK, idempotent re-runs.",
+  "migrations.strategyAppendTitle":
+    "Cursor-based: only rows newer than the high-water mark are written.",
+  "migrations.strategyMirrorTitle":
+    "Upsert by primary key — existing rows update in place, new rows insert.",
+  "migrations.strategyCustomTitle":
+    "Hand-edited migration config that doesn't match snapshot/append/mirror.",
   "migrations.cursorColumn": "Cursor column",
   "migrations.cursorColumnHelp":
     "A monotonically-increasing column (id, updated_at). The runtime tracks its high-water mark per run.",
@@ -1185,6 +1194,15 @@ export const ko: Messages = {
   "migrations.strategyMirror": "실시간 미러",
   "migrations.strategyMirrorDesc":
     "키로 upsert. 기존 행은 갱신, 새 행은 추가.",
+  // Phase ABO (2026-06-01) — list chip tooltip
+  "migrations.strategySnapshotTitle":
+    "매 실행마다 도착지를 drop & 재생성 — 스키마 drift 허용, 멱등 재실행.",
+  "migrations.strategyAppendTitle":
+    "커서 기반: high-water mark 이후 행만 기록.",
+  "migrations.strategyMirrorTitle":
+    "PK 기준 upsert — 기존 행은 갱신, 새 행은 추가.",
+  "migrations.strategyCustomTitle":
+    "snapshot/append/mirror 어디에도 안 맞는 수동 편집된 마이그레이션 config.",
   "migrations.cursorColumn": "커서 컬럼",
   "migrations.cursorColumnHelp":
     "단조 증가 컬럼(id, updated_at 등). 런타임이 실행마다 최댓값을 기록합니다.",

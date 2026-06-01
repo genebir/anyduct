@@ -80,26 +80,37 @@ function relativeTime(iso: string | null): string {
 function strategyChip(
   s: MigrationSummary["strategy"],
   t: Translate,
-): { label: string; cls: string } {
+): { label: string; cls: string; title: string } {
+  // Phase ABO (2026-06-01) — tooltip per strategy so the chip
+  // doesn't require operator memory ("does mirror keep or wipe
+  // existing rows?"). Wording matches the migration form's help
+  // text so the vocabulary stays consistent across surfaces.
   if (s === "snapshot") {
     return {
       label: t("migrations.strategySnapshot"),
       cls: "bg-warning/15 text-warning",
+      title: t("migrations.strategySnapshotTitle"),
     };
   }
   if (s === "append") {
     return {
       label: t("migrations.strategyAppend"),
       cls: "bg-info/15 text-info",
+      title: t("migrations.strategyAppendTitle"),
     };
   }
   if (s === "mirror") {
     return {
       label: t("migrations.strategyMirror"),
       cls: "bg-accent/15 text-accent",
+      title: t("migrations.strategyMirrorTitle"),
     };
   }
-  return { label: "custom", cls: "bg-overlay text-text-muted" };
+  return {
+    label: "custom",
+    cls: "bg-overlay text-text-muted",
+    title: t("migrations.strategyCustomTitle"),
+  };
 }
 
 function buildColumns(t: Translate): Column<Row>[] {
@@ -138,10 +149,11 @@ function buildColumns(t: Translate): Column<Row>[] {
       key: "strategy",
       header: t("migrations.colStrategy"),
       cell: (r) => {
-        const { label, cls } = strategyChip(r.migration.strategy, t);
+        const { label, cls, title } = strategyChip(r.migration.strategy, t);
         return (
           <span
             className={`inline-flex h-5 items-center rounded-sm px-1.5 text-[11px] font-medium ${cls}`}
+            title={title}
           >
             {label}
           </span>

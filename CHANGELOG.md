@@ -10,6 +10,15 @@
 ## [Unreleased]
 
 ### Added
+- **마이그레이션 리스트 multi-select + bulk delete (Phase AAW, 2026-06-01)** — 스키마 모드로 N개 만들고 일부를 정리하는 흐름에 필수:
+  - **체크박스 컬럼**: 각 행에 인디비주얼 + header에 "보이는 전체 선택" 토글(filteredRows 기준).
+  - **Bulk actions bar**: 선택 ≥1일 때만 노출(`bg-accent/5 border-accent/40`). "{n}개 선택됨" + Clear selection + Delete selected.
+  - **ConfirmDialog**: destructive + N 개수 안내 + audit log 보존 명시.
+  - **순차 삭제**: 한 행 실패해도 나머지 진행. 각 실패는 toast로 식별. 성공 N개 → `bulkDeleted` / 일부 실패 → `bulkPartial` 요약.
+  - **자동 리프레시**: 삭제 후 `pipelinesApi.list` 재호출 + selectedIds 초기화.
+  - 검증: web tsc clean. 코어/서버 변화 0. i18n en/ko 각 9 신규 키.
+
+### Added
 - **워크스페이스 대시보드에 Migrations 카드 (Phase AAV, 2026-06-01)** — 운영자 첫 화면에서 마이그레이션 surface 자연 인지:
   - 5번째 StatCard "Migrations" 추가 — ArrowRightLeftIcon, `/migrations` 링크.
   - **건강성 sub line**: 24h in-flight 있으면 `{n} in flight`, 없으면 `{n}% ok`(24h 성공률).

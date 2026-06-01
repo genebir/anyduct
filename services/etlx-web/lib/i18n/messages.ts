@@ -218,6 +218,16 @@ export const en = {
   "migrations.scheduleActivated": "Schedule activated",
   "migrations.schedulePaused": "Schedule paused",
   "migrations.scheduleCleared": "Schedule cleared",
+  // Phase AAW (2026-06-01) — multi-select + bulk delete
+  "migrations.selectAllVisibleAria": "Select all visible migrations",
+  "migrations.selectRowAria": "Select migration {name}",
+  "migrations.selectedCount": "{n} selected",
+  "migrations.clearSelection": "Clear selection",
+  "migrations.deleteSelected": "Delete selected",
+  "migrations.bulkDeleteTitle": "Delete selected migrations",
+  "migrations.bulkDeleteConfirm":
+    "This will permanently delete the {n} selected migration pipeline(s). Their run history stays in the audit log.",
+  "migrations.bulkDeleted": "Deleted {n} migrations",
   // sensors page (ADR-0041 K3c)
   "sensors.new": "New sensor",
   "sensors.newTitle": "New sensor",
@@ -1177,6 +1187,16 @@ export const ko: Messages = {
   "migrations.scheduleActivated": "스케줄 활성화됨",
   "migrations.schedulePaused": "스케줄 일시정지됨",
   "migrations.scheduleCleared": "스케줄 삭제됨",
+  // Phase AAW (2026-06-01) — 다중 선택 + 일괄 삭제
+  "migrations.selectAllVisibleAria": "보이는 마이그레이션 전체 선택",
+  "migrations.selectRowAria": "마이그레이션 {name} 선택",
+  "migrations.selectedCount": "{n}개 선택됨",
+  "migrations.clearSelection": "선택 해제",
+  "migrations.deleteSelected": "선택 삭제",
+  "migrations.bulkDeleteTitle": "선택한 마이그레이션 삭제",
+  "migrations.bulkDeleteConfirm":
+    "선택한 {n}개의 마이그레이션 파이프라인이 영구 삭제됩니다. 실행 기록은 audit log에 그대로 유지됩니다.",
+  "migrations.bulkDeleted": "마이그레이션 {n}개 삭제됨",
   "nav.sensors": "센서",
   // 센서 페이지 (ADR-0041 K3c)
   "sensors.new": "새 센서",

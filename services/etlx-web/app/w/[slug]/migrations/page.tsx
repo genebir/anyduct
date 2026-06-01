@@ -24,6 +24,7 @@ import {
   EditIcon,
   PlayIcon,
   PlusIcon,
+  Trash2Icon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Header } from "@/components/shell/header";
@@ -31,6 +32,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { EmptyState } from "@/components/ui/empty-state";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { StatusBadge } from "@/components/ui/status-badge";
 import {
   ApiError,
@@ -192,6 +194,56 @@ export default function MigrationsPage() {
   const [filterFrom, setFilterFrom] = useState("");
   const [filterTo, setFilterTo] = useState("");
   const [filterStrategy, setFilterStrategy] = useState("");
+  /** Phase AAW (2026-06-01) — multi-select + bulk delete for the
+   *  schema-mode case where users mass-create 20+ migrations and
+   *  need to clean up some of them. */
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+
+  function toggleSelection(id: string): void {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  async function onBulkDelete() {
+    if (!ws || selectedIds.size === 0) return;
+    setBulkDeleting(true);
+    let ok = 0;
+    let fail = 0;
+    const ids = [...selectedIds];
+    for (const id of ids) {
+      try {
+        await pipelinesApi.delete(ws.id, id);
+        ok += 1;
+      } catch (err) {
+        fail += 1;
+        const m = err instanceof ApiError ? err.message : String(err);
+        const name =
+          migrationRows.find((r) => r.id === id)?.name ?? id.slice(0, 8);
+        toast.error(`${name}: ${m}`);
+      }
+    }
+    setBulkDeleting(false);
+    setConfirmBulkDelete(false);
+    setSelectedIds(new Set());
+    // Refresh after bulk delete.
+    try {
+      const list = await pipelinesApi.list(ws.id);
+      setRows(list);
+    } catch {
+      // Polling will catch up.
+    }
+    if (fail === 0) {
+      toast.success(t("migrations.bulkDeleted", { n: ok }));
+    } else {
+      toast.warning(t("migrations.bulkPartial", { ok, fail }));
+    }
+  }
 
   async function onTrigger(row: PipelineSummary) {
     if (!ws) return;
@@ -326,6 +378,49 @@ export default function MigrationsPage() {
   }, [migrationRows, search, filterFrom, filterTo, filterStrategy]);
 
   const columns = buildColumns(t);
+  // Phase AAW (2026-06-01) — checkbox column injected as the first
+  // column. Header has a tri-state "select all visible" toggle.
+  const allVisibleSelected =
+    filteredRows.length > 0 &&
+    filteredRows.every((r) => selectedIds.has(r.id));
+  const selectColumn: Column<Row> = {
+    key: "_select",
+    className: "w-8",
+    header: (
+      <input
+        type="checkbox"
+        className="h-3.5 w-3.5 cursor-pointer accent-accent"
+        checked={allVisibleSelected}
+        aria-label={t("migrations.selectAllVisibleAria")}
+        onChange={() => {
+          if (allVisibleSelected) {
+            // Deselect all currently visible.
+            setSelectedIds((prev) => {
+              const next = new Set(prev);
+              for (const r of filteredRows) next.delete(r.id);
+              return next;
+            });
+          } else {
+            setSelectedIds((prev) => {
+              const next = new Set(prev);
+              for (const r of filteredRows) next.add(r.id);
+              return next;
+            });
+          }
+        }}
+      />
+    ),
+    cell: (r) => (
+      <input
+        type="checkbox"
+        className="h-3.5 w-3.5 cursor-pointer accent-accent"
+        checked={selectedIds.has(r.id)}
+        onChange={() => toggleSelection(r.id)}
+        onClick={(e) => e.stopPropagation()}
+        aria-label={t("migrations.selectRowAria", { name: r.name })}
+      />
+    ),
+  };
 
   return (
     <>
@@ -408,6 +503,35 @@ export default function MigrationsPage() {
           </div>
         ) : null}
 
+        {/* Phase AAW (2026-06-01) — bulk actions bar surfaces only
+            when at least one row is selected so it doesn't claim
+            space in the default view. */}
+        {selectedIds.size > 0 ? (
+          <div className="flex items-center justify-between gap-3 rounded-md border border-accent/40 bg-accent/5 px-3 py-2">
+            <span className="text-xs text-text">
+              {t("migrations.selectedCount", { n: selectedIds.size })}
+            </span>
+            <div className="flex gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setSelectedIds(new Set())}
+              >
+                {t("migrations.clearSelection")}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setConfirmBulkDelete(true)}
+                className="hover:text-error"
+              >
+                <Trash2Icon size={14} />
+                {t("migrations.deleteSelected")}
+              </Button>
+            </div>
+          </div>
+        ) : null}
+
         {rows === null ? null : migrationRows.length === 0 ? (
           <EmptyState
             icon={<ArrowRightLeftIcon size={28} />}
@@ -444,6 +568,7 @@ export default function MigrationsPage() {
         ) : (
           <DataTable
             columns={[
+              selectColumn,
               ...columns,
               {
                 key: "actions",
@@ -486,6 +611,16 @@ export default function MigrationsPage() {
           />
         )}
       </main>
+      <ConfirmDialog
+        open={confirmBulkDelete}
+        title={t("migrations.bulkDeleteTitle")}
+        description={t("migrations.bulkDeleteConfirm", { n: selectedIds.size })}
+        confirmLabel={t("common.delete")}
+        destructive
+        loading={bulkDeleting}
+        onConfirm={() => void onBulkDelete()}
+        onCancel={() => setConfirmBulkDelete(false)}
+      />
     </>
   );
 }

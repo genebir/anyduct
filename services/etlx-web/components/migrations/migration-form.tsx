@@ -476,6 +476,10 @@ export function MigrationForm({
                     value={f.sourceSchema}
                     onChange={(e) => {
                       if (!form) return;
+                      // Phase ACI follow-up — also clear the table
+                      // search box; "orders" search inside ``BDA_BI_DB``
+                      // is rarely meaningful inside ``BDA_DM_DB``.
+                      setTableSearch("");
                       onChange({
                         ...form,
                         sourceSchema: e.target.value,

@@ -117,7 +117,17 @@ uv run mypy etl_plugins
 
 ## 5. 현재 단계
 
-> **최신 마일스톤 (2026-06-01): Persona dogfood UX 폴리시 3rd wave (Phase ACB → ACC + ACA follow-up).** 2nd wave 직후 추가 3 슬라이스:
+> **최신 마일스톤 (2026-06-01): Persona dogfood UX 폴리시 4th wave (Phase ACD → ACI).** 3rd wave 마무리 후 추가 6 슬라이스 — 마이그레이션 폼 smart-default + dashboard 정합 + audit click-to-filter + table picker 검색:
+> - **ACD**: 마이그레이션 source 테이블 선택 시 dest 테이블이 비어 있으면 같은 이름으로 자동 채움. 'same name, different DB' 케이스 마찰 0.
+> - **ACE**: 대시보드 'Pipelines' 카드 카운트에서 마이그레이션 제외 — \`/pipelines\` 페이지가 이미 마이그레이션 hide함, 카드와 list 정합.
+> - **ACF**: Audit row의 resource_id chip을 클릭하면 필터(resource_type + resource_id) 자동 적용. UUID 복사·붙여넣기 마찰 0.
+> - **ACG**: Mirror strategy 선택 + keyColumns 빈 경우, source에 'id' 컬럼 있으면 자동 채움 (case-insensitive).
+> - **ACH**: Append strategy 선택 + cursorColumn 빈 경우, source에서 \`updated_at\` > \`created_at\` > 임의 \`*_at\` 순으로 자동 채움.
+> - **ACI**: schema mode 테이블 picker에 검색 input (11개 이상일 때만 노출). enterprise schema (50+ 테이블) 스캔 마찰 해소. sourceSchema 변경 시 검색 자동 reset.
+>
+> **누적 ABG→ACI = 30 슬라이스** 단일 long-running 사용자 페르소나 dogfood 세션. 코어/서버 변화 0(매 슬라이스), web tsc clean, 신규 시각 컴포넌트 1(DryRunResultCard), i18n 신규 키 ~85개. 882 unit + 53 server auth/audit it green.
+>
+> **이전 마일스톤 (2026-06-01): Persona dogfood UX 폴리시 3rd wave (Phase ACB → ACC + ACA follow-up).** 2nd wave 직후 추가 3 슬라이스:
 > - **ACB**: 대시보드 "Active schedules" 카드 next-firing sub-line. `cron-parser`로 모든 활성 cron 중 가장 가까운 firing 계산. ABV(list)/ABJ(migration card)와 함께 "where's the operator's attention?" 3 surface 정합.
 > - **ACC**: Audit log JsonBlock에 Copy 버튼. ABR(run detail config) Copy 패턴 정합. operator가 before/after JSON을 diff/Slack/issue에 paste.
 > - **ACA follow-up**: runs page client-side trigger filter가 narrow되었을 때 "Showing X of Y" 표시. "Load more 누르면 또 보이긴 하나?" 의문 해소.

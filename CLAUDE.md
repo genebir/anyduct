@@ -117,7 +117,9 @@ uv run mypy etl_plugins
 
 ## 5. 현재 단계
 
-> **최신 마일스톤 (2026-05-29): 빌더 "Cross-DB Migration" 스타터 템플릿 (Phase AAI).** Phases AAA→AAH의 cross-DB 기능을 가장 짧은 path로 노출. ① 새 템플릿 `db-migrate-cross`(postgres source + sqlite sink, `auto_create_table=true` 사전 설정 → 사용자가 토글 발견할 필요 0). ② `state()` helper에 per-node `overrides` 인자(노드별 field defaults). ③ i18n 4 신규 키 en/ko(`tpl.dbMigrateCross/Desc`). 신규 시각 컴포넌트 0. web tsc clean. 코어/서버 변화 0.
+> **최신 마일스톤 (2026-05-29): Cross-DB `auto_create_table` → 카탈로그 REST 자동 등록 dogfood (Phase AAJ).** auto-created sink가 catalog REST에서 first-class 자산으로 보임을 분석가 페르소나 e2e: products → products_cache(auto_create) run → `GET /assets`에서 src/products + dst/products_cache 둘 다 노출 + upstream lineage + materializations 모두 정확. **운영 보장**: auto-created 테이블이 runtime-only 사이드 이펙트가 아니라 카탈로그 first-class 시민(분석가 dashboard 빌드 시 lineage 그래프 자연 노출). 서버 it 481→482(+1). 코어 805 unchanged. DB 마이그레이션 0.
+>
+> **이전 마일스톤 (2026-05-29): 빌더 "Cross-DB Migration" 스타터 템플릿 (Phase AAI).** Phases AAA→AAH의 cross-DB 기능을 가장 짧은 path로 노출. ① 새 템플릿 `db-migrate-cross`(postgres source + sqlite sink, `auto_create_table=true` 사전 설정 → 사용자가 토글 발견할 필요 0). ② `state()` helper에 per-node `overrides` 인자(노드별 field defaults). ③ i18n 4 신규 키 en/ko(`tpl.dbMigrateCross/Desc`). 신규 시각 컴포넌트 0. web tsc clean. 코어/서버 변화 0.
 >
 > **이전 마일스톤 (2026-05-29): `examples/cross_db_migration.yaml` + CLI validate 회귀 가드 (Phase AAH).** Phases AAA→AAG의 cross-DB migration 기능을 카피·페이스트 가능한 한 페이지 사용자용 예제 + 회귀 가드. `auto_create_table` + `auto_create_if_exists` 코멘트 가이드 + `etlx validate` 사용법 + `connections.example.yaml` 동반(secret marker pattern). 신규 unit `test_example_yaml_loads.py`로 future config-schema 드리프트 방지. CLI 검증: "pipeline: orders_replication (mode=batch) ✓". 코어 unit 804→805(+1). ruff clean.
 >

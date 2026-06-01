@@ -10,6 +10,9 @@
 ## [Unreleased]
 
 ### Added
+- **Cross-DB `auto_create_table` → 카탈로그 REST 자동 등록 dogfood (Phase AAJ)** — auto-created sink가 catalog REST에서 first-class 자산으로 보임을 확인. 분석가가 dashboard 빌더에서 lineage 그래프 보고 "이 캐시 어디서 왔지?" 즉답 가능. ① products(src/products) → products_cache(dst/products_cache, auto_create) 흐름. ② `GET /workspaces/{ws}/assets`에서 두 자산 모두 노출. ③ `GET /assets/{sink_id}/lineage`로 upstream `src/products` 식별. ④ `GET /assets/{sink_id}/materializations`로 run materialisation 기록. **운영 보장**: auto-created 테이블이 runtime-only 사이드 이펙트가 아니라 카탈로그 first-class 시민. 서버 it 481→482(+1). 코어 805 unchanged.
+
+### Added
 - **빌더 "Cross-DB Migration" 스타터 템플릿 (Phase AAI)** — 사용자가 "DB 간 마이그레이션" 패턴을 한 클릭으로 시작:
   - 새 템플릿 `db-migrate-cross`: postgres source + sqlite sink, **`auto_create_table=true` 사전 설정**(사용자가 토글 발견할 필요 0).
   - `state()` helper에 per-node `overrides` 인자 추가 — 템플릿이 노드별 field defaults 지정 가능.

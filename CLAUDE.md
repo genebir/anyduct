@@ -117,7 +117,9 @@ uv run mypy etl_plugins
 
 ## 5. 현재 단계
 
-> **최신 마일스톤 (2026-05-29): Migration form wire-shape 서버 e2e — 3 strategies worker 통과 (Phase AAO).** `migration-config.ts`가 emit하는 3 JSON shape를 hand-build → worker 실행 → 결과 검증 → web↔server drift catch. ① AAO1 Full snapshot 2-pass schema drift. ② AAO2 Append 2-pass growing source 양 batch 보존. ③ AAO3 Live mirror PK 자동 emit + upsert merge, 3 rows 중복 0. 서버 it 482→485(+3). 코어 unit 812 unchanged.
+> **최신 마일스톤 (2026-05-29): Migrations 리스트에 최근 실행 상태 컬럼 — health at a glance (Phase AAP).** 운영자가 클릭 없이 모든 마이그레이션 건강 상태 한눈. ① 새 컬럼 Last run: StatusBadge + 상대 시간. ② Never run 명시. ③ 전체 workspace runs.list({limit:200}) 단일 요청 + pipeline_id별 최근 1개 추출(N+1 회피). ④ 5초 폴링. 신규 시각 컴포넌트 0. 코어/서버 변화 0. web tsc clean. i18n en/ko 각 2 키.
+>
+> **이전 마일스톤 (2026-05-29): Migration form wire-shape 서버 e2e — 3 strategies worker 통과 (Phase AAO).** `migration-config.ts`가 emit하는 3 JSON shape를 hand-build → worker 실행 → 결과 검증 → web↔server drift catch. ① AAO1 Full snapshot 2-pass schema drift. ② AAO2 Append 2-pass growing source 양 batch 보존. ③ AAO3 Live mirror PK 자동 emit + upsert merge, 3 rows 중복 0. 서버 it 482→485(+3). 코어 unit 812 unchanged.
 >
 > **이전 마일스톤 (2026-05-29): Migration detail page를 닫힌 surface로 — Run now + Recent runs (Phase AAN4).** AAN3 폼 옆에 실행 + 모니터링이 한 페이지에. ① 헤더 `Run now` 버튼(pipelinesApi.trigger, optimistic insert, current_version 없으면 disabled). ② Recent runs 카드: 파이프라인 한정 최근 5(StatusBadge + run id + records_written + duration + 상대 시간). 5s 폴링. ③ 빈 상태 안내. 운영 UX: 생성→저장→실행→결과 한 페이지 완결. 코어/서버 변화 0. web tsc clean. i18n en/ko 각 6 추가 키.
 >

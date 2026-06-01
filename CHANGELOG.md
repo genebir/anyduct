@@ -10,6 +10,15 @@
 ## [Unreleased]
 
 ### Added
+- **Migrations 리스트에 최근 실행 상태 컬럼 — health at a glance (Phase AAP)** — 운영자가 클릭 없이 모든 마이그레이션의 건강 상태 한눈에 확인:
+  - 새 컬럼 **Last run**: `StatusBadge` (succeeded/failed/running/...) + 상대 시간(`5m`/`3h`/`2d`).
+  - 실행 없는 마이그레이션은 `Never run` 명시(빈 칸이 아니라 명시적 안내).
+  - 전체 workspace `runs.list({limit:200})` 단일 요청 → 클라이언트에서 `pipeline_id`별 최근 1개 추출(N+1 회피).
+  - 5초 폴링(detail page와 동일 cadence) — Trigger가 다른 곳에서 일어나도 리스트에 반영.
+  - i18n en/ko 각 2 키(`colLastRun`/`neverRun`).
+  - 검증: web tsc clean. 코어/서버 변화 0.
+
+### Added
 - **Migration form wire-shape 서버 e2e — 3 strategies 모두 worker 통과 (Phase AAO)** — `migration-config.ts`가 emit하는 3가지 JSON 형태를 hand-build해서 worker로 실행 + 결과 검증. 향후 web↔server drift catch:
   - **AAO1 Full snapshot**: `mode=overwrite + auto_create_if_exists=drop` 2-pass, day-1 `(id, name)` → day-2 `(id, email)` schema drift → 도착지에 새 schema + day-2 데이터만 (day-1 wipe).
   - **AAO2 Append new rows**: `mode=append + cursor_column='id'` 2-pass, growing source → 도착지에 day-1 + day-2 모두 보존.

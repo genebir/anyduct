@@ -25,7 +25,14 @@ import { Header } from "@/components/shell/header";
 import { Button } from "@/components/ui/button";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { EmptyState } from "@/components/ui/empty-state";
-import { ApiError, pipelinesApi, type PipelineSummary } from "@/lib/api";
+import { StatusBadge } from "@/components/ui/status-badge";
+import {
+  ApiError,
+  pipelinesApi,
+  runsApi,
+  type PipelineSummary,
+  type RunSummary,
+} from "@/lib/api";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import { useLocale } from "@/components/providers/locale-provider";
 import type { Messages } from "@/lib/i18n/messages";
@@ -39,7 +46,23 @@ type Translate = (
   vars?: Record<string, string | number>,
 ) => string;
 
-type Row = PipelineSummary & { migration: MigrationSummary };
+type Row = PipelineSummary & {
+  migration: MigrationSummary;
+  lastRun: RunSummary | null;
+};
+
+const RUNS_POLL_MS = 5_000;
+
+function relativeTime(iso: string | null): string {
+  if (!iso) return "—";
+  const then = new Date(iso).getTime();
+  const now = Date.now();
+  const diff = Math.max(0, Math.floor((now - then) / 1000));
+  if (diff < 60) return `${diff}s`;
+  if (diff < 3600) return `${Math.floor(diff / 60)}m`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
+  return `${Math.floor(diff / 86400)}d`;
+}
 
 function strategyChip(
   s: MigrationSummary["strategy"],
@@ -112,6 +135,31 @@ function buildColumns(t: Translate): Column<Row>[] {
         );
       },
     },
+    {
+      // Phase AAP — health at a glance. "Last run" surfaces both the
+      // status (badge color) and how long ago, so the operator can
+      // skim the list and spot a stale or failed migration without
+      // opening it.
+      key: "last_run",
+      header: t("migrations.colLastRun"),
+      cell: (r) =>
+        r.lastRun ? (
+          <div className="flex items-center gap-2 text-xs">
+            <StatusBadge status={r.lastRun.status} />
+            <span className="text-text-muted">
+              {relativeTime(
+                r.lastRun.finished_at ??
+                  r.lastRun.started_at ??
+                  r.lastRun.created_at,
+              )}
+            </span>
+          </div>
+        ) : (
+          <span className="text-xs text-text-muted">
+            {t("migrations.neverRun")}
+          </span>
+        ),
+    },
   ];
 }
 
@@ -120,6 +168,12 @@ export default function MigrationsPage() {
   const ws = useWorkspaceFromSlug(slug);
   const { t } = useLocale();
   const [rows, setRows] = useState<PipelineSummary[] | null>(null);
+  /** Most recent run per pipeline_id. Refreshed every ``RUNS_POLL_MS``
+   *  so a Trigger from elsewhere lands on this list without a page
+   *  reload. */
+  const [lastRunByPipeline, setLastRunByPipeline] = useState<
+    Map<string, RunSummary>
+  >(new Map());
 
   useEffect(() => {
     if (!ws) return;
@@ -142,6 +196,38 @@ export default function MigrationsPage() {
     };
   }, [ws, t]);
 
+  // Recent runs across the whole workspace, indexed by pipeline_id.
+  // Phase AAP: gives every migration row a "last status + when" chip
+  // so the operator sees health at a glance without clicking in. We
+  // fetch a *workspace-wide* page of runs (single request, no N+1)
+  // and let the dict picker pick the most recent per pipeline.
+  useEffect(() => {
+    if (!ws) return;
+    let cancelled = false;
+    const fetchRuns = async () => {
+      try {
+        const list = await runsApi.list(ws.id, { limit: 200 });
+        if (cancelled) return;
+        const m = new Map<string, RunSummary>();
+        for (const r of list) {
+          const prev = m.get(r.pipeline_id);
+          // ``runsApi.list`` orders by created_at desc — the first one
+          // we see per pipeline is already the most recent.
+          if (!prev) m.set(r.pipeline_id, r);
+        }
+        setLastRunByPipeline(m);
+      } catch {
+        // Soft-fail. The list still renders without the status chip.
+      }
+    };
+    void fetchRuns();
+    const handle = setInterval(() => void fetchRuns(), RUNS_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(handle);
+    };
+  }, [ws]);
+
   // Client-side filter — keeps the page a pure view of the pipelines
   // list. No server endpoint changes.
   const migrationRows = useMemo<Row[]>(() => {
@@ -149,10 +235,16 @@ export default function MigrationsPage() {
     const out: Row[] = [];
     for (const p of rows) {
       const migration = migrationSummaryOf(p.current_config_json);
-      if (migration) out.push({ ...p, migration });
+      if (migration) {
+        out.push({
+          ...p,
+          migration,
+          lastRun: lastRunByPipeline.get(p.id) ?? null,
+        });
+      }
     }
     return out;
-  }, [rows]);
+  }, [rows, lastRunByPipeline]);
 
   const columns = buildColumns(t);
 

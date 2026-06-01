@@ -167,6 +167,8 @@ export const en = {
   "migrations.recentRuns": "Recent runs",
   "migrations.runsEmpty": "No runs yet. Hit Run now to start the first one.",
   "migrations.runRowsWritten": "rows",
+  "migrations.colLastRun": "Last run",
+  "migrations.neverRun": "Never run",
   // sensors page (ADR-0041 K3c)
   "sensors.new": "New sensor",
   "sensors.newTitle": "New sensor",
@@ -1092,6 +1094,8 @@ export const ko: Messages = {
   "migrations.recentRuns": "최근 실행",
   "migrations.runsEmpty": "아직 실행 기록이 없습니다. 지금 실행을 눌러 시작하세요.",
   "migrations.runRowsWritten": "행",
+  "migrations.colLastRun": "최근 실행",
+  "migrations.neverRun": "실행 없음",
   "nav.sensors": "센서",
   // 센서 페이지 (ADR-0041 K3c)
   "sensors.new": "새 센서",

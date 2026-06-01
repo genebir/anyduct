@@ -30,6 +30,7 @@ import {
   type ScheduleSummary,
   type SensorSummary,
 } from "@/lib/api";
+import { CronExpressionParser } from "cron-parser";
 import { useCurrentUser } from "@/components/providers/auth-provider";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import { useLocale } from "@/components/providers/locale-provider";
@@ -193,6 +194,38 @@ export default function WorkspaceHomePage() {
 
   const activeSchedules = (schedules ?? []).filter((s) => s.is_active).length;
   const activeSensors = (sensors ?? []).filter((s) => s.is_active).length;
+  /** Phase ACB (2026-06-01) — earliest next-firing across all active
+   *  cron schedules. Used to give the "Active schedules" card a
+   *  forward-looking sub-line ("next in 12m"). Returns ``null`` when
+   *  no active cron is present (paused-only, stream, or invalid). */
+  const nextFireSoon = useMemo(() => {
+    if (!schedules) return null;
+    let soonestMs: number | null = null;
+    for (const s of schedules) {
+      if (!s.is_active || !s.cron_expr) continue;
+      try {
+        const next = CronExpressionParser.parse(s.cron_expr).next().toDate();
+        const ms = next.getTime() - Date.now();
+        if (ms < 0) continue;
+        if (soonestMs === null || ms < soonestMs) soonestMs = ms;
+      } catch {
+        /* invalid cron — skip */
+      }
+    }
+    if (soonestMs === null) return null;
+    if (soonestMs < 60_000) return t("overview.scheduleFireSoon");
+    if (soonestMs < 3_600_000)
+      return t("overview.scheduleFireInMinutes", {
+        n: Math.round(soonestMs / 60_000),
+      });
+    if (soonestMs < 86_400_000)
+      return t("overview.scheduleFireInHours", {
+        n: Math.round(soonestMs / 3_600_000),
+      });
+    return t("overview.scheduleFireInDays", {
+      n: Math.round(soonestMs / 86_400_000),
+    });
+  }, [schedules, t]);
 
   return (
     <>
@@ -243,9 +276,13 @@ export default function WorkspaceHomePage() {
             icon={<CalendarClockIcon size={18} />}
             href={ws ? `/w/${ws.slug}/schedules` : "#"}
             sub={
-              schedules && schedules.length > 0
+              // Phase ACB (2026-06-01) — prefer the forward-looking
+              // "next in Xm" when any active cron is present; fall
+              // back to the paused count when nothing is active.
+              nextFireSoon ??
+              (schedules && schedules.length > 0
                 ? t("overview.paused", { n: schedules.length - activeSchedules })
-                : undefined
+                : undefined)
             }
           />
           <StatCard

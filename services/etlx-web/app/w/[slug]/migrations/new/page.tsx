@@ -75,7 +75,11 @@ export default function NewMigrationPage() {
         config,
       });
       toast.success(t("migrations.saved"));
-      router.push(`/w/${slug}/migrations/${created.id}`);
+      // Phase AAR (2026-06-01) — user request "생성 완료 시 목록으로
+      // 이동되도록 해줘". Land on the migration list so the operator
+      // sees the new row in context (Last run / Strategy badge) +
+      // can pick another action right away.
+      router.push(`/w/${slug}/migrations`);
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : String(err));
     } finally {

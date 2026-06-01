@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
   ActivityIcon,
@@ -33,6 +33,7 @@ import { useLocale } from "@/components/providers/locale-provider";
 import type { Messages } from "@/lib/i18n/messages";
 import { linearToGraph, serializeGraph } from "@/lib/pipeline-config";
 import { PIPELINE_TEMPLATES, findTemplate } from "@/lib/pipeline-templates";
+import { migrationSummaryOf } from "@/lib/migration-utils";
 import { cn } from "@/lib/cn";
 
 type Translate = (key: keyof Messages, vars?: Record<string, string | number>) => string;
@@ -98,6 +99,16 @@ export default function PipelinesPage() {
   const ws = useWorkspaceFromSlug(slug);
   const { t } = useLocale();
   const [rows, setRows] = useState<PipelineSummary[] | null>(null);
+  // Phase AAR (2026-06-01) — user request "마이그레이션 job을
+  // 파이프라인이 아니라 마이그레이션 탭에서 관리하도록 해주고".
+  // Migration pipelines are surfaced on /migrations; hide them
+  // from the generic Pipelines list so the two surfaces don't
+  // overlap. ``migrationSummaryOf`` returns non-null exactly when
+  // the pipeline's sink has ``auto_create_table=true``.
+  const visibleRows = useMemo(() => {
+    if (rows === null) return null;
+    return rows.filter((p) => migrationSummaryOf(p.current_config_json) === null);
+  }, [rows]);
   const [triggering, setTriggering] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
@@ -282,7 +293,7 @@ export default function PipelinesPage() {
           </Card>
         ) : null}
         <Card>
-          {rows === null ? (
+          {visibleRows === null ? (
             <div className="py-12 text-center text-sm text-text-muted">
               {t("common.loading")}
             </div>
@@ -356,7 +367,7 @@ export default function PipelinesPage() {
                   ),
                 },
               ]}
-              rows={rows}
+              rows={visibleRows}
               onRowContextMenu={(row, e) => {
                 rowMenuTargetRef.current = row;
                 rowMenu.openOnEvent(e);

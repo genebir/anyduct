@@ -14,6 +14,8 @@ from dataclasses import dataclass, field
 from types import CodeType
 from typing import Any
 
+import structlog
+
 from etl_plugins.config.models import DlqConfig, RetryConfig
 from etl_plugins.core.asset import (
     AssetKey,
@@ -51,6 +53,8 @@ from etl_plugins.observability.metrics import (
 )
 from etl_plugins.observability.tracing import get_tracer
 from etl_plugins.utils.retry import retryable
+
+_module_logger = structlog.get_logger(__name__)
 
 TransformFn = Callable[[Record], Record | None]
 """Transform: takes a Record, returns the (possibly modified) Record, or None to drop it."""
@@ -1232,13 +1236,36 @@ class Pipeline:
             pk_for_sink = (
                 list(spec.key_columns) if spec.mode == "upsert" and spec.key_columns else None
             )
-            with contextlib.suppress(Exception):
+            # Phase AAR (2026-06-01) — Postgres-style drivers leave the
+            # current transaction in *aborted* state after a failed
+            # DDL ("current transaction is aborted, commands ignored
+            # until end of transaction block"). The previous
+            # contextlib.suppress hid the DDL failure but the sink's
+            # subsequent write tripped over the poisoned transaction.
+            # We catch + log + rollback so the next stage sees a
+            # clean connection.
+            try:
                 sink.ensure_table(
                     spec.table,
                     cols_for_sink,
                     if_exists=spec.auto_create_if_exists,
                     primary_key=pk_for_sink,
                 )
+            except Exception as exc:
+                log = getattr(self, "_log", None) or _module_logger
+                log.warning(
+                    "auto_create_table.failed",
+                    sink_table=spec.table,
+                    error=str(exc)[:300],
+                )
+                # Best-effort rollback. Both psycopg and pymssql expose
+                # ``rollback()`` directly; sqlite's ``connection`` is
+                # always rollback-safe. If the connector has no
+                # rollback (HTTP / Kafka / S3 don't), skipping is fine.
+                conn = getattr(sink, "_conn", None) or getattr(sink, "connection", None)
+                if conn is not None:
+                    with contextlib.suppress(Exception):
+                        conn.rollback()
 
     def _run_pre_sql(self, task: Task, connectors: dict[str, Connector]) -> None:
         """Execute the task's pre-load SQL actions once, in order (ADR-0035)."""

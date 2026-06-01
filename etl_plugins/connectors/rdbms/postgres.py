@@ -191,6 +191,21 @@ class PostgresConnector(BatchSource, BatchSink):
         if not sep:
             schema, name = "public", table
 
+        # Phase AAR (2026-06-01) — cross-DB migrations into Postgres
+        # often carry a schema-qualified name from the source
+        # (Vertica's ``BDA_BI_DB.TB_XYZ``, MSSQL's ``dbo.X``, etc.).
+        # If the target schema doesn't exist yet the CREATE TABLE
+        # fails with ``schema "BDA_BI_DB" does not exist``, leaves
+        # the transaction aborted, and the subsequent COPY trips
+        # over "current transaction is aborted". CREATE SCHEMA IF
+        # NOT EXISTS up front sidesteps the whole class — Postgres
+        # treats unknown schemas as a real error, not a typo, so
+        # making one is exactly what the operator wanted when they
+        # picked ``auto_create_table=true``.
+        if schema != "public" and _SAFE_IDENT.match(schema):
+            with self.connection.cursor() as cur:
+                cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')
+
         with self.connection.cursor() as cur:
             cur.execute(
                 "SELECT 1 FROM information_schema.tables "

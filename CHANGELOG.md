@@ -10,6 +10,12 @@
 ## [Unreleased]
 
 ### Fixed
+- **마이그레이션 transaction-aborted 버그 + 마이그레이션 ↔ 파이프라인 surface 분리 (Phase AAR)** — 사용자 3건 신고:
+  - **(1) 마이그레이션 실패 root cause**: `mig` 파이프라인이 `postgres write failed: current transaction is aborted` 로 죽음. 원인: `_auto_create_sink_tables`의 `contextlib.suppress(Exception)`이 CREATE TABLE 실패를 삼킴 → postgres 트랜잭션은 aborted 상태로 남음 → 이어지는 sink.write의 모든 SQL 거부. 사용자 setup이 vertica(`test_verti`, `BDA_BI_DB.TB_BCDBAS601`) → postgres(`test`)였는데 destination에 `BDA_BI_DB` schema 없음 → CREATE 실패. **수정 (A)**: `_auto_create_sink_tables`가 명시적 `try/except` + structlog warning + `conn.rollback()` 호출. 다음 stage가 깨끗한 transaction 위에서 시작. **수정 (B)**: `postgres.ensure_table`이 schema-qualified table 받으면 `CREATE SCHEMA IF NOT EXISTS` 먼저 emit — cross-DB migration이 schema 자동 생성까지 처리.
+  - **(2) "마이그레이션 job을 파이프라인이 아니라 마이그레이션 탭에서 관리"**: Pipelines 리스트 페이지가 `migrationSummaryOf` 필터로 `auto_create_table=true` sink가 있는 파이프라인을 client-side 숨김. 두 surface 겹침 0. 서버 endpoint 변화 0(마이그레이션도 여전히 일반 pipeline으로 저장됨, 둘 다 동일 REST 사용).
+  - **(3) "생성 완료 시 목록으로 이동"**: `/migrations/new` 저장 후 `/migrations/[id]` 대신 `/migrations` 리스트로 이동 — 운영자가 새 행 + Last run 컬럼 + Strategy chip을 컨텍스트와 함께 봄.
+  - 검증: 코어 unit 878→882(+4: rollback / 통합 run / no-conn skip / CREATE SCHEMA 명령 emit). 서버 it 485 회귀 0. mypy/ruff/tsc clean.
+
 - **Vertica `ssl` 옵션 string-to-bool coercion + boolean field type (Phase AAQ post-mortem 4)** — 사용자 *"vertica connect failed: The value of connection option 'ssl' should be a bool or ssl.SSLContext object"*. UI form이 ssl을 string으로 전달, vertica-python은 bool 요구.
   - **Connector 측 (방어)**: `VerticaConnector.__init__`이 `ssl` string ("true"/"false"/"1"/"0"/"yes"/"no"/"on"/"off"/빈) → bool로 정규화. `ssl.SSLContext` 인스턴스 passthrough. 어떤 경로(YAML / web form / 기존 저장 connection)로 들어오든 안전.
   - **UI 측 (UX)**: `ConnectorField.type`에 `"boolean"` 추가. checkbox 렌더 + Enabled/Disabled 라벨. Vertica의 ssl 필드를 string → boolean 타입으로 변경(defaultValue: `false`). `buildCreateBody`가 `false`도 정상 직렬화(empty/undefined만 skip).

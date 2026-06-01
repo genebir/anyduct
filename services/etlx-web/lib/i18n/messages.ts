@@ -408,6 +408,11 @@ export const en = {
   "connections.clearFilters": "Clear filters",
   "connections.filterNoMatch":
     "No connections match the current search and filters.",
+  // Phase ABC (2026-06-01) — sensors page search + filter
+  "sensors.searchPlaceholder": "Search sensors by name or type…",
+  "sensors.filterTypeAll": "All sensor types",
+  "sensors.clearFilters": "Clear filters",
+  "sensors.filterNoMatch": "No sensors match the current search and filters.",
   "connections.connected": "{name} connected",
   "connections.testErrorNamed": "{name}: {error}",
   "connections.unknownError": "unknown error",
@@ -1395,6 +1400,11 @@ export const ko: Messages = {
   "connections.filterTypeAll": "모든 타입",
   "connections.clearFilters": "필터 초기화",
   "connections.filterNoMatch": "현재 검색/필터에 일치하는 연결이 없습니다.",
+  // Phase ABC (2026-06-01) — 센서 검색 + 필터
+  "sensors.searchPlaceholder": "이름이나 타입으로 검색…",
+  "sensors.filterTypeAll": "모든 센서 타입",
+  "sensors.clearFilters": "필터 초기화",
+  "sensors.filterNoMatch": "현재 검색/필터에 일치하는 센서가 없습니다.",
   "connections.colSecrets": "시크릿",
   "connections.refs": "참조 {count}개",
   "connections.connected": "{name} 연결됨",

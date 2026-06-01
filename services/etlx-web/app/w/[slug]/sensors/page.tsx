@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import {
   CheckCircle2Icon,
@@ -242,6 +242,29 @@ export default function SensorsPage() {
   const [checking, setChecking] = useState<string | null>(null);
   const rowMenu = useContextMenu();
   const rowMenuTargetRef = useRef<SensorSummary | null>(null);
+  /** Phase ABC (2026-06-01) — search + type filter, mirrors AAT/ABB. */
+  const [search, setSearch] = useState("");
+  const [typeFilter, setTypeFilter] = useState("");
+
+  const distinctTypes = useMemo(() => {
+    if (!rows) return [];
+    return [...new Set(rows.map((r) => r.type))].sort();
+  }, [rows]);
+
+  const filteredRows = useMemo(() => {
+    if (!rows) return [];
+    const term = search.trim().toLowerCase();
+    return rows.filter((r) => {
+      if (
+        term &&
+        !r.name.toLowerCase().includes(term) &&
+        !r.type.toLowerCase().includes(term)
+      )
+        return false;
+      if (typeFilter && r.type !== typeFilter) return false;
+      return true;
+    });
+  }, [rows, search, typeFilter]);
 
   async function refresh(workspaceId: string) {
     try {
@@ -414,6 +437,42 @@ export default function SensorsPage() {
           </Card>
         ) : null}
 
+        {/* Phase ABC (2026-06-01) — search + type filter. Hidden
+            below 5 rows. */}
+        {rows !== null && rows.length > 5 ? (
+          <div className="grid items-end gap-2 sm:grid-cols-[1fr_auto_auto]">
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={t("sensors.searchPlaceholder")}
+            />
+            <select
+              value={typeFilter}
+              onChange={(e) => setTypeFilter(e.target.value)}
+              className="h-10 rounded-md border border-border-subtle bg-elevated px-2 text-sm text-text focus-visible:border-accent focus-visible:outline-none"
+            >
+              <option value="">{t("sensors.filterTypeAll")}</option>
+              {distinctTypes.map((tp) => (
+                <option key={tp} value={tp}>
+                  {tp}
+                </option>
+              ))}
+            </select>
+            {search || typeFilter ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setSearch("");
+                  setTypeFilter("");
+                }}
+              >
+                {t("sensors.clearFilters")}
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
+
         <Card>
           <CardHeader title={t("sensors.listTitle")} description={t("sensors.listDesc")} />
           {rows === null ? (
@@ -424,9 +483,13 @@ export default function SensorsPage() {
               title={t("sensors.emptyTitle")}
               description={t("sensors.emptyDesc")}
             />
+          ) : filteredRows.length === 0 ? (
+            <p className="px-1 py-4 text-sm text-text-muted">
+              {t("sensors.filterNoMatch")}
+            </p>
           ) : (
             <DataTable<SensorSummary>
-              rows={rows}
+              rows={filteredRows}
               columns={buildColumns(
                 t,
                 onCheck,

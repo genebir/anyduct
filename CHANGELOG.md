@@ -10,6 +10,13 @@
 ## [Unreleased]
 
 ### Added
+- **워크스페이스 대시보드에 Migrations 카드 (Phase AAV, 2026-06-01)** — 운영자 첫 화면에서 마이그레이션 surface 자연 인지:
+  - 5번째 StatCard "Migrations" 추가 — ArrowRightLeftIcon, `/migrations` 링크.
+  - **건강성 sub line**: 24h in-flight 있으면 `{n} in flight`, 없으면 `{n}% ok`(24h 성공률).
+  - **추가 API 호출 0**: 이미 가져오는 `pipelines` payload를 `migrationSummaryOf`로 필터해서 마이그레이션 ID set 추출 → 같은 `runs` payload에서 마이그레이션 ID matching runs만 집계.
+  - 그리드 lg:grid-cols-5 → 6으로 확장(반응형).
+  - 검증: web tsc clean. 코어/서버 변화 0. 신규 i18n 키 0(`overview.inFlightCount` / `overview.successRate` 재사용).
+
 - **마이그레이션 detail에 Quick Schedule (Phase AAU, 2026-06-01)** — 마이그레이션을 자동 실행 흐름에 한 화면에서 묶기:
   - **`ScheduleCard`**: detail 페이지 양식 옆에 cron 입력 + Enable/Update/Pause/Resume/Clear 액션. `schedulesApi`(이미 존재) 위에 얇은 wrapper.
   - **상태 chip**: `active` / `paused` / 없음(없음 상태) — 아이콘 색까지 신호화.

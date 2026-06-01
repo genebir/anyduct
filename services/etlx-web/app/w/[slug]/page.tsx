@@ -6,6 +6,7 @@ import { useParams } from "next/navigation";
 import {
   ActivityIcon,
   AlertTriangleIcon,
+  ArrowRightLeftIcon,
   CableIcon,
   CalendarClockIcon,
   ChevronRightIcon,
@@ -34,6 +35,7 @@ import { useLocale } from "@/components/providers/locale-provider";
 import type { Messages } from "@/lib/i18n/messages";
 import { cn } from "@/lib/cn";
 import { toast } from "sonner";
+import { migrationSummaryOf } from "@/lib/migration-utils";
 
 type Translate = (key: keyof Messages, vars?: Record<string, string | number>) => string;
 
@@ -117,6 +119,37 @@ export default function WorkspaceHomePage() {
     [pipelines],
   );
 
+  // Phase AAV (2026-06-01) — migration-specific aggregate so the
+  // dashboard surfaces what the operator actually built (often N
+  // schema-mode rows in one go). Counted off the same ``pipelines``
+  // payload so no extra request is needed.
+  const migrationStats = useMemo(() => {
+    if (!pipelines) return null;
+    const migrationIds = new Set<string>();
+    for (const p of pipelines) {
+      if (migrationSummaryOf(p.current_config_json)) migrationIds.add(p.id);
+    }
+    let total24h = 0;
+    let succeeded24h = 0;
+    let inFlight = 0;
+    if (runs) {
+      const cutoff = Date.now() - ONE_DAY_MS;
+      for (const r of runs) {
+        if (!migrationIds.has(r.pipeline_id)) continue;
+        if (new Date(r.created_at).getTime() < cutoff) continue;
+        total24h += 1;
+        if (r.status === "succeeded") succeeded24h += 1;
+        if (r.status === "pending" || r.status === "running") inFlight += 1;
+      }
+    }
+    return {
+      count: migrationIds.size,
+      total24h,
+      succeeded24h,
+      inFlight,
+    };
+  }, [pipelines, runs]);
+
   /** Today's runs window — used for both the count and the success-rate
    *  pill below. Single pass so we walk the array once. */
   const todayStats = useMemo(() => {
@@ -156,12 +189,34 @@ export default function WorkspaceHomePage() {
         subtitle={ws ? t("overview.subtitle") : undefined}
       />
       <main className="mx-auto w-full max-w-6xl flex-1 space-y-6 overflow-y-auto px-6 py-8">
-        <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+        <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-6">
           <StatCard
             label={t("nav.pipelines")}
             value={pipelines?.length}
             icon={<WorkflowIcon size={18} />}
             href={ws ? `/w/${ws.slug}/pipelines` : "#"}
+          />
+          {/* Phase AAV (2026-06-01) — migrations as a first-class
+              dashboard signal. Sub line shows the in-flight count or
+              today's success rate so the operator sees migration
+              health at a glance. */}
+          <StatCard
+            label={t("nav.migrations")}
+            value={migrationStats?.count}
+            icon={<ArrowRightLeftIcon size={18} />}
+            href={ws ? `/w/${ws.slug}/migrations` : "#"}
+            sub={
+              migrationStats && migrationStats.total24h > 0
+                ? migrationStats.inFlight > 0
+                  ? t("overview.inFlightCount", { n: migrationStats.inFlight })
+                  : t("overview.successRate", {
+                      n: Math.round(
+                        (migrationStats.succeeded24h / migrationStats.total24h) *
+                          100,
+                      ),
+                    })
+                : undefined
+            }
           />
           <StatCard
             label={t("overview.activeSchedules")}

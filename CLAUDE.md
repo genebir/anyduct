@@ -117,7 +117,9 @@ uv run mypy etl_plugins
 
 ## 5. 현재 단계
 
-> **최신 마일스톤 (2026-05-29): Workspace Variables 페이지 type badge — 빌더와 일관성 (Phase AAL).** `/w/[slug]/variables` 리스트에 string/number/boolean/JSON 타입 배지 추가. 빌더 pipeline-settings-panel(L1)이 이미 갖고 있던 vocabulary와 합치. ① 신규 `lib/variable-types.ts` (`VarType` + `inferType`) — 두 surface가 같은 추론 함수 공유. ② 빌더 inline 선언 → import로 교체(코드 중복 0). ③ workspace 변수 리스트에 `<span>` badge(uppercase, `bg-overlay`). 신규 시각 컴포넌트 0. 코어/서버 변화 0. web tsc clean.
+> **최신 마일스톤 (2026-05-29): examples/ 확장 — snapshot rebuild + upsert merge 예제 (Phase AAM).** Phase AAH의 cross_db_migration.yaml 옆에 두 운영 시나리오 추가: `cross_db_snapshot.yaml`(drop + overwrite, 일일 schema-drift-tolerant 재구축) + `cross_db_upsert.yaml`(upsert + key_columns + auto_create_table, PRIMARY KEY 자동 emit + live cache 패턴). 헤더 코멘트에 ADR-0071/0072 운영 trade-off 명시. `etlx validate` 둘 다 직접 검증 ✓. lock-in test 2개 추가(코어 unit 810→812).
+>
+> **이전 마일스톤 (2026-05-29): Workspace Variables 페이지 type badge — 빌더와 일관성 (Phase AAL).** `/w/[slug]/variables` 리스트에 string/number/boolean/JSON 타입 배지 추가. 빌더 pipeline-settings-panel(L1)이 이미 갖고 있던 vocabulary와 합치. ① 신규 `lib/variable-types.ts` (`VarType` + `inferType`) — 두 surface가 같은 추론 함수 공유. ② 빌더 inline 선언 → import로 교체(코드 중복 0). ③ workspace 변수 리스트에 `<span>` badge(uppercase, `bg-overlay`). 신규 시각 컴포넌트 0. 코어/서버 변화 0. web tsc clean.
 >
 > **이전 마일스톤 (2026-05-29): `auto_create_table_planned` 린트 규칙 — dry-run 안내 (Phase AAK).** Phase DD 패턴 확장. 각 sink에 `auto_create_table=true`가 있으면 dry-run에서 "sink will create table 't2' on first run if it's missing" 안내. `auto_create_if_exists='drop'`은 "rebuild" / `'error'`는 "fail next run" 문구. linear / fan-out / graph 3 shape 모두 walk. **운영 UX**: 사용자가 Trigger 누르기 전 Dry Run에서 정확히 미리 봄. 코어 unit 805→810(+5). 신규 시각 컴포넌트 0(기존 DryRunPanel warnings 영역 자동 노출).
 >

@@ -1,0 +1,32 @@
+# Cross-DB live cache via UPSERT — pull-based CDC analog (Phase AAC / ADR-0072).
+#
+# Replicates a Postgres customers table into a local SQLite cache as
+# a *live* mirror — each run upserts by ``id``: existing rows update
+# in place, new rows insert. Unlike the snapshot pattern, the sink is
+# *not* wiped between runs, so deleted upstream rows linger in the
+# cache (that's a fundamental UPSERT trade-off; pair with a soft-delete
+# flag upstream if you need stronger semantics).
+#
+# ``auto_create_table: true`` + ``key_columns: [id]`` + ``mode: upsert``
+# combine to make the first run safe: the runtime creates the
+# destination with a PRIMARY KEY on ``id`` so the ``ON CONFLICT`` clause
+# resolves cleanly. (Without the PK, the first upsert would die with
+# "ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE
+# constraint" — that's the regression Phase AAC / ADR-0072 fixed.)
+#
+# Pair with ``examples/connections.example.yaml`` and run:
+#
+#     uv run etlx validate examples/cross_db_upsert.yaml \
+#         --connections examples/connections.example.yaml
+#
+name: customers_cache
+mode: batch
+source:
+  connection: pg_oltp
+  query: SELECT id, name, balance FROM customers
+sink:
+  connection: sqlite_analytics
+  table: customers_cache
+  mode: upsert
+  key_columns: [id]
+  auto_create_table: true       # first run emits PRIMARY KEY (id) for the cache

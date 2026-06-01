@@ -9,6 +9,14 @@
 
 ## [Unreleased]
 
+### Added
+- **examples/ 확장 — snapshot rebuild + upsert merge 예제 (Phase AAM)** — Phase AAH의 cross_db_migration.yaml 옆에 두 운영 시나리오 추가:
+  - `cross_db_snapshot.yaml`: `auto_create_if_exists: drop` + `mode: overwrite` — 일일 schema-drift-tolerant 재구축.
+  - `cross_db_upsert.yaml`: `mode: upsert` + `key_columns: [id]` + `auto_create_table: true` — PRIMARY KEY 자동 emit으로 live cache 패턴.
+  - 헤더 코멘트에 ADR-0071/0072 운영 trade-off 명시(snapshot은 삭제도 반영 / upsert는 deleted row linger).
+  - `etlx validate` 둘 다 직접 검증: ✓ pass.
+  - lock-in test 2개 추가(코어 unit 810→812).
+
 ### Changed
 - **Workspace Variables 페이지 type badge — 빌더와 일관성 (Phase AAL)** — `/w/[slug]/variables` 리스트에 string/number/boolean/JSON 타입 배지 추가. 빌더 pipeline-settings-panel(Phase L1)이 이미 갖고 있던 동일한 vocabulary. ① 신규 `lib/variable-types.ts` (`VarType` + `inferType`) — 두 surface가 같은 추론 함수 공유. ② 빌더 inline 선언 → import로 교체(코드 중복 0). ③ workspace 변수 리스트에 `<span>` badge(uppercase, `bg-overlay`). 신규 시각 컴포넌트 0(기존 badge 스타일 재사용). web tsc clean.
 

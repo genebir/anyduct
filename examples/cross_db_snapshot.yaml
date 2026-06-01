@@ -1,0 +1,32 @@
+# Cross-DB snapshot replication with schema-drift tolerance (Phase AAA / ADR-0071).
+#
+# Daily snapshot from an upstream Postgres into a SQLite analytics
+# cache, **but** the upstream schema can evolve between runs (a column
+# gets renamed, a column is added, a column is dropped). The default
+# ``skip`` policy would keep yesterday's table around and silently
+# write the new shape on top — leading to either a write failure (new
+# column the sink doesn't know about) or stale columns hanging
+# around forever.
+#
+# ``auto_create_if_exists: drop`` opts into a destructive rebuild
+# semantics: every run drops the sink table first, then recreates it
+# from the current source schema. Combined with ``mode: overwrite``
+# the run is fully idempotent — re-running it produces the same result
+# regardless of what was there before.
+#
+# Pair with ``examples/connections.example.yaml`` and run:
+#
+#     uv run etlx validate examples/cross_db_snapshot.yaml \
+#         --connections examples/connections.example.yaml
+#
+name: customers_snapshot
+mode: batch
+source:
+  connection: pg_oltp
+  query: SELECT * FROM customers
+sink:
+  connection: sqlite_analytics
+  table: customers_snapshot
+  mode: overwrite
+  auto_create_table: true
+  auto_create_if_exists: drop   # rebuild on every run, schema drift OK

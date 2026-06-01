@@ -180,6 +180,11 @@ export const en = {
     "Validate connections + secrets + connector instantiation without writing.",
   "migrations.dryRunOk": "Dry run ok — {n} of {total} connectors validated",
   "migrations.dryRunFailed": "Dry run failed: {error}",
+  // Phase ABQ (2026-06-01) — bulk dry-run
+  "migrations.dryRunSelected": "Dry run selected",
+  "migrations.bulkDryRunOk": "Dry run ok for all {n} migrations",
+  "migrations.bulkDryRunPartial": "Dry run: {ok} ok, {fail} failed",
+  "migrations.bulkDryRunAllFailed": "Dry run failed for all {n} migrations",
   "migrations.recentRuns": "Recent runs",
   "migrations.runsEmpty": "No runs yet. Hit Run now to start the first one.",
   "migrations.runRowsWritten": "rows",
@@ -1232,6 +1237,11 @@ export const ko: Messages = {
     "쓰기 없이 연결 + 시크릿 + connector 인스턴스화를 검증.",
   "migrations.dryRunOk": "사전검증 성공 — connector {n}/{total} 검증 완료",
   "migrations.dryRunFailed": "사전검증 실패: {error}",
+  // Phase ABQ (2026-06-01) — bulk 사전검증
+  "migrations.dryRunSelected": "선택 항목 사전검증",
+  "migrations.bulkDryRunOk": "사전검증 {n}건 모두 성공",
+  "migrations.bulkDryRunPartial": "사전검증: {ok}건 성공, {fail}건 실패",
+  "migrations.bulkDryRunAllFailed": "사전검증 {n}건 모두 실패",
   "migrations.recentRuns": "최근 실행",
   "migrations.runsEmpty": "아직 실행 기록이 없습니다. 지금 실행을 눌러 시작하세요.",
   "migrations.runRowsWritten": "행",

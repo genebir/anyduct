@@ -25,6 +25,7 @@ import {
   EditIcon,
   PlayIcon,
   PlusIcon,
+  ShieldCheckIcon,
   Trash2Icon,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -349,6 +350,59 @@ export default function MigrationsPage() {
       toast.success(t("migrations.bulkScheduled", { n: ok }));
     } else {
       toast.warning(t("migrations.bulkPartial", { ok, fail }));
+    }
+  }
+
+  /** Phase ABQ (2026-06-01) — bulk Dry run. ABP gave operators a
+   *  per-migration pre-flight; this scales it to a selection so a
+   *  schema-mode batch (often 50+ rows) can be validated in one go
+   *  before committing to bulk Run now. Sequential to keep order in
+   *  the failure toasts (a Promise.all would scramble them). */
+  const [bulkDryRunning, setBulkDryRunning] = useState(false);
+  async function onBulkDryRun() {
+    if (!ws || selectedIds.size === 0) return;
+    setBulkDryRunning(true);
+    let ok = 0;
+    let fail = 0;
+    let skipped = 0;
+    const ids = [...selectedIds];
+    for (const id of ids) {
+      const row = migrationRows.find((r) => r.id === id);
+      if (!row) {
+        skipped += 1;
+        continue;
+      }
+      if (!row.current_version) {
+        skipped += 1;
+        continue;
+      }
+      try {
+        const r = await pipelinesApi.dryRun(ws.id, id);
+        if (r.ok) {
+          ok += 1;
+        } else {
+          fail += 1;
+          const firstErr =
+            r.errors[0] ??
+            r.connectors.find((c) => !c.ok)?.error ??
+            "unknown";
+          toast.error(`${row.name}: ${firstErr}`);
+        }
+      } catch (err) {
+        fail += 1;
+        const m = err instanceof ApiError ? err.message : String(err);
+        toast.error(`${row.name}: ${m}`);
+      }
+    }
+    setBulkDryRunning(false);
+    if (fail === 0 && skipped === 0) {
+      toast.success(t("migrations.bulkDryRunOk", { n: ok }));
+    } else if (ok > 0) {
+      toast.warning(
+        t("migrations.bulkDryRunPartial", { ok, fail: fail + skipped }),
+      );
+    } else {
+      toast.error(t("migrations.bulkDryRunAllFailed", { n: fail }));
     }
   }
 
@@ -795,15 +849,27 @@ export default function MigrationsPage() {
                 variant="ghost"
                 size="sm"
                 onClick={() => setSelectedIds(new Set())}
-                disabled={bulkRunning || bulkDeleting}
+                disabled={bulkRunning || bulkDeleting || bulkDryRunning}
               >
                 {t("migrations.clearSelection")}
+              </Button>
+              {/* Phase ABQ — Dry run leftmost ("check before commit"). */}
+              <Button
+                variant="ghost"
+                size="sm"
+                loading={bulkDryRunning}
+                disabled={bulkRunning || bulkDeleting || bulkScheduling}
+                onClick={() => void onBulkDryRun()}
+                title={t("migrations.dryRunHint")}
+              >
+                <ShieldCheckIcon size={14} />
+                {t("migrations.dryRunSelected")}
               </Button>
               <Button
                 variant="ghost"
                 size="sm"
                 loading={bulkRunning}
-                disabled={bulkDeleting || bulkScheduling}
+                disabled={bulkDeleting || bulkScheduling || bulkDryRunning}
                 onClick={() => void onBulkRunNow()}
               >
                 <PlayIcon size={14} />

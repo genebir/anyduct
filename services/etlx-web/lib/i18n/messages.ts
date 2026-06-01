@@ -416,6 +416,8 @@ export const en = {
   "audit.before": "Before",
   "audit.after": "After",
   "audit.system": "system",
+  // Phase ABT (2026-06-01) — friendly self-actor display
+  "audit.you": "you",
   "audit.loadFailed": "Couldn't load audit log.",
 
   // connections
@@ -1480,6 +1482,8 @@ export const ko: Messages = {
   "audit.before": "이전",
   "audit.after": "이후",
   "audit.system": "시스템",
+  // Phase ABT (2026-06-01) — 본인 액션 친화 표시
+  "audit.you": "나",
   "audit.loadFailed": "감사 로그를 불러올 수 없습니다.",
 
   "connections.new": "새 연결",

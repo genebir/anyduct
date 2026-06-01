@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ApiError, auditApi, type AuditLogEntry } from "@/lib/api";
+import { useCurrentUser } from "@/components/providers/auth-provider";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import { useLocale } from "@/components/providers/locale-provider";
 import { cn } from "@/lib/cn";
@@ -86,6 +87,9 @@ export default function AuditPage() {
   const { slug } = useParams<{ slug: string }>();
   const ws = useWorkspaceFromSlug(slug);
   const { t } = useLocale();
+  // Phase ABT (2026-06-01) — used to render "you" instead of a bare
+  // UUID prefix when the actor matches the signed-in user.
+  const currentUser = useCurrentUser();
   const [rows, setRows] = useState<AuditLogEntry[] | null>(null);
   const [resourceType, setResourceType] = useState("");
   const [resourceId, setResourceId] = useState("");
@@ -233,6 +237,8 @@ export default function AuditPage() {
                     systemLabel={t("audit.system")}
                     beforeLabel={t("audit.before")}
                     afterLabel={t("audit.after")}
+                    youLabel={t("audit.you")}
+                    currentUserId={currentUser?.id ?? null}
                     open={!!expanded[row.id]}
                     onToggle={() =>
                       setExpanded((prev) => ({
@@ -290,6 +296,8 @@ function AuditRow({
   systemLabel,
   beforeLabel,
   afterLabel,
+  youLabel,
+  currentUserId,
 }: {
   row: AuditLogEntry;
   open: boolean;
@@ -297,6 +305,8 @@ function AuditRow({
   systemLabel: string;
   beforeLabel: string;
   afterLabel: string;
+  youLabel: string;
+  currentUserId: string | null;
 }) {
   const hasDiff =
     row.before_json !== null ||
@@ -334,7 +344,11 @@ function AuditRow({
           ) : null}
         </span>
         <span className="truncate text-right font-mono text-xs text-text-muted">
-          {row.actor_user_id ? `${row.actor_user_id.slice(0, 8)}…` : systemLabel}
+          {row.actor_user_id
+            ? row.actor_user_id === currentUserId
+              ? youLabel
+              : `${row.actor_user_id.slice(0, 8)}…`
+            : systemLabel}
         </span>
       </button>
       {open && hasDiff ? (

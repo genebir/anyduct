@@ -9,6 +9,9 @@
 
 ## [Unreleased]
 
+### Changed
+- **Workspace Variables 페이지 type badge — 빌더와 일관성 (Phase AAL)** — `/w/[slug]/variables` 리스트에 string/number/boolean/JSON 타입 배지 추가. 빌더 pipeline-settings-panel(Phase L1)이 이미 갖고 있던 동일한 vocabulary. ① 신규 `lib/variable-types.ts` (`VarType` + `inferType`) — 두 surface가 같은 추론 함수 공유. ② 빌더 inline 선언 → import로 교체(코드 중복 0). ③ workspace 변수 리스트에 `<span>` badge(uppercase, `bg-overlay`). 신규 시각 컴포넌트 0(기존 badge 스타일 재사용). web tsc clean.
+
 ### Added
 - **`auto_create_table_planned` 린트 규칙 — dry-run 안내 메시지 (Phase AAK)** — Phase DD 패턴 확장:
   - **새 lint rule**: 각 sink에 `auto_create_table=true`가 있으면 dry-run에서 안내 메시지("sink will create table 't2' on first run if it's missing").

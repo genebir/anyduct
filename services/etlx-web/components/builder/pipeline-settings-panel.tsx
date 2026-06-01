@@ -8,6 +8,7 @@ import { cn } from "@/lib/cn";
 import type { ConnectionSummary, PipelineSummary } from "@/lib/api";
 import type { DlqSettings, RetrySettings } from "@/lib/pipeline-config";
 import { useLocale } from "@/components/providers/locale-provider";
+import { type VarType, inferType } from "@/lib/variable-types";
 
 /**
  * Pipeline-level settings — retry policy + DLQ routing.
@@ -274,25 +275,16 @@ function TriggersEditor({
   );
 }
 
-/** Variable value types — drives validation, placeholder, badge.
- *  Audit finding (Phase L1, 2026-05-26): the old "guess JSON, fallback
- *  to string" silently saved the wrong type when the user typed e.g.
- *  ``42`` meaning the string "42". Explicit type → no surprises. */
-type VarType = "string" | "number" | "boolean" | "json";
-
+/** Variable value placeholder + label table. The ``VarType`` enum
+ *  + ``inferType`` are imported from ``lib/variable-types`` so the
+ *  workspace variables page (Phase AAL) and this panel agree on the
+ *  badge vocabulary. */
 const VAR_TYPE_OPTIONS: { value: VarType; label: string; placeholder: string }[] = [
   { value: "string", label: "string", placeholder: "hello" },
   { value: "number", label: "number", placeholder: "100" },
   { value: "boolean", label: "boolean", placeholder: "true" },
   { value: "json", label: "JSON", placeholder: '{"key":"value"}' },
 ];
-
-function inferType(value: unknown): VarType {
-  if (typeof value === "string") return "string";
-  if (typeof value === "number") return "number";
-  if (typeof value === "boolean") return "boolean";
-  return "json";
-}
 
 /** Convert the user's raw text into the declared type. Returns
  *  ``{ ok: false, error }`` so the caller can surface a real error

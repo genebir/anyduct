@@ -117,7 +117,9 @@ uv run mypy etl_plugins
 
 ## 5. 현재 단계
 
-> **최신 마일스톤 (2026-05-29): `auto_create_table_planned` 린트 규칙 — dry-run 안내 (Phase AAK).** Phase DD 패턴 확장. 각 sink에 `auto_create_table=true`가 있으면 dry-run에서 "sink will create table 't2' on first run if it's missing" 안내. `auto_create_if_exists='drop'`은 "rebuild" / `'error'`는 "fail next run" 문구. linear / fan-out / graph 3 shape 모두 walk. **운영 UX**: 사용자가 Trigger 누르기 전 Dry Run에서 정확히 미리 봄. 코어 unit 805→810(+5). 신규 시각 컴포넌트 0(기존 DryRunPanel warnings 영역 자동 노출).
+> **최신 마일스톤 (2026-05-29): Workspace Variables 페이지 type badge — 빌더와 일관성 (Phase AAL).** `/w/[slug]/variables` 리스트에 string/number/boolean/JSON 타입 배지 추가. 빌더 pipeline-settings-panel(L1)이 이미 갖고 있던 vocabulary와 합치. ① 신규 `lib/variable-types.ts` (`VarType` + `inferType`) — 두 surface가 같은 추론 함수 공유. ② 빌더 inline 선언 → import로 교체(코드 중복 0). ③ workspace 변수 리스트에 `<span>` badge(uppercase, `bg-overlay`). 신규 시각 컴포넌트 0. 코어/서버 변화 0. web tsc clean.
+>
+> **이전 마일스톤 (2026-05-29): `auto_create_table_planned` 린트 규칙 — dry-run 안내 (Phase AAK).** Phase DD 패턴 확장. 각 sink에 `auto_create_table=true`가 있으면 dry-run에서 "sink will create table 't2' on first run if it's missing" 안내. `auto_create_if_exists='drop'`은 "rebuild" / `'error'`는 "fail next run" 문구. linear / fan-out / graph 3 shape 모두 walk. **운영 UX**: 사용자가 Trigger 누르기 전 Dry Run에서 정확히 미리 봄. 코어 unit 805→810(+5). 신규 시각 컴포넌트 0(기존 DryRunPanel warnings 영역 자동 노출).
 >
 > **이전 마일스톤 (2026-05-29): Cross-DB `auto_create_table` → 카탈로그 REST 자동 등록 dogfood (Phase AAJ).** auto-created sink가 catalog REST에서 first-class 자산으로 보임을 분석가 페르소나 e2e: products → products_cache(auto_create) run → `GET /assets`에서 src/products + dst/products_cache 둘 다 노출 + upstream lineage + materializations 모두 정확. **운영 보장**: auto-created 테이블이 runtime-only 사이드 이펙트가 아니라 카탈로그 first-class 시민(분석가 dashboard 빌드 시 lineage 그래프 자연 노출). 서버 it 481→482(+1). 코어 805 unchanged. DB 마이그레이션 0.
 >

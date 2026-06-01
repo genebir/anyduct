@@ -16,6 +16,7 @@ import {
 } from "@/lib/api";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import { useLocale } from "@/components/providers/locale-provider";
+import { inferType } from "@/lib/variable-types";
 
 const NAME_RE = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 
@@ -113,10 +114,22 @@ export default function VariablesPage() {
             <p className="text-sm text-text-muted">{t("variables.empty")}</p>
           ) : (
             <ul className="divide-y divide-border-subtle">
-              {vars.map((v) => (
+              {vars.map((v) => {
+                // Phase AAL (2026-05-29): show the inferred type as a
+                // small badge so the workspace variables list speaks
+                // the same vocabulary as the pipeline-settings panel
+                // (string / number / boolean / JSON).
+                const inferred = inferType(v.value);
+                return (
                 <li key={v.name} className="flex items-center gap-3 py-2.5">
                   <div className="min-w-0 flex-1">
                     <code className="text-sm font-medium text-text">{`\${var.${v.name}}`}</code>
+                    <span
+                      className="ml-2 inline-flex h-4 items-center rounded-sm bg-overlay px-1 text-[10px] font-semibold uppercase text-text-muted"
+                      title={t("variables.typeBadge", { type: inferred })}
+                    >
+                      {inferred}
+                    </span>
                     <span className="ml-2 text-sm text-text-secondary">
                       {JSON.stringify(v.value)}
                     </span>
@@ -140,7 +153,8 @@ export default function VariablesPage() {
                     </>
                   ) : null}
                 </li>
-              ))}
+                );
+              })}
             </ul>
           )}
           {canEdit ? (

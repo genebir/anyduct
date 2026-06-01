@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * /w/[slug]/migrations — Phase AAN (2026-05-29).
+ * /w/[slug]/migrations — Phase AAN (2026-05-29) + AAN2 (dedicated form).
  *
  * Dedicated surface for cross-DB migration pipelines. A pipeline
  * counts as a migration here iff at least one of its sinks has
@@ -9,31 +9,26 @@
  * is on the hook for creating the destination table from the source
  * schema).
  *
- * This page is *purely a filtered view* of the pipelines list — no
- * new server endpoint, no new resource. The CTA opens the same
- * builder the pipelines page uses, but with the
- * ``db-migrate-cross`` template pre-selected so the user lands on a
- * working starting point (postgres → sqlite with the toggle
- * already on).
+ * Migrations don't open in the graph builder — their create / edit
+ * lives at ``/migrations/new`` and ``/migrations/[id]`` (Phase AAN2)
+ * so the surface stays focused: one source, one sink, four switches.
+ * Pipelines builder is reserved for richer shapes (transforms, joins,
+ * fan-out, etc.).
  */
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import { ArrowRightLeftIcon, EditIcon, PlusIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Header } from "@/components/shell/header";
-import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ApiError, pipelinesApi, type PipelineSummary } from "@/lib/api";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import { useLocale } from "@/components/providers/locale-provider";
 import type { Messages } from "@/lib/i18n/messages";
-import { linearToGraph, serializeGraph } from "@/lib/pipeline-config";
-import { findTemplate } from "@/lib/pipeline-templates";
 import {
   type MigrationSummary,
   migrationSummaryOf,
@@ -110,14 +105,10 @@ function buildColumns(t: Translate): Column<Row>[] {
 }
 
 export default function MigrationsPage() {
-  const router = useRouter();
   const { slug } = useParams<{ slug: string }>();
   const ws = useWorkspaceFromSlug(slug);
   const { t } = useLocale();
   const [rows, setRows] = useState<PipelineSummary[] | null>(null);
-  const [creating, setCreating] = useState(false);
-  const [newName, setNewName] = useState("");
-  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     if (!ws) return;
@@ -152,28 +143,6 @@ export default function MigrationsPage() {
     return out;
   }, [rows]);
 
-  async function onCreate() {
-    if (!ws || !newName.trim()) return;
-    setSubmitting(true);
-    try {
-      const tmpl =
-        findTemplate("db-migrate-cross") ?? findTemplate("blank")!;
-      const config = serializeGraph(linearToGraph(tmpl.build()), {
-        name: newName.trim(),
-        mode: tmpl.mode,
-      });
-      const created = await pipelinesApi.create(ws.id, {
-        name: newName.trim(),
-        config,
-      });
-      router.push(`/w/${slug}/pipelines/${created.id}/edit`);
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : String(err));
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
   const columns = buildColumns(t);
 
   return (
@@ -184,52 +153,16 @@ export default function MigrationsPage() {
           ws ? t("common.workspaceSubtitle", { name: ws.name }) : undefined
         }
         actions={
-          <Button
-            size="sm"
-            onClick={() => setCreating((v) => !v)}
-            disabled={!ws}
-          >
-            <PlusIcon size={14} />
-            {t("migrations.new")}
-          </Button>
+          <Link href={`/w/${slug}/migrations/new`}>
+            <Button size="sm" disabled={!ws}>
+              <PlusIcon size={14} />
+              {t("migrations.new")}
+            </Button>
+          </Link>
         }
       />
       <main className="mx-auto w-full max-w-5xl flex-1 space-y-6 overflow-y-auto px-6 py-8">
         <p className="text-sm text-text-muted">{t("migrations.desc")}</p>
-
-        {creating ? (
-          <Card>
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                void onCreate();
-              }}
-              className="flex flex-col gap-3 sm:flex-row sm:items-end"
-            >
-              <label className="flex flex-1 flex-col gap-1">
-                <span className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
-                  {t("common.name")}
-                </span>
-                <Input
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  placeholder="orders_replication"
-                  autoFocus
-                />
-              </label>
-              <Button type="submit" loading={submitting} disabled={!newName.trim()}>
-                {t("migrations.new")}
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                onClick={() => setCreating(false)}
-              >
-                {t("common.cancel")}
-              </Button>
-            </form>
-          </Card>
-        ) : null}
 
         {rows === null ? null : migrationRows.length === 0 ? (
           <EmptyState
@@ -237,10 +170,12 @@ export default function MigrationsPage() {
             title={t("migrations.title")}
             description={t("migrations.empty")}
             action={
-              <Button onClick={() => setCreating(true)} disabled={!ws}>
-                <PlusIcon size={14} />
-                {t("migrations.new")}
-              </Button>
+              <Link href={`/w/${slug}/migrations/new`}>
+                <Button disabled={!ws}>
+                  <PlusIcon size={14} />
+                  {t("migrations.new")}
+                </Button>
+              </Link>
             }
           />
         ) : (
@@ -250,15 +185,15 @@ export default function MigrationsPage() {
               {
                 key: "actions",
                 header: "",
-                className: "w-40 text-right",
+                className: "w-32 text-right",
                 cell: (r) => (
                   <Link
-                    href={`/w/${slug}/pipelines/${r.id}/edit`}
-                    aria-label={t("migrations.openInBuilder")}
+                    href={`/w/${slug}/migrations/${r.id}`}
+                    aria-label={t("common.edit")}
                   >
                     <Button size="sm" variant="secondary">
                       <EditIcon size={14} />
-                      {t("migrations.openInBuilder")}
+                      {t("common.edit")}
                     </Button>
                   </Link>
                 ),

@@ -101,6 +101,31 @@ export const en = {
   "migrations.ifExistsSkip": "skip — keep existing",
   "migrations.ifExistsDrop": "drop — rebuild",
   "migrations.ifExistsError": "error — fail-loud",
+  // migration form (Phase AAN2, 2026-05-29) — dedicated, non-builder editor
+  "migrations.formTitleNew": "New migration",
+  "migrations.formTitleEdit": "Edit migration",
+  "migrations.formSubtitleNew":
+    "Replicate a table across DBs. We'll create the destination table from the source schema (auto_create_table=true is implicit on this form).",
+  "migrations.formSubtitleEdit": "Edit this migration's source, sink, and policy.",
+  "migrations.formSource": "Source",
+  "migrations.formSink": "Sink",
+  "migrations.formConnection": "Connection",
+  "migrations.formQuery": "Query",
+  "migrations.formTable": "Destination table",
+  "migrations.formMode": "Mode",
+  "migrations.formIfExists": "If table exists",
+  "migrations.formKeyColumns": "Key columns",
+  "migrations.formKeyColumnsHelp":
+    "Comma-separated. These columns become the PRIMARY KEY when the destination is auto-created.",
+  "migrations.errRequired": "Required",
+  "migrations.saved": "Migration saved",
+  "migrations.deleted": "Migration deleted",
+  "migrations.delete": "Delete migration",
+  "migrations.deleteConfirm":
+    "This will delete the migration pipeline. Runs and history stay in the audit log.",
+  "migrations.notMigration":
+    "This pipeline has a richer shape (graph mode, transforms, or fan-out). Open it in the pipelines builder instead.",
+  "migrations.openInPipelines": "Open in pipelines",
   // sensors page (ADR-0041 K3c)
   "sensors.new": "New sensor",
   "sensors.newTitle": "New sensor",
@@ -961,6 +986,31 @@ export const ko: Messages = {
   "migrations.ifExistsSkip": "skip — 기존 유지",
   "migrations.ifExistsDrop": "drop — 재구축",
   "migrations.ifExistsError": "error — 실패",
+  // 마이그레이션 폼 (Phase AAN2, 2026-05-29) — 빌더와 분리된 전용 편집기
+  "migrations.formTitleNew": "새 마이그레이션",
+  "migrations.formTitleEdit": "마이그레이션 편집",
+  "migrations.formSubtitleNew":
+    "테이블을 DB 간 복제합니다. 도착지 테이블은 소스 스키마에서 자동 생성됩니다(auto_create_table=true 항상 적용).",
+  "migrations.formSubtitleEdit": "이 마이그레이션의 소스/싱크/정책을 편집합니다.",
+  "migrations.formSource": "소스",
+  "migrations.formSink": "싱크",
+  "migrations.formConnection": "연결",
+  "migrations.formQuery": "쿼리",
+  "migrations.formTable": "도착지 테이블",
+  "migrations.formMode": "모드",
+  "migrations.formIfExists": "테이블 존재 시 동작",
+  "migrations.formKeyColumns": "키 컬럼",
+  "migrations.formKeyColumnsHelp":
+    "쉼표로 구분. 도착지가 자동 생성될 때 PRIMARY KEY가 됩니다.",
+  "migrations.errRequired": "필수",
+  "migrations.saved": "마이그레이션 저장됨",
+  "migrations.deleted": "마이그레이션 삭제됨",
+  "migrations.delete": "마이그레이션 삭제",
+  "migrations.deleteConfirm":
+    "이 마이그레이션 파이프라인이 삭제됩니다. 실행 기록과 audit log는 그대로 유지됩니다.",
+  "migrations.notMigration":
+    "이 파이프라인은 더 복잡한 형태입니다(graph 모드/transform/fan-out). 파이프라인 빌더에서 여세요.",
+  "migrations.openInPipelines": "파이프라인에서 열기",
   "nav.sensors": "센서",
   // 센서 페이지 (ADR-0041 K3c)
   "sensors.new": "새 센서",

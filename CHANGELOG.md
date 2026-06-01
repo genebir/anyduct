@@ -10,6 +10,16 @@
 ## [Unreleased]
 
 ### Added
+- **Migration 자체를 빌더와 분리 — 전용 form + new/edit 페이지 (Phase AAN2)** — 사용자 추가 요청 *"빌더로 연결되는 게 아니라 마이그레이션 자체를 따로 빼줘"*. 이전 AAN은 graph 빌더로 라우팅했으나, 이제 마이그레이션 전용 단순 폼:
+  - **`/w/[slug]/migrations/new`**: 빌더 우회 새 마이그레이션 생성 폼.
+  - **`/w/[slug]/migrations/[id]`**: 전용 detail/edit/delete 페이지.
+  - **`MigrationForm` 컴포넌트**: 소스(connection+query) + 싱크(connection+table+mode+if_exists) + (upsert 시) key_columns. 한 fieldset = 한 영역. 빌더 graph canvas 없음. RDBMS connection(`postgres`/`mysql`/`sqlite`)만 dropdown에 노출.
+  - **`lib/migration-config.ts`**: `buildMigrationConfig` (form → PipelineConfig JSON) + `parseMigrationConfig` (PipelineConfig → form, 마이그레이션 shape이 아니면 null) + `validateMigrationForm` (per-field 에러 dict). pure functions, 테스트 가능.
+  - **safe-exit**: 마이그레이션 이외 shape(graph/fan-out/auto_create 없음) 파이프라인을 detail로 열면 friendly 안내 + 파이프라인 빌더로 routing — round-trip으로 데이터 잃지 않음.
+  - **list page CTA reroute**: "+ New" → `/migrations/new`, 행 액션 → `/migrations/[id]` (이전 AAN의 빌더 라우팅 제거).
+  - i18n en/ko 각 14 추가 키(`formTitleNew/Edit + formSubtitleNew/Edit + formSource/Sink/Connection/Query/Table/Mode/IfExists/KeyColumns + ...`).
+  - 검증: web tsc clean. 코어 unit 812 + 서버 it 482 회귀 0.
+
 - **사이드바 "Migrations" 메뉴 분리 + `/w/[slug]/migrations` 페이지 (Phase AAN)** — 사용자 요청 *"마이그레이션 메뉴를 따로 빼서 관리해줘"*. cross-DB migration 패턴 파이프라인만 따로 보고 관리하는 전용 surface:
   - **사이드바**: Pipelines와 Schedules 사이에 `Migrations`(ArrowRightLeftIcon) 새 nav 항목. "specialised pipelines"로 인접 배치.
   - **`/w/[slug]/migrations` 페이지**: 클라이언트 사이드 필터로 `auto_create_table=true` sink가 있는 파이프라인만 표시(별도 server endpoint 없음). 컬럼: 이름 / 도착지(connection/table) / 모드 / 존재 시 동작(skip|drop|error, tone-aware 색). "+ New migration" CTA가 `db-migrate-cross` 템플릿(AAI)으로 즉시 빌더 진입.

@@ -33,21 +33,51 @@ const RESOURCE_TYPES = [
  *  common control-plane events. Anything else still works — the
  *  filter is a free-string match server-side, the dropdown is just a
  *  shortcut. */
+/** Action shortcut list. Phase ABN (2026-06-01) — expanded after a
+ *  persona-driven audit of which actions actually fire in
+ *  production: ``pipeline.triggers_set`` (auto-materialize chains),
+ *  ``connection.delete``, ``schedule.delete``, ``schedule.toggled``,
+ *  ``variable.*``, ``workspace.*``. Anything else still works via
+ *  free-form URL ``?action=`` — the dropdown is just a shortcut. */
 const ACTIONS = [
   "",
+  // Data-plane (what actually ran)
   "run.sql_read",
   "run.sql_executed",
   "run.python_executed",
+  // Run lifecycle
   "run.trigger",
   "run.cancel",
   "run.retry",
+  // Pipelines
   "pipeline.create",
   "pipeline.update",
   "pipeline.delete",
+  "pipeline.triggers_set",
+  // Connections
   "connection.create",
   "connection.update",
+  "connection.delete",
+  // Schedules
   "schedule.create",
+  "schedule.update",
+  "schedule.delete",
+  "schedule.toggled",
+  // Sensors
   "sensor.create",
+  "sensor.update",
+  "sensor.delete",
+  // Workspace
+  "workspace.create",
+  "workspace.update",
+  "workspace.delete",
+  "membership.add",
+  "membership.role_changed",
+  "membership.remove",
+  // Variables (workspace-level)
+  "variable.create",
+  "variable.update",
+  "variable.delete",
 ];
 
 const PAGE_SIZE = 100;

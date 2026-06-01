@@ -203,6 +203,12 @@ async def test_ww1_engineer_ships_cross_db_pipeline_via_rest_with_auto_create(
         assert dry["ok"] is True
         # Warnings field always present even if empty.
         assert "warnings" in dry
+        # Phase AAK (2026-05-29): the engineer's sink has
+        # ``auto_create_table=true``, so the AAK lint rule must surface
+        # an "auto_create_table_planned" warning — that's the operator's
+        # confirmation before they hit Trigger.
+        codes = {w["code"] for w in dry["warnings"]}
+        assert "auto_create_table_planned" in codes
         # Both connections green.
         assert all(c["ok"] for c in dry["connectors"])
 

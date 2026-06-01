@@ -169,6 +169,25 @@ export const en = {
   "migrations.runRowsWritten": "rows",
   "migrations.colLastRun": "Last run",
   "migrations.neverRun": "Never run",
+  // Phase AAS (2026-06-01) — schema-level migration
+  "migrations.modeSingle": "Single table",
+  "migrations.modeSchema": "Entire schema",
+  "migrations.schemaNameHint":
+    "Used as the prefix for each per-table pipeline name (e.g. ‘ods_replication_orders’).",
+  "migrations.sourceSchema": "Source schema",
+  "migrations.destSchema": "Destination schema",
+  "migrations.destSchemaHelp":
+    "Defaults to the source schema. The runtime auto-creates it on the destination if it doesn't already exist.",
+  "migrations.tablesToReplicate": "Tables to replicate",
+  "migrations.selectAll": "Select all",
+  "migrations.deselectAll": "Deselect all",
+  "migrations.selectAtLeastOne": "Pick at least one table",
+  "migrations.selectedTablesCount": "{n} selected",
+  "migrations.typeSchemaFirst": "Type a schema name to see its tables.",
+  "migrations.schemaNoTables": "No tables found in schema ‘{schema}’.",
+  "migrations.bulkCreated": "{n} migrations created",
+  "migrations.bulkPartial":
+    "{ok} created, {fail} failed (check the toasts for which ones).",
   // sensors page (ADR-0041 K3c)
   "sensors.new": "New sensor",
   "sensors.newTitle": "New sensor",
@@ -1096,6 +1115,25 @@ export const ko: Messages = {
   "migrations.runRowsWritten": "행",
   "migrations.colLastRun": "최근 실행",
   "migrations.neverRun": "실행 없음",
+  // Phase AAS (2026-06-01) — 스키마 단위 마이그레이션
+  "migrations.modeSingle": "단일 테이블",
+  "migrations.modeSchema": "스키마 전체",
+  "migrations.schemaNameHint":
+    "각 테이블별 파이프라인 이름의 접두사로 사용됩니다 (예: 'ods_replication_orders').",
+  "migrations.sourceSchema": "소스 스키마",
+  "migrations.destSchema": "도착지 스키마",
+  "migrations.destSchemaHelp":
+    "비워두면 소스 스키마와 동일한 이름을 사용합니다. 도착지에 없으면 자동 생성됩니다.",
+  "migrations.tablesToReplicate": "복제할 테이블",
+  "migrations.selectAll": "전체 선택",
+  "migrations.deselectAll": "전체 해제",
+  "migrations.selectAtLeastOne": "테이블을 1개 이상 선택하세요",
+  "migrations.selectedTablesCount": "{n}개 선택됨",
+  "migrations.typeSchemaFirst": "스키마 이름을 입력하면 테이블 목록이 표시됩니다.",
+  "migrations.schemaNoTables": "스키마 ‘{schema}’ 에 테이블이 없습니다.",
+  "migrations.bulkCreated": "마이그레이션 {n}개 생성됨",
+  "migrations.bulkPartial":
+    "{ok}개 생성, {fail}개 실패 (실패 항목은 toast에서 확인).",
   "nav.sensors": "센서",
   // 센서 페이지 (ADR-0041 K3c)
   "sensors.new": "새 센서",

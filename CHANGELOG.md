@@ -10,6 +10,19 @@
 ## [Unreleased]
 
 ### Added
+- **스키마 단위 마이그레이션 (Phase AAS, 2026-06-01)** — 사용자 *"스키마 단위로 마이그레이션 할 수 있도록 추가해줘"*. 한 스키마의 N개 테이블을 한 번에 등록:
+  - **Mode 토글**: Single table (기존) / Entire schema. 폼 상단에 segmented control.
+  - **Source schema 입력** + datalist (connection inspect 결과에서 발견된 스키마 자동 제안).
+  - **Multi-select 테이블 picker**: 입력한 스키마의 모든 테이블에 체크박스 + "전체 선택 / 해제" 토글. 빈 스키마는 친화적 안내.
+  - **Destination schema 입력** (기본값: source schema — identity round-trip이 default).
+  - **Strategy radio + key columns / cursor column**은 모든 테이블에 동일 적용.
+  - **저장**: `buildBulkMigrationConfigs`가 각 테이블마다 PipelineConfig 1개 emit → 순차적으로 `pipelinesApi.create()` N번 호출. 각자 별도 마이그레이션 행으로 리스트에 등장 → 개별 Run/Edit/Last run 모니터링.
+  - **부분 실패 graceful**: 한 테이블이 4xx 떨어져도 나머지는 진행. 성공 N개 → `bulkCreated` toast / 일부 실패 → 각 실패 테이블 이름 toast + `bulkPartial` 요약.
+  - **신규 helper**: `MigrationMode` 타입, `parseQualifiedTable`, `groupTablesBySchema`, `buildBulkMigrationConfigs` (pure functions).
+  - i18n en/ko 각 16 신규 키.
+  - 검증: web tsc clean. 코어/서버 변화 0(저장된 각 마이그레이션은 기존 single-table shape).
+
+### Added
 - **마이그레이션 목록에서 즉시 실행 (Phase AAR follow-up 2)** — 사용자 *"마이그레이션 목록에서 실행을 할 수가 없네"*. Detail 페이지 들어가지 않고 list 행에서 바로 Run 가능:
   - 각 행 actions 컬럼에 `Run now` 버튼 추가 — `pipelinesApi.trigger(ws.id, row.id)` 호출.
   - `current_version` 없으면 disabled + tooltip 안내(`saveBeforeRun`). 다른 행이 진행 중이면 모든 Run 버튼 disabled(double-fire 방지).

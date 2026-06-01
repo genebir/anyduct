@@ -1262,9 +1262,15 @@ class Pipeline:
                 # ``rollback()`` directly; sqlite's ``connection`` is
                 # always rollback-safe. If the connector has no
                 # rollback (HTTP / Kafka / S3 don't), skipping is fine.
-                conn = getattr(sink, "_conn", None) or getattr(sink, "connection", None)
-                if conn is not None:
-                    with contextlib.suppress(Exception):
+                # The conn lookup itself is wrapped in suppress because
+                # some connectors (postgres' ``connection`` property)
+                # raise ``ConnectError`` when the underlying ``_conn``
+                # is None — getattr's default doesn't catch that.
+                with contextlib.suppress(Exception):
+                    conn = getattr(sink, "_conn", None)
+                    if conn is None:
+                        conn = getattr(sink, "connection", None)
+                    if conn is not None:
                         conn.rollback()
 
     def _run_pre_sql(self, task: Task, connectors: dict[str, Connector]) -> None:

@@ -20,6 +20,7 @@ import { useLocale } from "@/components/providers/locale-provider";
 import { MigrationForm } from "@/components/migrations/migration-form";
 import {
   DEFAULT_MIGRATION_FORM,
+  buildBulkMigrationConfigs,
   buildMigrationConfig,
   validateMigrationForm,
   type MigrationFormData,
@@ -69,16 +70,43 @@ export default function NewMigrationPage() {
     }
     setSubmitting(true);
     try {
-      const config = buildMigrationConfig(name.trim(), form);
-      const created = await pipelinesApi.create(ws.id, {
-        name: name.trim(),
-        config,
-      });
-      toast.success(t("migrations.saved"));
-      // Phase AAR (2026-06-01) — user request "생성 완료 시 목록으로
-      // 이동되도록 해줘". Land on the migration list so the operator
-      // sees the new row in context (Last run / Strategy badge) +
-      // can pick another action right away.
+      if (form.mode === "schema") {
+        // Phase AAS (2026-06-01) — schema-level: emit one pipeline
+        // per selected table. We try them sequentially so a 4xx
+        // surfaces with the table name in the toast instead of
+        // disappearing into a Promise.all rejection.
+        const plan = buildBulkMigrationConfigs(name.trim(), form);
+        let ok = 0;
+        let fail = 0;
+        for (const item of plan) {
+          try {
+            await pipelinesApi.create(ws.id, {
+              name: item.pipelineName,
+              config: item.config,
+            });
+            ok += 1;
+          } catch (err) {
+            fail += 1;
+            const m =
+              err instanceof ApiError ? err.message : String(err);
+            toast.error(`${item.sourceTable}: ${m}`);
+          }
+        }
+        if (fail === 0) {
+          toast.success(t("migrations.bulkCreated", { n: ok }));
+        } else {
+          toast.warning(t("migrations.bulkPartial", { ok, fail }));
+        }
+      } else {
+        const config = buildMigrationConfig(name.trim(), form);
+        await pipelinesApi.create(ws.id, {
+          name: name.trim(),
+          config,
+        });
+        toast.success(t("migrations.saved"));
+      }
+      // Phase AAR (2026-06-01) — land on the list so the operator
+      // sees the new rows in context (Last run / Strategy badge).
       router.push(`/w/${slug}/migrations`);
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : String(err));

@@ -26,7 +26,9 @@ import { ApiError, connectionsApi, type ConnectionSummary } from "@/lib/api";
 import {
   MIGRATION_SUPPORTED_TYPES,
   type MigrationFormData,
+  type MigrationMode,
   type MigrationStrategy,
+  parseQualifiedTable,
   validateMigrationForm,
 } from "@/lib/migration-config";
 
@@ -185,14 +187,67 @@ export function MigrationForm({
 
   const disabled = !form || submitting;
   const f = form ?? {
+    mode: "single" as MigrationMode,
     sourceConnection: "",
     sourceTable: "",
+    sourceSchema: "",
+    selectedTables: [] as string[],
     sinkConnection: "",
     sinkTable: "",
+    sinkSchema: "",
     strategy: "snapshot" as MigrationStrategy,
     keyColumns: "",
     cursorColumn: "",
   };
+
+  // Phase AAS (2026-06-01) — schema-mode helpers.
+  // In schema mode the user types ``sourceSchema`` and we show every
+  // ``<schema>.<table>`` that ``connectionsApi.tables`` returned for
+  // that schema. Tables with no schema prefix (sqlite) all live under
+  // the implicit "" bucket, which the form treats as a wildcard so a
+  // bare ``orders`` shows up when ``sourceSchema === ""``.
+  const tablesInSchema = useMemo(() => {
+    if (!form || form.mode !== "schema") return [];
+    const wanted = form.sourceSchema.trim();
+    return sourceTables
+      .map((q) => ({ qualified: q, parsed: parseQualifiedTable(q) }))
+      .filter(({ parsed }) =>
+        wanted === "" ? parsed.schema === null : parsed.schema === wanted,
+      );
+  }, [form, sourceTables]);
+
+  const allSchemas = useMemo(() => {
+    const s = new Set<string>();
+    for (const q of sourceTables) {
+      const p = parseQualifiedTable(q);
+      if (p.schema) s.add(p.schema);
+    }
+    return [...s].sort();
+  }, [sourceTables]);
+
+  function toggleTable(qualified: string): void {
+    if (!form) return;
+    const has = form.selectedTables.includes(qualified);
+    onChange({
+      ...form,
+      selectedTables: has
+        ? form.selectedTables.filter((t) => t !== qualified)
+        : [...form.selectedTables, qualified],
+    });
+  }
+
+  function toggleAllTables(): void {
+    if (!form) return;
+    const all = tablesInSchema.map((t) => t.qualified);
+    const allSelected =
+      all.length > 0 && all.every((t) => form.selectedTables.includes(t));
+    onChange({
+      ...form,
+      selectedTables: allSelected
+        ? form.selectedTables.filter((t) => !all.includes(t))
+        : Array.from(new Set([...form.selectedTables, ...all])),
+    });
+  }
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-6">
@@ -204,11 +259,50 @@ export function MigrationForm({
           </span>
           <Input
             value={name}
-            placeholder="orders_replication"
+            placeholder={
+              f.mode === "schema" ? "ods_replication" : "orders_replication"
+            }
             onChange={(e) => onNameChange(e.target.value)}
             disabled={disabled || !!nameLocked}
           />
+          {f.mode === "schema" ? (
+            <span className="text-xs text-text-muted">
+              {t("migrations.schemaNameHint")}
+            </span>
+          ) : null}
         </label>
+
+        {/* Phase AAS (2026-06-01) — mode toggle. ``nameLocked`` is
+            set on the edit page so a saved single-table migration
+            doesn't accidentally promote to schema mode (the page
+            renders only one detail at a time). */}
+        {!nameLocked ? (
+          <div className="mt-4 flex gap-2 rounded-md bg-overlay p-1">
+            {(["single", "schema"] as MigrationMode[]).map((m) => {
+              const active = f.mode === m;
+              return (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => {
+                    if (!form) return;
+                    onChange({ ...form, mode: m });
+                  }}
+                  className={`flex-1 rounded px-3 py-1.5 text-xs font-medium transition ${
+                    active
+                      ? "bg-bg text-text shadow-sm"
+                      : "text-text-muted hover:text-text"
+                  }`}
+                  disabled={disabled}
+                >
+                  {m === "single"
+                    ? t("migrations.modeSingle")
+                    : t("migrations.modeSchema")}
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
       </Card>
 
       {/* Direction — Source → Destination cards side by side */}
@@ -227,12 +321,14 @@ export function MigrationForm({
                 value={f.sourceConnection}
                 onChange={(e) => {
                   if (!form) return;
-                  // Reset table when the connection changes — the
-                  // old table doesn't exist on the new connection.
+                  // Reset table / schema when the connection changes —
+                  // both lookups depend on the connection.
                   onChange({
                     ...form,
                     sourceConnection: e.target.value,
                     sourceTable: "",
+                    sourceSchema: "",
+                    selectedTables: [],
                   });
                 }}
                 disabled={disabled}
@@ -251,35 +347,155 @@ export function MigrationForm({
                 </span>
               ) : null}
             </label>
-            <label className="flex flex-col gap-1">
-              <span className="text-xs text-text-secondary">
-                {t("migrations.pickTable")}
-              </span>
-              <input
-                list="src-tables-list"
-                value={f.sourceTable}
-                onChange={(e) => field("sourceTable", e.target.value)}
-                disabled={disabled || !sourceConnRow}
-                placeholder={
-                  sourceConnRow
-                    ? tablesLoading
-                      ? "…"
-                      : sourceTables[0] ?? "public.orders"
-                    : t("migrations.pickConnFirst")
-                }
-                className="h-10 rounded-md border border-border-subtle bg-elevated px-3 text-sm text-text focus-visible:border-accent focus-visible:outline-none"
-              />
-              <datalist id="src-tables-list">
-                {sourceTables.map((tab) => (
-                  <option key={tab} value={tab} />
-                ))}
-              </datalist>
-              {errors.sourceTable ? (
-                <span className="text-xs text-error">
-                  {t("migrations.errRequired")}
+
+            {f.mode === "single" ? (
+              <label className="flex flex-col gap-1">
+                <span className="text-xs text-text-secondary">
+                  {t("migrations.pickTable")}
                 </span>
-              ) : null}
-            </label>
+                <input
+                  list="src-tables-list"
+                  value={f.sourceTable}
+                  onChange={(e) => field("sourceTable", e.target.value)}
+                  disabled={disabled || !sourceConnRow}
+                  placeholder={
+                    sourceConnRow
+                      ? tablesLoading
+                        ? "…"
+                        : sourceTables[0] ?? "public.orders"
+                      : t("migrations.pickConnFirst")
+                  }
+                  className="h-10 rounded-md border border-border-subtle bg-elevated px-3 text-sm text-text focus-visible:border-accent focus-visible:outline-none"
+                />
+                <datalist id="src-tables-list">
+                  {sourceTables.map((tab) => (
+                    <option key={tab} value={tab} />
+                  ))}
+                </datalist>
+                {errors.sourceTable ? (
+                  <span className="text-xs text-error">
+                    {t("migrations.errRequired")}
+                  </span>
+                ) : null}
+              </label>
+            ) : (
+              <>
+                <label className="flex flex-col gap-1">
+                  <span className="text-xs text-text-secondary">
+                    {t("migrations.sourceSchema")}
+                  </span>
+                  <input
+                    list="src-schemas-list"
+                    value={f.sourceSchema}
+                    onChange={(e) => {
+                      if (!form) return;
+                      onChange({
+                        ...form,
+                        sourceSchema: e.target.value,
+                        // Reset selections when the schema changes —
+                        // the previous picks belonged to a different
+                        // schema.
+                        selectedTables: [],
+                        // Mirror to destination by default so identity
+                        // round-trips are the default.
+                        sinkSchema: form.sinkSchema || e.target.value,
+                      });
+                    }}
+                    disabled={disabled || !sourceConnRow}
+                    placeholder={
+                      sourceConnRow
+                        ? tablesLoading
+                          ? "…"
+                          : allSchemas[0] ?? "public"
+                        : t("migrations.pickConnFirst")
+                    }
+                    className="h-10 rounded-md border border-border-subtle bg-elevated px-3 text-sm text-text focus-visible:border-accent focus-visible:outline-none"
+                  />
+                  <datalist id="src-schemas-list">
+                    {allSchemas.map((s) => (
+                      <option key={s} value={s} />
+                    ))}
+                  </datalist>
+                  {errors.sourceSchema ? (
+                    <span className="text-xs text-error">
+                      {t("migrations.errRequired")}
+                    </span>
+                  ) : null}
+                </label>
+                <div className="flex flex-col gap-1">
+                  <div className="flex items-baseline justify-between">
+                    <span className="text-xs text-text-secondary">
+                      {t("migrations.tablesToReplicate")}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={toggleAllTables}
+                      disabled={disabled || tablesInSchema.length === 0}
+                      className="text-xs text-accent hover:underline disabled:text-text-muted disabled:no-underline"
+                    >
+                      {tablesInSchema.length > 0 &&
+                      tablesInSchema.every((t) =>
+                        f.selectedTables.includes(t.qualified),
+                      )
+                        ? t("migrations.deselectAll")
+                        : t("migrations.selectAll")}
+                    </button>
+                  </div>
+                  <div className="max-h-56 overflow-y-auto rounded-md border border-border-subtle">
+                    {!sourceConnRow ? (
+                      <p className="px-3 py-3 text-xs text-text-muted">
+                        {t("migrations.pickConnFirst")}
+                      </p>
+                    ) : tablesLoading ? (
+                      <p className="px-3 py-3 text-xs text-text-muted">
+                        {t("migrations.schemaLoading")}
+                      </p>
+                    ) : tablesInSchema.length === 0 ? (
+                      <p className="px-3 py-3 text-xs text-text-muted">
+                        {f.sourceSchema
+                          ? t("migrations.schemaNoTables", {
+                              schema: f.sourceSchema,
+                            })
+                          : t("migrations.typeSchemaFirst")}
+                      </p>
+                    ) : (
+                      <ul className="divide-y divide-border-subtle">
+                        {tablesInSchema.map(({ qualified, parsed }) => {
+                          const checked = f.selectedTables.includes(qualified);
+                          return (
+                            <li key={qualified}>
+                              <label className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-xs hover:bg-overlay">
+                                <input
+                                  type="checkbox"
+                                  className="h-3.5 w-3.5 cursor-pointer accent-accent"
+                                  checked={checked}
+                                  onChange={() => toggleTable(qualified)}
+                                  disabled={disabled}
+                                />
+                                <span className="font-mono text-text">
+                                  {parsed.name}
+                                </span>
+                              </label>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                  </div>
+                  {errors.selectedTables ? (
+                    <span className="text-xs text-error">
+                      {t("migrations.selectAtLeastOne")}
+                    </span>
+                  ) : (
+                    <span className="text-xs text-text-muted">
+                      {t("migrations.selectedTablesCount", {
+                        n: f.selectedTables.length,
+                      })}
+                    </span>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         </Card>
 
@@ -318,25 +534,47 @@ export function MigrationForm({
                 </span>
               ) : null}
             </label>
-            <label className="flex flex-col gap-1">
-              <span className="text-xs text-text-secondary">
-                {t("migrations.destTable")}
-              </span>
-              <Input
-                value={f.sinkTable}
-                onChange={(e) => field("sinkTable", e.target.value)}
-                disabled={disabled}
-                placeholder={f.sourceTable || "orders_copy"}
-              />
-              <span className="text-xs text-text-muted">
-                {t("migrations.destTableHelp")}
-              </span>
-              {errors.sinkTable ? (
-                <span className="text-xs text-error">
-                  {t("migrations.errRequired")}
+            {f.mode === "single" ? (
+              <label className="flex flex-col gap-1">
+                <span className="text-xs text-text-secondary">
+                  {t("migrations.destTable")}
                 </span>
-              ) : null}
-            </label>
+                <Input
+                  value={f.sinkTable}
+                  onChange={(e) => field("sinkTable", e.target.value)}
+                  disabled={disabled}
+                  placeholder={f.sourceTable || "orders_copy"}
+                />
+                <span className="text-xs text-text-muted">
+                  {t("migrations.destTableHelp")}
+                </span>
+                {errors.sinkTable ? (
+                  <span className="text-xs text-error">
+                    {t("migrations.errRequired")}
+                  </span>
+                ) : null}
+              </label>
+            ) : (
+              <label className="flex flex-col gap-1">
+                <span className="text-xs text-text-secondary">
+                  {t("migrations.destSchema")}
+                </span>
+                <Input
+                  value={f.sinkSchema}
+                  onChange={(e) => field("sinkSchema", e.target.value)}
+                  disabled={disabled}
+                  placeholder={f.sourceSchema || "public"}
+                />
+                <span className="text-xs text-text-muted">
+                  {t("migrations.destSchemaHelp")}
+                </span>
+                {errors.sinkSchema ? (
+                  <span className="text-xs text-error">
+                    {t("migrations.errRequired")}
+                  </span>
+                ) : null}
+              </label>
+            )}
           </div>
         </Card>
       </div>

@@ -34,18 +34,42 @@ export const MIGRATION_SUPPORTED_TYPES = new Set([
   "mssql",
 ]);
 
+/** Phase AAS (2026-06-01) — what *unit* the migration replicates.
+ *
+ * * ``single`` — one source table → one destination table (the
+ *   original Migration form behaviour).
+ * * ``schema`` — every selected table inside a source schema → the
+ *   matching destination schema. Saved as **one pipeline per
+ *   table** so the existing list / Last run / Run now flow keeps
+ *   working unchanged; the form just batches the create calls.
+ */
+export type MigrationMode = "single" | "schema";
+
 export interface MigrationFormData {
+  /** Whether the user is migrating one table or an entire schema. */
+  mode: MigrationMode;
   /** Connection NAME (matches what the runtime resolves). */
   sourceConnection: string;
-  /** Fully-qualified source table — e.g. ``public.orders`` for
-   *  Postgres, bare ``orders`` for SQLite. The runtime issues
-   *  ``SELECT * FROM <table>`` against it. */
+  /** Single-mode: fully-qualified source table — e.g.
+   *  ``public.orders`` for Postgres, bare ``orders`` for SQLite. */
   sourceTable: string;
+  /** Schema-mode: the schema whose tables are replicated. */
+  sourceSchema: string;
+  /** Schema-mode: tables the user picked (qualified
+   *  ``schema.table`` strings as returned by
+   *  ``connectionsApi.tables``). */
+  selectedTables: string[];
   sinkConnection: string;
   sinkTable: string;
+  /** Schema-mode: destination schema name. Defaults to the source
+   *  schema so the round-trip is identity by default. */
+  sinkSchema: string;
   strategy: MigrationStrategy;
   /** Required for ``mirror`` — comma-separated. Become PRIMARY KEY
-   *  on the auto-created sink (ADR-0072). */
+   *  on the auto-created sink (ADR-0072).
+   *  Schema-mode: the same keys are applied to every table, so the
+   *  feature is only useful when every selected table shares the
+   *  same key column(s). For mixed shapes use single-mode. */
   keyColumns: string;
   /** Required for ``append`` — single column whose value the
    *  runtime tracks (cursor state, Step 6.1). */
@@ -53,10 +77,14 @@ export interface MigrationFormData {
 }
 
 export const DEFAULT_MIGRATION_FORM: MigrationFormData = {
+  mode: "single",
   sourceConnection: "",
   sourceTable: "",
+  sourceSchema: "",
+  selectedTables: [],
   sinkConnection: "",
   sinkTable: "",
+  sinkSchema: "",
   strategy: "snapshot",
   keyColumns: "",
   cursorColumn: "",
@@ -65,8 +93,11 @@ export const DEFAULT_MIGRATION_FORM: MigrationFormData = {
 export interface MigrationFormErrors {
   sourceConnection?: string;
   sourceTable?: string;
+  sourceSchema?: string;
+  selectedTables?: string;
   sinkConnection?: string;
   sinkTable?: string;
+  sinkSchema?: string;
   keyColumns?: string;
   cursorColumn?: string;
 }
@@ -76,9 +107,16 @@ export function validateMigrationForm(
 ): MigrationFormErrors {
   const errs: MigrationFormErrors = {};
   if (!form.sourceConnection) errs.sourceConnection = "required";
-  if (!form.sourceTable.trim()) errs.sourceTable = "required";
   if (!form.sinkConnection) errs.sinkConnection = "required";
-  if (!form.sinkTable.trim()) errs.sinkTable = "required";
+
+  if (form.mode === "schema") {
+    if (!form.sourceSchema.trim()) errs.sourceSchema = "required";
+    if (!form.sinkSchema.trim()) errs.sinkSchema = "required";
+    if (form.selectedTables.length === 0) errs.selectedTables = "required";
+  } else {
+    if (!form.sourceTable.trim()) errs.sourceTable = "required";
+    if (!form.sinkTable.trim()) errs.sinkTable = "required";
+  }
   if (form.strategy === "mirror") {
     if (splitKeyColumns(form.keyColumns).length === 0) {
       errs.keyColumns = "required";
@@ -212,11 +250,19 @@ export function parseMigrationConfig(
   const cursorColumn =
     typeof src.cursor_column === "string" ? src.cursor_column : "";
 
+  // Loaded migrations are always single-mode on the edit page. The
+  // mode toggle is hidden anyway (``nameLocked``) — schema-level
+  // creates produce N separate single-table pipelines, each of which
+  // round-trips here as a normal single migration.
   return {
+    mode: "single",
     sourceConnection: typeof src.connection === "string" ? src.connection : "",
     sourceTable: table,
+    sourceSchema: "",
+    selectedTables: [],
     sinkConnection: typeof snk.connection === "string" ? snk.connection : "",
     sinkTable: typeof snk.table === "string" ? snk.table : "",
+    sinkSchema: "",
     strategy,
     keyColumns,
     cursorColumn,
@@ -230,4 +276,87 @@ export function parseSelectStarTable(query: string): string | null {
     query,
   );
   return m ? m[1] : null;
+}
+
+
+// ---------- Phase AAS (2026-06-01) schema-level helpers --------------------
+
+
+export interface SchemaQualifiedTable {
+  schema: string | null;
+  name: string;
+  qualified: string;
+}
+
+/** Split ``"schema.table"`` into its parts. Bare ``"orders"`` becomes
+ *  ``{schema: null, name: "orders"}``. ``connectionsApi.tables`` returns
+ *  schema-qualified strings for postgres / vertica / mssql; sqlite
+ *  reports bare names. */
+export function parseQualifiedTable(qualified: string): SchemaQualifiedTable {
+  const idx = qualified.indexOf(".");
+  if (idx <= 0 || idx === qualified.length - 1) {
+    return { schema: null, name: qualified, qualified };
+  }
+  return {
+    schema: qualified.slice(0, idx),
+    name: qualified.slice(idx + 1),
+    qualified,
+  };
+}
+
+/** Group a list of ``schema.table`` strings by schema. Bare names
+ *  land under the ``""`` key. */
+export function groupTablesBySchema(
+  tables: string[],
+): Map<string, SchemaQualifiedTable[]> {
+  const m = new Map<string, SchemaQualifiedTable[]>();
+  for (const t of tables) {
+    const parsed = parseQualifiedTable(t);
+    const key = parsed.schema ?? "";
+    const bucket = m.get(key);
+    if (bucket) bucket.push(parsed);
+    else m.set(key, [parsed]);
+  }
+  return m;
+}
+
+export interface BulkMigrationPlanItem {
+  /** Pipeline name to create — ``{baseName}_{tableName}``. */
+  pipelineName: string;
+  /** PipelineConfig JSON to POST. */
+  config: Record<string, unknown>;
+  /** The source qualified table — surfaced in error toasts. */
+  sourceTable: string;
+}
+
+/** Schema-mode build: take the form's ``selectedTables`` and emit
+ *  one ``buildMigrationConfig``-equivalent entry per table. Each
+ *  becomes its own pipeline (own row on the migrations list, own
+ *  Run / Last run / history). */
+export function buildBulkMigrationConfigs(
+  baseName: string,
+  form: MigrationFormData,
+): BulkMigrationPlanItem[] {
+  if (form.mode !== "schema") return [];
+  const out: BulkMigrationPlanItem[] = [];
+  const sinkSchema = form.sinkSchema.trim() || form.sourceSchema.trim();
+  for (const qualified of form.selectedTables) {
+    const parsed = parseQualifiedTable(qualified);
+    const tableName = parsed.name;
+    // Per-table form copy that re-uses ``buildMigrationConfig``'s
+    // strategy / mode wiring.
+    const perTable: MigrationFormData = {
+      ...form,
+      mode: "single",
+      sourceTable: qualified,
+      sinkTable: sinkSchema ? `${sinkSchema}.${tableName}` : tableName,
+    };
+    const pipelineName = `${baseName.trim()}_${tableName}`;
+    out.push({
+      pipelineName,
+      config: buildMigrationConfig(pipelineName, perTable),
+      sourceTable: qualified,
+    });
+  }
+  return out;
 }

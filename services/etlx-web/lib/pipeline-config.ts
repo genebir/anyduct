@@ -111,10 +111,31 @@ function nextId(prefix: string): string {
 export function makeNode(operatorId: string): BuilderNode {
   const spec = findOperator(operatorId);
   if (!spec) throw new Error(`Unknown operator ${operatorId}`);
+  // Phase AAS follow-up 2 (2026-06-01) — user report "파이프라인
+  // 템플릿이 적용이 다 안되는데". Root cause: ``makeNode`` started a
+  // node with ``data: {}``; ``defaultValue`` on each field was only
+  // consulted by the input renderer as a fallback (``value ??
+  // defaultValue``), never copied onto the node. So:
+  //
+  //   * a template that didn't override every field shipped the
+  //     un-defaulted ones as missing on the wire;
+  //   * a freshly-dropped node looked filled in the UI but
+  //     ``serializeGraph`` emitted bare keys;
+  //   * the worker then ran with append/0/empty placeholders instead
+  //     of what the user thought they'd configured.
+  //
+  // Pulling defaults into ``data`` here makes the wire shape match
+  // what the user sees. Template ``overrides`` still win because the
+  // ``state()`` helper merges them *after* this returns.
+  const data: Record<string, unknown> = {};
+  for (const f of spec.fields) {
+    const dv = (f as { defaultValue?: unknown }).defaultValue;
+    if (dv !== undefined) data[f.key] = dv;
+  }
   return {
     id: nextId(spec.kind),
     operatorId,
-    data: {},
+    data,
   };
 }
 

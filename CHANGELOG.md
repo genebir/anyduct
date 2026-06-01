@@ -9,6 +9,13 @@
 
 ## [Unreleased]
 
+### Fixed
+- **파이프라인 템플릿이 적용이 다 안되는 문제 (Phase AAS follow-up 2, 2026-06-01)** — 사용자 *"파이프라인 템플릿이 적용이 다 안되는데"*. Root cause: `makeNode`가 `data: {}` 빈 객체로 노드 생성 → operators.ts의 `fields[].defaultValue`는 인풋 렌더 시 fallback으로만 쓰일 뿐 `node.data`에 절대 안 들어감. 따라서 ① 템플릿이 override 안 한 default가 모두 누락된 채 wire로 나가고, ② 사용자가 인풋 안 만지면 UI엔 placeholder 보이지만 저장되는 값은 빈 키.
+  - **수정**: `makeNode`가 spec.fields를 walk해 `defaultValue !== undefined`인 모든 키를 `node.data`에 주입. 템플릿 overrides는 `state()` helper에서 그 뒤에 merge되어 여전히 win.
+  - **defaultValue 명시**: `mode: "append"` (모든 RDBMS sink) / `chunk_size: 10000` (모든 RDBMS source) / `format: "parquet"` (S3 sink). `FieldDef`의 string/number/select variants에 `defaultValue` 타입 추가.
+  - **결과**: 템플릿(blank/db-copy/db-migrate-cross/db-filtered-copy 등) 적용 시 모든 합리적 default가 즉시 node.data에 반영 → 사용자가 connection + table만 채우면 끝.
+  - 검증: web tsc clean. 코어/서버 변화 0.
+
 ### Changed
 - **소스 테이블 / 스키마를 dropdown으로 선택 (Phase AAS follow-up)** — 사용자 *"직접 테이블명을 입력하는 게 아니라 드롭다운 혹은 라디오 버튼으로 선택해서 할 수 있도록 해줘"*.
   - **Single mode**: source 테이블 — `<input list>` + datalist (free text 허용) → `<select>` (introspected 목록만). 임의 이름 입력 → 오타로 4xx 떨어지는 사례 차단.

@@ -63,6 +63,11 @@ export type FieldDef =
       kind: "string" | "number";
       placeholder?: string;
       multiline?: boolean;
+      // Phase AAS follow-up 2 (2026-06-01) — operators can ship a
+      // ``defaultValue`` that ``makeNode`` injects into the node's
+      // ``data`` so the wire shape carries it without the user
+      // having to touch the field.
+      defaultValue?: string | number;
     })
   | (FieldBase & {
       // A table / collection name with introspected suggestions. Renders a
@@ -91,6 +96,7 @@ export type FieldDef =
   | (FieldBase & {
       kind: "select";
       options: { label: string; value: string }[];
+      defaultValue?: string;
     })
   | (FieldBase & {
       kind: "json";
@@ -230,7 +236,7 @@ const SOURCES: OperatorSpec[] = [
         kind: "sourceQuery",
         placeholder: "SELECT id, name, created_at FROM users",
       },
-      { key: "chunk_size", label: "Chunk size", kind: "number", placeholder: "10000" },
+      { key: "chunk_size", label: "Chunk size", kind: "number", placeholder: "10000", defaultValue: 10000 },
       CURSOR_COLUMN_FIELD,
     ],
   },
@@ -245,7 +251,7 @@ const SOURCES: OperatorSpec[] = [
     fields: [
       { key: "connection", label: "Connection", kind: "connection", required: true },
       { key: "query", label: "Read", kind: "sourceQuery" },
-      { key: "chunk_size", label: "Chunk size", kind: "number" },
+      { key: "chunk_size", label: "Chunk size", kind: "number", defaultValue: 10000 },
       CURSOR_COLUMN_FIELD,
     ],
   },
@@ -275,7 +281,7 @@ const SOURCES: OperatorSpec[] = [
     fields: [
       { key: "connection", label: "Connection", kind: "connection", required: true },
       { key: "query", label: "Read", kind: "sourceQuery" },
-      { key: "chunk_size", label: "Chunk size", kind: "number" },
+      { key: "chunk_size", label: "Chunk size", kind: "number", defaultValue: 10000 },
       CURSOR_COLUMN_FIELD,
     ],
   },
@@ -291,7 +297,7 @@ const SOURCES: OperatorSpec[] = [
     fields: [
       { key: "connection", label: "Connection", kind: "connection", required: true },
       { key: "query", label: "Read", kind: "sourceQuery" },
-      { key: "chunk_size", label: "Chunk size", kind: "number" },
+      { key: "chunk_size", label: "Chunk size", kind: "number", defaultValue: 10000 },
       CURSOR_COLUMN_FIELD,
     ],
   },
@@ -748,6 +754,7 @@ const SINKS: OperatorSpec[] = [
         key: "mode",
         label: "Mode",
         kind: "select",
+        defaultValue: "append",
         options: [
           { label: "append", value: "append" },
           { label: "overwrite", value: "overwrite" },
@@ -803,6 +810,7 @@ const SINKS: OperatorSpec[] = [
         key: "mode",
         label: "Mode",
         kind: "select",
+        defaultValue: "append",
         options: [
           { label: "append", value: "append" },
           { label: "overwrite", value: "overwrite" },
@@ -853,6 +861,7 @@ const SINKS: OperatorSpec[] = [
         key: "mode",
         label: "Mode",
         kind: "select",
+        defaultValue: "append",
         options: [
           { label: "append", value: "append" },
           { label: "overwrite", value: "overwrite" },
@@ -902,6 +911,7 @@ const SINKS: OperatorSpec[] = [
         key: "mode",
         label: "Mode",
         kind: "select",
+        defaultValue: "append",
         options: [
           { label: "append", value: "append" },
           { label: "overwrite", value: "overwrite" },
@@ -957,6 +967,7 @@ const SINKS: OperatorSpec[] = [
         key: "mode",
         label: "Mode",
         kind: "select",
+        defaultValue: "append",
         options: [
           { label: "append", value: "append" },
           { label: "overwrite", value: "overwrite" },
@@ -1011,6 +1022,7 @@ const SINKS: OperatorSpec[] = [
         key: "mode",
         label: "Mode",
         kind: "select",
+        defaultValue: "append",
         options: [
           { label: "append", value: "append" },
           { label: "overwrite", value: "overwrite" },
@@ -1041,6 +1053,7 @@ const SINKS: OperatorSpec[] = [
         key: "format",
         label: "Format",
         kind: "select",
+        defaultValue: "parquet",
         options: [
           { label: "parquet", value: "parquet" },
           { label: "csv", value: "csv" },

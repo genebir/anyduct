@@ -237,7 +237,16 @@ export default function WorkspaceHomePage() {
         <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-6">
           <StatCard
             label={t("nav.pipelines")}
-            value={pipelines?.length}
+            /* Phase ACE (2026-06-01) — exclude migrations from the
+               Pipelines count to match the /pipelines page which
+               filters them out (so the card and list agree). */
+            value={
+              pipelines
+                ? pipelines.filter(
+                    (p) => migrationSummaryOf(p.current_config_json) === null,
+                  ).length
+                : undefined
+            }
             icon={<WorkflowIcon size={18} />}
             href={ws ? `/w/${ws.slug}/pipelines` : "#"}
           />

@@ -393,6 +393,8 @@ export const en = {
   "overview.pipelineRef": "pipeline {id}…",
   "overview.scheduled": "scheduled",
   "overview.manual": "manual",
+  // Phase ABU/2 (2026-06-01) — friendly self
+  "overview.manualByYou": "by you",
   "overview.recentFailures": "Recent failures",
   "overview.recentFailuresHint": "Top 5 failed in the latest batch.",
   "overview.nothingFailing": "Nothing failing right now.",
@@ -1463,6 +1465,8 @@ export const ko: Messages = {
   "overview.pipelineRef": "파이프라인 {id}…",
   "overview.scheduled": "예약됨",
   "overview.manual": "수동",
+  // Phase ABU/2 (2026-06-01) — 본인 친화
+  "overview.manualByYou": "내가",
   "overview.recentFailures": "최근 실패",
   "overview.recentFailuresHint": "최근 배치에서 실패한 상위 5개.",
   "overview.nothingFailing": "현재 실패한 항목이 없습니다.",

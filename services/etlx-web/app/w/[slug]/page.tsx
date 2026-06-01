@@ -30,6 +30,7 @@ import {
   type ScheduleSummary,
   type SensorSummary,
 } from "@/lib/api";
+import { useCurrentUser } from "@/components/providers/auth-provider";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import { useLocale } from "@/components/providers/locale-provider";
 import type { Messages } from "@/lib/i18n/messages";
@@ -49,6 +50,8 @@ export default function WorkspaceHomePage() {
   const { slug } = useParams<{ slug: string }>();
   const ws = useWorkspaceFromSlug(slug);
   const { t } = useLocale();
+  // Phase ABU/2 (2026-06-01) — friendly "by you" in Recent runs.
+  const currentUser = useCurrentUser();
   const [pipelines, setPipelines] = useState<PipelineSummary[] | null>(null);
   const [connections, setConnections] = useState<ConnectionSummary[] | null>(null);
   const [schedules, setSchedules] = useState<ScheduleRow[] | null>(null);
@@ -336,7 +339,10 @@ export default function WorkspaceHomePage() {
                           {"  ·  "}
                           {r.schedule_id
                             ? t("overview.scheduled")
-                            : t("overview.manual")}
+                            : r.triggered_by_user_id &&
+                                r.triggered_by_user_id === currentUser?.id
+                              ? t("overview.manualByYou")
+                              : t("overview.manual")}
                         </div>
                       </div>
                       <div className="text-right text-xs text-text-secondary">

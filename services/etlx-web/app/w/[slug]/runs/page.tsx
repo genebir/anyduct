@@ -470,7 +470,17 @@ export default function RunsPage() {
               (2026-05-28). */}
           {rows && rows.length > 0 ? (
             <div className="mt-4 flex items-center justify-between border-t border-border-subtle pt-3 text-xs text-text-muted">
-              <span>{t("runs.showing", { count: rows.length })}</span>
+              {/* Phase ACA follow-up — when the trigger filter narrows
+                  the visible set, surface "X of Y" so the operator
+                  doesn't wonder why Load more keeps fetching. */}
+              <span>
+                {triggerFilter && filteredRows && filteredRows.length !== rows.length
+                  ? t("runs.showingFiltered", {
+                      visible: filteredRows.length,
+                      total: rows.length,
+                    })
+                  : t("runs.showing", { count: rows.length })}
+              </span>
               {!maxedOut ? (
                 <Button
                   size="sm"

@@ -884,6 +884,7 @@ export const en = {
   "runs.triggerFilterAll": "Any",
   "runs.triggerFilterManual": "Manual",
   "runs.triggerFilterScheduled": "Scheduled",
+  "runs.showingFiltered": "Showing {visible} of {total} (trigger filter)",
   "runs.statusFilterAll": "All",
   // Phase T (2026-05-28) — workspace dashboard polish.
   "overview.inFlightCount": "{n} in flight",
@@ -1973,6 +1974,7 @@ export const ko: Messages = {
   "runs.triggerFilterAll": "전체",
   "runs.triggerFilterManual": "수동",
   "runs.triggerFilterScheduled": "스케줄",
+  "runs.showingFiltered": "{visible}/{total}건 표시 중 (트리거 필터)",
   "runs.statusFilterAll": "전체",
   // Phase T (2026-05-28) — 워크스페이스 대시보드 강화.
   "overview.inFlightCount": "{n}건 진행 중",

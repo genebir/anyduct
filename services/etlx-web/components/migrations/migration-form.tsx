@@ -371,7 +371,24 @@ export function MigrationForm({
                     is the runtime's source of truth. */}
                 <select
                   value={f.sourceTable}
-                  onChange={(e) => field("sourceTable", e.target.value)}
+                  onChange={(e) => {
+                    // Phase ACD (2026-06-01) — auto-fill the
+                    // destination with the same name when the user
+                    // picks a source AND the destination is empty.
+                    // Most migrations are "same name, different DB"
+                    // so this saves a typing step; if the user wants
+                    // a different name they can still edit it. We
+                    // only auto-fill when sinkTable was untouched
+                    // (empty) so we don't overwrite their choice.
+                    if (!form) return;
+                    const nextSource = e.target.value;
+                    const shouldAutofill = !f.sinkTable.trim();
+                    onChange({
+                      ...form,
+                      sourceTable: nextSource,
+                      sinkTable: shouldAutofill ? nextSource : f.sinkTable,
+                    });
+                  }}
                   disabled={disabled || !sourceConnRow || tablesLoading}
                   className="h-10 rounded-md border border-border-subtle bg-elevated px-2 text-sm text-text focus-visible:border-accent focus-visible:outline-none"
                 >

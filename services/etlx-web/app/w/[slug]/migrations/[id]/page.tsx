@@ -20,6 +20,7 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
   CalendarClockIcon,
+  HandIcon,
   PlayIcon,
   ShieldCheckIcon,
   Trash2Icon,
@@ -539,6 +540,28 @@ function RecentRunsCard({
                 className="flex items-center gap-3 py-2 text-sm"
               >
                 <StatusBadge status={r.status} />
+                {/* Phase ABY (2026-06-01) — trigger source icon-only
+                    chip. Same vocabulary as the runs-list (ABG) but
+                    icon-only since detail rows are narrower. */}
+                {r.schedule_id ? (
+                  <CalendarClockIcon
+                    size={12}
+                    className="text-accent"
+                    aria-label={tx("migrations.runTriggerSchedule")}
+                  >
+                    <title>{tx("migrations.runTriggerSchedule")}</title>
+                  </CalendarClockIcon>
+                ) : r.triggered_by_user_id ? (
+                  <HandIcon
+                    size={12}
+                    className="text-text-muted"
+                    aria-label={tx("migrations.runTriggerManual")}
+                  >
+                    <title>{tx("migrations.runTriggerManual")}</title>
+                  </HandIcon>
+                ) : (
+                  <span className="w-3" aria-hidden />
+                )}
                 <Link
                   href={`/w/${slug}/runs/${r.id}`}
                   className="flex-1 truncate font-mono text-xs text-text-secondary hover:text-accent"

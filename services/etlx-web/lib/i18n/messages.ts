@@ -189,6 +189,9 @@ export const en = {
   "migrations.dryRunResultOk": "Dry run passed",
   "migrations.dryRunResultFail": "Dry run failed",
   "migrations.dryRunResultSummary": "{n} of {total} connectors validated",
+  // Phase ABY (2026-06-01) — recent runs trigger icons
+  "migrations.runTriggerSchedule": "Triggered by schedule",
+  "migrations.runTriggerManual": "Manually triggered",
   "migrations.recentRuns": "Recent runs",
   "migrations.runsEmpty": "No runs yet. Hit Run now to start the first one.",
   "migrations.runRowsWritten": "rows",
@@ -1280,6 +1283,9 @@ export const ko: Messages = {
   "migrations.dryRunResultOk": "사전검증 성공",
   "migrations.dryRunResultFail": "사전검증 실패",
   "migrations.dryRunResultSummary": "connector {n}/{total} 검증됨",
+  // Phase ABY (2026-06-01) — recent runs trigger 아이콘
+  "migrations.runTriggerSchedule": "스케줄로 실행됨",
+  "migrations.runTriggerManual": "수동으로 실행됨",
   "migrations.recentRuns": "최근 실행",
   "migrations.runsEmpty": "아직 실행 기록이 없습니다. 지금 실행을 눌러 시작하세요.",
   "migrations.runRowsWritten": "행",

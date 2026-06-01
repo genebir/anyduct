@@ -376,11 +376,33 @@ function JsonBlock({
       return String(value);
     }
   }, [value]);
+  // Phase ACC (2026-06-01) — quick copy for operators investigating
+  // a change. ConfigPanel (ABR) ships the same affordance — keep the
+  // gesture consistent across surfaces.
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success("Copied to clipboard");
+    } catch {
+      toast.error("Couldn't copy — browser blocked clipboard");
+    }
+  }
   return (
     <div className="flex min-w-0 flex-col gap-1">
-      <span className="text-[11px] font-semibold uppercase tracking-wider text-text-secondary">
-        {label}
-      </span>
+      <div className="flex items-center justify-between">
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-text-secondary">
+          {label}
+        </span>
+        {value !== null ? (
+          <button
+            type="button"
+            onClick={() => void copy()}
+            className="rounded-sm border border-border-subtle bg-overlay px-1.5 py-0.5 text-[10px] text-text-muted hover:text-text"
+          >
+            Copy
+          </button>
+        ) : null}
+      </div>
       <pre
         className={cn(
           "max-h-72 overflow-auto rounded-md border border-border-subtle bg-bg p-3 font-mono text-[11px] leading-snug text-text",

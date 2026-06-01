@@ -5,8 +5,10 @@ import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
   ActivityIcon,
+  CalendarClockIcon,
   ExternalLinkIcon,
   EyeIcon,
+  HandIcon,
   RotateCcwIcon,
   WorkflowIcon,
   XIcon,
@@ -74,6 +76,40 @@ function buildColumns(
             {r.pipeline_id.slice(0, 8)}…
           </span>
         );
+      },
+    },
+    {
+      // Phase ABG (2026-06-01) — Trigger source chip. Quickly
+      // identifies which runs were auto-fired by a schedule vs
+      // user-triggered, so operators can spot "the cron is
+      // misbehaving" or "this was a manual one-off".
+      key: "trigger",
+      header: t("runs.colTrigger"),
+      className: "w-28",
+      cell: (r) => {
+        if (r.schedule_id) {
+          return (
+            <span
+              className="inline-flex h-5 items-center gap-1 rounded-sm bg-accent/15 px-1.5 text-[11px] text-accent"
+              title={t("runs.triggerScheduleTitle")}
+            >
+              <CalendarClockIcon size={11} />
+              {t("runs.triggerSchedule")}
+            </span>
+          );
+        }
+        if (r.triggered_by_user_id) {
+          return (
+            <span
+              className="inline-flex h-5 items-center gap-1 rounded-sm bg-overlay px-1.5 text-[11px] text-text-secondary"
+              title={t("runs.triggerManualTitle")}
+            >
+              <HandIcon size={11} />
+              {t("runs.triggerManual")}
+            </span>
+          );
+        }
+        return <span className="text-text-muted">—</span>;
       },
     },
     {

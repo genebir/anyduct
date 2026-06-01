@@ -122,6 +122,12 @@ dev = [
     "boto3>=1.34",
     "pyarrow>=16.0",
     "aiokafka>=0.11",
+    # Phase AAQ (2026-05-29) — Vertica + MSSQL drivers. Kept in the
+    # dev group so ``uv sync`` (no extras) installs them automatically
+    # for local dev / contract tests. End users still opt in via the
+    # ``[vertica]`` / ``[mssql]`` extras for production installs.
+    "vertica-python>=1.4",
+    "pymssql>=2.3",
     # Secret backend clients (Step 7.4) — needed for unit mocks + integration tests
     "hvac>=2.0",
     "google-cloud-secret-manager>=2.20",

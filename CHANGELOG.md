@@ -9,6 +9,16 @@
 
 ## [Unreleased]
 
+### Added
+- **Vertica + MSSQL 드라이버를 dev group으로 영구 포함 + offline smoke 8종 (Phase AAQ post-mortem 3)** — 사용자 *"vertica: ConnectError: vertica-python not installed"*. Lazy import는 의도대로 동작 — driver만 없었음:
+  - `pyproject.toml [dependency-groups] dev`에 `vertica-python>=1.4` + `pymssql>=2.3` 추가 → `uv sync`만으로 dev 환경에 자동 설치. 프로덕션 사용자는 여전히 `[vertica]`/`[mssql]` extras로 opt-in.
+  - **드라이버-free smoke test 8종** (`test_vertica_mssql_smoke.py`):
+    1. registry 라운드트립 2종 (`ConnectorRegistry.get("vertica/mssql")` → 정확한 클래스).
+    2. 4종 capability protocol(BatchSource/Sink/SchemaInspector/SchemaWriter) 모두 만족 — class-instantiation 시점에 contract 위반 catch.
+    3. monkeypatch로 driver 모듈 가린 후 ConnectError + "vertica-python not installed" + "pip install" 명문 메시지 검증.
+    4. DDL injection 가드 ("orders; DROP") 거절.
+  - 검증: 코어 unit 854→862(+8). mypy/ruff/tsc clean.
+
 ### Fixed
 - **서버 startup connector 사전 로드 + connection form host field re-fill 제거 (Phase AAQ post-mortem 2)** — 사용자 두 신고:
   - **(1) "test_vertica: RegistryError: Connector 'vertica' not registered" 계속 발생** — 실행 중인 worker/scheduler 프로세스가 옛 코드 + 옛 entry_points로 동작 → `_load_builtin` fallback이 거기까지 도달 못함. **방어**: app_factory lifespan + worker/scheduler/sensor-scheduler/stream-worker CLI 진입점 모두에 `_preload_builtin_connectors()` 추가 — startup 시 `ConnectorRegistry.list_connectors()` 호출 → 빌트인 9종 모두 명시적으로 module-path import. stdout에 "loaded connectors (9): http, kafka, mongodb, mssql, mysql, postgres, s3, sqlite, vertica" 출력해 사용자가 boot time에 직접 확인 가능.

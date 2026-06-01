@@ -239,6 +239,7 @@ export default function AuditPage() {
                     afterLabel={t("audit.after")}
                     youLabel={t("audit.you")}
                     currentUserId={currentUser?.id ?? null}
+                    t={t}
                     open={!!expanded[row.id]}
                     onToggle={() =>
                       setExpanded((prev) => ({
@@ -298,6 +299,7 @@ function AuditRow({
   afterLabel,
   youLabel,
   currentUserId,
+  t,
 }: {
   row: AuditLogEntry;
   open: boolean;
@@ -307,6 +309,7 @@ function AuditRow({
   afterLabel: string;
   youLabel: string;
   currentUserId: string | null;
+  t: (k: keyof import("@/lib/i18n/messages").Messages) => string;
 }) {
   const hasDiff =
     row.before_json !== null ||
@@ -353,8 +356,8 @@ function AuditRow({
       </button>
       {open && hasDiff ? (
         <div className="grid gap-3 px-8 pb-4 sm:grid-cols-2">
-          <JsonBlock label={beforeLabel} value={row.before_json} />
-          <JsonBlock label={afterLabel} value={row.after_json} />
+          <JsonBlock label={beforeLabel} value={row.before_json} t={t} />
+          <JsonBlock label={afterLabel} value={row.after_json} t={t} />
         </div>
       ) : null}
     </li>
@@ -364,9 +367,11 @@ function AuditRow({
 function JsonBlock({
   label,
   value,
+  t,
 }: {
   label: string;
   value: Record<string, unknown> | null;
+  t: (k: keyof import("@/lib/i18n/messages").Messages) => string;
 }) {
   const text = useMemo(() => {
     if (value === null) return "—";
@@ -382,9 +387,9 @@ function JsonBlock({
   async function copy() {
     try {
       await navigator.clipboard.writeText(text);
-      toast.success("Copied to clipboard");
+      toast.success(t("audit.jsonCopied"));
     } catch {
-      toast.error("Couldn't copy — browser blocked clipboard");
+      toast.error(t("audit.jsonCopyFailed"));
     }
   }
   return (
@@ -399,7 +404,7 @@ function JsonBlock({
             onClick={() => void copy()}
             className="rounded-sm border border-border-subtle bg-overlay px-1.5 py-0.5 text-[10px] text-text-muted hover:text-text"
           >
-            Copy
+            {t("runDetail.copy")}
           </button>
         ) : null}
       </div>

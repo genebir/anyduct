@@ -19,7 +19,7 @@ import {
 } from "@/lib/connector-schemas";
 import { useLocale } from "@/components/providers/locale-provider";
 
-type FieldValue = string | number | undefined;
+type FieldValue = string | number | boolean | undefined;
 
 export interface ConnectionFormProps {
   workspaceId: string;
@@ -234,6 +234,32 @@ function FieldInput({
           onChange(v === "" ? "" : Number(v));
         }}
       />
+    );
+  }
+  if (field.type === "boolean") {
+    // Phase AAQ post-mortem 3 (2026-05-29) — Vertica's ``ssl`` is a
+    // real bool on the wire. A free-text input let users type "false"
+    // and the driver bounced it with "ssl should be a bool or
+    // ssl.SSLContext". A checkbox makes the type-on-the-wire match
+    // what the user sees.
+    const checked =
+      typeof value === "boolean"
+        ? value
+        : typeof field.defaultValue === "boolean"
+          ? field.defaultValue
+          : false;
+    return (
+      <label className="flex cursor-pointer items-center gap-2 text-sm text-text">
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={(e) => onChange(e.target.checked)}
+          className="h-4 w-4 cursor-pointer accent-accent"
+        />
+        <span className="select-none text-text-secondary">
+          {checked ? "Enabled" : "Disabled"}
+        </span>
+      </label>
     );
   }
   if (field.type === "password") {

@@ -9,6 +9,12 @@
 
 ## [Unreleased]
 
+### Fixed
+- **Vertica `ssl` 옵션 string-to-bool coercion + boolean field type (Phase AAQ post-mortem 4)** — 사용자 *"vertica connect failed: The value of connection option 'ssl' should be a bool or ssl.SSLContext object"*. UI form이 ssl을 string으로 전달, vertica-python은 bool 요구.
+  - **Connector 측 (방어)**: `VerticaConnector.__init__`이 `ssl` string ("true"/"false"/"1"/"0"/"yes"/"no"/"on"/"off"/빈) → bool로 정규화. `ssl.SSLContext` 인스턴스 passthrough. 어떤 경로(YAML / web form / 기존 저장 connection)로 들어오든 안전.
+  - **UI 측 (UX)**: `ConnectorField.type`에 `"boolean"` 추가. checkbox 렌더 + Enabled/Disabled 라벨. Vertica의 ssl 필드를 string → boolean 타입으로 변경(defaultValue: `false`). `buildCreateBody`가 `false`도 정상 직렬화(empty/undefined만 skip).
+  - **검증**: 16 신규 unit (15 string variant coercion + 1 SSLContext passthrough). 코어 unit 862→878.
+
 ### Added
 - **Vertica + MSSQL 드라이버를 dev group으로 영구 포함 + offline smoke 8종 (Phase AAQ post-mortem 3)** — 사용자 *"vertica: ConnectError: vertica-python not installed"*. Lazy import는 의도대로 동작 — driver만 없었음:
   - `pyproject.toml [dependency-groups] dev`에 `vertica-python>=1.4` + `pymssql>=2.3` 추가 → `uv sync`만으로 dev 환경에 자동 설치. 프로덕션 사용자는 여전히 `[vertica]`/`[mssql]` extras로 opt-in.

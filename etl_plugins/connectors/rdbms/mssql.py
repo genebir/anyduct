@@ -82,7 +82,7 @@ class MSSQLConnector(BatchSource, BatchSink):
             return
         try:
             # Lazy import so the module loads without the driver.
-            import pymssql  # type: ignore[import-not-found]
+            import pymssql
         except ImportError as exc:  # pragma: no cover
             raise ConnectError(
                 "pymssql not installed. Install with: " "pip install 'etl-plugins[mssql]'"

@@ -52,6 +52,21 @@ def _qt(table: str) -> str:
     return ".".join(f'"{p}"' for p in table.split("."))
 
 
+def _coerce_ssl(value: Any) -> Any:
+    """Normalise an ``ssl`` config value into what vertica-python
+    accepts (bool or ssl.SSLContext). YAML / web-form round-trips
+    can hand us a string literal — turn ``"true"`` / ``"false"`` /
+    ``""`` into a real bool; pass anything else through unchanged so
+    ``SSLContext`` instances and explicit booleans aren't disturbed."""
+    if isinstance(value, str):
+        v = value.strip().lower()
+        if v in ("true", "1", "yes", "on"):
+            return True
+        if v in ("false", "0", "no", "off", ""):
+            return False
+    return value
+
+
 @ConnectorRegistry.register("vertica")
 class VerticaConnector(BatchSource, BatchSink):
     """Vertica batch source + sink."""
@@ -65,7 +80,7 @@ class VerticaConnector(BatchSource, BatchSink):
         password: str = "",
         *,
         connection_timeout: int = 10,
-        ssl: bool = False,
+        ssl: bool | str | Any = False,
         **extra: Any,
     ) -> None:
         self.host = host
@@ -74,7 +89,14 @@ class VerticaConnector(BatchSource, BatchSink):
         self.user = user
         self.password = password
         self.connection_timeout = connection_timeout
-        self.ssl = ssl
+        # Phase AAQ post-mortem 3 (2026-05-29) — connection config
+        # round-tripped through YAML / web form can deliver ``ssl`` as a
+        # string ("true" / "false") instead of an actual bool, and
+        # vertica-python's driver rejects that with a confusing
+        # ``"ssl should be a bool or ssl.SSLContext"``. Coerce string
+        # literals here so the connector is robust across input paths;
+        # SSLContext instances pass through untouched.
+        self.ssl = _coerce_ssl(ssl)
         self._extra: dict[str, Any] = extra
         self._conn: Any = None
 
@@ -85,7 +107,7 @@ class VerticaConnector(BatchSource, BatchSink):
             return
         try:
             # Lazy import so the module loads without the driver.
-            import vertica_python  # type: ignore[import-not-found]
+            import vertica_python  # type: ignore[import-untyped]
         except ImportError as exc:  # pragma: no cover - import side effect
             raise ConnectError(
                 "vertica-python not installed. Install with: " "pip install 'etl-plugins[vertica]'"

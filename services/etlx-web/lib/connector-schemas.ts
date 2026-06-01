@@ -10,7 +10,7 @@
  * the form predictable.
  */
 
-export type FieldType = "string" | "number" | "password";
+export type FieldType = "string" | "number" | "password" | "boolean";
 
 export interface ConnectorField {
   key: string;
@@ -19,7 +19,7 @@ export interface ConnectorField {
   required?: boolean;
   placeholder?: string;
   help?: string;
-  defaultValue?: string | number;
+  defaultValue?: string | number | boolean;
   /** Treat the value as a secret — sent via the ``secrets`` map with a
    *  ``{"$secret": "<key>"}`` marker in config (never reaches the metadata DB
    *  in plaintext). */
@@ -268,10 +268,10 @@ const VERTICA: ConnectorSchema = {
     },
     {
       key: "ssl",
-      label: "SSL",
-      type: "string",
-      defaultValue: "false",
-      help: "'true' or 'false' — wrap the wire connection in TLS.",
+      label: "SSL / TLS",
+      type: "boolean",
+      defaultValue: false,
+      help: "Wrap the wire connection in TLS. Requires the Vertica server to have a certificate configured.",
     },
   ],
 };

@@ -111,3 +111,48 @@ def test_mssql_rejects_unsafe_table_identifier() -> None:
     c = MSSQLConnector()
     with pytest.raises(WriteError, match="invalid table name"):
         c.ensure_table("orders; DROP", [ColumnInfo(name="id", type="INTEGER")])
+
+
+# ---------- Phase AAQ post-mortem 3 (2026-05-29) — ssl coercion ----------
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        # Falsy strings the web form / YAML round-trip might produce.
+        ("false", False),
+        ("False", False),
+        ("FALSE", False),
+        ("0", False),
+        ("no", False),
+        ("off", False),
+        ("", False),
+        # Truthy strings.
+        ("true", True),
+        ("True", True),
+        ("TRUE", True),
+        ("1", True),
+        ("yes", True),
+        ("on", True),
+        # Real booleans pass through.
+        (True, True),
+        (False, False),
+    ],
+)
+def test_vertica_ssl_string_coerced_to_bool(raw: object, expected: bool) -> None:
+    """The web form delivers ``ssl`` as a string; vertica-python
+    rejects that with ``"ssl should be a bool or ssl.SSLContext"``.
+    Coercion at the connector keeps the driver happy regardless of
+    how the value arrived."""
+    c = VerticaConnector(host="x", database="x", user="u", ssl=raw)  # type: ignore[arg-type]
+    assert c.ssl is expected
+
+
+def test_vertica_ssl_sslcontext_passes_through() -> None:
+    """Operators handing the connector an explicit ``ssl.SSLContext``
+    should NOT have it silently demoted to a bool."""
+    import ssl as _ssl
+
+    ctx = _ssl.create_default_context()
+    c = VerticaConnector(host="x", database="x", user="u", ssl=ctx)
+    assert c.ssl is ctx

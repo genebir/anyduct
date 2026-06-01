@@ -117,7 +117,23 @@ uv run mypy etl_plugins
 
 ## 5. 현재 단계
 
-> **최신 마일스톤 (2026-06-01): Persona dogfood UX 폴리시 (Phase ABG → ABQ).** AAR→ABA의 마이그레이션 surface 위에 운영자 페르소나 흐름을 직접 dogfooding하며 발견한 11 슬라이스로 마감. 핵심 dogfood 발견: 사용자 워크스페이스에 70 마이그레이션 중 62개가 한 번도 실행 안 됨 + 0 스케줄 → "방금 만든 뒤 next step?" UX gap이 다수 노출. 단위 슬라이스:
+> **최신 마일스톤 (2026-06-01): Persona dogfood UX 폴리시 2nd wave (Phase ABR → ACA).** ABG→ABQ 후 추가 10 슬라이스로 운영 surface 폴리시 강화. 마이그레이션 detail · 카탈로그 · runs · audit · connections · schedules · dashboard에 균일한 친화 표시 + 사전검증 + trigger 출처 가시화:
+> - **ABR**: Run detail에 "실행된 config" 패널 (`PipelineVersionEntry` listVersions API + collapsible JSON + copy-to-clipboard). 디버깅 시 현재 pipeline 아닌 실제 실행된 version의 config_json 표시 — pipeline이 그 사이 편집됐어도 정확한 debug context.
+> - **ABS**: Connections row에 세션 한정 test 결과 chip (ok/fail + title=error verbatim). 운영자가 5+ connection 중 어느 게 통과/실패했는지 한눈에.
+> - **ABT**: Audit row에 'you' 친화 actor 표시 (`useCurrentUser` → actor_user_id 매치 → "you").
+> - **ABU**: Runs trigger chip + dashboard Recent runs에 'by you' 친화 표시 (ABT의 자연 확장).
+> - **ABV**: Schedules list에 "Next firing" 컬럼 (`cron-parser` reuse + relative time + title=절대 시각).
+> - **ABW**: Run detail Summary에 "Triggered by" field (icon + 'by you'/'manual'/'schedule', ABG list-side chip과 정합).
+> - **ABX**: 마이그레이션 detail에 dry-run inline 결과 카드 (DryRunResultCard — header summary + errors verbatim + connector 상태 dot 리스트 + dismiss). Toast 사라진 뒤에도 결과 곱씹기.
+> - **ABY**: Migration detail Recent runs에 trigger icon-only chip (compact, aria-label/title로 의미 전달).
+> - **ABZ**: Dashboard 'Recent failures' view-all link에 `?status=failed` preset (1-line fix, 운영자가 status 다시 잡을 필요 0).
+> - **ACA**: Runs page에 'Trigger' 필터 (manual/scheduled/any, URL-synced via `?trigger=`, client-side over server's (status, pipeline) pre-filter).
+>
+> **friendly self 패턴 정착**: ABT(audit) → ABU(runs chip) → ABU/2(dashboard) → ABW(run detail Summary) 4 surface 균일. **trigger source 가시화**: ABG(runs list) → ABW(run detail) → ABY(migration recent runs) 3 surface 균일.
+>
+> 누적: ABG→ACA 21 슬라이스 단일 wave. 신규 시각 컴포넌트 1(DryRunResultCard ABX) + i18n 신규 키 ~60개. 코어/서버 변화 0. web tsc clean 매 슬라이스. 다음 axis: K4 graph 백필 / Snowflake/BigQuery connectors / DLQ UI / Step 11 운영 강화.
+>
+> **이전 마일스톤 (2026-06-01): Persona dogfood UX 폴리시 1st wave (Phase ABG → ABQ).** AAR→ABA의 마이그레이션 surface 위에 운영자 페르소나 흐름을 직접 dogfooding하며 발견한 11 슬라이스로 마감. 핵심 dogfood 발견: 사용자 워크스페이스에 70 마이그레이션 중 62개가 한 번도 실행 안 됨 + 0 스케줄 → "방금 만든 뒤 next step?" UX gap이 다수 노출. 단위 슬라이스:
 > - **ABG**: Runs 페이지 Trigger 컬럼 (manual vs schedule chip — schedule_id/triggered_by_user_id 분기).
 > - **ABH**: /assets 페이지 search + kind 필터 (6th list surface 균일화).
 > - **ABI**: 마이그레이션 list에 "Last run" 축 필터 (never/failed/ok) — 'forgot to run' bulk catch + 'fix what's broken' triage.

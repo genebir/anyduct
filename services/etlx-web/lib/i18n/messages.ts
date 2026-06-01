@@ -83,8 +83,24 @@ export const en = {
   "nav.overview": "Overview",
   "nav.connections": "Connections",
   "nav.pipelines": "Pipelines",
+  "nav.migrations": "Migrations",
   "nav.schedules": "Schedules",
   "nav.sensors": "Sensors",
+  // migrations page (Phase AAN, 2026-05-29) — filtered view of
+  // pipelines whose at-least-one sink auto-creates its destination.
+  "migrations.title": "DB migrations",
+  "migrations.desc":
+    "Pipelines whose sink auto-creates its destination table from the source schema (auto_create_table). Types translate automatically across DBs.",
+  "migrations.new": "New migration",
+  "migrations.empty":
+    "No migrations yet. Use the template to start your first one.",
+  "migrations.colSink": "Destination",
+  "migrations.colMode": "Mode",
+  "migrations.colIfExists": "If exists",
+  "migrations.openInBuilder": "Open in builder",
+  "migrations.ifExistsSkip": "skip — keep existing",
+  "migrations.ifExistsDrop": "drop — rebuild",
+  "migrations.ifExistsError": "error — fail-loud",
   // sensors page (ADR-0041 K3c)
   "sensors.new": "New sensor",
   "sensors.newTitle": "New sensor",
@@ -930,7 +946,21 @@ export const ko: Messages = {
   "nav.overview": "개요",
   "nav.connections": "연결",
   "nav.pipelines": "파이프라인",
+  "nav.migrations": "마이그레이션",
   "nav.schedules": "스케줄",
+  // 마이그레이션 페이지 (Phase AAN, 2026-05-29)
+  "migrations.title": "DB 마이그레이션",
+  "migrations.desc":
+    "소스 스키마를 읽어 싱크 테이블을 자동 생성하는 파이프라인 모음(auto_create_table). DB 간 타입 변환은 자동으로 처리됩니다.",
+  "migrations.new": "새 마이그레이션",
+  "migrations.empty": "아직 마이그레이션이 없습니다. 템플릿으로 첫 번째를 만들어보세요.",
+  "migrations.colSink": "도착지",
+  "migrations.colMode": "모드",
+  "migrations.colIfExists": "존재 시 동작",
+  "migrations.openInBuilder": "빌더에서 열기",
+  "migrations.ifExistsSkip": "skip — 기존 유지",
+  "migrations.ifExistsDrop": "drop — 재구축",
+  "migrations.ifExistsError": "error — 실패",
   "nav.sensors": "센서",
   // 센서 페이지 (ADR-0041 K3c)
   "sensors.new": "새 센서",

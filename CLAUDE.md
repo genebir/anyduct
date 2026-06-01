@@ -117,7 +117,9 @@ uv run mypy etl_plugins
 
 ## 5. 현재 단계
 
-> **최신 마일스톤 (2026-05-29): examples/ 확장 — snapshot rebuild + upsert merge 예제 (Phase AAM).** Phase AAH의 cross_db_migration.yaml 옆에 두 운영 시나리오 추가: `cross_db_snapshot.yaml`(drop + overwrite, 일일 schema-drift-tolerant 재구축) + `cross_db_upsert.yaml`(upsert + key_columns + auto_create_table, PRIMARY KEY 자동 emit + live cache 패턴). 헤더 코멘트에 ADR-0071/0072 운영 trade-off 명시. `etlx validate` 둘 다 직접 검증 ✓. lock-in test 2개 추가(코어 unit 810→812).
+> **최신 마일스톤 (2026-05-29): 사이드바 "Migrations" 메뉴 분리 + `/w/[slug]/migrations` 전용 페이지 (Phase AAN).** 사용자 요청 *"마이그레이션 메뉴를 따로 빼서 관리해줘"*. ① 사이드바 Pipelines와 Schedules 사이에 `Migrations`(ArrowRightLeftIcon) nav 추가. ② `/w/[slug]/migrations` 페이지 — `auto_create_table=true` 파이프라인만 client-side 필터(server endpoint 0). 컬럼 이름 / 도착지 / 모드 / 존재 시 동작(tone-aware). "+ New migration" CTA가 `db-migrate-cross` 템플릿(AAI)으로 빌더 진입. ③ 신규 `lib/migration-utils.ts` — `migrationSummaryOf(config)` linear/fan-out/graph 3 shape walk + pure 함수. ④ i18n en/ko 각 14 키. 신규 시각 컴포넌트 0. 코어/서버 변화 0. web tsc clean.
+>
+> **이전 마일스톤 (2026-05-29): examples/ 확장 — snapshot rebuild + upsert merge 예제 (Phase AAM).** Phase AAH의 cross_db_migration.yaml 옆에 두 운영 시나리오 추가: `cross_db_snapshot.yaml`(drop + overwrite, 일일 schema-drift-tolerant 재구축) + `cross_db_upsert.yaml`(upsert + key_columns + auto_create_table, PRIMARY KEY 자동 emit + live cache 패턴). 헤더 코멘트에 ADR-0071/0072 운영 trade-off 명시. `etlx validate` 둘 다 직접 검증 ✓. lock-in test 2개 추가(코어 unit 810→812).
 >
 > **이전 마일스톤 (2026-05-29): Workspace Variables 페이지 type badge — 빌더와 일관성 (Phase AAL).** `/w/[slug]/variables` 리스트에 string/number/boolean/JSON 타입 배지 추가. 빌더 pipeline-settings-panel(L1)이 이미 갖고 있던 vocabulary와 합치. ① 신규 `lib/variable-types.ts` (`VarType` + `inferType`) — 두 surface가 같은 추론 함수 공유. ② 빌더 inline 선언 → import로 교체(코드 중복 0). ③ workspace 변수 리스트에 `<span>` badge(uppercase, `bg-overlay`). 신규 시각 컴포넌트 0. 코어/서버 변화 0. web tsc clean.
 >

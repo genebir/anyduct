@@ -10,6 +10,13 @@
 ## [Unreleased]
 
 ### Added
+- **사이드바 "Migrations" 메뉴 분리 + `/w/[slug]/migrations` 페이지 (Phase AAN)** — 사용자 요청 *"마이그레이션 메뉴를 따로 빼서 관리해줘"*. cross-DB migration 패턴 파이프라인만 따로 보고 관리하는 전용 surface:
+  - **사이드바**: Pipelines와 Schedules 사이에 `Migrations`(ArrowRightLeftIcon) 새 nav 항목. "specialised pipelines"로 인접 배치.
+  - **`/w/[slug]/migrations` 페이지**: 클라이언트 사이드 필터로 `auto_create_table=true` sink가 있는 파이프라인만 표시(별도 server endpoint 없음). 컬럼: 이름 / 도착지(connection/table) / 모드 / 존재 시 동작(skip|drop|error, tone-aware 색). "+ New migration" CTA가 `db-migrate-cross` 템플릿(AAI)으로 즉시 빌더 진입.
+  - **신규 helper `lib/migration-utils.ts`**: `migrationSummaryOf(config)` — linear single sink / linear fan-out / graph 3 shape 모두 walk. pure 함수, 재사용·테스트 가능.
+  - **i18n**: en/ko 각 14개 키(nav.migrations + migrations.title/desc/empty/new/colSink/colMode/colIfExists/openInBuilder/ifExistsSkip|Drop|Error).
+  - 신규 시각 컴포넌트 0(Header/Card/DataTable/EmptyState 기존 재사용). 코어/서버 변화 0. web tsc clean.
+
 - **examples/ 확장 — snapshot rebuild + upsert merge 예제 (Phase AAM)** — Phase AAH의 cross_db_migration.yaml 옆에 두 운영 시나리오 추가:
   - `cross_db_snapshot.yaml`: `auto_create_if_exists: drop` + `mode: overwrite` — 일일 schema-drift-tolerant 재구축.
   - `cross_db_upsert.yaml`: `mode: upsert` + `key_columns: [id]` + `auto_create_table: true` — PRIMARY KEY 자동 emit으로 live cache 패턴.

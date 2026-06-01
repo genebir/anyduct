@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   ActivityIcon,
+  ArrowRightLeftIcon,
   BoxesIcon,
   BracesIcon,
   CableIcon,
@@ -59,6 +60,17 @@ const NAV: NavEntry[] = [
     href: (s) => `/w/${s}/pipelines`,
     labelKey: "nav.pipelines",
     icon: <WorkflowIcon size={18} />,
+  },
+  {
+    // Phase AAN (2026-05-29): dedicated DB-migration surface.
+    // Filtered view of pipelines whose at-least-one sink has
+    // ``auto_create_table: true`` (ADR-0066 / 0071 / 0072). Kept
+    // adjacent to ``pipelines`` so the user reads it as
+    // "specialised pipelines", not a separate primitive.
+    id: "migrations",
+    href: (s) => `/w/${s}/migrations`,
+    labelKey: "nav.migrations",
+    icon: <ArrowRightLeftIcon size={18} />,
   },
   {
     id: "schedules",

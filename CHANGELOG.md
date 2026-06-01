@@ -10,6 +10,14 @@
 ## [Unreleased]
 
 ### Added
+- **Migration detail page를 닫힌 surface로 — Run now + Recent runs 미니 대시보드 (Phase AAN4)** — AAN3로 만들어진 마이그레이션 폼 옆에 실행 + 모니터링이 한 페이지에 모임:
+  - **헤더 `Run now`** 버튼: `pipelinesApi.trigger`로 즉시 실행. `current_version` 없으면 disabled + tooltip 안내. Optimistic insert로 행이 즉시 보임.
+  - **Recent runs 카드**: 이 마이그레이션 한정 최근 5 runs(`runs.list({pipeline_id})`). 각 행: `StatusBadge` + run id(클릭 → 상세) + records_written + duration + 상대 시간. 5초 폴링(runs 페이지 패턴 일치).
+  - **빈 상태**: "No runs yet. Hit Run now to start the first one." — 사용자가 다음에 할 일을 명시.
+  - **운영 UX**: 마이그레이션 생성 → 저장 → Run now → 결과 확인이 한 페이지에서 완결. 페이지 이동 없이 dogfood 가능.
+  - i18n en/ko 각 6 추가 키(`runNow/runQueued/saveBeforeRun/recentRuns/runsEmpty/runRowsWritten`).
+  - 검증: web tsc clean. 코어/서버 변화 0.
+
 - **Migration 폼을 마이그레이션-shaped으로 재설계 (Phase AAN3)** — 사용자 *"명확하게 마이그레이션 같이 만들어줘. 지금 형태는 ETL과 별 차이가 없잖아"*. AAN2의 ETL-shaped 폼(쿼리/모드/if_exists)을 마이그레이션 mental model로 재구성:
   - **테이블 picker** (쿼리 textarea 제거) — 소스 connection 선택 시 `connectionsApi.tables`로 datalist 자동 채움. 사용자가 *"이 테이블을 복제한다"*는 사고 그대로.
   - **Source → Destination 카드** 좌우 + 가운데 ▶ 화살표(`ArrowRightIcon`). 한눈에 방향 인식.

@@ -117,7 +117,18 @@ uv run mypy etl_plugins
 
 ## 5. 현재 단계
 
-> **최신 마일스톤 (2026-05-29): ConnectorRegistry 빌트인 fallback — stale entry_points 대응 (AAQ post-mortem).** 사용자 신고 *"vertica: RegistryError: Connector 'vertica' not registered"*. 원인: dev 서버가 pyproject.toml 변경 전 시작 → 옛 entry_points.txt 메타데이터. 방어 코드: `_BUILTIN_MODULES` 매핑 + `_load_builtin(name)` — entry_points로 못 찾으면 module path로 직접 import 시도(decorator가 등록). 외부 플러그인은 entry_points 유지(기존 동작 동일). list_connectors도 exhaustive. 5 신규 unit. 코어 unit 850→854. mypy/ruff clean.
+> **최신 마일스톤 (2026-06-01): 마이그레이션 surface 완결 (Phase AAR → ABA).** Vertica/MSSQL 추가(AAQ) 직후 cross-DB 마이그레이션이 본격 활용되면서 사용자 요청 + dogfood 발견 이슈 14 슬라이스로 보강:
+> - **AAR**: postgres `current transaction is aborted` root cause — `_auto_create_sink_tables`의 `contextlib.suppress`가 DDL 실패 삼킴 → transaction abort 상태 poison. 명시적 try/except + rollback + `postgres.ensure_table`이 schema-qualified 받으면 `CREATE SCHEMA IF NOT EXISTS` 먼저 emit. 사용자의 vertica → postgres(`BDA_BI_DB.TB_BCDBAS601`) 실패가 즉시 해결. + Pipelines 탭에서 마이그레이션 숨김 + 생성 후 리스트로 redirect.
+> - **AAS family**: 스키마 단위 마이그레이션 — multi-select picker로 N개 한 번에 생성(`buildBulkMigrationConfigs`) + dropdown 소스 선택(typo 차단) + `makeNode`가 operators.ts의 `defaultValue`를 자동 주입(템플릿 default 누락 fix) + **템플릿 기능 완전 제거**(빈 그래프로 시작).
+> - **AAT–ABA**: 리스트 검색/필터(name + From/To/Strategy + Schedule status) + Run now 버튼 + Last run 컬럼(workspace-wide runs 단일 fetch) + Schedule chip 컬럼(N+1 per pipeline, 10s 폴링, soft-fail) + 임계값 5 below 검색바 숨김.
+> - **AAU**: detail page Quick Schedule — CronInput(preset chips + cronstrue + 다음 firing 미리보기) + Enable/Update/Pause/Resume/Clear, 단일 schedule 가정.
+> - **AAV**: 대시보드에 Migrations StatCard(count + 24h 성공률) + flaky `_audit_rows` test 안정화(secondary `id` sort).
+> - **AAW–AAY**: bulk multi-select + Delete/Run now/Schedule, `ConfirmDialog` 확장(`body?: ReactNode` slot + `confirmDisabled?` prop) — bulk schedule이 CronInput을 dialog 안에 통합.
+> - **AAX follow-up**: Recent runs 카드 → "View all" + "View failures" (`/runs?pipeline={id}&status=failed`) deeplink.
+>
+> 결과: 한 사용자 시나리오 = `+ New migration` → 폼(single/schema 모드) → 저장(N개 자동 생성) → 리스트(검색/필터 + bulk schedule + bulk Run now + chip 모니터링) → detail(Run/Schedule/Recent runs+히스토리 링크) → dashboard(아이콘 카드 + 성공률) 한 surface 완결. 코어 unit 882 + 서버 it 485 회귀 0(flaky 영구 해결). 신규 시각 컴포넌트 0(ConfirmDialog body 확장 외 모두 재사용). 이 turn 동안 ADR 없음(server contract 변경 0). 향후 axis: DLQ UI / K4 graph 백필 / additional connectors.
+>
+> **이전 마일스톤 (2026-05-29): ConnectorRegistry 빌트인 fallback — stale entry_points 대응 (AAQ post-mortem).** 사용자 신고 *"vertica: RegistryError: Connector 'vertica' not registered"*. 원인: dev 서버가 pyproject.toml 변경 전 시작 → 옛 entry_points.txt 메타데이터. 방어 코드: `_BUILTIN_MODULES` 매핑 + `_load_builtin(name)` — entry_points로 못 찾으면 module path로 직접 import 시도(decorator가 등록). 외부 플러그인은 entry_points 유지(기존 동작 동일). list_connectors도 exhaustive. 5 신규 unit. 코어 unit 850→854. mypy/ruff clean.
 >
 > **이전 마일스톤 (2026-05-29): Vertica + SQL Server (MSSQL) 커넥터 추가 — 마이그레이션 5×5 매트릭스 (Phase AAQ, ADR-0073).** 사용자 *"연결 유형 좀 더 추가해줘. vertica 포함해주고"*. ① 신규 RDBMS 커넥터 2종(vertica.py / mssql.py): BatchSource/Sink/SchemaInspector/SchemaWriter/SqlExecutor 풀 구현 + auto_create_table + PRIMARY KEY. lazy import. ② core/type_mapping.py vertica/mssql dialect + vendor 파싱 확장(nvarchar/bit/datetime2/long varchar/money/uniqueidentifier 등). ③ Web operators.ts 4종(source/sink × 2). ④ migration-config.ts MIGRATION_SUPPORTED_TYPES 확장 → 5×5 = 25 페어. ⑤ connector-schemas.ts 폼. ⑥ pyproject.toml extras + entry-points. ⑦ server audit set 확장. 코어 unit 812→850(+38 type_mapping). mypy/ruff/tsc clean. backward-compat 완전.
 >

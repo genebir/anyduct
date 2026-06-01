@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
+import { CronExpressionParser } from "cron-parser";
 import {
   CalendarClockIcon,
   PauseIcon,
@@ -45,6 +46,36 @@ type FormState =
   | { kind: "create"; pipelineId: string | "" }
   | { kind: "edit"; row: ScheduleRow };
 
+/** Phase ABV (2026-06-01) — compute "next firing in X" for active
+ *  batch schedules. Used in the list column so the operator can see
+ *  upcoming activity without opening the edit form. Returns null
+ *  for stream schedules (no cron) and paused rows. */
+function nextFireHint(
+  cron: string | null,
+  isActive: boolean,
+  t: Translate,
+): { absolute: string; relative: string } | null {
+  if (!isActive || !cron) return null;
+  try {
+    const it = CronExpressionParser.parse(cron.trim());
+    const next = it.next().toDate();
+    const ms = next.getTime() - Date.now();
+    return {
+      absolute: next.toLocaleString(),
+      relative:
+        ms < 60_000
+          ? t("schedules.fireInLessThanMinute")
+          : ms < 3_600_000
+            ? t("schedules.fireInMinutes", { n: Math.round(ms / 60_000) })
+            : ms < 86_400_000
+              ? t("schedules.fireInHours", { n: Math.round(ms / 3_600_000) })
+              : t("schedules.fireInDays", { n: Math.round(ms / 86_400_000) }),
+    };
+  } catch {
+    return null;
+  }
+}
+
 function buildColumns(t: Translate): Column<ScheduleRow>[] {
   return [
     { key: "name", header: t("schedules.colSchedule"), cell: (r) => r.name },
@@ -75,6 +106,21 @@ function buildColumns(t: Translate): Column<ScheduleRow>[] {
         ) : (
           <span className="text-text-muted">—</span>
         ),
+    },
+    {
+      // Phase ABV — "Next firing" column. Hidden for paused rows
+      // (they won't fire) and stream schedules (no cron).
+      key: "next",
+      header: t("schedules.colNextFiring"),
+      cell: (r) => {
+        const h = nextFireHint(r.cron_expr, r.is_active, t);
+        if (!h) return <span className="text-text-muted">—</span>;
+        return (
+          <span className="text-xs text-text-secondary" title={h.absolute}>
+            {h.relative}
+          </span>
+        );
+      },
     },
     {
       key: "active",

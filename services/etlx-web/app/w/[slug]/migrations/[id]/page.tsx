@@ -18,7 +18,12 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { CalendarClockIcon, PlayIcon, Trash2Icon } from "lucide-react";
+import {
+  CalendarClockIcon,
+  PlayIcon,
+  ShieldCheckIcon,
+  Trash2Icon,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Header } from "@/components/shell/header";
 import { Card } from "@/components/ui/card";
@@ -91,6 +96,10 @@ export default function MigrationDetailPage() {
   // sees the migration in motion without leaving the page.
   const [runs, setRuns] = useState<RunSummary[] | null>(null);
   const [triggering, setTriggering] = useState(false);
+  // Phase ABP (2026-06-01) — dry-run state. Surfaces connection
+  // validity + connector instantiation before the user commits to a
+  // wall-clock Run now (which can take minutes for a big sink).
+  const [dryRunning, setDryRunning] = useState(false);
   // Phase AAU (2026-06-01) — quick schedule. One migration ⇒ at most
   // one cron schedule for our UX; the underlying server supports
   // many, but the migration surface is narrower on purpose. We pick
@@ -206,6 +215,39 @@ export default function MigrationDetailPage() {
     }
   }
 
+  async function onDryRun() {
+    if (!ws || !pipeline) return;
+    setDryRunning(true);
+    try {
+      const result = await pipelinesApi.dryRun(ws.id, pipeline.id);
+      if (result.ok) {
+        // Show count of validated connectors so the message is
+        // informative ("checked 2 of them") not just a vague "ok".
+        const okCount = result.connectors.filter((c) => c.ok).length;
+        toast.success(
+          t("migrations.dryRunOk", {
+            n: okCount,
+            total: result.connectors.length,
+          }),
+        );
+      } else {
+        // Show the first error verbatim — operators want the exact
+        // string so they can grep their config for the typo. The rest
+        // come through in additional toasts so nothing is hidden.
+        const errs = result.errors.length > 0
+          ? result.errors
+          : result.connectors.filter((c) => !c.ok).map((c) => `${c.name}: ${c.error ?? "unknown"}`);
+        for (const e of errs) {
+          toast.error(t("migrations.dryRunFailed", { error: e }));
+        }
+      }
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : String(err));
+    } finally {
+      setDryRunning(false);
+    }
+  }
+
   async function onSaveSchedule() {
     if (!ws || !pipeline) return;
     const expr = scheduleDraft.trim();
@@ -296,6 +338,24 @@ export default function MigrationDetailPage() {
         actions={
           pipeline && !outsideMigrationShape ? (
             <>
+              {/* Phase ABP — Dry run first: cheap validation
+                  catches typos before the user commits to a wall-
+                  clock Run now (which may take minutes). */}
+              <Button
+                variant="secondary"
+                size="sm"
+                loading={dryRunning}
+                disabled={!pipeline.current_version}
+                onClick={() => void onDryRun()}
+                title={
+                  pipeline.current_version
+                    ? t("migrations.dryRunHint")
+                    : t("migrations.saveBeforeRun")
+                }
+              >
+                <ShieldCheckIcon size={14} />
+                {t("migrations.dryRun")}
+              </Button>
               <Button
                 size="sm"
                 loading={triggering}

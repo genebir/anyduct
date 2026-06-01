@@ -174,6 +174,12 @@ export const en = {
   "migrations.runNow": "Run now",
   "migrations.runQueued": "Migration queued",
   "migrations.saveBeforeRun": "Save the migration first",
+  // Phase ABP (2026-06-01) — pre-flight validation before Run now
+  "migrations.dryRun": "Dry run",
+  "migrations.dryRunHint":
+    "Validate connections + secrets + connector instantiation without writing.",
+  "migrations.dryRunOk": "Dry run ok — {n} of {total} connectors validated",
+  "migrations.dryRunFailed": "Dry run failed: {error}",
   "migrations.recentRuns": "Recent runs",
   "migrations.runsEmpty": "No runs yet. Hit Run now to start the first one.",
   "migrations.runRowsWritten": "rows",
@@ -1220,6 +1226,12 @@ export const ko: Messages = {
   "migrations.runNow": "지금 실행",
   "migrations.runQueued": "마이그레이션 대기열에 등록됨",
   "migrations.saveBeforeRun": "먼저 마이그레이션을 저장하세요",
+  // Phase ABP (2026-06-01) — Run now 전 사전검증
+  "migrations.dryRun": "사전검증",
+  "migrations.dryRunHint":
+    "쓰기 없이 연결 + 시크릿 + connector 인스턴스화를 검증.",
+  "migrations.dryRunOk": "사전검증 성공 — connector {n}/{total} 검증 완료",
+  "migrations.dryRunFailed": "사전검증 실패: {error}",
   "migrations.recentRuns": "최근 실행",
   "migrations.runsEmpty": "아직 실행 기록이 없습니다. 지금 실행을 눌러 시작하세요.",
   "migrations.runRowsWritten": "행",

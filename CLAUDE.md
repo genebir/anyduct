@@ -117,7 +117,9 @@ uv run mypy etl_plugins
 
 ## 5. 현재 단계
 
-> **최신 마일스톤 (2026-05-29): Migration detail page를 닫힌 surface로 — Run now + Recent runs (Phase AAN4).** AAN3 폼 옆에 실행 + 모니터링이 한 페이지에. ① 헤더 `Run now` 버튼(pipelinesApi.trigger, optimistic insert, current_version 없으면 disabled). ② Recent runs 카드: 파이프라인 한정 최근 5(StatusBadge + run id + records_written + duration + 상대 시간). 5s 폴링. ③ 빈 상태 안내. 운영 UX: 생성→저장→실행→결과 한 페이지 완결. 코어/서버 변화 0. web tsc clean. i18n en/ko 각 6 추가 키.
+> **최신 마일스톤 (2026-05-29): Migration form wire-shape 서버 e2e — 3 strategies worker 통과 (Phase AAO).** `migration-config.ts`가 emit하는 3 JSON shape를 hand-build → worker 실행 → 결과 검증 → web↔server drift catch. ① AAO1 Full snapshot 2-pass schema drift. ② AAO2 Append 2-pass growing source 양 batch 보존. ③ AAO3 Live mirror PK 자동 emit + upsert merge, 3 rows 중복 0. 서버 it 482→485(+3). 코어 unit 812 unchanged.
+>
+> **이전 마일스톤 (2026-05-29): Migration detail page를 닫힌 surface로 — Run now + Recent runs (Phase AAN4).** AAN3 폼 옆에 실행 + 모니터링이 한 페이지에. ① 헤더 `Run now` 버튼(pipelinesApi.trigger, optimistic insert, current_version 없으면 disabled). ② Recent runs 카드: 파이프라인 한정 최근 5(StatusBadge + run id + records_written + duration + 상대 시간). 5s 폴링. ③ 빈 상태 안내. 운영 UX: 생성→저장→실행→결과 한 페이지 완결. 코어/서버 변화 0. web tsc clean. i18n en/ko 각 6 추가 키.
 >
 > **이전 마일스톤 (2026-05-29): Migration 폼을 마이그레이션-shaped으로 재설계 (Phase AAN3).** 사용자 *"명확하게 마이그레이션 같이 만들어줘. 지금 형태는 ETL과 별 차이가 없잖아"*. ① 테이블 picker(쿼리 textarea 제거) + connectionsApi.tables datalist. ② Source→Destination 카드 좌우 + ▶ 화살표. ③ Strategy radio 3가지(Full snapshot=overwrite+drop / Append new rows=append+cursor / Live mirror=upsert+keys) — mode/if_exists 기술 라벨 제거. ④ 소스 스키마 미리보기 + (mirror) PK 컬럼 배지. ⑤ migration-config.ts 재설계: MigrationStrategy enum + strategyToSinkShape + parseSelectStarTable. ⑥ list page: From→To 화살표 + Strategy chip. ⑦ safe-exit: 복잡 쿼리는 빌더로. ⑧ i18n en/ko 각 22 추가 키. 신규 시각 컴포넌트 0. 코어/서버 변화 0. web tsc clean.
 >

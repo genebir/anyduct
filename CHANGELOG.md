@@ -10,6 +10,12 @@
 ## [Unreleased]
 
 ### Added
+- **Migration form wire-shape 서버 e2e — 3 strategies 모두 worker 통과 (Phase AAO)** — `migration-config.ts`가 emit하는 3가지 JSON 형태를 hand-build해서 worker로 실행 + 결과 검증. 향후 web↔server drift catch:
+  - **AAO1 Full snapshot**: `mode=overwrite + auto_create_if_exists=drop` 2-pass, day-1 `(id, name)` → day-2 `(id, email)` schema drift → 도착지에 새 schema + day-2 데이터만 (day-1 wipe).
+  - **AAO2 Append new rows**: `mode=append + cursor_column='id'` 2-pass, growing source → 도착지에 day-1 + day-2 모두 보존.
+  - **AAO3 Live mirror**: `mode=upsert + key_columns=['id']`, auto-emit PRIMARY KEY(ADR-0072) 첫 run 성공 → day-2 알리스 updated + 캐롤 inserted, 총 3 rows 중복 0.
+  - 검증: 서버 it 482→485(+3). 코어 unit 812 unchanged. ruff/mypy clean.
+
 - **Migration detail page를 닫힌 surface로 — Run now + Recent runs 미니 대시보드 (Phase AAN4)** — AAN3로 만들어진 마이그레이션 폼 옆에 실행 + 모니터링이 한 페이지에 모임:
   - **헤더 `Run now`** 버튼: `pipelinesApi.trigger`로 즉시 실행. `current_version` 없으면 disabled + tooltip 안내. Optimistic insert로 행이 즉시 보임.
   - **Recent runs 카드**: 이 마이그레이션 한정 최근 5 runs(`runs.list({pipeline_id})`). 각 행: `StatusBadge` + run id(클릭 → 상세) + records_written + duration + 상대 시간. 5초 폴링(runs 페이지 패턴 일치).

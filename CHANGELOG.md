@@ -9,6 +9,13 @@
 
 ## [Unreleased]
 
+### Fixed
+- **`ConnectorRegistry` 빌트인 fallback — stale `entry_points` 대응 (Phase AAQ post-mortem)** — 사용자가 새 커넥터(vertica) 사용 시 `RegistryError: Connector 'vertica' not registered. Available: ['http','kafka','mongodb','mysql','postgres','s3','sqlite']` 발생. 원인: 실행 중인 dev 서버 프로세스가 pyproject.toml 변경 *전*에 시작 → 옛 `entry_points.txt` 메타데이터 기반으로 vertica/mssql 보이지 않음.
+  - **방어 코드**: `_BUILTIN_MODULES` 매핑 + `_load_builtin(name)` — entry_points로 못 찾으면 module path로 직접 import 시도 (decorator가 등록). 외부 플러그인은 entry_points 유지(기존 동작 동일).
+  - **`list_connectors`**도 빌트인 전체 로드 — `etlx list-connectors` 가 stale install에서도 exhaustive.
+  - 알려지지 않은 이름은 여전히 명확한 `RegistryError`로 실패 (typo 가려주지 않음).
+  - 5 신규 unit (stale 시뮬레이션, vertica/mssql fallback, 미지 이름 실패, list_connectors exhaustive).
+
 ### Added
 - **Vertica + SQL Server (MSSQL) 커넥터 추가 — 마이그레이션 5×5 매트릭스 (Phase AAQ)** [ADR-0073] — 사용자 *"연결 유형 좀 더 추가해줘. vertica 포함해주고. 그에 따른 테이블 복사 및 마이그레이션도 확장되어야해"*:
   - **신규 커넥터 2종**: `vertica.py` (vertica-python, postgres-flavoured, MERGE-upsert), `mssql.py` (pymssql, square-bracket identifier, native MERGE). 둘 다 BatchSource/Sink/SchemaInspector/SchemaWriter/SqlExecutor 풀 구현. `auto_create_table + primary_key` (ADR-0072) 자동 지원.

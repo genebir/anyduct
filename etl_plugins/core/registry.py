@@ -7,6 +7,7 @@ point group.
 
 from __future__ import annotations
 
+import importlib
 import logging
 from collections.abc import Callable
 from importlib.metadata import entry_points
@@ -20,6 +21,30 @@ C = TypeVar("C", bound=type[Connector])
 ENTRY_POINT_GROUP = "etl_plugins.connectors"
 
 logger = logging.getLogger(__name__)
+
+#: Built-in connector module paths — used as a defence-in-depth
+#: fallback when the installed package's ``entry_points`` metadata is
+#: stale (Phase AAQ post-mortem 2026-05-29). The user-visible symptom
+#: was ``RegistryError: Connector 'vertica' not registered`` after a
+#: fresh edit to ``pyproject.toml`` because the dev server kept
+#: running against the metadata snapshot it started with.
+#:
+#: Importing the module triggers ``@ConnectorRegistry.register(...)``
+#: at module top-level, which populates the registry. The lookup logic
+#: tries entry_points first, then this table, then gives up — so
+#: external plugins (still discovered via entry_points only) keep
+#: working unchanged.
+_BUILTIN_MODULES: dict[str, str] = {
+    "postgres": "etl_plugins.connectors.rdbms.postgres",
+    "mysql": "etl_plugins.connectors.rdbms.mysql",
+    "sqlite": "etl_plugins.connectors.rdbms.sqlite",
+    "vertica": "etl_plugins.connectors.rdbms.vertica",
+    "mssql": "etl_plugins.connectors.rdbms.mssql",
+    "mongodb": "etl_plugins.connectors.nosql.mongodb",
+    "s3": "etl_plugins.connectors.object_storage.s3",
+    "kafka": "etl_plugins.connectors.stream.kafka",
+    "http": "etl_plugins.connectors.http.connector",
+}
 
 
 class ConnectorRegistry:
@@ -60,6 +85,12 @@ class ConnectorRegistry:
         if name not in cls._registry:
             cls._load_entry_points()
         if name not in cls._registry:
+            # Built-in fallback (Phase AAQ post-mortem) — if the
+            # installed metadata is stale but the source module is
+            # right there, import it explicitly so the decorator
+            # registers the connector.
+            cls._load_builtin(name)
+        if name not in cls._registry:
             raise RegistryError(
                 f"Connector '{name}' not registered. Available: {sorted(cls._registry.keys())}"
             )
@@ -68,6 +99,7 @@ class ConnectorRegistry:
     @classmethod
     def list_connectors(cls) -> list[str]:
         cls._load_entry_points()
+        cls._load_all_builtins()
         return sorted(cls._registry.keys())
 
     @classmethod
@@ -96,3 +128,27 @@ class ConnectorRegistry:
                 logger.warning("failed to load connector plugin %s: %s", ep.name, exc)
                 continue
             cls._registry[ep.name] = klass
+
+    @classmethod
+    def _load_builtin(cls, name: str) -> None:
+        """Import the built-in module for ``name`` if known. The
+        module's top-level decorator does the actual registration."""
+        module_path = _BUILTIN_MODULES.get(name)
+        if module_path is None:
+            return
+        try:
+            importlib.import_module(module_path)
+        except Exception as exc:
+            # Soft-fail — caller surfaces a clean RegistryError. We log
+            # so the operator can debug an ImportError (missing extra,
+            # broken module, etc.).
+            logger.warning("failed to load built-in connector %s: %s", name, exc)
+
+    @classmethod
+    def _load_all_builtins(cls) -> None:
+        """Try every built-in once. Used by :meth:`list_connectors` so
+        ``etlx list-connectors`` is exhaustive even on a stale-metadata
+        install."""
+        for name in _BUILTIN_MODULES:
+            if name not in cls._registry:
+                cls._load_builtin(name)

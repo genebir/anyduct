@@ -117,7 +117,14 @@ uv run mypy etl_plugins
 
 ## 5. 현재 단계
 
-> **최신 마일스톤 (2026-06-01): Persona dogfood UX 폴리시 2nd wave (Phase ABR → ACA).** ABG→ABQ 후 추가 10 슬라이스로 운영 surface 폴리시 강화. 마이그레이션 detail · 카탈로그 · runs · audit · connections · schedules · dashboard에 균일한 친화 표시 + 사전검증 + trigger 출처 가시화:
+> **최신 마일스톤 (2026-06-01): Persona dogfood UX 폴리시 3rd wave (Phase ACB → ACC + ACA follow-up).** 2nd wave 직후 추가 3 슬라이스:
+> - **ACB**: 대시보드 "Active schedules" 카드 next-firing sub-line. `cron-parser`로 모든 활성 cron 중 가장 가까운 firing 계산. ABV(list)/ABJ(migration card)와 함께 "where's the operator's attention?" 3 surface 정합.
+> - **ACC**: Audit log JsonBlock에 Copy 버튼. ABR(run detail config) Copy 패턴 정합. operator가 before/after JSON을 diff/Slack/issue에 paste.
+> - **ACA follow-up**: runs page client-side trigger filter가 narrow되었을 때 "Showing X of Y" 표시. "Load more 누르면 또 보이긴 하나?" 의문 해소.
+>
+> **누적 ABG→ACC = 24 슬라이스** 단일 long-running 사용자 페르소나 dogfood 세션. 코어/서버 변화 0(매 슬라이스), web tsc clean, 신규 시각 컴포넌트 1(DryRunResultCard), i18n 신규 키 ~75개. 882 unit + 53 server auth/audit it green.
+>
+> **이전 마일스톤 (2026-06-01): Persona dogfood UX 폴리시 2nd wave (Phase ABR → ACA).** ABG→ABQ 후 추가 10 슬라이스로 운영 surface 폴리시 강화. 마이그레이션 detail · 카탈로그 · runs · audit · connections · schedules · dashboard에 균일한 친화 표시 + 사전검증 + trigger 출처 가시화:
 > - **ABR**: Run detail에 "실행된 config" 패널 (`PipelineVersionEntry` listVersions API + collapsible JSON + copy-to-clipboard). 디버깅 시 현재 pipeline 아닌 실제 실행된 version의 config_json 표시 — pipeline이 그 사이 편집됐어도 정확한 debug context.
 > - **ABS**: Connections row에 세션 한정 test 결과 chip (ok/fail + title=error verbatim). 운영자가 5+ connection 중 어느 게 통과/실패했는지 한눈에.
 > - **ABT**: Audit row에 'you' 친화 actor 표시 (`useCurrentUser` → actor_user_id 매치 → "you").

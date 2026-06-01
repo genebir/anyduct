@@ -20,15 +20,18 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { StatusBadge } from "@/components/ui/status-badge";
 import {
   ApiError,
+  pipelinesApi,
   runsApi,
   type LogLevel,
   type NodeRunEntry,
+  type PipelineSummary,
   type RunDetail,
   type RunLogEntry,
   type RunMetricEntry,
   type RunStatus,
 } from "@/lib/api";
 import { RunDagGraph } from "@/components/runs/run-dag-graph";
+import { migrationSummaryOf } from "@/lib/migration-utils";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import { useLocale } from "@/components/providers/locale-provider";
 import type { Messages } from "@/lib/i18n/messages";
@@ -67,6 +70,11 @@ export default function RunDetailPage() {
   const ws = useWorkspaceFromSlug(slug);
   const { t } = useLocale();
   const [run, setRun] = useState<RunDetail | null>(null);
+  // Phase ABL (2026-06-01) — pipeline summary lookup. Used to decide
+  // whether the "pipeline" link points to the migration page or the
+  // generic editor. One-shot fetch per run since pipeline identity
+  // doesn't change mid-run.
+  const [pipeline, setPipeline] = useState<PipelineSummary | null>(null);
   const [logs, setLogs] = useState<RunLogEntry[] | null>(null);
   const [metrics, setMetrics] = useState<RunMetricEntry[] | null>(null);
   const [nodeRuns, setNodeRuns] = useState<NodeRunEntry[] | null>(null);
@@ -138,6 +146,19 @@ export default function RunDetailPage() {
       // render. Failures land as the panel's own "empty list" + a one-
       // time toast so the user knows it's a fetch problem, not "no data".
       setRun(r);
+      // Phase ABL (2026-06-01) — one-shot pipeline fetch. Best-effort:
+      // a 404 here just means the link falls back to the generic
+      // editor (the same as before this slice).
+      if (!cancelled && r.pipeline_id && !pipeline) {
+        void pipelinesApi
+          .get(workspaceId, r.pipeline_id)
+          .then((p) => {
+            if (!cancelled) setPipeline(p);
+          })
+          .catch(() => {
+            /* best-effort */
+          });
+      }
       // Honour the active node filter on every poll — re-applying it
       // each tick (instead of carrying client-side state) keeps the
       // server query selective even for long runs with thousands of
@@ -489,7 +510,15 @@ export default function RunDetailPage() {
           <div className="flex flex-col gap-6">
             <Card>
               <CardHeader title={t("runDetail.summary")} />
-              <Summary run={run} workspaceSlug={ws?.slug} t={t} />
+              <Summary
+                run={run}
+                workspaceSlug={ws?.slug}
+                isMigration={
+                  pipeline !== null &&
+                  migrationSummaryOf(pipeline.current_config_json) !== null
+                }
+                t={t}
+              />
             </Card>
             <Card>
               <CardHeader
@@ -668,22 +697,32 @@ function LogView({
 function Summary({
   run,
   workspaceSlug,
+  isMigration,
   t,
 }: {
   run: RunDetail | null;
   workspaceSlug: string | undefined;
+  /** Phase ABL — true when the pipeline summary parses as a
+   *  migration; routes the link to /migrations/[id] instead. */
+  isMigration: boolean;
   t: Translate;
 }) {
   if (!run) {
     return <div className="text-sm text-text-muted">{t("common.loading")}</div>;
   }
-  // pipeline_id renders as a clickable link → the pipeline editor.
-  // ExternalLinkIcon hint + title so users know the row is interactive.
-  const pipelineLink = workspaceSlug ? (
+  // pipeline_id renders as a clickable link → the pipeline editor
+  // (or migration page when the pipeline is a migration). The
+  // ExternalLinkIcon + title hint that the row is interactive.
+  const pipelineHref = workspaceSlug
+    ? isMigration
+      ? `/w/${workspaceSlug}/migrations/${run.pipeline_id}`
+      : `/w/${workspaceSlug}/pipelines/${run.pipeline_id}/edit`
+    : null;
+  const pipelineLink = pipelineHref ? (
     <Link
-      href={`/w/${workspaceSlug}/pipelines/${run.pipeline_id}/edit`}
+      href={pipelineHref}
       className="inline-flex items-center gap-1 text-accent hover:underline"
-      title={t("runDetail.openPipeline")}
+      title={isMigration ? t("runDetail.openMigration") : t("runDetail.openPipeline")}
     >
       <code>{run.pipeline_id.slice(0, 8)}…</code>
       <ExternalLinkIcon size={12} />

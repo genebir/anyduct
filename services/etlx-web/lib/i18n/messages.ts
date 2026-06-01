@@ -830,6 +830,7 @@ export const en = {
   // Row right-click menu (2026-05-26 user request)
   "runs.menuOpen": "Open run detail",
   "runs.menuOpenPipeline": "Open pipeline",
+  "runs.menuOpenMigration": "Open migration",
   "runs.menuFilterPipeline": "Filter runs for this pipeline",
   "runs.menuRetry": "Retry this run",
   "runs.menuRetried": "Queued retry as run {id}…",
@@ -857,6 +858,7 @@ export const en = {
   "runDetail.notFoundDesc":
     "This run doesn't exist in this workspace. It may have been deleted, belong to a different workspace, or you may have followed an old link.",
   "runDetail.openPipeline": "Open this run's pipeline",
+  "runDetail.openMigration": "Open this run's migration",
   "runDetail.title": "Run {id}…",
   "runDetail.final": "Final",
   "runDetail.live": "Live · refreshing every 2 s",
@@ -1847,6 +1849,7 @@ export const ko: Messages = {
   // 행 우클릭 메뉴 (2026-05-26 사용자 요청)
   "runs.menuOpen": "실행 상세 열기",
   "runs.menuOpenPipeline": "파이프라인 열기",
+  "runs.menuOpenMigration": "마이그레이션 열기",
   "runs.menuFilterPipeline": "이 파이프라인의 실행만 보기",
   "runs.menuRetry": "이 실행 재시도",
   "runs.menuRetried": "재시도가 {id}… 실행으로 큐에 들어갔습니다",
@@ -1872,6 +1875,7 @@ export const ko: Messages = {
   "runDetail.notFoundDesc":
     "이 워크스페이스에 해당 실행이 없습니다. 삭제됐거나 다른 워크스페이스의 실행이거나 오래된 링크를 따라왔을 수 있습니다.",
   "runDetail.openPipeline": "이 실행의 파이프라인 열기",
+  "runDetail.openMigration": "이 실행의 마이그레이션 열기",
   "runDetail.title": "실행 {id}…",
   "runDetail.final": "완료",
   "runDetail.live": "실시간 · 2초마다 새로고침",

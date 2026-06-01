@@ -438,10 +438,22 @@ export default function RunsPage() {
           icon={<WorkflowIcon size={14} />}
           onSelect={() => {
             const r = rowMenuTargetRef.current;
-            if (r && ws) router.push(`/w/${ws.slug}/pipelines/${r.pipeline_id}/edit`);
+            if (!r || !ws) return;
+            // Phase ABL (2026-06-01) — same migration-aware split as
+            // the banner link so the right-click goes to the surface
+            // the operator actually edits this pipeline on.
+            const dest = isMigrationById.get(r.pipeline_id)
+              ? `/w/${ws.slug}/migrations/${r.pipeline_id}`
+              : `/w/${ws.slug}/pipelines/${r.pipeline_id}/edit`;
+            router.push(dest);
           }}
         >
-          {t("runs.menuOpenPipeline")}
+          {(() => {
+            const r = rowMenuTargetRef.current;
+            return r && isMigrationById.get(r.pipeline_id)
+              ? t("runs.menuOpenMigration")
+              : t("runs.menuOpenPipeline");
+          })()}
         </ContextMenuItem>
         <ContextMenuItem
           icon={<ExternalLinkIcon size={14} />}

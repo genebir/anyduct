@@ -166,6 +166,25 @@ export function MigrationForm({
         if (cancelled) return;
         setSourceColumns(resp.columns);
         setColumnsState("ok");
+        // Phase ACG (2026-06-01) — smart default for mirror's PK
+        // input. Most real schemas have an ``id`` (or ``ID`` / ``Id``)
+        // column. When the user picks mirror and leaves keyColumns
+        // empty, fill in the obvious primary key so they don't have
+        // to type it. Non-destructive: only fills when empty + only
+        // when mirror is selected. Free-text keyColumns input
+        // remains, so the user can edit or clear it.
+        if (
+          form.strategy === "mirror" &&
+          !form.keyColumns.trim() &&
+          resp.columns.length > 0
+        ) {
+          const id =
+            resp.columns.find((c) => c.name === "id") ??
+            resp.columns.find((c) => c.name.toLowerCase() === "id");
+          if (id) {
+            onChange({ ...form, keyColumns: id.name });
+          }
+        }
       } catch (err) {
         if (cancelled) return;
         setSourceColumns([]);

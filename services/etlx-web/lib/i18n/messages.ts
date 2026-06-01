@@ -185,6 +185,10 @@ export const en = {
   "migrations.bulkDryRunOk": "Dry run ok for all {n} migrations",
   "migrations.bulkDryRunPartial": "Dry run: {ok} ok, {fail} failed",
   "migrations.bulkDryRunAllFailed": "Dry run failed for all {n} migrations",
+  // Phase ABX (2026-06-01) — inline result card
+  "migrations.dryRunResultOk": "Dry run passed",
+  "migrations.dryRunResultFail": "Dry run failed",
+  "migrations.dryRunResultSummary": "{n} of {total} connectors validated",
   "migrations.recentRuns": "Recent runs",
   "migrations.runsEmpty": "No runs yet. Hit Run now to start the first one.",
   "migrations.runRowsWritten": "rows",
@@ -1272,6 +1276,10 @@ export const ko: Messages = {
   "migrations.bulkDryRunOk": "사전검증 {n}건 모두 성공",
   "migrations.bulkDryRunPartial": "사전검증: {ok}건 성공, {fail}건 실패",
   "migrations.bulkDryRunAllFailed": "사전검증 {n}건 모두 실패",
+  // Phase ABX (2026-06-01) — inline 결과 카드
+  "migrations.dryRunResultOk": "사전검증 성공",
+  "migrations.dryRunResultFail": "사전검증 실패",
+  "migrations.dryRunResultSummary": "connector {n}/{total} 검증됨",
   "migrations.recentRuns": "최근 실행",
   "migrations.runsEmpty": "아직 실행 기록이 없습니다. 지금 실행을 눌러 시작하세요.",
   "migrations.runRowsWritten": "행",

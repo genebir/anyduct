@@ -100,6 +100,12 @@ export default function MigrationDetailPage() {
   // validity + connector instantiation before the user commits to a
   // wall-clock Run now (which can take minutes for a big sink).
   const [dryRunning, setDryRunning] = useState(false);
+  // Phase ABX (2026-06-01) — keep the latest dry-run result inline
+  // so the user can re-read the connector statuses after the toast
+  // disappears. ``null`` = never run; otherwise the latest result.
+  const [dryRunResult, setDryRunResult] = useState<
+    import("@/lib/api").DryRunResponse | null
+  >(null);
   // Phase AAU (2026-06-01) — quick schedule. One migration ⇒ at most
   // one cron schedule for our UX; the underlying server supports
   // many, but the migration surface is narrower on purpose. We pick
@@ -220,6 +226,9 @@ export default function MigrationDetailPage() {
     setDryRunning(true);
     try {
       const result = await pipelinesApi.dryRun(ws.id, pipeline.id);
+      // Phase ABX — keep the result inline so it survives the toast
+      // dismiss. Operators often compare 2-3 runs in sequence.
+      setDryRunResult(result);
       if (result.ok) {
         // Show count of validated connectors so the message is
         // informative ("checked 2 of them") not just a vague "ok".
@@ -407,6 +416,18 @@ export default function MigrationDetailPage() {
           </Card>
         ) : (
           <>
+            {/* Phase ABX (2026-06-01) — inline dry-run result. Shows
+                the last run's per-connector status as a persistent
+                panel so the operator can re-read after the toast
+                fades. Dismissable since some operators prefer a
+                clean slate after they've absorbed it. */}
+            {dryRunResult ? (
+              <DryRunResultCard
+                result={dryRunResult}
+                onDismiss={() => setDryRunResult(null)}
+                t={t}
+              />
+            ) : null}
             <MigrationForm
               workspaceId={ws?.id ?? ""}
               name={pipeline?.name ?? ""}
@@ -634,6 +655,92 @@ function ScheduleCard({
           </Button>
         </div>
       </div>
+    </Card>
+  );
+}
+
+/** Phase ABX (2026-06-01) — inline dry-run result card. Persists
+ *  the latest connector check statuses after the toast disappears
+ *  so operators can dwell on the details. */
+function DryRunResultCard({
+  result,
+  onDismiss,
+  t,
+}: {
+  result: import('@/lib/api').DryRunResponse;
+  onDismiss: () => void;
+  t: (k: never) => string;
+}) {
+  const tx = t as unknown as (k: string) => string;
+  const okCount = result.connectors.filter((c) => c.ok).length;
+  return (
+    <Card>
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <div
+            className={`text-xs font-semibold uppercase tracking-wider ${
+              result.ok ? 'text-success' : 'text-error'
+            }`}
+          >
+            {result.ok
+              ? tx('migrations.dryRunResultOk')
+              : tx('migrations.dryRunResultFail')}
+          </div>
+          <div className="mt-0.5 text-xs text-text-muted">
+            {tx('migrations.dryRunResultSummary')
+              .replace('{n}', String(okCount))
+              .replace('{total}', String(result.connectors.length))}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onDismiss}
+          className="text-xs text-text-muted hover:text-text"
+          aria-label={tx('common.dismiss')}
+        >
+          ×
+        </button>
+      </div>
+      {result.errors.length > 0 ? (
+        <div className="mt-3 space-y-1">
+          {result.errors.map((e, i) => (
+            <pre
+              key={i}
+              className="overflow-auto whitespace-pre-wrap break-words rounded-sm border border-error/30 bg-error/5 p-2 font-mono text-[11px] text-error"
+            >
+              {e}
+            </pre>
+          ))}
+        </div>
+      ) : null}
+      {result.connectors.length > 0 ? (
+        <ul className="mt-3 divide-y divide-border-subtle">
+          {result.connectors.map((c) => (
+            <li
+              key={c.name}
+              className="flex items-center justify-between gap-3 py-2 text-xs"
+            >
+              <div className="flex items-center gap-2">
+                <span
+                  className={`h-2 w-2 rounded-full ${
+                    c.ok ? 'bg-success' : 'bg-error'
+                  }`}
+                  aria-hidden
+                />
+                <span className="font-medium text-text">{c.name}</span>
+                <span className="font-mono text-text-muted">{c.type}</span>
+              </div>
+              {c.error ? (
+                <span className="truncate text-right font-mono text-text-secondary" title={c.error}>
+                  {c.error}
+                </span>
+              ) : (
+                <span className="text-text-muted">ok</span>
+              )}
+            </li>
+          ))}
+        </ul>
+      ) : null}
     </Card>
   );
 }

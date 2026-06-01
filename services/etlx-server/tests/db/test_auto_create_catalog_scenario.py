@@ -200,6 +200,25 @@ async def test_aaj1_auto_created_sink_lands_in_catalog_via_rest(
         upstream_keys = {a["asset_key"] for a in lineage_resp.json()["upstream"]}
         assert "src/products" in upstream_keys
 
+        # ---- column lineage ----
+        # The pipeline's source is a plain ``SELECT id, name FROM
+        # products``, so each sink column traces 1:1 back to its source.
+        # ``column_lineage_opaque`` must be False (Phase Z/AA/BB) — we
+        # don't want auto-created sinks to silently regress to "opaque"
+        # just because the runtime made the table on its own.
+        col_resp = await client.get(
+            f"/workspaces/{ws.id}/assets/{sink_asset['id']}/column-lineage",
+            headers=headers,
+        )
+        assert col_resp.status_code == 200, col_resp.text
+        col_body = col_resp.json()
+        assert col_body["opaque"] is False
+        by_col = {c["name"]: c for c in col_body["columns"]}
+        assert {"id", "name"} <= set(by_col)
+        for col_name in ("id", "name"):
+            ups = {(u["asset_key"], u["column"]) for u in by_col[col_name]["upstreams"]}
+            assert ("src/products", col_name) in ups
+
         # One materialisation entry stamped for the run.
         mat_resp = await client.get(
             f"/workspaces/{ws.id}/assets/{sink_asset['id']}/materializations",

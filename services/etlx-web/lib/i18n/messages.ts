@@ -192,6 +192,15 @@ export const en = {
   "migrations.noTablesFound": "No tables found on this connection",
   "migrations.noSchemasFound":
     "No schemas found on this connection — the introspector couldn't enumerate any.",
+  // Phase AAT (2026-06-01) — list-level search + filter
+  "migrations.searchPlaceholder": "Search migrations by name…",
+  "migrations.filterFromAll": "All sources",
+  "migrations.filterToAll": "All destinations",
+  "migrations.filterStrategyAll": "All strategies",
+  "migrations.clearFilters": "Clear filters",
+  "migrations.filterNoMatch": "No matches",
+  "migrations.filterNoMatchDesc":
+    "No migrations match the current search and filters. Try widening them or clearing all.",
   // sensors page (ADR-0041 K3c)
   "sensors.new": "New sensor",
   "sensors.newTitle": "New sensor",
@@ -1125,6 +1134,15 @@ export const ko: Messages = {
   "migrations.noTablesFound": "이 연결에서 테이블을 찾지 못했습니다.",
   "migrations.noSchemasFound":
     "이 연결에서 스키마를 찾지 못했습니다.",
+  // Phase AAT (2026-06-01) — 검색 + 필터
+  "migrations.searchPlaceholder": "이름으로 검색…",
+  "migrations.filterFromAll": "모든 출발지",
+  "migrations.filterToAll": "모든 도착지",
+  "migrations.filterStrategyAll": "모든 방식",
+  "migrations.clearFilters": "필터 초기화",
+  "migrations.filterNoMatch": "검색 결과 없음",
+  "migrations.filterNoMatchDesc":
+    "현재 검색/필터에 일치하는 마이그레이션이 없습니다. 조건을 줄이거나 초기화하세요.",
   "nav.sensors": "센서",
   // 센서 페이지 (ADR-0041 K3c)
   "sensors.new": "새 센서",

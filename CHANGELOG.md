@@ -9,6 +9,18 @@
 
 ## [Unreleased]
 
+### Added
+- **마이그레이션 리스트 검색 + From/To/Strategy 필터 (Phase AAT, 2026-06-01)** — 스키마 단위 일괄 생성으로 마이그레이션이 빠르게 누적될 수 있어 navigability 보강:
+  - **검색 input**: 이름(name) + 설명(description) substring case-insensitive.
+  - **From 필터**: 데이터에 실제로 존재하는 source connections만 dropdown(orphaned 옵션 0).
+  - **To 필터**: 동일 패턴, sink connections.
+  - **Strategy 필터**: snapshot / append / mirror / custom 4 옵션.
+  - **임계값 5**: 마이그레이션이 5개 이하면 검색 바 자체를 숨김 — 신규 워크스페이스에 시각적 노이즈 0.
+  - **Clear filters** 버튼: 어떤 필터든 활성이면 노출. EmptyState도 "검색 결과 없음" + Clear 버튼.
+  - 모두 client-side. server endpoint 변화 0. polling / Run now 모두 그대로 반응.
+  - i18n en/ko 각 7 신규 키.
+  - 검증: web tsc clean.
+
 ### Removed
 - **파이프라인 템플릿 기능 제거 (Phase AAS follow-up 3, 2026-06-01)** — 사용자 *"그냥 템플릿 기능은 지워줘. 필요없을 것 같아"*.
   - `lib/pipeline-templates.ts` 통째로 삭제(`PIPELINE_TEMPLATES` / `findTemplate` / `PipelineTemplate`).

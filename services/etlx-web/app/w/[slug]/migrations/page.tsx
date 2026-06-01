@@ -28,6 +28,7 @@ import {
 import { toast } from "sonner";
 import { Header } from "@/components/shell/header";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { EmptyState } from "@/components/ui/empty-state";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -184,6 +185,13 @@ export default function MigrationsPage() {
    *  currently pending so we can paint a spinner without locking the
    *  whole table. */
   const [triggeringId, setTriggeringId] = useState<string | null>(null);
+  /** Phase AAT (2026-06-01) — search + filter so the list stays
+   *  navigable after schema-mode mass-creation. Pure client-side over
+   *  ``migrationRows`` so polling + Run-now stay reactive. */
+  const [search, setSearch] = useState("");
+  const [filterFrom, setFilterFrom] = useState("");
+  const [filterTo, setFilterTo] = useState("");
+  const [filterStrategy, setFilterStrategy] = useState("");
 
   async function onTrigger(row: PipelineSummary) {
     if (!ws) return;
@@ -280,6 +288,43 @@ export default function MigrationsPage() {
     return out;
   }, [rows, lastRunByPipeline]);
 
+  // Phase AAT (2026-06-01) — fan-out of distinct values for the
+  // filter dropdowns. Computed off ``migrationRows`` so the available
+  // options follow the actual data (no orphaned options pointing at
+  // connections that no migration uses).
+  const distinctSources = useMemo(() => {
+    const s = new Set<string>();
+    for (const r of migrationRows) {
+      if (r.migration.sourceConnection) s.add(r.migration.sourceConnection);
+    }
+    return [...s].sort();
+  }, [migrationRows]);
+  const distinctSinks = useMemo(() => {
+    const s = new Set<string>();
+    for (const r of migrationRows) {
+      if (r.migration.sinkConnection) s.add(r.migration.sinkConnection);
+    }
+    return [...s].sort();
+  }, [migrationRows]);
+
+  const filteredRows = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    return migrationRows.filter((r) => {
+      if (
+        term &&
+        !r.name.toLowerCase().includes(term) &&
+        !(r.description ?? "").toLowerCase().includes(term)
+      )
+        return false;
+      if (filterFrom && r.migration.sourceConnection !== filterFrom)
+        return false;
+      if (filterTo && r.migration.sinkConnection !== filterTo) return false;
+      if (filterStrategy && r.migration.strategy !== filterStrategy)
+        return false;
+      return true;
+    });
+  }, [migrationRows, search, filterFrom, filterTo, filterStrategy]);
+
   const columns = buildColumns(t);
 
   return (
@@ -301,6 +346,68 @@ export default function MigrationsPage() {
       <main className="mx-auto w-full max-w-5xl flex-1 space-y-6 overflow-y-auto px-6 py-8">
         <p className="text-sm text-text-muted">{t("migrations.desc")}</p>
 
+        {/* Phase AAT (2026-06-01) — search + filter bar. Stays
+            hidden until there are enough migrations to need it so a
+            fresh workspace doesn't look noisy. */}
+        {migrationRows.length > 5 ? (
+          <div className="grid items-end gap-2 sm:grid-cols-[1fr_auto_auto_auto_auto]">
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={t("migrations.searchPlaceholder")}
+            />
+            <select
+              value={filterFrom}
+              onChange={(e) => setFilterFrom(e.target.value)}
+              className="h-10 rounded-md border border-border-subtle bg-elevated px-2 text-sm text-text focus-visible:border-accent focus-visible:outline-none"
+            >
+              <option value="">{t("migrations.filterFromAll")}</option>
+              {distinctSources.map((c) => (
+                <option key={c} value={c}>
+                  {t("migrations.from")}: {c}
+                </option>
+              ))}
+            </select>
+            <select
+              value={filterTo}
+              onChange={(e) => setFilterTo(e.target.value)}
+              className="h-10 rounded-md border border-border-subtle bg-elevated px-2 text-sm text-text focus-visible:border-accent focus-visible:outline-none"
+            >
+              <option value="">{t("migrations.filterToAll")}</option>
+              {distinctSinks.map((c) => (
+                <option key={c} value={c}>
+                  {t("migrations.to")}: {c}
+                </option>
+              ))}
+            </select>
+            <select
+              value={filterStrategy}
+              onChange={(e) => setFilterStrategy(e.target.value)}
+              className="h-10 rounded-md border border-border-subtle bg-elevated px-2 text-sm text-text focus-visible:border-accent focus-visible:outline-none"
+            >
+              <option value="">{t("migrations.filterStrategyAll")}</option>
+              <option value="snapshot">{t("migrations.strategySnapshot")}</option>
+              <option value="append">{t("migrations.strategyAppend")}</option>
+              <option value="mirror">{t("migrations.strategyMirror")}</option>
+              <option value="custom">custom</option>
+            </select>
+            {search || filterFrom || filterTo || filterStrategy ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setSearch("");
+                  setFilterFrom("");
+                  setFilterTo("");
+                  setFilterStrategy("");
+                }}
+              >
+                {t("migrations.clearFilters")}
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
+
         {rows === null ? null : migrationRows.length === 0 ? (
           <EmptyState
             icon={<ArrowRightLeftIcon size={28} />}
@@ -313,6 +420,25 @@ export default function MigrationsPage() {
                   {t("migrations.new")}
                 </Button>
               </Link>
+            }
+          />
+        ) : filteredRows.length === 0 ? (
+          <EmptyState
+            icon={<ArrowRightLeftIcon size={28} />}
+            title={t("migrations.filterNoMatch")}
+            description={t("migrations.filterNoMatchDesc")}
+            action={
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setSearch("");
+                  setFilterFrom("");
+                  setFilterTo("");
+                  setFilterStrategy("");
+                }}
+              >
+                {t("migrations.clearFilters")}
+              </Button>
             }
           />
         ) : (
@@ -356,7 +482,7 @@ export default function MigrationsPage() {
                 ),
               },
             ]}
-            rows={migrationRows}
+            rows={filteredRows}
           />
         )}
       </main>

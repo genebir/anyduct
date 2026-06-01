@@ -6,7 +6,9 @@ import { useParams, useRouter } from "next/navigation";
 import {
   ArrowLeftIcon,
   BanIcon,
+  CalendarClockIcon,
   ExternalLinkIcon,
+  HandIcon,
   RefreshCwIcon,
   RotateCcwIcon,
   SearchXIcon,
@@ -33,6 +35,7 @@ import {
 } from "@/lib/api";
 import { RunDagGraph } from "@/components/runs/run-dag-graph";
 import { migrationSummaryOf } from "@/lib/migration-utils";
+import { useCurrentUser } from "@/components/providers/auth-provider";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import { useLocale } from "@/components/providers/locale-provider";
 import type { Messages } from "@/lib/i18n/messages";
@@ -69,6 +72,9 @@ export default function RunDetailPage() {
   const { slug, id } = useParams<{ slug: string; id: string }>();
   const router = useRouter();
   const ws = useWorkspaceFromSlug(slug);
+  // Phase ABW (2026-06-01) — used to render "by you" on the trigger
+  // source field in Summary.
+  const currentUser = useCurrentUser();
   const { t } = useLocale();
   const [run, setRun] = useState<RunDetail | null>(null);
   // Phase ABL (2026-06-01) — pipeline summary lookup. Used to decide
@@ -541,6 +547,7 @@ export default function RunDetailPage() {
                   pipeline !== null &&
                   migrationSummaryOf(pipeline.current_config_json) !== null
                 }
+                currentUserId={currentUser?.id ?? null}
                 t={t}
               />
             </Card>
@@ -732,6 +739,9 @@ function Summary({
   run,
   workspaceSlug,
   isMigration,
+  /** Phase ABW (2026-06-01) — used to render "by you" vs the bare
+   *  UUID prefix on the trigger source line. */
+  currentUserId,
   t,
 }: {
   run: RunDetail | null;
@@ -739,6 +749,7 @@ function Summary({
   /** Phase ABL — true when the pipeline summary parses as a
    *  migration; routes the link to /migrations/[id] instead. */
   isMigration: boolean;
+  currentUserId: string | null;
   t: Translate;
 }) {
   if (!run) {
@@ -773,6 +784,29 @@ function Summary({
         value={<code>{run.pipeline_version_id.slice(0, 8)}…</code>}
       />
       <Field label={t("common.scheduled")} value={fmt(run.scheduled_at)} />
+      {/* Phase ABW (2026-06-01) — trigger source. Same info as the
+          runs-list chip, surfaced on the detail page so the operator
+          knows what fired this run without going back. */}
+      <Field
+        label={t("runDetail.triggerSource")}
+        value={
+          run.schedule_id ? (
+            <span className="inline-flex items-center gap-1 text-accent">
+              <CalendarClockIcon size={12} />
+              {t("runDetail.triggerScheduled")}
+            </span>
+          ) : run.triggered_by_user_id ? (
+            <span className="inline-flex items-center gap-1 text-text-secondary">
+              <HandIcon size={12} />
+              {run.triggered_by_user_id === currentUserId
+                ? t("runDetail.triggerManualByYou")
+                : t("runDetail.triggerManual")}
+            </span>
+          ) : (
+            <span className="text-text-muted">—</span>
+          )
+        }
+      />
       <Field label={t("runDetail.started")} value={fmt(run.started_at)} />
       <Field label={t("runDetail.finished")} value={fmt(run.finished_at)} />
       <Field label={t("common.duration")} value={fmtDuration(run.duration_seconds)} />

@@ -929,6 +929,11 @@ export const en = {
   "runDetail.metrics": "Metrics",
   "runDetail.points": "{count} point(s)",
   "runDetail.started": "Started",
+  // Phase ABW (2026-06-01) — trigger source field
+  "runDetail.triggerSource": "Triggered by",
+  "runDetail.triggerScheduled": "schedule",
+  "runDetail.triggerManual": "manual",
+  "runDetail.triggerManualByYou": "you (manual)",
   "runDetail.finished": "Finished",
   "runDetail.records": "Records (read / written)",
   "runDetail.worker": "Worker",
@@ -1990,6 +1995,11 @@ export const ko: Messages = {
   "runDetail.metrics": "메트릭",
   "runDetail.points": "{count}개 포인트",
   "runDetail.started": "시작",
+  // Phase ABW (2026-06-01) — 트리거 출처 필드
+  "runDetail.triggerSource": "트리거",
+  "runDetail.triggerScheduled": "스케줄",
+  "runDetail.triggerManual": "수동",
+  "runDetail.triggerManualByYou": "내가 수동",
   "runDetail.finished": "종료",
   "runDetail.records": "레코드 (읽음 / 기록)",
   "runDetail.worker": "워커",

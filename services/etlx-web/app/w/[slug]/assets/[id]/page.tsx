@@ -18,6 +18,7 @@ import {
 } from "@/lib/api";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import { useLocale } from "@/components/providers/locale-provider";
+import { relativeTime, absoluteTime } from "@/lib/format-time";
 
 export default function AssetDetailPage() {
   const { slug, id } = useParams<{ slug: string; id: string }>();
@@ -131,10 +132,18 @@ export default function AssetDetailPage() {
                   <tbody>
                     {mats.map((m, i) => (
                       <tr key={i} className="border-b border-border-subtle/50">
-                        <td className="px-4 py-2 text-text-secondary">
-                          {new Date(m.materialized_at).toLocaleString()}
+                        {/* Phase ACX (2026-06-04) — relative time +
+                            absolute on hover, matching the catalog list
+                            and every other surface. */}
+                        <td
+                          className="px-4 py-2 text-text-secondary"
+                          title={absoluteTime(m.materialized_at)}
+                        >
+                          {relativeTime(m.materialized_at, t)}
                         </td>
-                        <td className="px-4 py-2 font-mono text-text">{m.records_written}</td>
+                        <td className="px-4 py-2 font-mono text-text">
+                          {m.records_written.toLocaleString()}
+                        </td>
                         <td className="px-4 py-2">
                           {m.run_id ? (
                             <Link

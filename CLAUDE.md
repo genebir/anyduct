@@ -147,8 +147,10 @@ uv run mypy etl_plugins
 > - **ADI**: connections "unused" 필터 + 대시보드 Connections 카드 deeplink(`?usage=unused`).
 > - **ADJ**: 대시보드 Sensors 카드 orphaned(타겟 삭제) 신호.
 > - **ADK**: sensors orphaned 필터 + 대시보드 Sensors 카드 deeplink(`?filter=orphaned`).
+> - **ADL**: migration detail에 누락 connection 배너(ADD의 detail 버전).
+> - **ADM**: 변수 폼 create/update 명확성(이름 키 upsert footgun 완화).
 >
-> **누적 ABG→ADK = 59 슬라이스(+follow-up)** 단일 long-running 페르소나 dogfood 세션. 신규 pure 헬퍼 4(connection-usage/variable-usage/format-time/cron). 코어/서버 변화 0(매 슬라이스), web tsc clean, **production build 통과**(21 routes). dogfood가 잡은 silent/실버그 3건(ACJ/ACL·ACM/ACQ). 코어 단위 905 passed(회귀 0). 테마: **시간 표기 전 surface 지역화 통일** · **usage/broken-reference 안전망**(connections·variables used-by + 삭제/리네임 경고 + 누락 connection 플래그 + orphaned sensors) · **signal→action deeplink 3종**(ADH/ADI/ADK). i18n 신규 키 ~120개.
+> **누적 ABG→ADM = 61 슬라이스(+follow-up)** 단일 long-running 페르소나 dogfood 세션. 신규 pure 헬퍼 4(connection-usage/variable-usage/format-time/cron). 코어/서버 변화 0(매 슬라이스), web tsc clean, **production build 통과**(21 routes). dogfood가 잡은 silent/실버그 3건(ACJ/ACL·ACM/ACQ). 코어 단위 905 passed(회귀 0). 테마: **시간 표기 전 surface 지역화 통일** · **usage/broken-reference 안전망**(connections·variables used-by + 삭제/리네임 경고 + 누락 connection 플래그 list+detail + orphaned sensors) · **signal→action deeplink 3종**(ADH/ADI/ADK). i18n 신규 키 ~125개.
 >
 > **이전 마일스톤 (2026-06-01): Persona dogfood UX 폴리시 4th wave (Phase ACD → ACI).** 3rd wave 마무리 후 추가 6 슬라이스 — 마이그레이션 폼 smart-default + dashboard 정합 + audit click-to-filter + table picker 검색:
 > - **ACD**: 마이그레이션 source 테이블 선택 시 dest 테이블이 비어 있으면 같은 이름으로 자동 채움. 'same name, different DB' 케이스 마찰 0.

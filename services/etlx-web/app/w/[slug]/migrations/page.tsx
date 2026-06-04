@@ -23,6 +23,7 @@ import {
   ArrowRightLeftIcon,
   CalendarClockIcon,
   EditIcon,
+  HandIcon,
   PlayIcon,
   PlusIcon,
   ShieldCheckIcon,
@@ -172,6 +173,28 @@ function buildColumns(t: Translate): Column<Row>[] {
         r.lastRun ? (
           <div className="flex items-center gap-2 text-xs">
             <StatusBadge status={r.lastRun.status} />
+            {/* Phase ACK (2026-06-04) — trigger source icon-only chip,
+                same vocabulary as the runs list (ABG) and migration
+                detail recent-runs (ABY). Lets the data engineer skim
+                the list and see whether each migration's last run was
+                cron-driven or hand-triggered without opening it. */}
+            {r.lastRun.schedule_id ? (
+              <CalendarClockIcon
+                size={12}
+                className="shrink-0 text-accent"
+                aria-label={t("migrations.runTriggerSchedule")}
+              >
+                <title>{t("migrations.runTriggerSchedule")}</title>
+              </CalendarClockIcon>
+            ) : r.lastRun.triggered_by_user_id ? (
+              <HandIcon
+                size={12}
+                className="shrink-0 text-text-muted"
+                aria-label={t("migrations.runTriggerManual")}
+              >
+                <title>{t("migrations.runTriggerManual")}</title>
+              </HandIcon>
+            ) : null}
             <span className="text-text-muted">
               {relativeTime(
                 r.lastRun.finished_at ??

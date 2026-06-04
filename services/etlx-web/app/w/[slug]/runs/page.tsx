@@ -165,11 +165,24 @@ function buildColumns(
     {
       key: "duration",
       header: t("common.duration"),
-      cell: (r) => (
-        <span className="text-text-secondary">
-          {formatDuration(r.duration_seconds)}
-        </span>
-      ),
+      // Phase AFK (2026-06-04) — live elapsed for in-flight runs (the
+      // list-side parallel to the run detail AFJ). duration_seconds is
+      // null until the run finishes, so a running row showed "—"; show
+      // started_at → now instead, refreshed by the page's 5s poll.
+      cell: (r) =>
+        r.status === "running" && r.started_at ? (
+          <span
+            className="text-text-secondary"
+            title={t("runDetail.elapsedTitle")}
+          >
+            {formatDuration((Date.now() - Date.parse(r.started_at)) / 1000)} ·{" "}
+            {t("runDetail.elapsedRunning")}
+          </span>
+        ) : (
+          <span className="text-text-secondary">
+            {formatDuration(r.duration_seconds)}
+          </span>
+        ),
     },
     {
       key: "rw",

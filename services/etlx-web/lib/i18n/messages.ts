@@ -1211,6 +1211,8 @@ export const en = {
   "settings.deleteDesc":
     "Everything in this workspace is removed (connections, pipelines, schedules, runs, audit). Confirm you have a backup if you'll need this data later.",
   "settings.deleteForever": "Delete forever",
+  // Phase AFU (2026-06-04) — type-to-confirm guard for workspace delete.
+  "settings.deleteConfirmPrompt": "Type {name} to confirm:",
   "settings.nothingToSave": "Nothing to save.",
   "settings.saved": "Saved {name}",
   "settings.saveFailed": "Couldn't save workspace.",
@@ -2419,6 +2421,8 @@ export const ko: Messages = {
   "settings.deleteDesc":
     "이 워크스페이스의 모든 항목(연결·파이프라인·스케줄·실행·감사)이 제거됩니다. 나중에 이 데이터가 필요하면 백업이 있는지 확인하세요.",
   "settings.deleteForever": "영구 삭제",
+  // Phase AFU (2026-06-04) — 워크스페이스 삭제 type-to-confirm 가드.
+  "settings.deleteConfirmPrompt": "확인하려면 {name}을(를) 입력하세요:",
   "settings.nothingToSave": "저장할 변경사항이 없습니다.",
   "settings.saved": "{name} 저장됨",
   "settings.saveFailed": "워크스페이스를 저장할 수 없습니다.",

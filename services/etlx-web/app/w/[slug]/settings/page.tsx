@@ -205,6 +205,11 @@ function DangerZone({
   const { t } = useLocale();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  // Phase AFU (2026-06-04) — type-to-confirm guard. Deleting a workspace
+  // cascades (connections / pipelines / schedules / runs / audit), so make
+  // the operator type the name — a fat-finger "Delete forever" shouldn't
+  // wipe everything.
+  const [confirmText, setConfirmText] = useState("");
 
   if (disabled) return null;
 
@@ -231,7 +236,13 @@ function DangerZone({
           description={t("settings.dangerDesc")}
         />
         <div className="flex justify-end">
-          <Button variant="destructive" onClick={() => setConfirmOpen(true)}>
+          <Button
+            variant="destructive"
+            onClick={() => {
+              setConfirmText("");
+              setConfirmOpen(true);
+            }}
+          >
             <Trash2Icon size={16} />
             {t("settings.deleteWorkspace")}
           </Button>
@@ -244,6 +255,22 @@ function DangerZone({
         confirmLabel={t("settings.deleteForever")}
         destructive
         loading={submitting}
+        // Phase AFU — require typing the exact workspace name to enable.
+        confirmDisabled={confirmText.trim() !== workspace.name}
+        body={
+          <label className="block text-sm">
+            <span className="text-text-secondary">
+              {t("settings.deleteConfirmPrompt", { name: workspace.name })}
+            </span>
+            <Input
+              value={confirmText}
+              onChange={(e) => setConfirmText(e.target.value)}
+              placeholder={workspace.name}
+              autoFocus
+              className="mt-1.5"
+            />
+          </label>
+        }
         onConfirm={onDelete}
         onCancel={() => (submitting ? undefined : setConfirmOpen(false))}
       />

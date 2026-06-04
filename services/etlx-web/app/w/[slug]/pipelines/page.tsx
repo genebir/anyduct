@@ -181,16 +181,31 @@ export default function PipelinesPage() {
   /** Phase ABD (2026-06-01) — name/description search, same UX as
    *  migrations/connections/sensors. */
   const [search, setSearch] = useState("");
+  /** Phase ADA (2026-06-04) — Last run axis filter, mirroring the
+   *  migrations list (ABI) now that pipelines carry last-run data
+   *  (ACS). Lets the operator triage "never run" / "failed" subsets. */
+  const [lastRunFilter, setLastRunFilter] = useState<
+    "" | "never" | "failed" | "ok"
+  >("");
   const filteredRows = useMemo(() => {
     if (visibleRows === null) return null;
     const term = search.trim().toLowerCase();
-    if (!term) return visibleRows;
-    return visibleRows.filter(
-      (p) =>
-        p.name.toLowerCase().includes(term) ||
-        (p.description ?? "").toLowerCase().includes(term),
-    );
-  }, [visibleRows, search]);
+    return visibleRows.filter((p) => {
+      if (
+        term &&
+        !p.name.toLowerCase().includes(term) &&
+        !(p.description ?? "").toLowerCase().includes(term)
+      )
+        return false;
+      if (lastRunFilter) {
+        const run = lastRunByPipeline.get(p.id) ?? null;
+        if (lastRunFilter === "never" && run !== null) return false;
+        if (lastRunFilter === "failed" && run?.status !== "failed") return false;
+        if (lastRunFilter === "ok" && run?.status !== "succeeded") return false;
+      }
+      return true;
+    });
+  }, [visibleRows, search, lastRunFilter, lastRunByPipeline]);
   const [triggering, setTriggering] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
@@ -376,17 +391,36 @@ export default function PipelinesPage() {
         {/* Phase ABD (2026-06-01) — search box. Hidden below 5 rows
             so a fresh workspace stays uncluttered. */}
         {visibleRows !== null && visibleRows.length > 5 ? (
-          <div className="grid items-end gap-2 sm:grid-cols-[1fr_auto]">
+          <div className="grid items-end gap-2 sm:grid-cols-[1fr_auto_auto]">
             <Input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder={t("pipelines.searchPlaceholder")}
             />
-            {search ? (
+            {/* Phase ADA — reuses migrations.filterLastRun* labels;
+                wording is generic ("Last run: failed"). */}
+            <select
+              value={lastRunFilter}
+              onChange={(e) =>
+                setLastRunFilter(
+                  e.target.value as "" | "never" | "failed" | "ok",
+                )
+              }
+              className="h-10 rounded-md border border-border-subtle bg-elevated px-2 text-sm text-text focus-visible:border-accent focus-visible:outline-none"
+            >
+              <option value="">{t("migrations.filterLastRunAll")}</option>
+              <option value="never">{t("migrations.filterLastRunNever")}</option>
+              <option value="failed">{t("migrations.filterLastRunFailed")}</option>
+              <option value="ok">{t("migrations.filterLastRunOk")}</option>
+            </select>
+            {search || lastRunFilter ? (
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => setSearch("")}
+                onClick={() => {
+                  setSearch("");
+                  setLastRunFilter("");
+                }}
               >
                 {t("common.clear")}
               </Button>
@@ -398,7 +432,9 @@ export default function PipelinesPage() {
             <div className="py-12 text-center text-sm text-text-muted">
               {t("common.loading")}
             </div>
-          ) : filteredRows !== null && filteredRows.length === 0 && search ? (
+          ) : filteredRows !== null &&
+            filteredRows.length === 0 &&
+            (search || lastRunFilter) ? (
             <div className="py-8 text-center text-sm text-text-muted">
               {t("pipelines.searchNoMatch")}
             </div>

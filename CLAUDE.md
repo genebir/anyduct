@@ -160,8 +160,9 @@ uv run mypy etl_plugins
 > - **ADU**: 빌더 connection 필드에 누락 참조 경고(작성 surface).
 > - **ADV**: 마이그레이션 detail 누락 connection 시 Run now 비활성화(doomed run 능동 차단, Dry run은 유지).
 > - **ADW**: pipelines list Trigger를 누락 connection 시 비활성화(ADV의 pipelines 버전 — 양 실행 surface 능동 차단).
+> - **ADX (ADR-0074)**: 사용자 *"SQL 쿼리도 Python 처럼 IDE 활용해줘"* — `CodeEditor`(Monaco, language prop)로 일반화, sourceQuery SQL 모드 + sql_exec statement(신규 `kind:"sql"`)를 SQL IDE로. Python 에디터는 위임. 저장 wire shape 불변.
 >
-> **누적 ABG→ADW = 71 슬라이스(+follow-up)** — **broken-reference 안전망 완전 라이프사이클**: 탐지(list ADC/ADD · detail ADL · builder ADU · dashboard ADS/ADT) + 능동 차단(ADV/ADW Run/Trigger 비활성화) + 정리 deeplink(ADH/ADI/ADK/ADT). 대시보드 4종 주의 신호 모두 deep-link actionable. 코어/서버 변화 0(매 슬라이스), web tsc clean, production build 반복 통과, 코어 단위 905 passed(회귀 0).
+> **누적 ABG→ADX = 72 슬라이스(+follow-up)** — **broken-reference 안전망 완전 라이프사이클**: 탐지(list ADC/ADD · detail ADL · builder ADU · dashboard ADS/ADT) + 능동 차단(ADV/ADW Run/Trigger 비활성화) + 정리 deeplink(ADH/ADI/ADK/ADT). 대시보드 4종 주의 신호 모두 deep-link actionable. 코어/서버 변화 0(매 슬라이스), web tsc clean, production build 반복 통과, 코어 단위 905 passed(회귀 0).
 >
 > **(이전 카운트)** ABG→ADR = 66 슬라이스(+follow-up) 단일 long-running 페르소나 dogfood 세션. 신규 pure 헬퍼 4(connection-usage/variable-usage/format-time/cron). 코어/서버 변화 0(매 슬라이스), web tsc clean, **production build 통과**(21 routes, 반복 인증). dogfood가 잡은 silent/실버그 4건(ACJ strategy 디폴트 / ACL·ACM walker / ACQ schedules 빈 목록 영구로딩 / ADP·variables 로딩 깜빡임). 코어 단위 905 passed(회귀 0). 테마: **시간 표기 8 surface 지역화 통일** · **usage/broken-reference 안전망**(connections·variables used-by + 삭제/리네임 경고 + 누락 connection 플래그 list+detail + orphaned sensors + cleanup 신호) · **signal→action deeplink 3종**(ADH/ADI/ADK) · **로딩/빈 상태 정합**(ACQ/ADP) · **검증 도구 확장**(ACT test-all, ADQ dry-run). i18n 신규 키 ~130개.
 >

@@ -570,6 +570,8 @@ export const en = {
   "pipelines.deleteDesc":
     "All versions and schedules of this pipeline are removed. Past runs stay in the runs table for audit. Pending and in-flight runs are left to complete on their own — the worker won't be able to re-fetch them after deletion.",
   "pipelines.loadFailed": "Couldn't load pipelines.",
+  "pipelines.colLastRun": "Last run",
+  "pipelines.neverRun": "Never run",
   "pipelines.created": "Created {name}",
   "pipelines.createFailed": "Couldn't create pipeline.",
   "pipelines.deleted": "Deleted {name}",
@@ -1681,6 +1683,8 @@ export const ko: Messages = {
   "pipelines.deleteDesc":
     "이 파이프라인의 모든 버전과 스케줄이 제거됩니다. 과거 실행은 감사를 위해 실행 테이블에 남습니다. 대기 중 및 진행 중인 실행은 그대로 완료되도록 두지만, 삭제 후 워커가 다시 가져올 수는 없습니다.",
   "pipelines.loadFailed": "파이프라인을 불러올 수 없습니다.",
+  "pipelines.colLastRun": "최근 실행",
+  "pipelines.neverRun": "실행 안 됨",
   "pipelines.created": "{name} 생성됨",
   "pipelines.createFailed": "파이프라인을 생성할 수 없습니다.",
   "pipelines.deleted": "{name} 삭제됨",

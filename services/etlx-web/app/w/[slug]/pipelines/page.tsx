@@ -5,8 +5,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
   ActivityIcon,
+  CalendarClockIcon,
   CalendarPlusIcon,
   EditIcon,
+  HandIcon,
   PlayIcon,
   PlusIcon,
   Trash2Icon,
@@ -18,6 +20,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { DataTable, type Column } from "@/components/ui/data-table";
+import { StatusBadge } from "@/components/ui/status-badge";
 import {
   ContextMenu,
   ContextMenuItem,
@@ -27,9 +30,16 @@ import {
 import { EmptyState } from "@/components/ui/empty-state";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { BackfillDialog } from "@/components/pipelines/backfill-dialog";
-import { ApiError, pipelinesApi, type PipelineSummary } from "@/lib/api";
+import {
+  ApiError,
+  pipelinesApi,
+  runsApi,
+  type PipelineSummary,
+  type RunSummary,
+} from "@/lib/api";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import { useLocale } from "@/components/providers/locale-provider";
+import { relativeTime, absoluteTime } from "@/lib/format-time";
 import type { Messages } from "@/lib/i18n/messages";
 import {
   DEFAULT_DLQ,
@@ -41,7 +51,12 @@ import { cn } from "@/lib/cn";
 
 type Translate = (key: keyof Messages, vars?: Record<string, string | number>) => string;
 
-function buildColumns(t: Translate): Column<PipelineSummary>[] {
+const RUNS_POLL_MS = 5_000;
+
+function buildColumns(
+  t: Translate,
+  lastRunByPipeline: Map<string, RunSummary>,
+): Column<PipelineSummary>[] {
   return [
     {
       key: "name",
@@ -93,6 +108,51 @@ function buildColumns(t: Translate): Column<PipelineSummary>[] {
           <span className="text-text-muted">—</span>
         ),
     },
+    {
+      // Phase ACS (2026-06-04) — last-run health, mirroring the
+      // migrations list (AAP) + its trigger icon (ACK). A regular
+      // pipeline operator gets the same at-a-glance "did it last
+      // succeed, when, and was it cron or manual?" without opening the
+      // runs page. Data comes from one workspace-wide runs fetch.
+      key: "last_run",
+      header: t("pipelines.colLastRun"),
+      cell: (r) => {
+        const run = lastRunByPipeline.get(r.id);
+        if (!run) {
+          return (
+            <span className="text-xs text-text-muted">
+              {t("pipelines.neverRun")}
+            </span>
+          );
+        }
+        const when = run.finished_at ?? run.started_at ?? run.created_at;
+        return (
+          <div className="flex items-center gap-2 text-xs">
+            <StatusBadge status={run.status} />
+            {run.schedule_id ? (
+              <CalendarClockIcon
+                size={12}
+                className="shrink-0 text-accent"
+                aria-label={t("migrations.runTriggerSchedule")}
+              >
+                <title>{t("migrations.runTriggerSchedule")}</title>
+              </CalendarClockIcon>
+            ) : run.triggered_by_user_id ? (
+              <HandIcon
+                size={12}
+                className="shrink-0 text-text-muted"
+                aria-label={t("migrations.runTriggerManual")}
+              >
+                <title>{t("migrations.runTriggerManual")}</title>
+              </HandIcon>
+            ) : null}
+            <span className="text-text-muted" title={absoluteTime(when)}>
+              {relativeTime(when, t)}
+            </span>
+          </div>
+        );
+      },
+    },
   ];
 }
 
@@ -102,6 +162,12 @@ export default function PipelinesPage() {
   const ws = useWorkspaceFromSlug(slug);
   const { t } = useLocale();
   const [rows, setRows] = useState<PipelineSummary[] | null>(null);
+  /** Phase ACS (2026-06-04) — most recent run per pipeline_id, from one
+   *  workspace-wide runs fetch (polled) so a Trigger elsewhere lands on
+   *  this list without a reload. Mirrors the migrations list. */
+  const [lastRunByPipeline, setLastRunByPipeline] = useState<
+    Map<string, RunSummary>
+  >(new Map());
   // Phase AAR (2026-06-01) — user request "마이그레이션 job을
   // 파이프라인이 아니라 마이그레이션 탭에서 관리하도록 해주고".
   // Migration pipelines are surfaced on /migrations; hide them
@@ -157,6 +223,35 @@ export default function PipelinesPage() {
       cancelled = true;
     };
   }, [ws, t]);
+
+  // Phase ACS (2026-06-04) — poll workspace runs and keep the most
+  // recent per pipeline. Soft-fail: the list still renders without the
+  // status chip.
+  useEffect(() => {
+    if (!ws) return;
+    let cancelled = false;
+    const fetchRuns = async () => {
+      try {
+        const list = await runsApi.list(ws.id, { limit: 200 });
+        if (cancelled) return;
+        const m = new Map<string, RunSummary>();
+        for (const r of list) {
+          // runsApi.list orders by created_at desc — first seen per
+          // pipeline is the most recent.
+          if (!m.has(r.pipeline_id)) m.set(r.pipeline_id, r);
+        }
+        setLastRunByPipeline(m);
+      } catch {
+        // soft-fail
+      }
+    };
+    void fetchRuns();
+    const handle = setInterval(() => void fetchRuns(), RUNS_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(handle);
+    };
+  }, [ws]);
 
   async function onCreate() {
     if (!ws || !newName.trim()) return;
@@ -310,7 +405,7 @@ export default function PipelinesPage() {
           ) : (
             <DataTable
               columns={[
-                ...buildColumns(t),
+                ...buildColumns(t, lastRunByPipeline),
                 {
                   key: "actions",
                   header: "",

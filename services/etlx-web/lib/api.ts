@@ -474,10 +474,23 @@ export interface DryRunConnectorCheck {
   error: string | null;
 }
 
+/** One advisory lint warning from dry-run (Phase DD/AAK/FF server-side).
+ *  Never flips ``ok`` to false — an accuracy nudge the user can close
+ *  (e.g. "this python transform has no column_mapping; catalog lineage
+ *  will rely on a heuristic"). */
+export interface DryRunLintWarning {
+  code: string;
+  message: string;
+  location: string | null;
+}
+
 export interface DryRunResponse {
   ok: boolean;
   errors: string[];
   connectors: DryRunConnectorCheck[];
+  /** Advisory lint hints (Phase AEN — web surfaces them). Optional for
+   *  back-compat with older server builds. */
+  warnings?: DryRunLintWarning[];
 }
 
 export interface ScheduleCreateBody {

@@ -826,6 +826,26 @@ function DryRunPanel({
           ))}
         </ul>
       ) : null}
+      {/* Phase AEN (2026-06-04) — advisory lint warnings (DD/AAK/FF).
+          The server has returned these all along; the builder now shows
+          them. Non-blocking accuracy nudges (e.g. "add column_mapping"). */}
+      {result.warnings && result.warnings.length > 0 ? (
+        <ul className="mt-2 space-y-1">
+          {result.warnings.map((w, i) => (
+            <li
+              key={i}
+              className="rounded-md border border-warning/40 bg-warning/5 p-2 text-xs text-warning"
+            >
+              <div className="whitespace-pre-wrap break-words">{w.message}</div>
+              {w.location ? (
+                <div className="mt-0.5 font-mono text-[11px] text-warning/70">
+                  {w.location}
+                </div>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      ) : null}
       {/* Connector outcomes — show ALL of them (not just failures), so
           the user has the full picture. Failed rows get the error
           banded panel + copy button; healthy rows are a one-line ✓. */}

@@ -799,6 +799,26 @@ function DryRunResultCard({
           ))}
         </ul>
       ) : null}
+      {/* Phase AEN (2026-06-04) — advisory lint warnings. The server has
+          returned these since DD/AAK/FF but no UI surfaced them. They
+          don't block running — accuracy nudges the operator can close. */}
+      {result.warnings && result.warnings.length > 0 ? (
+        <ul className="mt-3 space-y-1">
+          {result.warnings.map((w, i) => (
+            <li
+              key={i}
+              className="rounded-sm border border-warning/30 bg-warning/5 p-2 text-[11px] text-warning"
+            >
+              {w.message}
+              {w.location ? (
+                <span className="ml-1 font-mono text-warning/70">
+                  ({w.location})
+                </span>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      ) : null}
     </Card>
   );
 }

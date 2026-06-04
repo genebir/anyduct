@@ -25,7 +25,7 @@ const PRESET_COLORS = [
 ];
 
 export default function WorkspacesPage() {
-  const { workspaces, setCurrent, refresh } = useWorkspaces();
+  const { workspaces, setCurrent, refresh, loading } = useWorkspaces();
   const { t } = useLocale();
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
@@ -146,7 +146,16 @@ export default function WorkspacesPage() {
           </Card>
         ) : null}
 
-        {workspaces.length === 0 ? (
+        {/* Phase ADP (2026-06-04) — show a loading state while the
+            first fetch is in flight so a user with workspaces doesn't
+            see the "no workspaces yet" empty state flash. */}
+        {loading && workspaces.length === 0 ? (
+          <Card>
+            <div className="py-12 text-center text-sm text-text-muted">
+              {t("common.loading")}
+            </div>
+          </Card>
+        ) : workspaces.length === 0 ? (
           <Card>
             <EmptyState
               icon={<BoxesIcon size={40} strokeWidth={1.5} />}

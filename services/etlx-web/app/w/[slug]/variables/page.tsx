@@ -250,11 +250,25 @@ export default function VariablesPage() {
                 </span>
                 <Input value={description} onChange={(e) => setDescription(e.target.value)} />
               </label>
-              <div className="sm:col-span-2">
+              <div className="sm:col-span-2 flex items-center gap-3">
                 <Button type="submit" loading={saving}>
                   {t("variables.save")}
                 </Button>
-                <span className="ml-3 text-xs text-text-muted">{t("variables.valueHelp")}</span>
+                {/* Phase ADM (2026-06-04) — set is an upsert keyed by
+                    name, so editing then changing the name silently
+                    creates a *new* variable. Show whether the current
+                    name updates an existing one or creates a new one. */}
+                {name.trim() ? (
+                  <span className="text-xs text-text-muted">
+                    {(vars ?? []).some((v) => v.name === name.trim())
+                      ? t("variables.willUpdate", { name: name.trim() })
+                      : t("variables.willCreate")}
+                  </span>
+                ) : (
+                  <span className="text-xs text-text-muted">
+                    {t("variables.valueHelp")}
+                  </span>
+                )}
               </div>
             </form>
           ) : null}

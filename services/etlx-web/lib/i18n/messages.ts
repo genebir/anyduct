@@ -1134,6 +1134,8 @@ export const en = {
   "variables.nameError":
     "Variable name must start with a letter or underscore and use only letters, numbers, or underscores.",
   "variables.valueHelp": "JSON value (number, boolean, list) or plain text.",
+  "variables.willUpdate": "Updates existing '{name}'",
+  "variables.willCreate": "Creates a new variable",
   "variables.description": "Description (optional)",
   "variables.save": "Save variable",
   "variables.saved": "Saved variable {name}",
@@ -2247,6 +2249,8 @@ export const ko: Messages = {
   "variables.nameError":
     "변수 이름은 문자/언더스코어로 시작하고 문자·숫자·언더스코어만 사용할 수 있습니다.",
   "variables.valueHelp": "JSON 값(숫자·불리언·리스트) 또는 일반 텍스트.",
+  "variables.willUpdate": "기존 '{name}' 수정",
+  "variables.willCreate": "새 변수 생성",
   "variables.description": "설명(선택)",
   "variables.save": "변수 저장",
   "variables.saved": "변수 {name} 저장됨",

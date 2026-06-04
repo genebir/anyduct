@@ -177,6 +177,9 @@ uv run mypy etl_plugins
 > - **AEQ**: connections name hover에 config 요약(비-secret만, `${SECRET}`→`***` 마스킹) — 같은 타입 connection 식별. 거의 미사용이던 config_json 안전 활용.
 > - **AER**: run 상세 로그 레벨 필터(전체/info+/warning+/error) — RunLogEntry의 기존 level 필드로 클라이언트 측 "min level" 필터. 실패 run 수백 줄에서 error/warning만 즉시. 노드 필터(M)+cap 안내(ADB)와 합성, "X of Y" + 빈 레벨 메시지.
 > - **AES**: run 상세 로그 텍스트 검색(message substring, 클라이언트 측) — 레벨(AER)+노드(M) 필터와 합성해 로그 디버깅 3축(검색/레벨/노드) 완성. "X of Y" + 빈 결과 메시지 generic화.
+> - **AET**: run 상세 "Copy logs" 버튼 — 현재 필터(검색/레벨/노드)된 줄만 plain text로 클립보드 복사(ABR/ACC clipboard 패턴 재사용, toast 줄 수 안내). 이슈/Slack 붙여넣기.
+> - **AEU**: run 상세 로그 error/warning 카운트 칩(전체 로그 기준, 0이면 숨김) — 실패 run 열자마자 신호, 클릭 시 해당 min-level 필터(AER) 즉시 적용(신호→액션). failed-node 칩 tone 정합.
+> - **AEV/AEW/AEX (실패 유형 triage 4 surface 정합)**: RunSummary가 이미 반환하던 `error_class`를 status 배지 옆/아래 칩(truncate + title=full)으로 — **AEV** runs list, **AEW** pipelines list Last run, **AEX** migrations list Last run. 대시보드 Recent failures(기존)와 합쳐 4 surface에서 클릭 없이 실패 종류(WriteError/ZombieReaped 등) triage. error_class 있을 때만 노출, i18n 키 0.
 >
 > **세션 green 확정(2026-06-04)**: 코어 단위 905 passed(코어 production 미변경, 회귀 0) · 신규 서버 시나리오 5 it green(testcontainers) · web tsc clean(매 슬라이스) · 실행 중 dev 서버 전 라우트 200 · production build 21 routes(반복). 검증 방법: dev 동시 실행으로 `next build` 금지(메모리), `tsc` + dev curl(런타임) + 서버 contract는 testcontainers e2e. ruff-format 커밋 중단은 `uv run ruff format` 사전 실행으로 회피.
 >

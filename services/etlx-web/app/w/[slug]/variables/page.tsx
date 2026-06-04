@@ -11,12 +11,14 @@ import { Input } from "@/components/ui/input";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
   ApiError,
+  pipelinesApi,
   variablesApi,
   type WorkspaceVariableEntry,
 } from "@/lib/api";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import { useLocale } from "@/components/providers/locale-provider";
 import { inferType } from "@/lib/variable-types";
+import { buildVariableUsage } from "@/lib/variable-usage";
 
 const NAME_RE = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 
@@ -34,7 +36,15 @@ export default function VariablesPage() {
   const { t } = useLocale();
   const canEdit = ws?.role === "owner" || ws?.role === "editor" || ws?.role == null;
 
-  const [vars, setVars] = useState<WorkspaceVariableEntry[]>([]);
+  // null = not loaded yet (distinguishes loading from a genuinely
+  // empty list — previously ``[]`` flashed "no variables" during load).
+  const [vars, setVars] = useState<WorkspaceVariableEntry[] | null>(null);
+  /** Phase ACR (2026-06-04) — variable name → referencing pipelines.
+   *  null until the pipelines fetch resolves; cells render neutral
+   *  until then so a failed fetch never reads as "unused". */
+  const [usage, setUsage] = useState<
+    Map<string, { id: string; name: string }[]> | null
+  >(null);
   const [name, setName] = useState("");
   const [valueText, setValueText] = useState("");
   const [description, setDescription] = useState("");
@@ -52,6 +62,34 @@ export default function VariablesPage() {
   useEffect(() => {
     if (ws) void load(ws.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ws?.id]);
+
+  // Phase ACR (2026-06-04) — index variable usage from pipelines. Soft-
+  // fail: keep usage null on error so cells stay neutral, never a false
+  // "unused".
+  useEffect(() => {
+    if (!ws) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const pipelines = await pipelinesApi.list(ws.id);
+        if (cancelled) return;
+        setUsage(
+          buildVariableUsage(
+            pipelines.map((p) => ({
+              id: p.id,
+              name: p.name,
+              config: p.current_config_json,
+            })),
+          ),
+        );
+      } catch {
+        if (!cancelled) setUsage(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [ws?.id]);
 
   function editRow(v: WorkspaceVariableEntry) {
@@ -97,6 +135,10 @@ export default function VariablesPage() {
     }
   }
 
+  // Phase ACR (2026-06-04) — pipelines referencing the variable queued
+  // for deletion. Empty when usage hasn't loaded or it's truly unused.
+  const deleteRefs = (pendingDelete && usage?.get(pendingDelete)) || [];
+
   return (
     <>
       <Header
@@ -110,7 +152,9 @@ export default function VariablesPage() {
       <main className="mx-auto w-full max-w-3xl flex-1 space-y-6 overflow-y-auto px-6 py-8">
         <Card>
           <CardHeader title={t("variables.title")} description={t("variables.desc")} />
-          {vars.length === 0 ? (
+          {vars === null ? (
+            <p className="text-sm text-text-muted">{t("common.loading")}</p>
+          ) : vars.length === 0 ? (
             <p className="text-sm text-text-muted">{t("variables.empty")}</p>
           ) : (
             <ul className="divide-y divide-border-subtle">
@@ -137,6 +181,26 @@ export default function VariablesPage() {
                       <p className="truncate text-xs text-text-muted">{v.description}</p>
                     ) : null}
                   </div>
+                  {/* Phase ACR (2026-06-04) — usage at a glance. usage
+                      null → render nothing (not loaded / fetch failed)
+                      so an empty index never reads as "unused". */}
+                  {usage !== null
+                    ? (() => {
+                        const refs = usage.get(v.name) ?? [];
+                        return refs.length > 0 ? (
+                          <span
+                            className="shrink-0 text-xs text-text-secondary"
+                            title={refs.map((p) => p.name).join("\n")}
+                          >
+                            {t("variables.usedByCount", { count: refs.length })}
+                          </span>
+                        ) : (
+                          <span className="shrink-0 text-xs text-text-muted">
+                            {t("variables.usedByNone")}
+                          </span>
+                        );
+                      })()
+                    : null}
                   {canEdit ? (
                     <>
                       <Button variant="ghost" size="sm" onClick={() => editRow(v)}>
@@ -198,6 +262,25 @@ export default function VariablesPage() {
             open={pendingDelete !== null}
             title={t("variables.deleteTitle")}
             description={t("variables.deleteConfirm", { name: pendingDelete ?? "" })}
+            body={
+              // Phase ACR (2026-06-04) — warn when the variable is still
+              // interpolated by pipelines; their next run would fail to
+              // resolve ``${var.<name>}``. Reuses the usage index.
+              deleteRefs.length > 0 ? (
+                <div className="rounded-md border border-warning/40 bg-warning/10 p-3 text-xs">
+                  <p className="font-medium text-warning">
+                    {t("variables.deleteInUseWarn", { count: deleteRefs.length })}
+                  </p>
+                  <ul className="mt-2 list-disc space-y-0.5 pl-4 text-text-secondary">
+                    {deleteRefs.map((p) => (
+                      <li key={p.id} className="font-mono">
+                        {p.name}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : undefined
+            }
             confirmLabel={t("common.delete")}
             onConfirm={() => pendingDelete && onDelete(pendingDelete)}
             onCancel={() => setPendingDelete(null)}

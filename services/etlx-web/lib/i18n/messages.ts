@@ -1126,6 +1126,10 @@ export const en = {
   "variables.deleteAria": "Delete variable {name}",
   "variables.deleteTitle": "Delete variable",
   "variables.deleteConfirm": "Delete variable '{name}'? Pipelines referencing it will fail to build.",
+  "variables.usedByCount": "{count} pipeline(s)",
+  "variables.usedByNone": "unused",
+  "variables.deleteInUseWarn":
+    "Still referenced by {count} pipeline(s) — their next run will fail to resolve it:",
 
   // run status badge
   "status.pending": "Pending",
@@ -2217,6 +2221,10 @@ export const ko: Messages = {
   "variables.deleteAria": "변수 {name} 삭제",
   "variables.deleteTitle": "변수 삭제",
   "variables.deleteConfirm": "변수 '{name}'을(를) 삭제할까요? 이를 참조하는 파이프라인은 빌드에 실패합니다.",
+  "variables.usedByCount": "파이프라인 {count}개",
+  "variables.usedByNone": "미사용",
+  "variables.deleteInUseWarn":
+    "아직 파이프라인 {count}개가 참조 중 — 다음 실행에서 해석 실패합니다:",
 
   "status.pending": "대기 중",
   "status.queued": "큐 대기",

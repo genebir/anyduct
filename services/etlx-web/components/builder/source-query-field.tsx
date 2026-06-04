@@ -93,13 +93,23 @@ export function SourceQueryField({
         // editor is uncontrolled; it mounts fresh each time the user
         // toggles into SQL mode, so ``defaultValue`` picks up the latest
         // query (incl. one just built in visual mode).
-        <CodeEditor
-          language="sql"
-          value={typeof value === "string" ? value : ""}
-          onChange={(v) => onChange(v.trim() ? v : undefined)}
-          height={180}
-          tabSize={2}
-        />
+        <div className="flex flex-col gap-1">
+          <CodeEditor
+            language="sql"
+            value={typeof value === "string" ? value : ""}
+            onChange={(v) => onChange(v.trim() ? v : undefined)}
+            height={180}
+            tabSize={2}
+          />
+          {/* Phase ADY (2026-06-04) — Monaco doesn't render the field
+              placeholder, so surface the example query as a muted hint
+              (the textarea used to show it). */}
+          {placeholder ? (
+            <span className="text-[11px] text-text-muted">
+              {t("builder.sqlExample", { example: placeholder })}
+            </span>
+          ) : null}
+        </div>
       ) : (
         <VisualBuilder
           workspaceId={workspaceId}

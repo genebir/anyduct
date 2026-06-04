@@ -661,6 +661,7 @@ export const en = {
     "Select a node to configure it. Click any operator on the canvas to edit its fields here.",
   "builder.resizeDrawer": "Drag to resize the properties panel",
   "builder.noConnectionsOfType": "No connections of this type",
+  "builder.sqlExample": "e.g. {example}",
   "builder.missingConnectionRef":
     "References '{name}', which no longer exists — pick another connection.",
   "builder.tableSelectConnFirst": "Select a connection to load tables.",
@@ -1798,6 +1799,7 @@ export const ko: Messages = {
     "구성할 노드를 선택하세요. 캔버스에서 오퍼레이터를 클릭하면 여기서 필드를 편집할 수 있습니다.",
   "builder.resizeDrawer": "드래그해서 속성 패널 너비 조절",
   "builder.noConnectionsOfType": "이 유형의 연결이 없습니다",
+  "builder.sqlExample": "예: {example}",
   "builder.missingConnectionRef":
     "'{name}'을(를) 참조하지만 더 이상 존재하지 않습니다 — 다른 연결을 선택하세요.",
   "builder.tableSelectConnFirst": "연결을 선택하면 테이블 목록을 불러옵니다.",

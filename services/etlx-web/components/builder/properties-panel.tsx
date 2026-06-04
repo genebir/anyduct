@@ -645,13 +645,21 @@ function FieldInput({
     // DELETE/MERGE without dominating the panel. Uncontrolled (the
     // wrapper keys per node:field, so node switches remount it).
     return (
-      <CodeEditor
-        language="sql"
-        value={(value as string | undefined) ?? ""}
-        onChange={(next) => onChange(next)}
-        height={240}
-        tabSize={2}
-      />
+      <div className="flex flex-col gap-1">
+        <CodeEditor
+          language="sql"
+          value={(value as string | undefined) ?? ""}
+          onChange={(next) => onChange(next)}
+          height={240}
+          tabSize={2}
+        />
+        {/* Phase ADY — Monaco hides the placeholder; show the example. */}
+        {field.placeholder ? (
+          <span className="text-[11px] text-text-muted">
+            {t("builder.sqlExample", { example: field.placeholder })}
+          </span>
+        ) : null}
+      </div>
     );
   }
   if (field.kind === "string" && field.multiline) {

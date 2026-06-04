@@ -123,7 +123,10 @@ uv run mypy etl_plugins
 > - **DLQ-3 (web)**: 뷰어 카드에 Copy(records→JSON 클립보드, 티켓용) + Refresh(DLQ 테이블은 후속 run마다 증가, lazy fetch 캐시 갱신).
 > - **DLQ-4 (web)**: 행 수 selector(50/100/200, 서버 캡 200) + "처음 N개만 표시" truncation 안내(no-silent-cap, 로그 ADB 원칙). → DLQ 뷰어 view/copy/refresh/limit 운영 완결.
 > - **DLQ-5 (서버)**: preview를 SQL-dialect allow-list(`_SQL_READABLE_TYPES` = sqlite/postgres/mysql/vertica/mssql)로 제한 — 비-RDBMS sink(S3/Kafka/HTTP)는 SELECT를 못 받으므로 connector build *전에* `sink_not_readable`로 short-circuit(무거운 import 회피, 혼란스러운 read_failed 방지). 서버 it 5.
-> - **남은 후속(후보)**: per-run 필터(코어 변경 동반 — DLQ는 사용자 sink라 core가 run_id를 모름, "core는 service를 모른다" 원칙과 충돌) / **S3·object-storage DLQ 읽기**(connector-specific) / 정렬·페이지네이션 / 빌더·마이그레이션 detail에서도 뷰어 노출.
+> - **DLQ-6 (web)**: 성공 run인데 DLQ로 라우팅된 경우(dlqRouted>0) status 배지 옆 "부분 성공" warning 칩 — 초록 배지에 묻히던 silent data drop 가시화.
+> - **DLQ-7 (서버 e2e)**: 운영자 DLQ 조사 여정 HTTP 테스트 — login→ws→connections→DLQ 파이프라인→trigger→drain→GET run→GET dlq/records(실패 2행) + no-dlq 파이프라인 reason. auth+router+response_model HTTP 계약 검증(서비스 단위 DLQP1-5와 별개).
+> - **DLQ-8 (코어 lint, ADR-0076)**: `dlq_recommended` advisory — `python`/`custom_python` transform + `dlq` 없음이면 "한 행 raise가 run 전체를 죽인다, dlq를 설정하라" 경고(파이프라인당 1회, sql_exec 제외, location=None). dry-run warnings가 이미 빌더/마이그레이션 UI에 표시되므로 **web 변화 0**. 코어 lint unit 19→25, 서버 21 it 회귀 0. → **DLQ 라이프사이클 완성**: 권고(DLQ-8)→설정(빌더)→실행→수(AFB)→부분 플래그(DLQ-6)→record 조회(DLQ-1~5)→e2e(DLQ-7).
+> - **남은 후속(후보)**: per-run 필터(코어 변경 동반 — DLQ는 사용자 sink라 core가 run_id를 모름) / **S3·object-storage DLQ 읽기**(connector-specific) / 정렬·페이지네이션 / 빌더·마이그레이션 detail에서도 뷰어 노출.
 >
 > **이전 마일스톤 (2026-06-04): 운영-가시성 23슬라이스 (Phase AET → AFP).** 단일 슬라이스-단위 세션(web 전용, 코어/서버 변화 0, 매 슬라이스 tsc clean + dev 200). run 디버그(로그/오류 copy·카운트·records delta·DLQ count·heartbeat liveness·running 경과 3 surface) · 실패 triage error_class 5 surface · Last run 컬럼 5 surface · 헬스 signal→action 양축(schedules/sensors: 컬럼→대시보드 신호→필터+deeplink) · 분석가 asset 행수 delta · audit my-actions · builder dry-run 경고 수.
 >

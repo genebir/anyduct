@@ -662,6 +662,8 @@ export const en = {
   "builder.resizeDrawer": "Drag to resize the properties panel",
   "builder.noConnectionsOfType": "No connections of this type",
   "builder.sqlExample": "e.g. {example}",
+  "builder.expandEditor": "Fullscreen",
+  "builder.collapseEditor": "Exit (Esc)",
   "builder.missingConnectionRef":
     "References '{name}', which no longer exists — pick another connection.",
   "builder.tableSelectConnFirst": "Select a connection to load tables.",
@@ -1800,6 +1802,8 @@ export const ko: Messages = {
   "builder.resizeDrawer": "드래그해서 속성 패널 너비 조절",
   "builder.noConnectionsOfType": "이 유형의 연결이 없습니다",
   "builder.sqlExample": "예: {example}",
+  "builder.expandEditor": "전체화면",
+  "builder.collapseEditor": "닫기 (Esc)",
   "builder.missingConnectionRef":
     "'{name}'을(를) 참조하지만 더 이상 존재하지 않습니다 — 다른 연결을 선택하세요.",
   "builder.tableSelectConnFirst": "연결을 선택하면 테이블 목록을 불러옵니다.",

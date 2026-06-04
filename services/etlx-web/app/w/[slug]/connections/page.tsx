@@ -277,6 +277,12 @@ export default function ConnectionsPage() {
     }
   }
 
+  // Phase ACM (2026-06-04) — pipelines that reference the connection
+  // queued for deletion. Empty when usage hasn't loaded or it's
+  // genuinely unused.
+  const deleteRefs =
+    (pendingDelete && usage?.get(pendingDelete.name)) || [];
+
   return (
     <>
       <Header
@@ -452,6 +458,28 @@ export default function ConnectionsPage() {
                 count: pendingDelete.secret_refs.length,
               })
             : undefined
+        }
+        body={
+          // Phase ACM (2026-06-04) — warn when the connection is still
+          // referenced. Deleting it would break those pipelines' next
+          // run, so list them explicitly rather than letting the
+          // operator find out at runtime. Reuses the ACL usage index.
+          deleteRefs.length > 0 ? (
+            <div className="rounded-md border border-warning/40 bg-warning/10 p-3 text-xs">
+              <p className="font-medium text-warning">
+                {t("connections.deleteInUseWarn", {
+                  count: deleteRefs.length,
+                })}
+              </p>
+              <ul className="mt-2 list-disc space-y-0.5 pl-4 text-text-secondary">
+                {deleteRefs.map((p) => (
+                  <li key={p.id} className="font-mono">
+                    {p.name}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : undefined
         }
         confirmLabel={t("common.delete")}
         destructive

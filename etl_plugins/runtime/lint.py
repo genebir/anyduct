@@ -41,6 +41,13 @@ from etl_plugins.runtime.column_lineage import (
 #: column lineage in the catalog (ADR-0047).
 _OPAQUE_TRANSFORM_TYPES = frozenset({"python", "custom_python", "sql_exec"})
 
+#: Transform types that run arbitrary code *per record* and can therefore
+#: raise on a single bad row. Without a ``dlq:`` such a raise fails the
+#: whole run — the target of the ``dlq_recommended`` rule (ADR-0076).
+#: ``sql_exec`` is excluded: it's a one-shot statement, not per-record, so
+#: a DLQ (record-level routing) wouldn't help it.
+_PER_RECORD_CODE_TRANSFORM_TYPES = frozenset({"python", "custom_python"})
+
 
 @dataclass(frozen=True)
 class LintWarning:
@@ -97,7 +104,60 @@ def lint_pipeline(cfg: PipelineConfig) -> list[LintWarning]:
     # connector health checks.
     warnings.extend(_lint_auto_create_table_planned(cfg))
 
+    # Phase DLQ-8 (2026-06-04, ADR-0076): a per-record code transform with
+    # no DLQ fails the whole run on a single bad record. Nudge the operator
+    # to configure a dead-letter queue so failures route aside instead.
+    warnings.extend(_lint_dlq_recommended(cfg))
+
     return warnings
+
+
+def _has_per_record_code_transform(cfg: PipelineConfig) -> bool:
+    """True if any shape contains a ``python`` / ``custom_python`` transform."""
+    if cfg.graph is not None:
+        return any(
+            node.type == "transform"
+            and node.transform is not None
+            and node.transform.type in _PER_RECORD_CODE_TRANSFORM_TYPES
+            for node in cfg.graph.nodes
+        )
+    if cfg.tasks:
+        return any(
+            tc.type in _PER_RECORD_CODE_TRANSFORM_TYPES
+            for task in cfg.tasks
+            for tc in task.transforms
+        )
+    return any(tc.type in _PER_RECORD_CODE_TRANSFORM_TYPES for tc in cfg.transforms)
+
+
+def _lint_dlq_recommended(cfg: PipelineConfig) -> list[LintWarning]:
+    """Pipeline-level rule (ADR-0076): a ``python`` / ``custom_python``
+    transform raises per record. With no ``dlq:`` configured, one bad row
+    aborts the entire run (``TransformError``). Recommend a DLQ so the bad
+    records route aside and the rest keep flowing — the canonical
+    partial-success pattern (Phase II).
+
+    Advisory only; fires once per pipeline. ``location`` is ``None`` — the
+    fix lives in pipeline settings (the ``dlq`` block), not at any one
+    node, so there's nothing for the builder to jump to.
+    """
+    if cfg.dlq is not None:
+        return []
+    if not _has_per_record_code_transform(cfg):
+        return []
+    return [
+        LintWarning(
+            code="dlq_recommended",
+            message=(
+                "This pipeline has a python/custom_python transform but no "
+                "dead-letter queue (dlq) is configured. If the transform "
+                "raises on a single record, the entire run fails. Configure "
+                "a dlq to route failing records aside and keep processing "
+                "the rest."
+            ),
+            location=None,
+        )
+    ]
 
 
 def _lint_transform(tc: TransformConfig, location: str) -> list[LintWarning]:
@@ -236,8 +296,7 @@ def _lint_auto_create_table_planned(cfg: PipelineConfig) -> list[LintWarning]:
                 "(auto_create_table=true, auto_create_if_exists='error')"
             )
         return (
-            f"sink will create table {target} on first run if it's "
-            "missing (auto_create_table=true)"
+            f"sink will create table {target} on first run if it's missing (auto_create_table=true)"
         )
 
     warnings: list[LintWarning] = []

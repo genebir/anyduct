@@ -20,9 +20,16 @@ def _cfg(**over: object) -> PipelineConfig:
 # ---------- column_mapping_recommended ----------
 
 
+def _mapping_warnings(cfg: PipelineConfig) -> list:
+    """Only the ``column_mapping_recommended`` warnings — keeps these
+    tests focused now that ``dlq_recommended`` (ADR-0076) also fires for
+    python/custom_python transforms without a DLQ."""
+    return [w for w in lint_pipeline(cfg) if w.code == "column_mapping_recommended"]
+
+
 def test_python_transform_without_mapping_emits_warning() -> None:
     cfg = _cfg(transforms=[{"type": "python", "callable": "m:f"}])
-    warnings = lint_pipeline(cfg)
+    warnings = _mapping_warnings(cfg)
     assert len(warnings) == 1
     assert warnings[0].code == "column_mapping_recommended"
     assert warnings[0].location == "transforms.0"
@@ -38,7 +45,7 @@ def test_custom_python_without_mapping_emits_warning() -> None:
             }
         ]
     )
-    warnings = lint_pipeline(cfg)
+    warnings = _mapping_warnings(cfg)
     assert len(warnings) == 1
     assert warnings[0].code == "column_mapping_recommended"
 
@@ -61,7 +68,7 @@ def test_python_transform_with_mapping_emits_no_warning() -> None:
             }
         ]
     )
-    assert lint_pipeline(cfg) == []
+    assert _mapping_warnings(cfg) == []
 
 
 def test_declarative_transforms_emit_no_warning() -> None:
@@ -88,7 +95,7 @@ def test_multiple_opaque_transforms_emit_multiple_warnings() -> None:
             {"type": "custom_python", "code": "def transform(r):\n    return r\n"},
         ]
     )
-    warnings = lint_pipeline(cfg)
+    warnings = _mapping_warnings(cfg)
     assert len(warnings) == 2
     assert {w.location for w in warnings} == {"transforms.0", "transforms.2"}
 
@@ -117,7 +124,7 @@ def test_task_dag_shape_walks_every_task() -> None:
             ],
         }
     )
-    warnings = lint_pipeline(cfg)
+    warnings = _mapping_warnings(cfg)
     assert len(warnings) == 1
     assert warnings[0].location == "tasks.0.transforms.0"
 
@@ -151,7 +158,7 @@ def test_graph_shape_walks_every_transform_node() -> None:
             },
         }
     )
-    warnings = lint_pipeline(cfg)
+    warnings = _mapping_warnings(cfg)
     assert len(warnings) == 1
     assert warnings[0].location == "graph.nodes.py"
 
@@ -354,3 +361,76 @@ def test_auto_create_table_graph_shape_warns_at_node() -> None:
     assert len(warnings) == 1
     assert warnings[0].location == "graph.nodes.k"  # type: ignore[attr-defined]
     assert "rebuild" in warnings[0].message  # type: ignore[attr-defined]
+
+
+# ---------- dlq_recommended (Phase DLQ-8, ADR-0076) ----------
+
+
+def _dlq(cfg: PipelineConfig) -> list:
+    return [w for w in lint_pipeline(cfg) if w.code == "dlq_recommended"]
+
+
+def test_dlq_recommended_fires_for_custom_python_without_dlq() -> None:
+    cfg = _cfg(transforms=[{"type": "custom_python", "code": "def transform(r):\n    return r\n"}])
+    warnings = _dlq(cfg)
+    assert len(warnings) == 1
+    assert warnings[0].location is None
+    assert "dlq" in warnings[0].message.lower()
+
+
+def test_dlq_recommended_silent_when_dlq_configured() -> None:
+    cfg = _cfg(
+        transforms=[{"type": "python", "callable": "m:f"}],
+        dlq={"connection": "wh", "table": "bad", "mode": "append"},
+    )
+    assert _dlq(cfg) == []
+
+
+def test_dlq_recommended_silent_for_declarative_only() -> None:
+    """rename/cast/etc. don't run per-record code → no run-failure risk."""
+    cfg = _cfg(transforms=[{"type": "rename", "mapping": {"a": "id"}}])
+    assert _dlq(cfg) == []
+
+
+def test_dlq_recommended_silent_for_sql_exec() -> None:
+    """``sql_exec`` is a one-shot statement, not per-record — a DLQ
+    (record-level routing) wouldn't help, so no nudge."""
+    cfg = _cfg(transforms=[{"type": "sql_exec", "connection": "wh", "statement": "VACUUM t1"}])
+    assert _dlq(cfg) == []
+
+
+def test_dlq_recommended_fires_once_for_multiple_code_transforms() -> None:
+    cfg = _cfg(
+        transforms=[
+            {"type": "python", "callable": "m:a"},
+            {"type": "custom_python", "code": "def transform(r):\n    return r\n"},
+        ]
+    )
+    assert len(_dlq(cfg)) == 1  # pipeline-level, fires once
+
+
+def test_dlq_recommended_fires_in_graph_shape() -> None:
+    cfg = PipelineConfig.model_validate(
+        {
+            "name": "p",
+            "graph": {
+                "nodes": [
+                    {"id": "s", "type": "source", "connection": "wh", "query": "SELECT a FROM t"},
+                    {
+                        "id": "py",
+                        "type": "transform",
+                        "transform": {
+                            "type": "custom_python",
+                            "code": "def transform(r):\n    return r\n",
+                        },
+                    },
+                    {"id": "k", "type": "sink", "connection": "wh", "table": "out"},
+                ],
+                "edges": [
+                    {"from_node": "s", "to_node": "py"},
+                    {"from_node": "py", "to_node": "k"},
+                ],
+            },
+        }
+    )
+    assert len(_dlq(cfg)) == 1

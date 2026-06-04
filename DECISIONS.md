@@ -2396,4 +2396,24 @@ L1 출시 직후 사용자가 5개 회신:
 
 ---
 
+## ADR-0076: `dlq_recommended` lint 규칙 — per-record 코드 transform + DLQ 없음 경고
+
+**Date**: 2026-06-04
+**Status**: Accepted
+**Context**: DLQ 뷰어(ADR-0075) 작업 중 dogfood로 드러난 footgun — `python`/`custom_python` transform은 record마다 임의 코드를 실행하므로 한 record에서 raise하면 `TransformError`로 **run 전체가 실패**한다. `dlq:`를 설정하면 그 record만 DLQ로 빠지고 나머지는 계속 처리(Phase II partial-success). 그런데 많은 파이프라인이 transform만 있고 DLQ가 없어, 운영자가 이 위험을 모른 채 운영하다 한 행 때문에 전체가 죽는다. 기존 lint(DD/FF/AAK)는 column lineage·auto_create만 다뤘다.
+
+**Decision**:
+1. **새 advisory 규칙 `dlq_recommended`** (`etl_plugins/runtime/lint.py`): `cfg.dlq is None` && 어떤 shape(linear/task-DAG/graph)든 `python`/`custom_python` transform이 있으면 파이프라인당 1회 경고. 메시지는 "transform이 raise하면 run 전체가 실패한다, dlq를 설정해 실패 record를 빼라". advisory(차단 안 함, `dry-run` ok 불변).
+2. **`sql_exec` 제외** (`_PER_RECORD_CODE_TRANSFORM_TYPES = {python, custom_python}`) — sql_exec은 per-record가 아닌 one-shot statement라 record-level DLQ가 도움 안 됨.
+3. **`location=None`** — 고칠 곳이 특정 노드가 아니라 pipeline settings의 `dlq` 블록이라 builder가 점프할 대상이 없음. AEN/AEO의 null-location 렌더(plain text) 경로 사용.
+4. **web 변화 0** — dry-run `warnings`는 이미 빌더 DryRunPanel(AEN/AEO) + 마이그레이션 DryRunResultCard에 표시되고, 메시지는 서버 영어를 그대로 렌더(다른 lint 경고와 동일). 새 규칙이 자동 노출.
+
+**Consequences**:
+- ✅ 운영자가 dry-run에서 "DLQ 없이 transform 쓰면 한 행이 run을 죽인다"를 사전 인지 → DLQ 채택률↑, silent total-failure↓. AFB(DLQ 수)+ADR-0075(뷰어)+AFB partial 칩(DLQ-6)과 함께 DLQ 라이프사이클(권고→설정→실행→조회) 완성.
+- ✅ 코어 unit 25 lint(19→25, +6 dlq 케이스). 기존 6개 정확-카운트 테스트는 `column_mapping_recommended`만 필터하도록 갱신(새 경고가 같은 fixture에서 동시 발화). 서버 dry-run/journey 21 it 회귀 0(membership 단언이라 안전).
+- ✅ coarse 규칙(false-positive 비용 0 — DLQ가 늘 옳은 건 아니지만 advisory라 무해). mypy/ruff clean. DB 마이그레이션 0.
+- ⚠️ graph shape도 커버(column_mapping consistency FF가 graph를 punt한 것과 달리, dlq는 단순 존재 검사라 graph 포함).
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

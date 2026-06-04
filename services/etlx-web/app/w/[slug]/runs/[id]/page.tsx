@@ -586,19 +586,47 @@ export default function RunDetailPage() {
                   // selects the same node in the DAG (accent ring) so
                   // both surfaces line up.
                   action={
-                    failedNode ? (
+                    <div className="flex items-center gap-2">
+                      {failedNode ? (
+                        <button
+                          type="button"
+                          onClick={() => setNodeFilter(failedNode.node_id)}
+                          className="inline-flex items-center gap-1 rounded-sm border border-error/40 bg-error/10 px-2 py-1 text-xs font-medium text-error hover:bg-error/20"
+                          title={t("runDetail.openFailedNodeTitle", {
+                            node: failedNode.node_id,
+                          })}
+                        >
+                          <span className="font-mono">{failedNode.node_id}</span>
+                          <span aria-hidden>→</span>
+                        </button>
+                      ) : null}
+                      {/* Phase AEY (2026-06-04) — copy the full failure
+                          (class + message + node root cause) so it can be
+                          pasted into an issue / search. Reuses the AET
+                          clipboard pattern. */}
                       <button
                         type="button"
-                        onClick={() => setNodeFilter(failedNode.node_id)}
-                        className="inline-flex items-center gap-1 rounded-sm border border-error/40 bg-error/10 px-2 py-1 text-xs font-medium text-error hover:bg-error/20"
-                        title={t("runDetail.openFailedNodeTitle", {
-                          node: failedNode.node_id,
-                        })}
+                        onClick={() => {
+                          const parts: string[] = [];
+                          if (run.error_class) parts.push(run.error_class);
+                          if (run.error_message) parts.push(run.error_message);
+                          if (
+                            failedNode?.error_message &&
+                            failedNode.error_message !== run.error_message
+                          )
+                            parts.push(
+                              `[${failedNode.node_id}] ${failedNode.error_message}`,
+                            );
+                          navigator.clipboard.writeText(parts.join("\n")).then(
+                            () => toast.success(t("runDetail.errorCopied")),
+                            () => toast.error(t("runDetail.logsCopyFailed")),
+                          );
+                        }}
+                        className="rounded-sm border border-border-subtle bg-overlay px-2 py-1 text-xs text-text-secondary hover:text-text"
                       >
-                        <span className="font-mono">{failedNode.node_id}</span>
-                        <span aria-hidden>→</span>
+                        {t("runDetail.copy")}
                       </button>
-                    ) : null
+                    </div>
                   }
                 />
                 <div className="space-y-2 font-mono text-xs">

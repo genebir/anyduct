@@ -975,6 +975,8 @@ export const en = {
   "runDetail.copyLogs": "Copy logs",
   "runDetail.logsCopied": "Copied {count} log lines to clipboard",
   "runDetail.logsCopyFailed": "Couldn't copy — your browser blocked clipboard access",
+  // Phase AEY (2026-06-04) — copy the full failure from the error card.
+  "runDetail.errorCopied": "Copied error to clipboard",
   // Phase AEU (2026-06-04) — at-a-glance error/warning counts; click filters.
   "runDetail.logErrorCount": "{count} errors",
   "runDetail.logWarnCount": "{count} warnings",
@@ -2133,6 +2135,8 @@ export const ko: Messages = {
   "runDetail.copyLogs": "로그 복사",
   "runDetail.logsCopied": "로그 {count}줄을 클립보드에 복사했습니다",
   "runDetail.logsCopyFailed": "복사 실패 — 브라우저가 클립보드 접근을 막았습니다",
+  // Phase AEY (2026-06-04) — 오류 카드에서 실패 전체 복사.
+  "runDetail.errorCopied": "오류를 클립보드에 복사했습니다",
   // Phase AEU (2026-06-04) — 오류/경고 개수 한눈에; 클릭 시 필터.
   "runDetail.logErrorCount": "오류 {count}개",
   "runDetail.logWarnCount": "경고 {count}개",

@@ -133,6 +133,7 @@ uv run mypy etl_plugins
 > - **AFT**: assets list "불투명만" 필터 + URL preset `?lineage=opaque` + 대시보드 Assets 카드 opaque>0 시 subset deep-link(ADI/ADK 패턴). AFS(신호)→AFT(필터+deeplink) 루프.
 > - **AFU**: 워크스페이스 삭제 type-to-confirm 가드(관리자) — cascade(connections/pipelines/schedules/runs/audit) 비가역 삭제에 "이름 입력" + confirmDisabled(정확 일치 시만 활성, GitHub식). ConfirmDialog body(AAW) 활용.
 > - **AFV**: 대시보드 Recent runs duration도 running이면 live 경과 → running 경과 표기 4 surface(runs list/run detail/migration detail/dashboard) 정합.
+> - **DLQ-9 (서버 e2e)**: `dlq_recommended`(DLQ-8)가 dry-run REST 응답 warnings에 실리는지(+dlq 설정 시 사라지는 mirror) HTTP 계약 검증. 신규 서버 it 2. dogfood로 cancel-confirm/members-confirm/runs-retry-menu 등 다수 surface 이미 안전 확인(변경 0).
 >
 > **이전 마일스톤 (2026-06-04): 운영-가시성 23슬라이스 (Phase AET → AFP).** 단일 슬라이스-단위 세션(web 전용, 코어/서버 변화 0, 매 슬라이스 tsc clean + dev 200). run 디버그(로그/오류 copy·카운트·records delta·DLQ count·heartbeat liveness·running 경과 3 surface) · 실패 triage error_class 5 surface · Last run 컬럼 5 surface · 헬스 signal→action 양축(schedules/sensors: 컬럼→대시보드 신호→필터+deeplink) · 분석가 asset 행수 delta · audit my-actions · builder dry-run 경고 수.
 >

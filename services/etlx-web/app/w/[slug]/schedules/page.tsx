@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { CronExpressionParser } from "cron-parser";
 import { cronHuman } from "@/lib/cron";
 import {
@@ -205,6 +205,16 @@ export default function SchedulesPage() {
   const [statusFilter, setStatusFilter] = useState<"" | "active" | "paused">(
     "",
   );
+  /** Phase AFE (2026-06-04) — Last run axis filter (mirrors pipelines
+   *  ADA), URL-presettable via ``?lastRun=failed`` so the dashboard
+   *  AFD "N failing" signal can deep-link to the actionable subset. */
+  const searchParams = useSearchParams();
+  const [lastRunFilter, setLastRunFilter] = useState<
+    "" | "never" | "failed" | "ok"
+  >(() => {
+    const v = searchParams.get("lastRun");
+    return v === "never" || v === "failed" || v === "ok" ? v : "";
+  });
 
   const filteredRows = useMemo(() => {
     if (!rows) return null;
@@ -219,9 +229,15 @@ export default function SchedulesPage() {
         return false;
       if (statusFilter === "active" && !r.is_active) return false;
       if (statusFilter === "paused" && r.is_active) return false;
+      if (lastRunFilter) {
+        const run = lastRunByPipeline.get(r.pipeline_id) ?? null;
+        if (lastRunFilter === "never" && run !== null) return false;
+        if (lastRunFilter === "failed" && run?.status !== "failed") return false;
+        if (lastRunFilter === "ok" && run?.status !== "succeeded") return false;
+      }
       return true;
     });
-  }, [rows, search, statusFilter]);
+  }, [rows, search, statusFilter, lastRunFilter, lastRunByPipeline]);
 
   async function refresh(workspaceId: string) {
     try {
@@ -387,9 +403,11 @@ export default function SchedulesPage() {
         ) : null}
 
         {/* Phase ABE (2026-06-01) — search + status filter. Hidden
-            below 5 rows so a fresh workspace stays uncluttered. */}
-        {rows !== null && rows.length > 5 ? (
-          <div className="grid items-end gap-2 sm:grid-cols-[1fr_auto_auto]">
+            below 5 rows so a fresh workspace stays uncluttered. Phase AFE
+            (2026-06-04) — also shown when a Last run filter is preset via
+            URL (dashboard AFD deep-link) so it stays adjustable. */}
+        {rows !== null && (rows.length > 5 || lastRunFilter) ? (
+          <div className="grid items-end gap-2 sm:grid-cols-[1fr_auto_auto_auto]">
             <Input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -406,13 +424,32 @@ export default function SchedulesPage() {
               <option value="active">{t("schedules.filterStatusActive")}</option>
               <option value="paused">{t("schedules.filterStatusPaused")}</option>
             </select>
-            {search || statusFilter ? (
+            {/* Phase AFE — Last run axis filter (reuses migrations labels,
+                like pipelines ADA). */}
+            <select
+              value={lastRunFilter}
+              onChange={(e) =>
+                setLastRunFilter(
+                  e.target.value as "" | "never" | "failed" | "ok",
+                )
+              }
+              className="h-10 rounded-md border border-border-subtle bg-elevated px-2 text-sm text-text focus-visible:border-accent focus-visible:outline-none"
+            >
+              <option value="">{t("migrations.filterLastRunAll")}</option>
+              <option value="never">{t("migrations.filterLastRunNever")}</option>
+              <option value="failed">
+                {t("migrations.filterLastRunFailed")}
+              </option>
+              <option value="ok">{t("migrations.filterLastRunOk")}</option>
+            </select>
+            {search || statusFilter || lastRunFilter ? (
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => {
                   setSearch("");
                   setStatusFilter("");
+                  setLastRunFilter("");
                 }}
               >
                 {t("common.clear")}
@@ -428,7 +465,7 @@ export default function SchedulesPage() {
             </div>
           ) : filteredRows !== null &&
             filteredRows.length === 0 &&
-            (search || statusFilter) ? (
+            (search || statusFilter || lastRunFilter) ? (
             // Phase ACQ (2026-06-04) — only short-circuit to the
             // no-match message when a filter is active. A genuinely
             // empty list (no schedules, no filter) must fall through to

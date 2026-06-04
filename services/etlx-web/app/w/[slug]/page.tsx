@@ -371,7 +371,16 @@ export default function WorkspaceHomePage() {
             label={t("overview.activeSchedules")}
             value={schedules ? activeSchedules : undefined}
             icon={<CalendarClockIcon size={18} />}
-            href={ws ? `/w/${ws.slug}/schedules` : "#"}
+            // Phase AFE (2026-06-04) — when the signal is "N failing",
+            // deep-link to the pre-filtered subset (ADH/ADI/ADK/ADT pattern)
+            // so the click lands on the actionable rows.
+            href={
+              ws
+                ? failingSchedules > 0
+                  ? `/w/${ws.slug}/schedules?lastRun=failed`
+                  : `/w/${ws.slug}/schedules`
+                : "#"
+            }
             sub={
               // Phase AFD (2026-06-04) — a failing active schedule is the
               // most urgent signal, so it wins over the forward-looking

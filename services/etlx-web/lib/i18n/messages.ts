@@ -969,7 +969,8 @@ export const en = {
   "runDetail.logLevel": "Level",
   "runDetail.logLevelAll": "All",
   "runDetail.logLevelShowing": "{shown} of {total}",
-  "runDetail.noLogsAtLevel": "No logs at this level.",
+  "runDetail.noLogsAtLevel": "No logs match the filters.",
+  "runDetail.logSearchPlaceholder": "Search logs…",
   // Phase M (2026-05-26) — per-node log filtering.
   "runDetail.noLogsForNode": "No logs from this node yet.",
   "runDetail.filterByNodeTitle": "Show only logs from {node}",
@@ -2117,7 +2118,8 @@ export const ko: Messages = {
   "runDetail.logLevel": "레벨",
   "runDetail.logLevelAll": "전체",
   "runDetail.logLevelShowing": "{total}개 중 {shown}개",
-  "runDetail.noLogsAtLevel": "이 레벨의 로그가 없습니다.",
+  "runDetail.noLogsAtLevel": "필터에 맞는 로그가 없습니다.",
+  "runDetail.logSearchPlaceholder": "로그 검색…",
   // Phase M (2026-05-26) — 노드별 로그 필터.
   "runDetail.noLogsForNode": "이 노드에서 발생한 로그가 아직 없습니다.",
   "runDetail.filterByNodeTitle": "{node} 노드의 로그만 표시",

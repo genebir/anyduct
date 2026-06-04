@@ -665,6 +665,7 @@ function LogView({
   t: Translate;
 }) {
   const [minLevel, setMinLevel] = useState<LogLevel | "">("");
+  const [logSearch, setLogSearch] = useState("");
   if (logs === null) {
     return (
       <div className="py-8 text-center text-sm text-text-muted">
@@ -682,12 +683,24 @@ function LogView({
   // Phase AER (2026-06-04) — client-side "min level" filter over the
   // already-fetched logs, so an operator debugging a noisy run can jump
   // straight to the warnings/errors without scrolling past info lines.
-  const shown = minLevel
-    ? logs.filter((e) => LEVEL_ORDER[e.level] >= LEVEL_ORDER[minLevel])
-    : logs;
+  // Phase AER (level) + AES (text search) — both client-side over the
+  // already-fetched logs; compose with the server-side node filter (M).
+  const q = logSearch.trim().toLowerCase();
+  const shown = logs.filter(
+    (e) =>
+      (!minLevel || LEVEL_ORDER[e.level] >= LEVEL_ORDER[minLevel]) &&
+      (!q || e.message.toLowerCase().includes(q)),
+  );
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-center gap-1.5 text-xs text-text-muted">
+      <div className="flex flex-wrap items-center gap-1.5 text-xs text-text-muted">
+        {/* Phase AES — message substring search. */}
+        <input
+          value={logSearch}
+          onChange={(e) => setLogSearch(e.target.value)}
+          placeholder={t("runDetail.logSearchPlaceholder")}
+          className="h-7 w-48 rounded-md border border-border-subtle bg-elevated px-2 text-xs text-text focus-visible:border-accent focus-visible:outline-none"
+        />
         <span>{t("runDetail.logLevel")}</span>
         <select
           value={minLevel}
@@ -699,7 +712,7 @@ function LogView({
           <option value="warning">warning+</option>
           <option value="error">error</option>
         </select>
-        {minLevel ? (
+        {minLevel || q ? (
           <span>
             {t("runDetail.logLevelShowing", {
               shown: shown.length,

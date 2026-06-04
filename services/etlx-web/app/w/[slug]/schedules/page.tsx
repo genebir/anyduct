@@ -344,11 +344,18 @@ export default function SchedulesPage() {
             <div className="py-12 text-center text-sm text-text-muted">
               {t("common.loading")}
             </div>
-          ) : filteredRows !== null && filteredRows.length === 0 ? (
+          ) : filteredRows !== null &&
+            filteredRows.length === 0 &&
+            (search || statusFilter) ? (
+            // Phase ACQ (2026-06-04) — only short-circuit to the
+            // no-match message when a filter is active. A genuinely
+            // empty list (no schedules, no filter) must fall through to
+            // the DataTable so its EmptyState (with the create CTA)
+            // renders — previously this branch caught it and showed
+            // "Loading…" forever. Matches the assets / connections
+            // pattern.
             <div className="py-8 text-center text-sm text-text-muted">
-              {search || statusFilter
-                ? t("schedules.searchNoMatch")
-                : t("common.loading")}
+              {t("schedules.searchNoMatch")}
             </div>
           ) : (
             <DataTable

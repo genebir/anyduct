@@ -240,6 +240,24 @@ export default function WorkspaceHomePage() {
     ).length;
   }, [sensors, pipelines]);
 
+  // Phase AFG (2026-06-04) — active sensors whose target pipeline's most
+  // recent run failed. A sensor firing into a pipeline that fails every
+  // run is a top-priority signal (parallel to failingSchedules, AFD).
+  // Heuristic over the recent runs window (dashboard fetches the last 50).
+  const failingSensors = useMemo(() => {
+    if (!sensors || !runs) return 0;
+    const lastByPipeline = new Map<string, RunSummary>();
+    for (const r of runs) {
+      if (!lastByPipeline.has(r.pipeline_id)) lastByPipeline.set(r.pipeline_id, r);
+    }
+    return sensors.filter(
+      (s) =>
+        s.is_active &&
+        s.target_pipeline_id &&
+        lastByPipeline.get(s.target_pipeline_id)?.status === "failed",
+    ).length;
+  }, [sensors, runs]);
+
   // Phase ACY (2026-06-04) — count connections no pipeline references,
   // a cleanup signal for the operator. Reuses ACL's usage index over
   // the pipelines + connections the dashboard already fetched, so no
@@ -403,24 +421,30 @@ export default function WorkspaceHomePage() {
             value={sensors ? activeSensors : undefined}
             icon={<RadarIcon size={18} />}
             // Phase ADK (2026-06-04) — deep-link to the orphaned subset
-            // when that's the signal (ADH/ADI pattern).
+            // when that's the signal (ADH/ADI pattern). Phase AFG — a
+            // failing target wins, but has no list filter yet so it links
+            // to the plain list (the AFF Last run column shows them).
             href={
               ws
-                ? orphanedSensors > 0
-                  ? `/w/${ws.slug}/sensors?filter=orphaned`
-                  : `/w/${ws.slug}/sensors`
+                ? failingSensors > 0
+                  ? `/w/${ws.slug}/sensors`
+                  : orphanedSensors > 0
+                    ? `/w/${ws.slug}/sensors?filter=orphaned`
+                    : `/w/${ws.slug}/sensors`
                 : "#"
             }
             sub={
-              // Orphaned is the more urgent signal — prefer it, then
-              // fall back to the paused count.
-              orphanedSensors > 0
-                ? t("overview.sensorsOrphaned", { n: orphanedSensors })
-                : sensors && sensors.length > 0
-                  ? t("overview.pausedSensors", {
-                      n: sensors.length - activeSensors,
-                    })
-                  : undefined
+              // Phase AFG (2026-06-04) — a failing target is the most
+              // urgent signal, then orphaned (ADK), then the paused count.
+              failingSensors > 0
+                ? t("overview.sensorsFailing", { n: failingSensors })
+                : orphanedSensors > 0
+                  ? t("overview.sensorsOrphaned", { n: orphanedSensors })
+                  : sensors && sensors.length > 0
+                    ? t("overview.pausedSensors", {
+                        n: sensors.length - activeSensors,
+                      })
+                    : undefined
             }
           />
           <StatCard

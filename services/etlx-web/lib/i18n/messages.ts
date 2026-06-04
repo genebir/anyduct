@@ -397,6 +397,8 @@ export const en = {
   "overview.paused": "{n} paused",
   // Phase AFD (2026-06-04) — active schedules whose last run failed.
   "overview.schedulesFailing": "{n} failing",
+  // Phase AFG (2026-06-04) — active sensors whose target's last run failed.
+  "overview.sensorsFailing": "{n} target failing",
   "overview.runsToday": "Runs today",
   "overview.connectionsUnused": "{n} unused",
   "overview.pipelinesBroken": "{n} broken",
@@ -1587,6 +1589,8 @@ export const ko: Messages = {
   "overview.paused": "{n}개 일시정지",
   // Phase AFD (2026-06-04) — 마지막 run이 실패한 활성 스케줄.
   "overview.schedulesFailing": "{n}개 실패 중",
+  // Phase AFG (2026-06-04) — 타겟의 마지막 run이 실패한 활성 센서.
+  "overview.sensorsFailing": "타겟 {n}개 실패 중",
   "overview.runsToday": "오늘 실행",
   "overview.connectionsUnused": "{n}개 미사용",
   "overview.pipelinesBroken": "{n}개 연결 누락",

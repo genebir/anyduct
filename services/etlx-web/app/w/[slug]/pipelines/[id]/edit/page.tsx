@@ -815,6 +815,13 @@ function DryRunPanel({
           <span className="text-text-muted">
             {t("builder.connectorsChecked", { count: checkedCount })}
           </span>
+          {/* Phase AFO (2026-06-04) — advisory warning count up front so
+              the user sees there are lint nudges without scrolling. */}
+          {result.warnings && result.warnings.length > 0 ? (
+            <span className="text-warning">
+              {t("builder.dryRunWarnings", { count: result.warnings.length })}
+            </span>
+          ) : null}
         </div>
         <button
           type="button"

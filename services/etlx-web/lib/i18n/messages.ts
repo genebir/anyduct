@@ -629,6 +629,8 @@ export const en = {
   "builder.dryRunOk": "OK",
   "builder.dryRunFailedCount": "{failed} of {total} connector(s) failed.",
   "builder.connectorsChecked": "({count} connector(s) checked)",
+  // Phase AFO (2026-06-04) — advisory warning count in the dry-run header.
+  "builder.dryRunWarnings": "{count} advisory",
   "builder.configErrors": "Config errors",
   "builder.saved": "Saved pipeline v{version}",
   "builder.operators": "Operators",
@@ -1819,6 +1821,8 @@ export const ko: Messages = {
   "builder.dryRunOk": "OK",
   "builder.dryRunFailedCount": "{total}개 중 {failed}개 커넥터 실패",
   "builder.connectorsChecked": "(커넥터 {count}개 확인됨)",
+  // Phase AFO (2026-06-04) — dry-run 헤더의 권고 경고 수.
+  "builder.dryRunWarnings": "권고 {count}개",
   "builder.configErrors": "구성 오류",
   "builder.saved": "파이프라인 v{version} 저장됨",
   "builder.operators": "오퍼레이터",

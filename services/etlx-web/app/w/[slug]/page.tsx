@@ -481,12 +481,16 @@ export default function WorkspaceHomePage() {
                         <div className="truncate font-mono text-[11px] text-text-muted">
                           {t("overview.run", { id: r.id.slice(0, 8) })}
                           {"  ·  "}
+                          {/* Phase AEK — distinguish auto (system-fired)
+                              from manual; previously both-null fell to
+                              "manual" incorrectly. */}
                           {r.schedule_id
                             ? t("overview.scheduled")
-                            : r.triggered_by_user_id &&
-                                r.triggered_by_user_id === currentUser?.id
-                              ? t("overview.manualByYou")
-                              : t("overview.manual")}
+                            : r.triggered_by_user_id
+                              ? r.triggered_by_user_id === currentUser?.id
+                                ? t("overview.manualByYou")
+                                : t("overview.manual")
+                              : t("overview.auto")}
                         </div>
                       </div>
                       <div className="text-right text-xs text-text-secondary">

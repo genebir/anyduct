@@ -408,6 +408,7 @@ export const en = {
   "overview.pipelineRef": "pipeline {id}…",
   "overview.scheduled": "scheduled",
   "overview.manual": "manual",
+  "overview.auto": "auto",
   // Phase ABU/2 (2026-06-01) — friendly self
   "overview.manualByYou": "by you",
   "overview.recentFailures": "Recent failures",
@@ -892,6 +893,8 @@ export const en = {
   "runs.triggerSchedule": "schedule",
   "runs.triggerScheduleTitle": "Auto-fired by a cron schedule",
   "runs.triggerManual": "manual",
+  "runs.triggerAuto": "auto",
+  "runs.triggerAutoTitle": "System-triggered — a sensor or an upstream asset's auto-materialize",
   "runs.triggerManualTitle": "User-triggered (Run now)",
   // Phase ABU (2026-06-01) — friendly self-actor on manual trigger
   "runs.triggerManualByYou": "by you",
@@ -1565,6 +1568,7 @@ export const ko: Messages = {
   "overview.pipelineRef": "파이프라인 {id}…",
   "overview.scheduled": "예약됨",
   "overview.manual": "수동",
+  "overview.auto": "자동",
   // Phase ABU/2 (2026-06-01) — 본인 친화
   "overview.manualByYou": "내가",
   "overview.recentFailures": "최근 실패",
@@ -2034,6 +2038,8 @@ export const ko: Messages = {
   "runs.triggerSchedule": "스케줄",
   "runs.triggerScheduleTitle": "cron 스케줄이 자동 발화",
   "runs.triggerManual": "수동",
+  "runs.triggerAuto": "자동",
+  "runs.triggerAutoTitle": "시스템 트리거 — 센서 또는 상류 자산의 자동 머티리얼라이즈",
   "runs.triggerManualTitle": "사용자가 수동 실행 (Run now)",
   // Phase ABU (2026-06-01) — 본인이 친 수동 실행 친화 표시
   "runs.triggerManualByYou": "내가 실행",

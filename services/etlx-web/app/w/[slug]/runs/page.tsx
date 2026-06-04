@@ -12,6 +12,7 @@ import {
   RotateCcwIcon,
   WorkflowIcon,
   XIcon,
+  ZapIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Header } from "@/components/shell/header";
@@ -114,7 +115,19 @@ function buildColumns(
             </span>
           );
         }
-        return <span className="text-text-muted">—</span>;
+        // Phase AEK (2026-06-04) — neither a schedule nor a user fired
+        // this, so it was system-triggered (a sensor or an upstream
+        // asset's auto-materialize, ADR-0037/0041). "auto" reads clearer
+        // than a bare "—", which looks like missing data.
+        return (
+          <span
+            className="inline-flex h-5 items-center gap-1 rounded-sm bg-overlay px-1.5 text-[11px] text-text-muted"
+            title={t("runs.triggerAutoTitle")}
+          >
+            <ZapIcon size={11} />
+            {t("runs.triggerAuto")}
+          </span>
+        );
       },
     },
     {

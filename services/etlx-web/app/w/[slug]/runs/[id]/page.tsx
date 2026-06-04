@@ -718,9 +718,35 @@ function LogView({
       toast.error(t("runDetail.logsCopyFailed"));
     }
   }
+  // Phase AEU (2026-06-04) — at-a-glance error/warning tallies over the
+  // FULL fetched log set (not the filtered view), so opening a failed run
+  // immediately answers "did anything go wrong?" without scrolling. Each
+  // chip is a one-click shortcut into the AER min-level filter.
+  const errorCount = logs.filter((e) => e.level === "error").length;
+  const warnCount = logs.filter((e) => e.level === "warning").length;
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-1.5 text-xs text-text-muted">
+        {errorCount > 0 ? (
+          <button
+            type="button"
+            onClick={() => setMinLevel("error")}
+            title={t("runDetail.filterToErrors")}
+            className="inline-flex items-center rounded-sm border border-error/40 bg-error/10 px-2 py-1 font-medium text-error hover:bg-error/20"
+          >
+            {t("runDetail.logErrorCount", { count: errorCount })}
+          </button>
+        ) : null}
+        {warnCount > 0 ? (
+          <button
+            type="button"
+            onClick={() => setMinLevel("warning")}
+            title={t("runDetail.filterToWarnings")}
+            className="inline-flex items-center rounded-sm border border-warning/40 bg-warning/10 px-2 py-1 font-medium text-warning hover:bg-warning/20"
+          >
+            {t("runDetail.logWarnCount", { count: warnCount })}
+          </button>
+        ) : null}
         {/* Phase AES — message substring search. */}
         <input
           value={logSearch}

@@ -293,3 +293,53 @@ async def test_aef_graph_sql_exec_node_missing_connection_fails_dry_run(
         body = dry.json()
         assert body["ok"] is False, body
         assert "ghost_wh" in " ".join(body["errors"]), body
+
+
+async def test_aep_dry_run_returns_lint_warnings(session: AsyncSession, tmp_path) -> None:
+    """A custom_python transform without ``column_mapping`` makes the
+    server emit an advisory lint warning (Phase DD). This pins that the
+    dry-run REST *response* carries ``warnings`` — the data the web now
+    renders in the builder DryRunPanel + migration card (AEN/AEO). Without
+    this the UI surfaces would always be empty.
+    """
+    app = _build_app(session)
+    async with _client(app) as client:
+        h = await _login(session, client, email="aep@example.com")
+        ws_id = await _make_ws(client, h, slug="aep-ws")
+        # Connections must exist or dry-run early-returns before linting.
+        await _make_conn(client, h, ws_id, name="src", db=str(tmp_path / "src.db"))
+        await _make_conn(client, h, ws_id, name="dst", db=str(tmp_path / "dst.db"))
+
+        pipe = (
+            await client.post(
+                f"/workspaces/{ws_id}/pipelines",
+                headers=h,
+                json={
+                    "name": "lint_me",
+                    "config": {
+                        "name": "lint_me",
+                        "mode": "batch",
+                        "source": {"connection": "src", "query": "SELECT 1 AS n"},
+                        # custom_python transform with no column_mapping →
+                        # DD's column_mapping_recommended advisory fires.
+                        "transforms": [
+                            {
+                                "type": "custom_python",
+                                "code": "def transform(record):\n    return record\n",
+                            }
+                        ],
+                        "sink": {"connection": "dst", "table": "out"},
+                    },
+                },
+            )
+        ).json()
+        pipe_id = pipe["id"]
+
+        dry = await client.post(f"/workspaces/{ws_id}/pipelines/{pipe_id}/dry-run", headers=h)
+        assert dry.status_code == 200, dry.text
+        body = dry.json()
+        # Warnings are advisory — present regardless of ok.
+        assert "warnings" in body, body
+        assert len(body["warnings"]) > 0, body
+        joined = " ".join(w["message"] for w in body["warnings"]).lower()
+        assert "column_mapping" in joined or "column mapping" in joined, body

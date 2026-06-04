@@ -30,14 +30,17 @@ import { CodeEditor } from "@/components/builder/code-editor";
 import {
   ApiError,
   pipelinesApi,
+  runsApi,
   sensorsApi,
   type PipelineSummary,
+  type RunSummary,
   type SensorCheckResponse,
   type SensorCreateBody,
   type SensorSummary,
   type SensorUpdateBody,
 } from "@/lib/api";
 import { relativeTime, absoluteTime } from "@/lib/format-time";
+import { StatusBadge } from "@/components/ui/status-badge";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import { useLocale } from "@/components/providers/locale-provider";
 import type { Messages } from "@/lib/i18n/messages";
@@ -118,6 +121,7 @@ function buildColumns(
   onDelete: (s: SensorSummary) => void,
   checking: string | null,
   pipelineNameById: Map<string, string>,
+  lastRunByPipeline: Map<string, RunSummary>,
 ): Column<SensorSummary>[] {
   return [
     { key: "name", header: t("sensors.colName"), cell: (s) => s.name },
@@ -141,6 +145,43 @@ function buildColumns(
         ) : (
           <span className="text-warning">{t("sensors.orphaned")}</span>
         ),
+    },
+    {
+      // Phase AFF (2026-06-04) — last run of the sensor's TARGET pipeline.
+      // A sensor can fire on schedule yet enqueue runs that fail every
+      // time; that's invisible on the sensors page until now. Mirrors the
+      // Last run column on pipelines (ACS) / schedules (AFC).
+      key: "last_run",
+      header: t("pipelines.colLastRun"),
+      cell: (s) => {
+        const run = s.target_pipeline_id
+          ? lastRunByPipeline.get(s.target_pipeline_id)
+          : undefined;
+        if (!run) {
+          return (
+            <span className="text-xs text-text-muted">
+              {t("pipelines.neverRun")}
+            </span>
+          );
+        }
+        const when = run.finished_at ?? run.started_at ?? run.created_at;
+        return (
+          <div className="flex items-center gap-2 text-xs">
+            <StatusBadge status={run.status} />
+            <span className="text-text-muted" title={absoluteTime(when)}>
+              {relativeTime(when, t)}
+            </span>
+            {run.error_class ? (
+              <span
+                className="max-w-[7rem] truncate font-mono text-[10px] text-error"
+                title={run.error_class}
+              >
+                {run.error_class}
+              </span>
+            ) : null}
+          </div>
+        );
+      },
     },
     {
       key: "interval",
@@ -239,6 +280,11 @@ export default function SensorsPage() {
   const { t } = useLocale();
   const [pipelines, setPipelines] = useState<PipelineSummary[]>([]);
   const [rows, setRows] = useState<SensorSummary[] | null>(null);
+  /** Phase AFF (2026-06-04) — most recent run per pipeline_id, for the
+   *  target's Last run column. Mirrors the pipelines list (ACS). */
+  const [lastRunByPipeline, setLastRunByPipeline] = useState<
+    Map<string, RunSummary>
+  >(new Map());
   const [form, setForm] = useState<FormState>({ kind: "closed" });
   const [pendingDelete, setPendingDelete] = useState<SensorSummary | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -298,6 +344,33 @@ export default function SensorsPage() {
   useEffect(() => {
     if (!ws) return;
     void refresh(ws.id);
+  }, [ws]);
+
+  // Phase AFF (2026-06-04) — poll workspace runs and keep the most recent
+  // per pipeline (same pattern as pipelines ACS / schedules AFC).
+  // Soft-fail: the list still renders without the Last run chip.
+  useEffect(() => {
+    if (!ws) return;
+    let cancelled = false;
+    const fetchRuns = async () => {
+      try {
+        const list = await runsApi.list(ws.id, { limit: 200 });
+        if (cancelled) return;
+        const m = new Map<string, RunSummary>();
+        for (const r of list) {
+          if (!m.has(r.pipeline_id)) m.set(r.pipeline_id, r);
+        }
+        setLastRunByPipeline(m);
+      } catch {
+        // soft-fail
+      }
+    };
+    void fetchRuns();
+    const handle = setInterval(() => void fetchRuns(), 10000);
+    return () => {
+      cancelled = true;
+      clearInterval(handle);
+    };
   }, [ws]);
 
   async function onCheck(sensor: SensorSummary) {
@@ -525,6 +598,7 @@ export default function SensorsPage() {
                 (s) => setPendingDelete(s),
                 checking,
                 pipelineNameById,
+                lastRunByPipeline,
               )}
               onRowContextMenu={(row, e) => {
                 rowMenuTargetRef.current = row;

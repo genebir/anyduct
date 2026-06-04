@@ -1260,6 +1260,20 @@ function DlqRecordsCard({
     return seen;
   }, [data]);
 
+  // Phase DLQ-3 (2026-06-04) — copy the records as JSON for a ticket.
+  async function copyRecords() {
+    if (!data?.records) return;
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(data.records, null, 2));
+      toast.success(t("runDetail.dlqCopied"));
+    } catch {
+      toast.error(t("runDetail.logsCopyFailed"));
+    }
+  }
+
+  const btn =
+    "rounded-sm border border-border-subtle bg-overlay px-2 py-1 text-xs text-text-secondary hover:text-text disabled:opacity-40";
+
   return (
     <Card>
       <CardHeader
@@ -1270,13 +1284,28 @@ function DlqRecordsCard({
             : undefined
         }
         action={
-          <button
-            type="button"
-            onClick={toggle}
-            className="rounded-sm border border-border-subtle bg-overlay px-2 py-1 text-xs text-text-secondary hover:text-text"
-          >
-            {open ? t("runDetail.collapse") : t("runDetail.view")}
-          </button>
+          <div className="flex items-center gap-2">
+            {/* Phase DLQ-3 — copy JSON + refresh (the DLQ table grows as
+                later runs route more records; the lazy fetch is cached). */}
+            {open && data?.available && data.records.length > 0 ? (
+              <button type="button" onClick={() => void copyRecords()} className={btn}>
+                {t("runDetail.copy")}
+              </button>
+            ) : null}
+            {open ? (
+              <button
+                type="button"
+                onClick={() => void load()}
+                disabled={loading}
+                className={btn}
+              >
+                {t("common.refresh")}
+              </button>
+            ) : null}
+            <button type="button" onClick={toggle} className={btn}>
+              {open ? t("runDetail.collapse") : t("runDetail.view")}
+            </button>
+          </div>
         }
       />
       {open ? (

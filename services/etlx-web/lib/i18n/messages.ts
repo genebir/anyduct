@@ -1009,6 +1009,8 @@ export const en = {
     "The DLQ connection no longer exists in this workspace.",
   "runDetail.dlqReasonReadFailed": "Couldn't read the DLQ table.",
   "runDetail.dlqReasonGeneric": "DLQ records aren't available to preview.",
+  // Phase DLQ-3 (2026-06-04) — copy the DLQ records as JSON.
+  "runDetail.dlqCopied": "Copied DLQ records to clipboard",
   // Phase AEU (2026-06-04) — at-a-glance error/warning counts; click filters.
   "runDetail.logErrorCount": "{count} errors",
   "runDetail.logWarnCount": "{count} warnings",
@@ -2208,6 +2210,8 @@ export const ko: Messages = {
     "DLQ connection이 이 워크스페이스에 더 이상 존재하지 않습니다.",
   "runDetail.dlqReasonReadFailed": "DLQ 테이블을 읽지 못했습니다.",
   "runDetail.dlqReasonGeneric": "미리볼 수 있는 DLQ 레코드가 없습니다.",
+  // Phase DLQ-3 (2026-06-04) — DLQ 레코드를 JSON으로 복사.
+  "runDetail.dlqCopied": "DLQ 레코드를 클립보드에 복사했습니다",
   // Phase AEU (2026-06-04) — 오류/경고 개수 한눈에; 클릭 시 필터.
   "runDetail.logErrorCount": "오류 {count}개",
   "runDetail.logWarnCount": "경고 {count}개",

@@ -135,6 +135,7 @@ uv run mypy etl_plugins
 > - **AFV**: 대시보드 Recent runs duration도 running이면 live 경과 → running 경과 표기 4 surface(runs list/run detail/migration detail/dashboard) 정합.
 > - **DLQ-9 (서버 e2e)**: `dlq_recommended`(DLQ-8)가 dry-run REST 응답 warnings에 실리는지(+dlq 설정 시 사라지는 mirror) HTTP 계약 검증. 신규 서버 it 2. dogfood로 cancel-confirm/members-confirm/runs-retry-menu 등 다수 surface 이미 안전 확인(변경 0).
 > - **AFW (서버 e2e)**: 운영자 backfill 여정 HTTP→worker→data 전체 — POST /backfill{from,to}→drain→sink에 (from,to] 윈도우 행만 안착(나머지 제외) 실증. 기존엔 enqueue shape(run_actions)+윈도우 로직(JJ service-level)만 따로 덮음. 신규 서버 it 1. 커버리지 감사로 sensor /check(+RR tick→drain), stream worker(fakes) 이미 충분 확인.
+> - **AFX (서버 e2e)**: retry-after-failure 운영자 여정 HTTP — sink 테이블 없음→FAILED(error_class)→테이블 생성→POST /retry→새 run SUCCEEDED+3행+result_json.retry_of 링크+원본 FAILED 유지. 시뮬 status flip 아닌 실제 실패→복구. retry 응답이 RunSummary(no result_json)임을 명문화. 신규 서버 it 1.
 >
 > **이전 마일스톤 (2026-06-04): 운영-가시성 23슬라이스 (Phase AET → AFP).** 단일 슬라이스-단위 세션(web 전용, 코어/서버 변화 0, 매 슬라이스 tsc clean + dev 200). run 디버그(로그/오류 copy·카운트·records delta·DLQ count·heartbeat liveness·running 경과 3 surface) · 실패 triage error_class 5 surface · Last run 컬럼 5 surface · 헬스 signal→action 양축(schedules/sensors: 컬럼→대시보드 신호→필터+deeplink) · 분석가 asset 행수 delta · audit my-actions · builder dry-run 경고 수.
 >

@@ -589,6 +589,16 @@ function RecentRunsCard({
                     <title>{tx("migrations.runTriggerAuto")}</title>
                   </ZapIcon>
                 )}
+                {/* Phase AFA (2026-06-04) — failure type at a glance, the
+                    detail-page parallel to the list chips (AEV/AEW/AEX). */}
+                {r.error_class ? (
+                  <span
+                    className="max-w-[8rem] shrink-0 truncate font-mono text-[10px] text-error"
+                    title={r.error_class}
+                  >
+                    {r.error_class}
+                  </span>
+                ) : null}
                 <Link
                   href={`/w/${slug}/runs/${r.id}`}
                   className="flex-1 truncate font-mono text-xs text-text-secondary hover:text-accent"

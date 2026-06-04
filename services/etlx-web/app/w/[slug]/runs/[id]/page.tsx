@@ -34,6 +34,7 @@ import {
   type RunStatus,
 } from "@/lib/api";
 import { RunDagGraph } from "@/components/runs/run-dag-graph";
+import { relativeTime, absoluteTime } from "@/lib/format-time";
 import { migrationSummaryOf } from "@/lib/migration-utils";
 import { useCurrentUser } from "@/components/providers/auth-provider";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
@@ -972,6 +973,15 @@ function Summary({
       <ExternalLinkIcon size={12} />
     </Link>
   );
+  // Phase AFI (2026-06-04) — heartbeat liveness. A running run heartbeats
+  // ~every 10s; if the last beat is older than 60s the worker may be
+  // stalled (the ZombieReaper will eventually fail it). Flag it so the
+  // operator sees a stuck run without waiting for the reaper. Re-evaluated
+  // on each poll while the run is live.
+  const heartbeatStale =
+    run.status === "running" &&
+    run.heartbeat_at != null &&
+    Date.now() - Date.parse(run.heartbeat_at) > 60_000;
   return (
     <dl className="grid grid-cols-1 gap-3 text-sm">
       <Field label={t("common.status")} value={<StatusBadge status={run.status} />} />
@@ -1069,7 +1079,18 @@ function Summary({
         <Field label={t("runDetail.worker")} value={<code>{run.worker_id}</code>} />
       ) : null}
       {run.heartbeat_at ? (
-        <Field label={t("runDetail.heartbeat")} value={fmt(run.heartbeat_at)} />
+        <Field
+          label={t("runDetail.heartbeat")}
+          value={
+            <span
+              className={heartbeatStale ? "text-warning" : "text-text-secondary"}
+              title={absoluteTime(run.heartbeat_at)}
+            >
+              {relativeTime(run.heartbeat_at, t)}
+              {heartbeatStale ? ` · ${t("runDetail.heartbeatStale")}` : null}
+            </span>
+          }
+        />
       ) : null}
     </dl>
   );

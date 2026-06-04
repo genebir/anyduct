@@ -780,6 +780,31 @@ function Summary({
   ) : (
     <code>{run.pipeline_id.slice(0, 8)}…</code>
   );
+  // Phase AEI (2026-06-04) — run origin/lineage from result_json (the
+  // server returns it on RunDetail but the page never surfaced it). Tells
+  // the operator *why* this run exists: a manual retry, an auto-trigger
+  // off another run's materialization, or a backfill window.
+  const rj = (run.result_json ?? {}) as Record<string, unknown>;
+  const retryOf = typeof rj.retry_of === "string" ? rj.retry_of : null;
+  const triggerChain = Array.isArray(rj.trigger_chain)
+    ? (rj.trigger_chain.filter((x): x is string => typeof x === "string"))
+    : [];
+  const autoTriggerBy = triggerChain.length > 0 ? triggerChain[triggerChain.length - 1] : null;
+  const backfill =
+    rj.backfill && typeof rj.backfill === "object"
+      ? (rj.backfill as Record<string, unknown>)
+      : null;
+  const runHref = (rid: string) =>
+    workspaceSlug ? `/w/${workspaceSlug}/runs/${rid}` : "#";
+  const runLink = (rid: string) => (
+    <Link
+      href={runHref(rid)}
+      className="inline-flex items-center gap-1 text-accent hover:underline"
+    >
+      <code>{rid.slice(0, 8)}…</code>
+      <ExternalLinkIcon size={12} />
+    </Link>
+  );
   return (
     <dl className="grid grid-cols-1 gap-3 text-sm">
       <Field label={t("common.status")} value={<StatusBadge status={run.status} />} />
@@ -812,6 +837,27 @@ function Summary({
           )
         }
       />
+      {/* Phase AEI — run lineage (retry / auto-trigger / backfill). */}
+      {retryOf ? (
+        <Field label={t("runDetail.retryOf")} value={runLink(retryOf)} />
+      ) : null}
+      {autoTriggerBy ? (
+        <Field
+          label={t("runDetail.autoTriggeredBy")}
+          value={runLink(autoTriggerBy)}
+        />
+      ) : null}
+      {backfill ? (
+        <Field
+          label={t("runDetail.backfillWindow")}
+          value={
+            <code className="text-xs">
+              {String(backfill.cursor_from ?? "—")} →{" "}
+              {String(backfill.cursor_to ?? "—")}
+            </code>
+          }
+        />
+      ) : null}
       <Field label={t("runDetail.started")} value={fmt(run.started_at)} />
       <Field label={t("runDetail.finished")} value={fmt(run.finished_at)} />
       <Field label={t("common.duration")} value={fmtDuration(run.duration_seconds)} />

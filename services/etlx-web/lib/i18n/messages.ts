@@ -989,6 +989,9 @@ export const en = {
   "runDetail.metrics": "Metrics",
   "runDetail.points": "{count} point(s)",
   "runDetail.started": "Started",
+  "runDetail.retryOf": "Retry of",
+  "runDetail.autoTriggeredBy": "Auto-triggered by",
+  "runDetail.backfillWindow": "Backfill window",
   // Phase ABW (2026-06-01) — trigger source field
   "runDetail.triggerSource": "Triggered by",
   "runDetail.triggerScheduled": "schedule",
@@ -2123,6 +2126,9 @@ export const ko: Messages = {
   "runDetail.metrics": "메트릭",
   "runDetail.points": "{count}개 포인트",
   "runDetail.started": "시작",
+  "runDetail.retryOf": "재시도 원본",
+  "runDetail.autoTriggeredBy": "자동 트리거 출처",
+  "runDetail.backfillWindow": "백필 범위",
   // Phase ABW (2026-06-01) — 트리거 출처 필드
   "runDetail.triggerSource": "트리거",
   "runDetail.triggerScheduled": "스케줄",

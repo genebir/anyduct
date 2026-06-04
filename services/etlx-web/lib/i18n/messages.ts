@@ -1039,6 +1039,9 @@ export const en = {
   "runDetail.heartbeat": "Last heartbeat",
   // Phase AFI (2026-06-04) — running run whose heartbeat is >60s old.
   "runDetail.heartbeatStale": "may be stalled",
+  // Phase AFJ (2026-06-04) — live elapsed time for an in-flight run.
+  "runDetail.elapsedRunning": "running",
+  "runDetail.elapsedTitle": "Elapsed so far (run in progress)",
   "runDetail.noMetrics":
     "No metric points yet. Records counters land here after the first task finishes.",
   "runDetail.loadFailed": "Couldn't load run.",
@@ -2214,6 +2217,9 @@ export const ko: Messages = {
   "runDetail.heartbeat": "마지막 하트비트",
   // Phase AFI (2026-06-04) — 하트비트가 60초 이상 지난 running run.
   "runDetail.heartbeatStale": "멈췄을 수 있음",
+  // Phase AFJ (2026-06-04) — 진행 중 run의 실시간 경과 시간.
+  "runDetail.elapsedRunning": "진행 중",
+  "runDetail.elapsedTitle": "현재까지 경과 (run 진행 중)",
   "runDetail.noMetrics":
     "아직 메트릭 포인트가 없습니다. 레코드 카운터는 첫 태스크가 끝난 뒤 여기에 표시됩니다.",
   "runDetail.loadFailed": "실행을 불러올 수 없습니다.",

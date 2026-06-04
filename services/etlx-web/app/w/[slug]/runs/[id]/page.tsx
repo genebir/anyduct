@@ -982,6 +982,14 @@ function Summary({
     run.status === "running" &&
     run.heartbeat_at != null &&
     Date.now() - Date.parse(run.heartbeat_at) > 60_000;
+  // Phase AFJ (2026-06-04) — duration_seconds is null until the run
+  // finishes, so a running run showed "—". Show the live elapsed time
+  // (started_at → now), re-evaluated on each poll, so the operator can
+  // see how long an in-flight run has been going.
+  const runningElapsed =
+    run.status === "running" && run.started_at
+      ? (Date.now() - Date.parse(run.started_at)) / 1000
+      : null;
   return (
     <dl className="grid grid-cols-1 gap-3 text-sm">
       <Field label={t("common.status")} value={<StatusBadge status={run.status} />} />
@@ -1037,7 +1045,18 @@ function Summary({
       ) : null}
       <Field label={t("runDetail.started")} value={fmt(run.started_at)} />
       <Field label={t("runDetail.finished")} value={fmt(run.finished_at)} />
-      <Field label={t("common.duration")} value={fmtDuration(run.duration_seconds)} />
+      <Field
+        label={t("common.duration")}
+        value={
+          runningElapsed != null ? (
+            <span className="text-text-secondary" title={t("runDetail.elapsedTitle")}>
+              {fmtDuration(runningElapsed)} · {t("runDetail.elapsedRunning")}
+            </span>
+          ) : (
+            fmtDuration(run.duration_seconds)
+          )
+        }
+      />
       <Field
         label={t("runDetail.records")}
         value={

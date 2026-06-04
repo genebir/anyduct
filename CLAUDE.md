@@ -175,6 +175,8 @@ uv run mypy etl_plugins
 > - **AEO**: 빌더 dry-run warning(AEN) 클릭 시 해당 노드 포커스(location `graph.nodes.<id>` 파싱, ValidationBanner와 동일 UX) — 권고를 actionable하게.
 > - **AEP (서버 e2e)**: custom_python(column_mapping 없음) → dry-run REST가 warnings 반환 검증 → AEN/AEO 전체 데이터 흐름(서버 lint→REST→web) 입증. 신규 서버 시나리오 파일 누적 5 it(AEC1/AEC2/AEE/AEF/AEP).
 > - **AEQ**: connections name hover에 config 요약(비-secret만, `${SECRET}`→`***` 마스킹) — 같은 타입 connection 식별. 거의 미사용이던 config_json 안전 활용.
+> - **AER**: run 상세 로그 레벨 필터(전체/info+/warning+/error) — RunLogEntry의 기존 level 필드로 클라이언트 측 "min level" 필터. 실패 run 수백 줄에서 error/warning만 즉시. 노드 필터(M)+cap 안내(ADB)와 합성, "X of Y" + 빈 레벨 메시지.
+> - **AES**: run 상세 로그 텍스트 검색(message substring, 클라이언트 측) — 레벨(AER)+노드(M) 필터와 합성해 로그 디버깅 3축(검색/레벨/노드) 완성. "X of Y" + 빈 결과 메시지 generic화.
 >
 > **세션 green 확정(2026-06-04)**: 코어 단위 905 passed(코어 production 미변경, 회귀 0) · 신규 서버 시나리오 5 it green(testcontainers) · web tsc clean(매 슬라이스) · 실행 중 dev 서버 전 라우트 200 · production build 21 routes(반복). 검증 방법: dev 동시 실행으로 `next build` 금지(메모리), `tsc` + dev curl(런타임) + 서버 contract는 testcontainers e2e. ruff-format 커밋 중단은 `uv run ruff format` 사전 실행으로 회피.
 >

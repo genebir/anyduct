@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/context-menu";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { CodeEditor } from "@/components/builder/code-editor";
 import {
   ApiError,
   pipelinesApi,
@@ -40,7 +41,6 @@ import { relativeTime, absoluteTime } from "@/lib/format-time";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import { useLocale } from "@/components/providers/locale-provider";
 import type { Messages } from "@/lib/i18n/messages";
-import { cn } from "@/lib/cn";
 
 type Translate = (key: keyof Messages, vars?: Record<string, string | number>) => string;
 
@@ -666,18 +666,17 @@ function SensorForm({
         required
         help={t("sensors.fieldConfigHelp")}
       >
-        <textarea
+        {/* Phase AEG (2026-06-04) — Monaco JSON editor: real-time
+            squiggle validation + fullscreen, matching the builder's
+            JSON field (AEA). Uncontrolled — configText only ever
+            changes through this editor (type switch shows a hint, it
+            doesn't rewrite the config). */}
+        <CodeEditor
+          language="json"
           value={values.configText}
-          onChange={(e) => update("configText", e.target.value)}
-          rows={8}
-          spellCheck={false}
-          className={cn(
-            "min-h-32 w-full rounded-md border bg-elevated px-3 py-2 font-mono text-xs text-text",
-            "focus-visible:outline-none",
-            configError
-              ? "border-error focus-visible:border-error"
-              : "border-border-subtle focus-visible:border-accent",
-          )}
+          height={200}
+          tabSize={2}
+          onChange={(txt) => update("configText", txt)}
         />
         {configError ? (
           <p className="mt-1 text-xs text-error">{configError}</p>

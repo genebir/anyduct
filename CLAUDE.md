@@ -138,8 +138,17 @@ uv run mypy etl_plugins
 > - **ACZ**: runs 빈 상태에 "파이프라인으로 이동" CTA(온보딩 일관성).
 > - **ADA**: pipelines list "Last run" 축 필터(never/failed/ok — migrations ABI 평행, ACS 데이터 재사용).
 > - **ADB**: run detail 로그 1000줄 cap 안내(no-silent-truncation).
+> - **ADC**: pipelines list에서 누락 connection 참조 경고(삭제/리네임된 connection을 참조하는 파이프라인을 실행 전 포착).
+> - **ADD**: migrations list에서 누락 connection 참조 경고(ADC 평행, From→To 빨강+⚠).
+> - **ADE**: connection rename 시 사용 중 경고(EditForm usageCount) — connection 안전 라이프사이클 완성(생성→test→usage→rename→delete→orphan).
+> - **ADF**: schedules list cron에 cronstrue 사람-읽기 tooltip.
+> - **ADG**: `cronHuman`을 `lib/cron.ts`로 추출 + migrations schedule chip에도 적용.
+> - **ADH**: 대시보드 Migrations 카드 never-run 신호 → `?lastRun=never` deeplink.
+> - **ADI**: connections "unused" 필터 + 대시보드 Connections 카드 deeplink(`?usage=unused`).
+> - **ADJ**: 대시보드 Sensors 카드 orphaned(타겟 삭제) 신호.
+> - **ADK**: sensors orphaned 필터 + 대시보드 Sensors 카드 deeplink(`?filter=orphaned`).
 >
-> **누적 ABG→ADB = 50 슬라이스(+follow-up)** 단일 long-running 페르소나 dogfood 세션. 신규 pure 헬퍼 3(connection-usage/variable-usage/format-time). 코어/서버 변화 0(매 슬라이스), web tsc clean. dogfood가 잡은 silent/실버그 3건(ACJ strategy 디폴트 / ACL·ACM walker / ACQ 빈 목록). **시간 표기 전 surface 단일 지역화 헬퍼 통일**. **usage 인덱스 테마**(connections/variables/dashboard cleanup 신호 + 삭제 경고). i18n 신규 키 ~110개. 882 unit + 53 server it green(회귀 0, 코어/서버 미변경).
+> **누적 ABG→ADK = 59 슬라이스(+follow-up)** 단일 long-running 페르소나 dogfood 세션. 신규 pure 헬퍼 4(connection-usage/variable-usage/format-time/cron). 코어/서버 변화 0(매 슬라이스), web tsc clean, **production build 통과**(21 routes). dogfood가 잡은 silent/실버그 3건(ACJ/ACL·ACM/ACQ). 코어 단위 905 passed(회귀 0). 테마: **시간 표기 전 surface 지역화 통일** · **usage/broken-reference 안전망**(connections·variables used-by + 삭제/리네임 경고 + 누락 connection 플래그 + orphaned sensors) · **signal→action deeplink 3종**(ADH/ADI/ADK). i18n 신규 키 ~120개.
 >
 > **이전 마일스톤 (2026-06-01): Persona dogfood UX 폴리시 4th wave (Phase ACD → ACI).** 3rd wave 마무리 후 추가 6 슬라이스 — 마이그레이션 폼 smart-default + dashboard 정합 + audit click-to-filter + table picker 검색:
 > - **ACD**: 마이그레이션 source 테이블 선택 시 dest 테이블이 비어 있으면 같은 이름으로 자동 채움. 'same name, different DB' 케이스 마찰 0.

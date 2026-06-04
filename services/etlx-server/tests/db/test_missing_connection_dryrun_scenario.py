@@ -1,0 +1,197 @@
+"""Missing-connection dry-run scenario (Phase AEC, 2026-06-04).
+
+The web builder/list surfaces grew a *broken-reference safety net* this
+session — pipelines & migrations that reference a connection no longer in
+the workspace are flagged (ADC/ADD), the migration detail banners it
+(ADL), the dashboard counts it (ADS), and **Run now / Trigger are
+disabled** (ADV/ADW) because "the run would just fail to build".
+
+This module dogfoods the *premise* those UI affordances rest on: a
+pipeline that names a connection which doesn't exist must fail dry-run
+with a clear, connection-naming error — through the real REST surface,
+not a unit stub.
+
+It also pins the web↔server agreement on *which* connections a config
+references. The web walker (``lib/connection-usage.ts``
+``extractConnectionNames``) and the server
+(``etlx_server.pipelines.runtime.referenced_connection_names``) must
+agree, or the UI would warn about a connection the runtime doesn't
+actually need (or miss one it does). Scenario AEC2 specifically proves
+the **DLQ** connection counts as a reference — the gap the ACL/ACM
+follow-up fixed on the web side.
+
+Scenarios:
+* **AEC1** — a sink naming a non-existent connection → dry-run ``ok=false``
+  + the missing name surfaced verbatim.
+* **AEC2** — every source/sink connection exists but the **dlq** names a
+  missing one → dry-run still fails, naming the dlq connection (proves
+  dlq is a tracked reference, matching the web walker).
+"""
+
+from __future__ import annotations
+
+from collections.abc import AsyncIterator
+
+import httpx
+import pytest
+from etlx_server.app_factory import create_app
+from etlx_server.auth.jwt_service import JwtService, generate_rsa_keypair_pem
+from etlx_server.auth.password_service import PasswordService
+from etlx_server.db.enums import AuthMethod
+from etlx_server.db.models import User
+from etlx_server.dependencies import get_session
+from etlx_server.settings import Settings
+from fastapi import FastAPI
+from httpx import ASGITransport
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from etl_plugins.config.secrets import StaticSecretBackend
+
+pytestmark = pytest.mark.asyncio
+
+
+def _build_app(session: AsyncSession) -> FastAPI:
+    private, public = generate_rsa_keypair_pem(bits=2048)
+    settings = Settings(
+        database_url="postgresql+asyncpg://stub:stub@stub:5432/stub",  # pragma: allowlist secret
+        auth_jwt_private_key_pem=private.decode("utf-8"),
+        auth_jwt_public_key_pem=public.decode("utf-8"),
+        auth_jwt_access_ttl_seconds=60,
+        auth_jwt_refresh_ttl_seconds=120,
+    )
+    app = create_app(settings=settings)
+
+    async def _override_session() -> AsyncIterator[AsyncSession]:
+        yield session
+
+    app.dependency_overrides[get_session] = _override_session
+    app.state.password_service = PasswordService(rounds=4)
+    app.state.jwt_service = JwtService(
+        private_key_pem=private,
+        public_key_pem=public,
+        issuer=settings.auth_jwt_issuer,
+        audience=settings.auth_jwt_audience,
+        access_ttl_seconds=settings.auth_jwt_access_ttl_seconds,
+        refresh_ttl_seconds=settings.auth_jwt_refresh_ttl_seconds,
+    )
+    app.state.secret_backend = StaticSecretBackend()
+    return app
+
+
+def _client(app: FastAPI) -> httpx.AsyncClient:
+    return httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+
+
+async def _login(session: AsyncSession, client: httpx.AsyncClient, *, email: str) -> dict[str, str]:
+    user = User(
+        email=email.lower(),
+        name="Engineer",
+        auth_method=AuthMethod.LOCAL,
+        password_hash=PasswordService(rounds=4).hash("hunter2"),  # pragma: allowlist secret
+    )
+    session.add(user)
+    await session.flush()
+    await session.commit()
+    resp = await client.post(
+        "/auth/login",
+        json={"email": email, "password": "hunter2"},  # pragma: allowlist secret
+    )
+    assert resp.status_code == 200, resp.text
+    return {"Authorization": f"Bearer {resp.json()['access_token']}"}
+
+
+async def _make_ws(client: httpx.AsyncClient, h: dict[str, str], *, slug: str) -> str:
+    resp = await client.post("/workspaces", headers=h, json={"name": "Eng Ws", "slug": slug})
+    assert resp.status_code == 201, resp.text
+    return str(resp.json()["id"])
+
+
+async def _make_conn(
+    client: httpx.AsyncClient, h: dict[str, str], ws_id: str, *, name: str, db: str
+) -> None:
+    resp = await client.post(
+        f"/workspaces/{ws_id}/connections",
+        headers=h,
+        json={"name": name, "type": "sqlite", "config": {"database": db}, "secrets": {}},
+    )
+    assert resp.status_code == 201, resp.text
+
+
+async def test_aec1_sink_missing_connection_fails_dry_run(session: AsyncSession, tmp_path) -> None:
+    """A sink that names a connection which doesn't exist → dry-run fails
+    and names the missing connection. This is the runtime fact the web's
+    'Trigger disabled — missing connection' (ADW) relies on."""
+    app = _build_app(session)
+    async with _client(app) as client:
+        h = await _login(session, client, email="aec1@example.com")
+        ws_id = await _make_ws(client, h, slug="aec1-ws")
+        # Only the source connection exists; the sink names a ghost.
+        await _make_conn(client, h, ws_id, name="src", db=str(tmp_path / "src.db"))
+
+        pipe = (
+            await client.post(
+                f"/workspaces/{ws_id}/pipelines",
+                headers=h,
+                json={
+                    "name": "broken_sink",
+                    "config": {
+                        "name": "broken_sink",
+                        "mode": "batch",
+                        "source": {"connection": "src", "query": "SELECT 1 AS n"},
+                        "sink": {"connection": "ghost_sink", "table": "out"},
+                    },
+                },
+            )
+        ).json()
+        pipe_id = pipe["id"]
+
+        # Creating the pipeline succeeds — connection existence is NOT a
+        # create-time check (a connection can be deleted after the
+        # pipeline is built; that's exactly the ADC/ADL scenario).
+        dry = await client.post(f"/workspaces/{ws_id}/pipelines/{pipe_id}/dry-run", headers=h)
+        assert dry.status_code == 200, dry.text
+        body = dry.json()
+        assert body["ok"] is False, body
+        # The missing connection name is surfaced verbatim so the operator
+        # knows exactly which one to fix.
+        joined = " ".join(body["errors"])
+        assert "ghost_sink" in joined, body
+        assert "src" not in joined, body  # the existing one is not flagged
+
+
+async def test_aec2_missing_dlq_connection_fails_dry_run(session: AsyncSession, tmp_path) -> None:
+    """Source + sink connections both exist, but the DLQ names a missing
+    one → dry-run still fails, naming the dlq connection. Proves the DLQ
+    connection is a *tracked reference* on the server, matching the web
+    walker's ACL/ACM follow-up (which added dlq.connection)."""
+    app = _build_app(session)
+    async with _client(app) as client:
+        h = await _login(session, client, email="aec2@example.com")
+        ws_id = await _make_ws(client, h, slug="aec2-ws")
+        await _make_conn(client, h, ws_id, name="src", db=str(tmp_path / "src.db"))
+        await _make_conn(client, h, ws_id, name="dst", db=str(tmp_path / "dst.db"))
+
+        pipe = (
+            await client.post(
+                f"/workspaces/{ws_id}/pipelines",
+                headers=h,
+                json={
+                    "name": "broken_dlq",
+                    "config": {
+                        "name": "broken_dlq",
+                        "mode": "batch",
+                        "source": {"connection": "src", "query": "SELECT 1 AS n"},
+                        "sink": {"connection": "dst", "table": "out"},
+                        "dlq": {"connection": "ghost_dlq", "mode": "table", "table": "dlq"},
+                    },
+                },
+            )
+        ).json()
+        pipe_id = pipe["id"]
+
+        dry = await client.post(f"/workspaces/{ws_id}/pipelines/{pipe_id}/dry-run", headers=h)
+        assert dry.status_code == 200, dry.text
+        body = dry.json()
+        assert body["ok"] is False, body
+        joined = " ".join(body["errors"])
+        assert "ghost_dlq" in joined, body

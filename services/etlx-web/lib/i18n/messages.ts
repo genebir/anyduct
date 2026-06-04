@@ -164,6 +164,8 @@ export const en = {
   "migrations.keyColumnsLabel": "Primary key columns",
   "migrations.keyColumnsHelp":
     "Comma-separated. Become the PRIMARY KEY on the destination so upserts have something to anchor on.",
+  "migrations.columnAppliesAllTables":
+    "Applied to all {count} selected table(s); tables missing this column will fail at run.",
   "migrations.schemaPreview": "Source schema",
   "migrations.schemaPreviewHint":
     "{n} columns will be replicated. The runtime translates DB-specific types automatically.",
@@ -1293,6 +1295,8 @@ export const ko: Messages = {
   "migrations.keyColumnsLabel": "PRIMARY KEY 컬럼",
   "migrations.keyColumnsHelp":
     "쉼표 구분. 도착지의 PRIMARY KEY가 되어 upsert가 충돌 컬럼으로 사용합니다.",
+  "migrations.columnAppliesAllTables":
+    "선택한 {count}개 테이블 모두에 적용됩니다. 이 컬럼이 없는 테이블은 실행 시 실패합니다.",
   "migrations.schemaPreview": "소스 스키마",
   "migrations.schemaPreviewHint":
     "{n}개 컬럼이 복제됩니다. DB별 타입은 런타임이 자동 변환합니다.",

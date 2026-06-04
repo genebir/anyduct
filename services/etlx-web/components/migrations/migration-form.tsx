@@ -728,6 +728,16 @@ export function MigrationForm({
             <span className="text-xs text-text-muted">
               {t("migrations.cursorColumnHelp")}
             </span>
+            {/* Phase ACU (2026-06-04) — schema mode applies one
+                cursor/key column to every selected table; flag that so
+                the user knows tables lacking it will fail at run. */}
+            {f.mode === "schema" ? (
+              <span className="text-xs text-warning">
+                {t("migrations.columnAppliesAllTables", {
+                  count: f.selectedTables.length,
+                })}
+              </span>
+            ) : null}
             {errors.cursorColumn ? (
               <span className="text-xs text-error">
                 {t("migrations.errRequired")}
@@ -750,6 +760,13 @@ export function MigrationForm({
             <span className="text-xs text-text-muted">
               {t("migrations.keyColumnsHelp")}
             </span>
+            {f.mode === "schema" ? (
+              <span className="text-xs text-warning">
+                {t("migrations.columnAppliesAllTables", {
+                  count: f.selectedTables.length,
+                })}
+              </span>
+            ) : null}
             {errors.keyColumns ? (
               <span className="text-xs text-error">
                 {t("migrations.errRequired")}

@@ -153,6 +153,24 @@ export default function AssetDetailPage() {
                         </td>
                         <td className="px-4 py-2 font-mono text-text">
                           {m.records_written.toLocaleString()}
+                          {/* Phase AFM (2026-06-04) — delta vs the previous
+                              (older) materialization. mats is newest-first,
+                              so the prior run is mats[i+1]. A sudden drop in
+                              rows written is an analyst's data-quality cue. */}
+                          {i < mats.length - 1 &&
+                          m.records_written !== mats[i + 1].records_written ? (
+                            <span
+                              className="ml-2 text-xs text-text-muted"
+                              title={t("assets.matDeltaTitle")}
+                            >
+                              {m.records_written > mats[i + 1].records_written
+                                ? "+"
+                                : "−"}
+                              {Math.abs(
+                                m.records_written - mats[i + 1].records_written,
+                              ).toLocaleString()}
+                            </span>
+                          ) : null}
                         </td>
                         <td className="px-4 py-2">
                           {m.run_id ? (

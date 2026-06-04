@@ -1080,6 +1080,8 @@ export const en = {
   "assets.colWhen": "When",
   "assets.detailLoadFailed": "Couldn't load asset.",
   "assets.openRun": "Open run →",
+  // Phase AFM (2026-06-04) — row-count change vs the previous run.
+  "assets.matDeltaTitle": "Change in rows written vs the previous materialization",
   // column lineage (J3)
   "assets.columnLineage": "Column lineage",
   "assets.columnLineageEmpty": "No column-level lineage recorded yet.",
@@ -2257,6 +2259,8 @@ export const ko: Messages = {
   "assets.colWhen": "시각",
   "assets.detailLoadFailed": "자산을 불러올 수 없습니다.",
   "assets.openRun": "실행 열기 →",
+  // Phase AFM (2026-06-04) — 이전 run 대비 기록 행 수 변화.
+  "assets.matDeltaTitle": "이전 materialization 대비 기록 행 수 변화",
   // 컬럼 리니지 (J3)
   "assets.columnLineage": "컬럼 리니지",
   "assets.columnLineageEmpty": "아직 컬럼 단위 리니지가 기록되지 않았습니다.",

@@ -194,6 +194,17 @@ export default function WorkspaceHomePage() {
   const activeSchedules = (schedules ?? []).filter((s) => s.is_active).length;
   const activeSensors = (sensors ?? []).filter((s) => s.is_active).length;
 
+  // Phase ADJ (2026-06-04) — sensors whose target pipeline no longer
+  // exists. They still poll but trigger nothing, so surface them as a
+  // stronger signal than the paused count. Needs both payloads.
+  const orphanedSensors = useMemo(() => {
+    if (!sensors || !pipelines) return 0;
+    const ids = new Set(pipelines.map((p) => p.id));
+    return sensors.filter(
+      (s) => s.target_pipeline_id && !ids.has(s.target_pipeline_id),
+    ).length;
+  }, [sensors, pipelines]);
+
   // Phase ACY (2026-06-04) — count connections no pipeline references,
   // a cleanup signal for the operator. Reuses ACL's usage index over
   // the pipelines + connections the dashboard already fetched, so no
@@ -327,11 +338,15 @@ export default function WorkspaceHomePage() {
             icon={<RadarIcon size={18} />}
             href={ws ? `/w/${ws.slug}/sensors` : "#"}
             sub={
-              sensors && sensors.length > 0
-                ? t("overview.pausedSensors", {
-                    n: sensors.length - activeSensors,
-                  })
-                : undefined
+              // Orphaned is the more urgent signal — prefer it, then
+              // fall back to the paused count.
+              orphanedSensors > 0
+                ? t("overview.sensorsOrphaned", { n: orphanedSensors })
+                : sensors && sensors.length > 0
+                  ? t("overview.pausedSensors", {
+                      n: sensors.length - activeSensors,
+                    })
+                  : undefined
             }
           />
           <StatCard

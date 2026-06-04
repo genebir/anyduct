@@ -916,6 +916,7 @@ export const en = {
   "overview.inFlightCount": "{n} in flight",
   "overview.successRate": "{pct}% ok",
   "overview.pausedSensors": "{n} paused",
+  "overview.sensorsOrphaned": "{n} orphaned",
   // Phase ABJ (2026-06-01) — never-run backlog signal on the
   // migration dashboard card.
   "overview.migrationsNeverRun": "{n} never run",
@@ -2036,6 +2037,7 @@ export const ko: Messages = {
   "overview.inFlightCount": "{n}건 진행 중",
   "overview.successRate": "{pct}% 성공",
   "overview.pausedSensors": "{n}개 일시중지",
+  "overview.sensorsOrphaned": "{n}개 대상 없음",
   // Phase ABJ (2026-06-01) — 마이그레이션 카드 미실행 누적 신호
   "overview.migrationsNeverRun": "{n}개 미실행",
   // Phase ACB (2026-06-01) — 활성 스케줄 카드 forward sub

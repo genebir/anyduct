@@ -691,6 +691,33 @@ function LogView({
       (!minLevel || LEVEL_ORDER[e.level] >= LEVEL_ORDER[minLevel]) &&
       (!q || e.message.toLowerCase().includes(q)),
   );
+  // Phase AET (2026-06-04) — copy exactly what's on screen (after the
+  // search/level/node filters), so an operator can paste the relevant
+  // lines into an issue or Slack instead of the whole 1000-line dump.
+  // Reuses the clipboard pattern from the "config that ran" panel (ABR).
+  async function copyLogs() {
+    const text = shown
+      .map((e) => {
+        const ctx =
+          Object.keys(e.context_json).length > 0
+            ? "  " +
+              Object.entries(e.context_json)
+                .map(
+                  ([k, v]) =>
+                    `${k}=${typeof v === "string" ? v : JSON.stringify(v)}`,
+                )
+                .join(" ")
+            : "";
+        return `${e.ts} ${e.level.toUpperCase()} ${e.node_id ?? "-"} ${e.message}${ctx}`;
+      })
+      .join("\n");
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success(t("runDetail.logsCopied", { count: shown.length }));
+    } catch {
+      toast.error(t("runDetail.logsCopyFailed"));
+    }
+  }
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-1.5 text-xs text-text-muted">
@@ -720,6 +747,14 @@ function LogView({
             })}
           </span>
         ) : null}
+        <button
+          type="button"
+          onClick={() => void copyLogs()}
+          disabled={shown.length === 0}
+          className="ml-auto rounded-sm border border-border-subtle bg-overlay px-2 py-1 text-xs text-text-secondary hover:text-text disabled:opacity-40 disabled:hover:text-text-secondary"
+        >
+          {t("runDetail.copyLogs")}
+        </button>
       </div>
       <div className="max-h-[600px] overflow-y-auto rounded-md border border-border-subtle bg-bg font-mono text-xs">
       <ul>

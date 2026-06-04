@@ -971,6 +971,10 @@ export const en = {
   "runDetail.logLevelShowing": "{shown} of {total}",
   "runDetail.noLogsAtLevel": "No logs match the filters.",
   "runDetail.logSearchPlaceholder": "Search logs…",
+  // Phase AET (2026-06-04) — copy the currently-filtered log lines.
+  "runDetail.copyLogs": "Copy logs",
+  "runDetail.logsCopied": "Copied {count} log lines to clipboard",
+  "runDetail.logsCopyFailed": "Couldn't copy — your browser blocked clipboard access",
   // Phase M (2026-05-26) — per-node log filtering.
   "runDetail.noLogsForNode": "No logs from this node yet.",
   "runDetail.filterByNodeTitle": "Show only logs from {node}",
@@ -2120,6 +2124,10 @@ export const ko: Messages = {
   "runDetail.logLevelShowing": "{total}개 중 {shown}개",
   "runDetail.noLogsAtLevel": "필터에 맞는 로그가 없습니다.",
   "runDetail.logSearchPlaceholder": "로그 검색…",
+  // Phase AET (2026-06-04) — 현재 필터된 로그 줄 복사.
+  "runDetail.copyLogs": "로그 복사",
+  "runDetail.logsCopied": "로그 {count}줄을 클립보드에 복사했습니다",
+  "runDetail.logsCopyFailed": "복사 실패 — 브라우저가 클립보드 접근을 막았습니다",
   // Phase M (2026-05-26) — 노드별 로그 필터.
   "runDetail.noLogsForNode": "이 노드에서 발생한 로그가 아직 없습니다.",
   "runDetail.filterByNodeTitle": "{node} 노드의 로그만 표시",

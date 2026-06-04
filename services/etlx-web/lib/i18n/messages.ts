@@ -883,6 +883,7 @@ export const en = {
     "Trigger a pipeline manually or wait for a scheduled run. This view updates every five seconds.",
   "runs.emptyDescForPipeline":
     "This pipeline hasn't run yet. Trigger it manually or wait for its schedule / sensor to fire.",
+  "runs.emptyCta": "Go to pipelines",
   "runs.filteredByPipeline": "Showing runs for pipeline: {name}",
   "runs.clearFilter": "Clear filter",
   "runs.openPipeline": "Open pipeline →",
@@ -1996,6 +1997,7 @@ export const ko: Messages = {
     "파이프라인을 수동으로 실행하거나 예약된 실행을 기다리세요. 이 화면은 5초마다 갱신됩니다.",
   "runs.emptyDescForPipeline":
     "이 파이프라인은 아직 실행된 적이 없습니다. 수동으로 트리거하거나 스케줄·센서가 발동하길 기다리세요.",
+  "runs.emptyCta": "파이프라인으로 이동",
   "runs.filteredByPipeline": "{name} 파이프라인의 실행 기록만 표시 중",
   "runs.clearFilter": "필터 해제",
   "runs.openPipeline": "파이프라인 열기 →",

@@ -462,6 +462,18 @@ export default function RunsPage() {
                       ? t("runs.emptyDescForPipeline")
                       : t("runs.emptyDesc")
                   }
+                  // Phase ACZ (2026-06-04) — onboarding CTA so a fresh
+                  // workspace with no runs has a next step (runs come
+                  // from triggering a pipeline). Omitted when filtered
+                  // by a specific pipeline — the answer there is "that
+                  // pipeline hasn't run", not "go make a pipeline".
+                  action={
+                    !pipelineFilter ? (
+                      <Link href={`/w/${slug}/pipelines`}>
+                        <Button>{t("runs.emptyCta")}</Button>
+                      </Link>
+                    ) : undefined
+                  }
                 />
               }
             />

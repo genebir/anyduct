@@ -68,6 +68,14 @@ const LEVEL_CLASSES: Record<LogLevel, string> = {
   error: "text-error",
 };
 
+/** Phase AER (2026-06-04) — ordinal for the "min level" log filter. */
+const LEVEL_ORDER: Record<LogLevel, number> = {
+  debug: 0,
+  info: 1,
+  warning: 2,
+  error: 3,
+};
+
 export default function RunDetailPage() {
   const { slug, id } = useParams<{ slug: string; id: string }>();
   const router = useRouter();
@@ -656,6 +664,7 @@ function LogView({
   onSelectNode: (nodeId: string | null) => void;
   t: Translate;
 }) {
+  const [minLevel, setMinLevel] = useState<LogLevel | "">("");
   if (logs === null) {
     return (
       <div className="py-8 text-center text-sm text-text-muted">
@@ -670,10 +679,38 @@ function LogView({
       </div>
     );
   }
+  // Phase AER (2026-06-04) — client-side "min level" filter over the
+  // already-fetched logs, so an operator debugging a noisy run can jump
+  // straight to the warnings/errors without scrolling past info lines.
+  const shown = minLevel
+    ? logs.filter((e) => LEVEL_ORDER[e.level] >= LEVEL_ORDER[minLevel])
+    : logs;
   return (
-    <div className="max-h-[600px] overflow-y-auto rounded-md border border-border-subtle bg-bg font-mono text-xs">
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center gap-1.5 text-xs text-text-muted">
+        <span>{t("runDetail.logLevel")}</span>
+        <select
+          value={minLevel}
+          onChange={(e) => setMinLevel(e.target.value as LogLevel | "")}
+          className="h-7 rounded-md border border-border-subtle bg-elevated px-1.5 text-xs text-text focus-visible:border-accent focus-visible:outline-none"
+        >
+          <option value="">{t("runDetail.logLevelAll")}</option>
+          <option value="info">info+</option>
+          <option value="warning">warning+</option>
+          <option value="error">error</option>
+        </select>
+        {minLevel ? (
+          <span>
+            {t("runDetail.logLevelShowing", {
+              shown: shown.length,
+              total: logs.length,
+            })}
+          </span>
+        ) : null}
+      </div>
+      <div className="max-h-[600px] overflow-y-auto rounded-md border border-border-subtle bg-bg font-mono text-xs">
       <ul>
-        {logs.map((entry) => (
+        {shown.map((entry) => (
           <li
             key={entry.id}
             className="flex gap-3 border-b border-border-subtle/60 px-3 py-1.5 last:border-b-0"
@@ -735,7 +772,13 @@ function LogView({
           </li>
         ))}
       </ul>
+      {shown.length === 0 ? (
+        <div className="py-6 text-center text-text-muted">
+          {t("runDetail.noLogsAtLevel")}
+        </div>
+      ) : null}
       <div ref={bottomRef} />
+      </div>
     </div>
   );
 }

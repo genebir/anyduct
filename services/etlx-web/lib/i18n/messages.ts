@@ -966,6 +966,10 @@ export const en = {
   "runDetail.entriesCapped": "{count} entries (limited to 1000)",
   "runDetail.noLogs":
     "No logs yet. They'll appear as the worker emits structlog events.",
+  "runDetail.logLevel": "Level",
+  "runDetail.logLevelAll": "All",
+  "runDetail.logLevelShowing": "{shown} of {total}",
+  "runDetail.noLogsAtLevel": "No logs at this level.",
   // Phase M (2026-05-26) — per-node log filtering.
   "runDetail.noLogsForNode": "No logs from this node yet.",
   "runDetail.filterByNodeTitle": "Show only logs from {node}",
@@ -2110,6 +2114,10 @@ export const ko: Messages = {
   "runDetail.entries": "{count}개 항목",
   "runDetail.entriesCapped": "{count}개 항목 (최대 1000개 표시)",
   "runDetail.noLogs": "아직 로그가 없습니다. 워커가 structlog 이벤트를 내보내면 표시됩니다.",
+  "runDetail.logLevel": "레벨",
+  "runDetail.logLevelAll": "전체",
+  "runDetail.logLevelShowing": "{total}개 중 {shown}개",
+  "runDetail.noLogsAtLevel": "이 레벨의 로그가 없습니다.",
   // Phase M (2026-05-26) — 노드별 로그 필터.
   "runDetail.noLogsForNode": "이 노드에서 발생한 로그가 아직 없습니다.",
   "runDetail.filterByNodeTitle": "{node} 노드의 로그만 표시",

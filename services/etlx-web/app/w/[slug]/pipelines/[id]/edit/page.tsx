@@ -729,7 +729,10 @@ function ValidationBanner({
           </button>
         ) : null}
       </div>
-      <ul className="ml-6 mt-1 space-y-0.5 text-xs">
+      {/* Phase AED (2026-06-04) — cap the expanded list so a graph with
+          many issues scrolls internally instead of pushing the canvas
+          down. Short lists never reach the cap, so no visual change. */}
+      <ul className="ml-6 mt-1 max-h-40 space-y-0.5 overflow-y-auto text-xs">
         {visible.map((issue, i) => (
           <li key={i} className="flex items-baseline gap-1">
             <span aria-hidden>•</span>

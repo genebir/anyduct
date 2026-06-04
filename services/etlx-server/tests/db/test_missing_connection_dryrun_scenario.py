@@ -195,3 +195,53 @@ async def test_aec2_missing_dlq_connection_fails_dry_run(session: AsyncSession, 
         assert body["ok"] is False, body
         joined = " ".join(body["errors"])
         assert "ghost_dlq" in joined, body
+
+
+async def test_aee_config_json_roundtrips_for_web_walkers(session: AsyncSession, tmp_path) -> None:
+    """The web usage/broken-reference features (ACL/ACR/ADC/ADS/ADU) all
+    read ``pipelinesApi.list().current_config_json`` and walk it
+    client-side. This pins that the GET response preserves — through the
+    server's canonical ``PipelineConfig`` round-trip — exactly the bits
+    those walkers parse: source/sink/dlq connection names, workspace
+    ``variables``, and ``${var.x}`` reference tokens.
+    """
+    import json
+
+    app = _build_app(session)
+    async with _client(app) as client:
+        h = await _login(session, client, email="aee@example.com")
+        ws_id = await _make_ws(client, h, slug="aee-ws")
+
+        await client.post(
+            f"/workspaces/{ws_id}/pipelines",
+            headers=h,
+            json={
+                "name": "roundtrip",
+                "config": {
+                    "name": "roundtrip",
+                    "mode": "batch",
+                    "variables": {"region": "us"},
+                    "source": {
+                        "connection": "src",
+                        "query": "SELECT * FROM orders WHERE region = '${var.region}'",
+                    },
+                    "sink": {"connection": "dst", "table": "out"},
+                    "dlq": {"connection": "errors_conn", "mode": "table", "table": "dlq"},
+                },
+            },
+        )
+
+        # GET via the same list endpoint the web reads.
+        listing = await client.get(f"/workspaces/{ws_id}/pipelines", headers=h)
+        assert listing.status_code == 200, listing.text
+        row = next(p for p in listing.json() if p["name"] == "roundtrip")
+        cfg = row["current_config_json"]
+        assert cfg is not None
+
+        # extractConnectionNames sees these three (incl. dlq — ACL/ACM f/u).
+        assert cfg["source"]["connection"] == "src"
+        assert cfg["sink"]["connection"] == "dst"
+        assert cfg["dlq"]["connection"] == "errors_conn"
+        # referencedVariableNames sees ${var.region}; variables block survives.
+        assert cfg["variables"]["region"] == "us"
+        assert "${var.region}" in json.dumps(cfg)

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import {
   CheckCircle2Icon,
   EditIcon,
@@ -248,6 +248,13 @@ export default function SensorsPage() {
   /** Phase ABC (2026-06-01) — search + type filter, mirrors AAT/ABB. */
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("");
+  /** Phase ADK (2026-06-04) — orphaned filter (target pipeline gone),
+   *  URL-presettable via ``?filter=orphaned`` for the dashboard
+   *  deep-link. */
+  const searchParams = useSearchParams();
+  const [orphanFilter, setOrphanFilter] = useState<"" | "orphaned">(
+    searchParams.get("filter") === "orphaned" ? "orphaned" : "",
+  );
 
   const distinctTypes = useMemo(() => {
     if (!rows) return [];
@@ -257,6 +264,7 @@ export default function SensorsPage() {
   const filteredRows = useMemo(() => {
     if (!rows) return [];
     const term = search.trim().toLowerCase();
+    const pipelineIds = new Set(pipelines.map((p) => p.id));
     return rows.filter((r) => {
       if (
         term &&
@@ -265,9 +273,13 @@ export default function SensorsPage() {
       )
         return false;
       if (typeFilter && r.type !== typeFilter) return false;
+      if (orphanFilter === "orphaned") {
+        if (!r.target_pipeline_id || pipelineIds.has(r.target_pipeline_id))
+          return false;
+      }
       return true;
     });
-  }, [rows, search, typeFilter]);
+  }, [rows, search, typeFilter, orphanFilter, pipelines]);
 
   async function refresh(workspaceId: string) {
     try {
@@ -441,9 +453,11 @@ export default function SensorsPage() {
         ) : null}
 
         {/* Phase ABC (2026-06-01) — search + type filter. Hidden
-            below 5 rows. */}
-        {rows !== null && rows.length > 5 ? (
-          <div className="grid items-end gap-2 sm:grid-cols-[1fr_auto_auto]">
+            below 5 rows. Phase ADK — also render when the orphaned
+            filter is active (e.g. dashboard deep-link) so it's
+            clearable even with a short list. */}
+        {rows !== null && (rows.length > 5 || orphanFilter) ? (
+          <div className="grid items-end gap-2 sm:grid-cols-[1fr_auto_auto_auto]">
             <Input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -461,13 +475,24 @@ export default function SensorsPage() {
                 </option>
               ))}
             </select>
-            {search || typeFilter ? (
+            <select
+              value={orphanFilter}
+              onChange={(e) =>
+                setOrphanFilter(e.target.value as "" | "orphaned")
+              }
+              className="h-10 rounded-md border border-border-subtle bg-elevated px-2 text-sm text-text focus-visible:border-accent focus-visible:outline-none"
+            >
+              <option value="">{t("sensors.filterTargetAll")}</option>
+              <option value="orphaned">{t("sensors.filterOrphanedOnly")}</option>
+            </select>
+            {search || typeFilter || orphanFilter ? (
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => {
                   setSearch("");
                   setTypeFilter("");
+                  setOrphanFilter("");
                 }}
               >
                 {t("sensors.clearFilters")}

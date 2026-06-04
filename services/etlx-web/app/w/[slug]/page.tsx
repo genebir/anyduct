@@ -336,7 +336,15 @@ export default function WorkspaceHomePage() {
             label={t("nav.sensors")}
             value={sensors ? activeSensors : undefined}
             icon={<RadarIcon size={18} />}
-            href={ws ? `/w/${ws.slug}/sensors` : "#"}
+            // Phase ADK (2026-06-04) — deep-link to the orphaned subset
+            // when that's the signal (ADH/ADI pattern).
+            href={
+              ws
+                ? orphanedSensors > 0
+                  ? `/w/${ws.slug}/sensors?filter=orphaned`
+                  : `/w/${ws.slug}/sensors`
+                : "#"
+            }
             sub={
               // Orphaned is the more urgent signal — prefer it, then
               // fall back to the paused count.

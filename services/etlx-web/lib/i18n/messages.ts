@@ -475,6 +475,8 @@ export const en = {
   // Phase ABC (2026-06-01) — sensors page search + filter
   "sensors.searchPlaceholder": "Search sensors by name or type…",
   "sensors.filterTypeAll": "All sensor types",
+  "sensors.filterTargetAll": "All targets",
+  "sensors.filterOrphanedOnly": "Orphaned only",
   "sensors.clearFilters": "Clear filters",
   "sensors.filterNoMatch": "No sensors match the current search and filters.",
   "connections.connected": "{name} connected",
@@ -1600,6 +1602,8 @@ export const ko: Messages = {
   // Phase ABC (2026-06-01) — 센서 검색 + 필터
   "sensors.searchPlaceholder": "이름이나 타입으로 검색…",
   "sensors.filterTypeAll": "모든 센서 타입",
+  "sensors.filterTargetAll": "전체 대상",
+  "sensors.filterOrphanedOnly": "대상 없음만",
   "sensors.clearFilters": "필터 초기화",
   "sensors.filterNoMatch": "현재 검색/필터에 일치하는 센서가 없습니다.",
   "connections.colSecrets": "시크릿",

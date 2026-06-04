@@ -608,8 +608,22 @@ function RecentRunsCard({
                 <span className="text-xs tabular-nums text-text-muted">
                   {r.records_written.toLocaleString()} {tx("migrations.runRowsWritten")}
                 </span>
-                <span className="text-xs tabular-nums text-text-muted">
-                  {formatDuration(r.duration_seconds)}
+                {/* Phase AFL (2026-06-04) — live elapsed for running runs
+                    (parallel to runs list AFK / run detail AFJ); else the
+                    final duration. */}
+                <span
+                  className="text-xs tabular-nums text-text-muted"
+                  title={
+                    r.status === "running" && r.started_at
+                      ? tx("runDetail.elapsedTitle")
+                      : undefined
+                  }
+                >
+                  {r.status === "running" && r.started_at
+                    ? `${formatDuration(
+                        (Date.now() - Date.parse(r.started_at)) / 1000,
+                      )} · ${tx("runDetail.elapsedRunning")}`
+                    : formatDuration(r.duration_seconds)}
                 </span>
                 <span
                   className="w-20 text-right text-xs text-text-muted"

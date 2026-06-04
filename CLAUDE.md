@@ -154,8 +154,12 @@ uv run mypy etl_plugins
 > - **ADP**: workspaces 페이지 로딩 중 EmptyState 깜빡임 수정(provider loading 활용).
 > - **ADQ**: pipelines 컨텍스트 메뉴에 Dry run(검증→실행, 마이그레이션 ABP/ABQ 평행).
 > - **ADR**: audit row 시간 relative + tooltip — 시간 표기 전 surface 완전 통일.
+> - **ADS**: 대시보드 Pipelines 카드 broken(누락 connection) 신호(ADC→dashboard).
+> - **ADT**: pipelines "broken" 필터 + 대시보드 ADS deeplink → 대시보드 4종 주의 신호(never-run migrations/unused connections/orphaned sensors/broken pipelines) 모두 deep-link 정합.
 >
-> **누적 ABG→ADR = 66 슬라이스(+follow-up)** 단일 long-running 페르소나 dogfood 세션. 신규 pure 헬퍼 4(connection-usage/variable-usage/format-time/cron). 코어/서버 변화 0(매 슬라이스), web tsc clean, **production build 통과**(21 routes, 반복 인증). dogfood가 잡은 silent/실버그 4건(ACJ strategy 디폴트 / ACL·ACM walker / ACQ schedules 빈 목록 영구로딩 / ADP·variables 로딩 깜빡임). 코어 단위 905 passed(회귀 0). 테마: **시간 표기 8 surface 지역화 통일** · **usage/broken-reference 안전망**(connections·variables used-by + 삭제/리네임 경고 + 누락 connection 플래그 list+detail + orphaned sensors + cleanup 신호) · **signal→action deeplink 3종**(ADH/ADI/ADK) · **로딩/빈 상태 정합**(ACQ/ADP) · **검증 도구 확장**(ACT test-all, ADQ dry-run). i18n 신규 키 ~130개.
+> **누적 ABG→ADT = 68 슬라이스(+follow-up)** — 대시보드 "운영자 주의" 4종 신호가 모두 deep-link로 actionable(signal→정확한 서브셋→행동 루프 완성·대칭).
+>
+> **(이전 카운트)** ABG→ADR = 66 슬라이스(+follow-up) 단일 long-running 페르소나 dogfood 세션. 신규 pure 헬퍼 4(connection-usage/variable-usage/format-time/cron). 코어/서버 변화 0(매 슬라이스), web tsc clean, **production build 통과**(21 routes, 반복 인증). dogfood가 잡은 silent/실버그 4건(ACJ strategy 디폴트 / ACL·ACM walker / ACQ schedules 빈 목록 영구로딩 / ADP·variables 로딩 깜빡임). 코어 단위 905 passed(회귀 0). 테마: **시간 표기 8 surface 지역화 통일** · **usage/broken-reference 안전망**(connections·variables used-by + 삭제/리네임 경고 + 누락 connection 플래그 list+detail + orphaned sensors + cleanup 신호) · **signal→action deeplink 3종**(ADH/ADI/ADK) · **로딩/빈 상태 정합**(ACQ/ADP) · **검증 도구 확장**(ACT test-all, ADQ dry-run). i18n 신규 키 ~130개.
 >
 > **이전 마일스톤 (2026-06-01): Persona dogfood UX 폴리시 4th wave (Phase ACD → ACI).** 3rd wave 마무리 후 추가 6 슬라이스 — 마이그레이션 폼 smart-default + dashboard 정합 + audit click-to-filter + table picker 검색:
 > - **ACD**: 마이그레이션 source 테이블 선택 시 dest 테이블이 비어 있으면 같은 이름으로 자동 채움. 'same name, different DB' 케이스 마찰 0.

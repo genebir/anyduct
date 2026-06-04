@@ -139,6 +139,7 @@ uv run mypy etl_plugins
 > - **AFY (서버 e2e)**: fan-out 카탈로그 분석가 여정 HTTP — one-source→two-sink(when 술어) run 후 GET /assets에 양 sink+source, 각 sink lineage upstream에 공유 source. EE Scenario B(service-level)의 REST 변형, KK(chain)에 fan-out 추가. 신규 서버 it 1.
 > - **green-check sweep**: scenario/journey/dlq/backfill/retry/lint e2e 79 passed(오늘 밤 추가분 상호 정합 확인).
 > - **AFZ (서버 e2e)**: 데이터플레인 audit REST — custom_python+sql_exec run 후 GET /audit?action=run.sql_read/python_executed/sql_executed 세 이벤트가 run_id로 조회+payload 정확. QQ(service-level)/onboarding(sql_read만 REST)의 컴플라이언스 REST 변형. 신규 서버 it 1.
+> - **AGA (서버 e2e)**: auto-materialize 체인 REST — A를 REST trigger→drain→B(auto_materialize) 자동 실행, runs A+B 각 1 succeeded, catalog raw→staging→mart, mart 데이터 정확. GG(service-level)의 REST 변형(asset-driven orchestration 비전). 신규 서버 it 1. 코어 단위 재확인 **911 passed**(905 base + DLQ-8 6).
 >
 > **이전 마일스톤 (2026-06-04): 운영-가시성 23슬라이스 (Phase AET → AFP).** 단일 슬라이스-단위 세션(web 전용, 코어/서버 변화 0, 매 슬라이스 tsc clean + dev 200). run 디버그(로그/오류 copy·카운트·records delta·DLQ count·heartbeat liveness·running 경과 3 surface) · 실패 triage error_class 5 surface · Last run 컬럼 5 surface · 헬스 signal→action 양축(schedules/sensors: 컬럼→대시보드 신호→필터+deeplink) · 분석가 asset 행수 delta · audit my-actions · builder dry-run 경고 수.
 >

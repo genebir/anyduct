@@ -427,6 +427,8 @@ export const en = {
   "audit.resourceType": "Resource type",
   "audit.allResources": "All resources",
   "audit.action": "Action",
+  // Phase AFN (2026-06-04) — scope the audit log to my own actions.
+  "audit.mineOnly": "My actions only",
   "audit.allActions": "All actions",
   "audit.resourceId": "Resource ID",
   "audit.resourceIdPlaceholder": "exact match (UUID)",
@@ -1624,6 +1626,8 @@ export const ko: Messages = {
   "audit.resourceType": "리소스 유형",
   "audit.allResources": "모든 리소스",
   "audit.action": "액션",
+  // Phase AFN (2026-06-04) — 감사 로그를 내 작업만으로 좁힘.
+  "audit.mineOnly": "내 작업만",
   "audit.allActions": "모든 액션",
   "audit.resourceId": "리소스 ID",
   "audit.resourceIdPlaceholder": "정확히 일치 (UUID)",

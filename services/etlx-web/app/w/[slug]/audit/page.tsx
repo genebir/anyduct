@@ -99,6 +99,10 @@ export default function AuditPage() {
   // data-plane events (``run.sql_executed`` / ``run.python_executed``)
   // without scrolling through hundreds of pipeline.create rows.
   const [actionFilter, setActionFilter] = useState("");
+  // Phase AFN (2026-06-04) — "my actions only" filter via the existing
+  // actor_user_id param. Answers "what did I change?" for the signed-in
+  // operator without copy-pasting their own UUID into the actor field.
+  const [mineOnly, setMineOnly] = useState(false);
   const [offset, setOffset] = useState(0);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
@@ -111,6 +115,8 @@ export default function AuditPage() {
           resource_type: resourceType || undefined,
           resource_id: resourceId.trim() || undefined,
           action: actionFilter || undefined,
+          actor_user_id:
+            mineOnly && currentUser ? currentUser.id : undefined,
           limit: PAGE_SIZE,
           offset,
         });
@@ -127,7 +133,7 @@ export default function AuditPage() {
     return () => {
       cancelled = true;
     };
-  }, [ws, resourceType, resourceId, actionFilter, offset, t]);
+  }, [ws, resourceType, resourceId, actionFilter, mineOnly, currentUser, offset, t]);
 
   return (
     <>
@@ -201,13 +207,29 @@ export default function AuditPage() {
                 placeholder={t("audit.resourceIdPlaceholder")}
               />
             </label>
-            <div className="flex items-end justify-end gap-2">
+            <div className="flex items-end justify-end gap-3">
+              {/* Phase AFN (2026-06-04) — scope to the signed-in user's
+                  own actions via the actor_user_id param. */}
+              <label className="flex items-center gap-2 pb-2 text-sm text-text-secondary">
+                <input
+                  type="checkbox"
+                  checked={mineOnly}
+                  disabled={!currentUser}
+                  onChange={(e) => {
+                    setMineOnly(e.target.checked);
+                    setOffset(0);
+                  }}
+                  className="h-4 w-4 rounded border-border-subtle"
+                />
+                {t("audit.mineOnly")}
+              </label>
               <Button
                 variant="ghost"
                 onClick={() => {
                   setResourceType("");
                   setResourceId("");
                   setActionFilter("");
+                  setMineOnly(false);
                   setOffset(0);
                 }}
               >

@@ -195,6 +195,21 @@ export default function WorkspaceHomePage() {
   }, [todayStats]);
 
   const activeSchedules = (schedules ?? []).filter((s) => s.is_active).length;
+
+  // Phase AFD (2026-06-04) — active schedules whose pipeline's most recent
+  // run failed. A schedule firing on time but failing every run is a
+  // top-priority signal that's otherwise invisible on the dashboard.
+  // Heuristic over the recent runs window (dashboard fetches the last 50).
+  const failingSchedules = useMemo(() => {
+    if (!schedules || !runs) return 0;
+    const lastByPipeline = new Map<string, RunSummary>();
+    for (const r of runs) {
+      if (!lastByPipeline.has(r.pipeline_id)) lastByPipeline.set(r.pipeline_id, r);
+    }
+    return schedules.filter(
+      (s) => s.is_active && lastByPipeline.get(s.pipeline_id)?.status === "failed",
+    ).length;
+  }, [schedules, runs]);
   const activeSensors = (sensors ?? []).filter((s) => s.is_active).length;
 
   // Phase ADS (2026-06-04) — regular pipelines that reference a
@@ -358,13 +373,20 @@ export default function WorkspaceHomePage() {
             icon={<CalendarClockIcon size={18} />}
             href={ws ? `/w/${ws.slug}/schedules` : "#"}
             sub={
-              // Phase ACB (2026-06-01) — prefer the forward-looking
-              // "next in Xm" when any active cron is present; fall
-              // back to the paused count when nothing is active.
-              nextFireSoon ??
-              (schedules && schedules.length > 0
-                ? t("overview.paused", { n: schedules.length - activeSchedules })
-                : undefined)
+              // Phase AFD (2026-06-04) — a failing active schedule is the
+              // most urgent signal, so it wins over the forward-looking
+              // "next in Xm" (ACB) and the paused count.
+              failingSchedules > 0
+                ? t("overview.schedulesFailing", { n: failingSchedules })
+                : // Phase ACB (2026-06-01) — prefer the forward-looking
+                  // "next in Xm" when any active cron is present; fall
+                  // back to the paused count when nothing is active.
+                  (nextFireSoon ??
+                  (schedules && schedules.length > 0
+                    ? t("overview.paused", {
+                        n: schedules.length - activeSchedules,
+                      })
+                    : undefined))
             }
           />
           <StatCard

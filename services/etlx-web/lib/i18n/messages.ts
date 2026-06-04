@@ -395,6 +395,8 @@ export const en = {
   "overview.subtitle": "Live snapshot of your workspace — refreshes every 10 s.",
   "overview.activeSchedules": "Active schedules",
   "overview.paused": "{n} paused",
+  // Phase AFD (2026-06-04) — active schedules whose last run failed.
+  "overview.schedulesFailing": "{n} failing",
   "overview.runsToday": "Runs today",
   "overview.connectionsUnused": "{n} unused",
   "overview.pipelinesBroken": "{n} broken",
@@ -1583,6 +1585,8 @@ export const ko: Messages = {
   "overview.subtitle": "워크스페이스 실시간 스냅샷 — 10초마다 새로고침.",
   "overview.activeSchedules": "활성 스케줄",
   "overview.paused": "{n}개 일시정지",
+  // Phase AFD (2026-06-04) — 마지막 run이 실패한 활성 스케줄.
+  "overview.schedulesFailing": "{n}개 실패 중",
   "overview.runsToday": "오늘 실행",
   "overview.connectionsUnused": "{n}개 미사용",
   "overview.pipelinesBroken": "{n}개 연결 누락",

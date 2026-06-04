@@ -182,6 +182,9 @@ uv run mypy etl_plugins
 > - **AEV/AEW/AEX (실패 유형 triage 4 surface 정합)**: RunSummary가 이미 반환하던 `error_class`를 status 배지 옆/아래 칩(truncate + title=full)으로 — **AEV** runs list, **AEW** pipelines list Last run, **AEX** migrations list Last run. 대시보드 Recent failures(기존)와 합쳐 4 surface에서 클릭 없이 실패 종류(WriteError/ZombieReaped 등) triage. error_class 있을 때만 노출, i18n 키 0.
 > - **AEY**: run 상세 오류 카드 Copy 버튼 — error_class + error_message + 노드 root cause 합쳐 클립보드 복사(AET 패턴 확장, copy 미니테마 로그/오류/config 3종 완성).
 > - **AEZ**: run 상세 records read−written 차이 표시 — 두 값이 다르면 "−N개 필터됨" muted 힌트 + tooltip(필터/중복제거/DLQ 경로 설명). X/Y 쌍에 묻히던 조용한 데이터 손실 가시화.
+> - **AFA**: migration detail Recent runs에 error_class 칩 — AEV/AEW/AEX 리스트 칩의 detail-page 평행. 실패 유형 triage가 list 3종 + 대시보드 + migration detail = 5 surface 정합.
+> - **AFB**: run 상세에 DLQ 라우팅 행 수 표시 — 코어 `etl_plugins.errors`(routed="dlq") 카운터를 run metrics `attrs_json`에서 합산해 Summary에 "N개 DLQ로 라우팅됨"(>0일 때) + tooltip. AEZ의 generic 필터 중 DLQ 몫 명시(나쁜 행이 버려진 게 아니라 포착). 기존 metrics 데이터 활용(서버 변화 0).
+> - **AFC**: schedules list에 Last run 컬럼 — 정시 fire해도 매 run 실패 시 schedules 페이지에서 안 보이던 갭. pipelines(ACS)/migrations(AAP) 패턴(workspace runs 단일 fetch + 10s 폴링 + StatusBadge + relative time + error_class 칩). Last run 컬럼 4 surface(pipelines/migrations/schedules/대시보드) 정합.
 >
 > **세션 green 확정(2026-06-04)**: 코어 단위 905 passed(코어 production 미변경, 회귀 0) · 신규 서버 시나리오 5 it green(testcontainers) · web tsc clean(매 슬라이스) · 실행 중 dev 서버 전 라우트 200 · production build 21 routes(반복). 검증 방법: dev 동시 실행으로 `next build` 금지(메모리), `tsc` + dev curl(런타임) + 서버 contract는 testcontainers e2e. ruff-format 커밋 중단은 `uv run ruff format` 사전 실행으로 회피.
 >

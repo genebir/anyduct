@@ -581,7 +581,14 @@ export default function WorkspaceHomePage() {
                         </div>
                       </div>
                       <div className="text-right text-xs text-text-secondary">
-                        {fmtDuration(r.duration_seconds)}
+                        {/* Phase AFV (2026-06-04) — live elapsed for an
+                            in-flight run, matching runs list (AFK) / run
+                            detail (AFJ); else the final duration. */}
+                        {r.status === "running" && r.started_at
+                          ? `${fmtDuration(
+                              (Date.now() - Date.parse(r.started_at)) / 1000,
+                            )} · ${t("runDetail.elapsedRunning")}`
+                          : fmtDuration(r.duration_seconds)}
                       </div>
                       <ChevronRightIcon
                         size={14}

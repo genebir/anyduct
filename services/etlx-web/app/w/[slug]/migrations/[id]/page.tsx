@@ -43,6 +43,7 @@ import {
   type RunSummary,
   type ScheduleSummary,
 } from "@/lib/api";
+import { relativeTime } from "@/lib/format-time";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import { useLocale } from "@/components/providers/locale-provider";
 import { MigrationForm } from "@/components/migrations/migration-form";
@@ -65,17 +66,6 @@ function formatDuration(seconds: number | null): string {
   if (m < 60) return `${m}m ${s}s`;
   const h = Math.floor(m / 60);
   return `${h}h ${m % 60}m`;
-}
-
-function formatRelativeTime(iso: string | null): string {
-  if (!iso) return "—";
-  const then = new Date(iso).getTime();
-  const now = Date.now();
-  const diff = Math.max(0, Math.floor((now - then) / 1000));
-  if (diff < 60) return `${diff}s ago`;
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-  return `${Math.floor(diff / 86400)}d ago`;
 }
 
 export default function MigrationDetailPage() {
@@ -575,7 +565,9 @@ function RecentRunsCard({
                   {formatDuration(r.duration_seconds)}
                 </span>
                 <span className="w-20 text-right text-xs text-text-muted">
-                  {formatRelativeTime(r.finished_at ?? r.started_at ?? r.created_at)}
+                  {relativeTime(r.finished_at ?? r.started_at ?? r.created_at, {
+                    ago: true,
+                  })}
                 </span>
               </li>
             ))}

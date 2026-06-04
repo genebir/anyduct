@@ -50,6 +50,7 @@ import {
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import { useLocale } from "@/components/providers/locale-provider";
 import type { Messages } from "@/lib/i18n/messages";
+import { relativeTime } from "@/lib/format-time";
 import {
   type MigrationSummary,
   migrationSummaryOf,
@@ -67,17 +68,6 @@ type Row = PipelineSummary & {
 };
 
 const RUNS_POLL_MS = 5_000;
-
-function relativeTime(iso: string | null): string {
-  if (!iso) return "—";
-  const then = new Date(iso).getTime();
-  const now = Date.now();
-  const diff = Math.max(0, Math.floor((now - then) / 1000));
-  if (diff < 60) return `${diff}s`;
-  if (diff < 3600) return `${Math.floor(diff / 60)}m`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
-  return `${Math.floor(diff / 86400)}d`;
-}
 
 function strategyChip(
   s: MigrationSummary["strategy"],

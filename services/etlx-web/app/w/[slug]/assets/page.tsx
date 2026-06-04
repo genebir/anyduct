@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { LayersIcon } from "lucide-react";
+import { LayersIcon, RefreshCwIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Header } from "@/components/shell/header";
 import { Card } from "@/components/ui/card";
@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ApiError, assetsApi, type AssetSummary } from "@/lib/api";
+import { relativeTime, absoluteTime } from "@/lib/format-time";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import { useLocale } from "@/components/providers/locale-provider";
 import type { Messages } from "@/lib/i18n/messages";
@@ -41,8 +42,15 @@ function buildColumns(t: Translate): Column<AssetSummary>[] {
       header: t("assets.colLastMaterialized"),
       cell: (r) =>
         r.last_materialized_at ? (
-          <span className="text-text-secondary">
-            {new Date(r.last_materialized_at).toLocaleString()}
+          // Phase ACN (2026-06-04) — relative time (scannable) with the
+          // exact instant on hover. Matches the migrations list; lets
+          // the analyst spot a stale asset without parsing full
+          // timestamps row by row.
+          <span
+            className="text-text-secondary"
+            title={absoluteTime(r.last_materialized_at)}
+          >
+            {relativeTime(r.last_materialized_at, { ago: true })}
           </span>
         ) : (
           <span className="text-text-muted">{t("assets.never")}</span>
@@ -57,6 +65,7 @@ export default function AssetsPage() {
   const router = useRouter();
   const { t } = useLocale();
   const [rows, setRows] = useState<AssetSummary[] | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   /** Phase ABH (2026-06-01) — list-level search + kind filter. As
    *  cross-DB migration runs accumulate catalog assets quickly
    *  (e.g. 7 sinks from one schema-mode bulk run), operators need
@@ -101,12 +110,42 @@ export default function AssetsPage() {
     };
   }, [ws, t]);
 
+  // Phase ACN (2026-06-04) — manual refresh. The catalog isn't polled
+  // (assets change only when a run materialises), so the analyst needs
+  // a way to pull the latest after triggering a run elsewhere.
+  async function onRefresh() {
+    if (!ws || refreshing) return;
+    setRefreshing(true);
+    try {
+      const list = await assetsApi.list(ws.id);
+      setRows(list);
+    } catch (err) {
+      toast.error(
+        err instanceof ApiError ? err.message : t("assets.loadFailed"),
+      );
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
   return (
     <>
       <Header
         title={t("assets.title")}
         subtitle={
           ws ? t("assets.subtitle") : t("common.loadingWorkspace")
+        }
+        actions={
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onRefresh}
+            loading={refreshing}
+            disabled={!ws}
+          >
+            <RefreshCwIcon size={14} />
+            {t("common.refresh")}
+          </Button>
         }
       />
       <main className="mx-auto w-full max-w-6xl flex-1 space-y-6 overflow-y-auto px-6 py-8">

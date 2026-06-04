@@ -52,6 +52,7 @@ import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import { useLocale } from "@/components/providers/locale-provider";
 import type { Messages } from "@/lib/i18n/messages";
 import { relativeTime, absoluteTime } from "@/lib/format-time";
+import { cronHuman } from "@/lib/cron";
 import {
   type MigrationSummary,
   migrationSummaryOf,
@@ -257,8 +258,10 @@ function buildColumns(
                 : "bg-warning/15 text-warning"
             }`}
             title={
+              // Phase ADG (2026-06-04) — human-readable cron + state,
+              // e.g. "At 02:00 AM (paused)".
               r.schedule.cron_expr
-                ? `${r.schedule.cron_expr}${
+                ? `${cronHuman(r.schedule.cron_expr) ?? r.schedule.cron_expr}${
                     active ? "" : " (paused)"
                   }`
                 : undefined

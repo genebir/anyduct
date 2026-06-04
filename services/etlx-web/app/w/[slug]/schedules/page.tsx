@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { CronExpressionParser } from "cron-parser";
-import cronstrue from "cronstrue";
+import { cronHuman } from "@/lib/cron";
 import {
   CalendarClockIcon,
   PauseIcon,
@@ -46,17 +46,6 @@ type FormState =
   | { kind: "closed" }
   | { kind: "create"; pipelineId: string | "" }
   | { kind: "edit"; row: ScheduleRow };
-
-/** Phase ADF (2026-06-04) — human-readable cron for a tooltip.
- *  Returns undefined on parse failure so the title attribute is
- *  simply omitted. */
-function cronHuman(cron: string): string | undefined {
-  try {
-    return cronstrue.toString(cron, { verbose: true });
-  } catch {
-    return undefined;
-  }
-}
 
 /** Phase ABV (2026-06-01) — compute "next firing in X" for active
  *  batch schedules. Used in the list column so the operator can see

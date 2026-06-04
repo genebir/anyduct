@@ -63,7 +63,23 @@ function buildColumns(
       key: "status",
       header: t("common.status"),
       className: "w-32",
-      cell: (r) => <StatusBadge status={r.status} />,
+      // Phase AEV (2026-06-04) — surface the failure CLASS right under the
+      // badge so an operator scanning a list of failed runs can triage by
+      // error type (e.g. WriteError vs ZombieReaped) without opening each.
+      // error_class is already on RunSummary; full text in the title.
+      cell: (r) => (
+        <div className="flex flex-col gap-0.5">
+          <StatusBadge status={r.status} />
+          {r.error_class ? (
+            <span
+              className="max-w-[8rem] truncate font-mono text-[10px] text-error"
+              title={r.error_class}
+            >
+              {r.error_class}
+            </span>
+          ) : null}
+        </div>
+      ),
     },
     {
       key: "pipeline",

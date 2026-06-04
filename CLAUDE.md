@@ -127,6 +127,8 @@ uv run mypy etl_plugins
 > - **DLQ-7 (서버 e2e)**: 운영자 DLQ 조사 여정 HTTP 테스트 — login→ws→connections→DLQ 파이프라인→trigger→drain→GET run→GET dlq/records(실패 2행) + no-dlq 파이프라인 reason. auth+router+response_model HTTP 계약 검증(서비스 단위 DLQP1-5와 별개).
 > - **DLQ-8 (코어 lint, ADR-0076)**: `dlq_recommended` advisory — `python`/`custom_python` transform + `dlq` 없음이면 "한 행 raise가 run 전체를 죽인다, dlq를 설정하라" 경고(파이프라인당 1회, sql_exec 제외, location=None). dry-run warnings가 이미 빌더/마이그레이션 UI에 표시되므로 **web 변화 0**. 코어 lint unit 19→25, 서버 21 it 회귀 0. → **DLQ 라이프사이클 완성**: 권고(DLQ-8)→설정(빌더)→실행→수(AFB)→부분 플래그(DLQ-6)→record 조회(DLQ-1~5)→e2e(DLQ-7).
 > - **남은 후속(후보)**: per-run 필터(코어 변경 동반 — DLQ는 사용자 sink라 core가 run_id를 모름) / **S3·object-storage DLQ 읽기**(connector-specific) / 정렬·페이지네이션 / 빌더·마이그레이션 detail에서도 뷰어 노출.
+> - **AFQ (post-DLQ dogfood)**: 빌더 DLQ 설정이 table(BatchSink)+topic(StreamSink)을 항상 둘 다 노출하던 것을, 선택된 connection 타입(kafka=stream)에 맞는 하나만 표시(미선택 시 table 기본). FieldDef.showWhen(AAF) 평행.
+> - **AFR**: schedules 행에 "지금 실행"(Run now, ZapIcon) — 다음 cron tick 안 기다리고 pipelinesApi.trigger 후 새 run으로 이동(migrations Run now/ABK 평행).
 >
 > **이전 마일스톤 (2026-06-04): 운영-가시성 23슬라이스 (Phase AET → AFP).** 단일 슬라이스-단위 세션(web 전용, 코어/서버 변화 0, 매 슬라이스 tsc clean + dev 200). run 디버그(로그/오류 copy·카운트·records delta·DLQ count·heartbeat liveness·running 경과 3 surface) · 실패 triage error_class 5 surface · Last run 컬럼 5 surface · 헬스 signal→action 양축(schedules/sensors: 컬럼→대시보드 신호→필터+deeplink) · 분석가 asset 행수 delta · audit my-actions · builder dry-run 경고 수.
 >

@@ -421,13 +421,13 @@ export default function WorkspaceHomePage() {
             value={sensors ? activeSensors : undefined}
             icon={<RadarIcon size={18} />}
             // Phase ADK (2026-06-04) — deep-link to the orphaned subset
-            // when that's the signal (ADH/ADI pattern). Phase AFG — a
-            // failing target wins, but has no list filter yet so it links
-            // to the plain list (the AFF Last run column shows them).
+            // when that's the signal (ADH/ADI pattern). Phase AFH — a
+            // failing target wins and deep-links to its own filtered
+            // subset (?lastRun=failed), matching schedules (AFE).
             href={
               ws
                 ? failingSensors > 0
-                  ? `/w/${ws.slug}/sensors`
+                  ? `/w/${ws.slug}/sensors?lastRun=failed`
                   : orphanedSensors > 0
                     ? `/w/${ws.slug}/sensors?filter=orphaned`
                     : `/w/${ws.slug}/sensors`

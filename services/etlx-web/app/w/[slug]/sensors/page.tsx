@@ -301,6 +301,15 @@ export default function SensorsPage() {
   const [orphanFilter, setOrphanFilter] = useState<"" | "orphaned">(
     searchParams.get("filter") === "orphaned" ? "orphaned" : "",
   );
+  /** Phase AFH (2026-06-04) — Last run axis filter over the target
+   *  pipeline (mirrors schedules AFE), URL-presettable via
+   *  ``?lastRun=failed`` so the dashboard AFG signal can deep-link. */
+  const [lastRunFilter, setLastRunFilter] = useState<
+    "" | "never" | "failed" | "ok"
+  >(() => {
+    const v = searchParams.get("lastRun");
+    return v === "never" || v === "failed" || v === "ok" ? v : "";
+  });
 
   const distinctTypes = useMemo(() => {
     if (!rows) return [];
@@ -323,9 +332,25 @@ export default function SensorsPage() {
         if (!r.target_pipeline_id || pipelineIds.has(r.target_pipeline_id))
           return false;
       }
+      if (lastRunFilter) {
+        const run = r.target_pipeline_id
+          ? (lastRunByPipeline.get(r.target_pipeline_id) ?? null)
+          : null;
+        if (lastRunFilter === "never" && run !== null) return false;
+        if (lastRunFilter === "failed" && run?.status !== "failed") return false;
+        if (lastRunFilter === "ok" && run?.status !== "succeeded") return false;
+      }
       return true;
     });
-  }, [rows, search, typeFilter, orphanFilter, pipelines]);
+  }, [
+    rows,
+    search,
+    typeFilter,
+    orphanFilter,
+    pipelines,
+    lastRunFilter,
+    lastRunByPipeline,
+  ]);
 
   async function refresh(workspaceId: string) {
     try {
@@ -529,8 +554,9 @@ export default function SensorsPage() {
             below 5 rows. Phase ADK — also render when the orphaned
             filter is active (e.g. dashboard deep-link) so it's
             clearable even with a short list. */}
-        {rows !== null && (rows.length > 5 || orphanFilter) ? (
-          <div className="grid items-end gap-2 sm:grid-cols-[1fr_auto_auto_auto]">
+        {rows !== null &&
+        (rows.length > 5 || orphanFilter || lastRunFilter) ? (
+          <div className="grid items-end gap-2 sm:grid-cols-[1fr_auto_auto_auto_auto]">
             <Input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -558,7 +584,25 @@ export default function SensorsPage() {
               <option value="">{t("sensors.filterTargetAll")}</option>
               <option value="orphaned">{t("sensors.filterOrphanedOnly")}</option>
             </select>
-            {search || typeFilter || orphanFilter ? (
+            {/* Phase AFH — target Last run filter (reuses migrations
+                labels, like pipelines ADA / schedules AFE). */}
+            <select
+              value={lastRunFilter}
+              onChange={(e) =>
+                setLastRunFilter(
+                  e.target.value as "" | "never" | "failed" | "ok",
+                )
+              }
+              className="h-10 rounded-md border border-border-subtle bg-elevated px-2 text-sm text-text focus-visible:border-accent focus-visible:outline-none"
+            >
+              <option value="">{t("migrations.filterLastRunAll")}</option>
+              <option value="never">{t("migrations.filterLastRunNever")}</option>
+              <option value="failed">
+                {t("migrations.filterLastRunFailed")}
+              </option>
+              <option value="ok">{t("migrations.filterLastRunOk")}</option>
+            </select>
+            {search || typeFilter || orphanFilter || lastRunFilter ? (
               <Button
                 variant="ghost"
                 size="sm"
@@ -566,6 +610,7 @@ export default function SensorsPage() {
                   setSearch("");
                   setTypeFilter("");
                   setOrphanFilter("");
+                  setLastRunFilter("");
                 }}
               >
                 {t("sensors.clearFilters")}

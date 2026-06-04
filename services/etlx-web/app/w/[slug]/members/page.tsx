@@ -140,7 +140,17 @@ export default function MembersPage() {
       header: t("members.colUser"),
       cell: (r) => (
         <div className="min-w-0">
-          <div className="truncate font-medium text-text">{r.name}</div>
+          <div className="truncate font-medium text-text">
+            {r.name}
+            {/* Phase ADO (2026-06-04) — mark the current user, matching
+                the friendly-self pattern on audit (ABT) and runs (ABU)
+                so an admin spots their own row at a glance. */}
+            {r.user_id === currentUserId ? (
+              <span className="ml-2 inline-flex h-4 items-center rounded-sm bg-accent/15 px-1 text-[10px] font-semibold uppercase text-accent">
+                {t("members.you")}
+              </span>
+            ) : null}
+          </div>
           <div className="truncate text-xs text-text-muted">{r.email}</div>
         </div>
       ),

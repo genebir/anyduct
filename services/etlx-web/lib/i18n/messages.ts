@@ -502,6 +502,8 @@ export const en = {
   "connForm.createFailed": "Couldn't create connection.",
   "connForm.renamed": "Renamed to {name}",
   "connForm.renameFailed": "Couldn't rename connection.",
+  "connForm.renameInUseWarn":
+    "{count} pipeline(s) reference this connection by its current name — update them too, or their next run will fail.",
 
   // members
   "members.add": "Add member",
@@ -1628,6 +1630,8 @@ export const ko: Messages = {
   "connForm.createFailed": "연결을 생성할 수 없습니다.",
   "connForm.renamed": "{name}(으)로 이름이 변경됨",
   "connForm.renameFailed": "연결 이름을 변경할 수 없습니다.",
+  "connForm.renameInUseWarn":
+    "파이프라인 {count}개가 현재 이름으로 이 연결을 참조 중 — 함께 수정하지 않으면 다음 실행이 실패합니다.",
 
   "members.add": "멤버 추가",
   "members.readOnly": "읽기 전용",

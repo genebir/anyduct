@@ -26,6 +26,10 @@ export interface ConnectionFormProps {
   mode: "create" | "edit";
   /** Required in edit mode. */
   existing?: ConnectionSummary;
+  /** Phase ADE (2026-06-04) — number of pipelines referencing this
+   *  connection by name. In edit mode, renaming breaks them (configs
+   *  reference by name), so we warn when the name is changed. */
+  usageCount?: number;
   onSaved: (c: ConnectionSummary) => void;
   onCancel: () => void;
 }
@@ -125,12 +129,14 @@ function CreateForm({ workspaceId, onSaved, onCancel }: ConnectionFormProps) {
 function EditForm({
   workspaceId,
   existing,
+  usageCount = 0,
   onSaved,
   onCancel,
 }: ConnectionFormProps & { existing: ConnectionSummary }) {
   const { t } = useLocale();
   const [name, setName] = useState(existing.name);
   const [submitting, setSubmitting] = useState(false);
+  const renaming = name.trim() !== existing.name && name.trim().length > 0;
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -167,6 +173,14 @@ function EditForm({
             onChange={(e) => setName(e.target.value)}
             required
           />
+          {/* Phase ADE (2026-06-04) — renaming a referenced connection
+              breaks the pipelines that name it (configs aren't rewritten
+              automatically). Warn so the operator updates them too. */}
+          {renaming && usageCount > 0 ? (
+            <span className="mt-1 text-xs text-warning">
+              {t("connForm.renameInUseWarn", { count: usageCount })}
+            </span>
+          ) : null}
         </FieldRow>
         <div className="flex gap-2">
           <Button variant="ghost" type="button" onClick={onCancel} disabled={submitting}>

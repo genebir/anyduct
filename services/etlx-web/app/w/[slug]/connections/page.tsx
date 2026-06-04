@@ -375,6 +375,8 @@ export default function ConnectionsPage() {
             workspaceId={ws.id}
             mode="edit"
             existing={form.row}
+            // Phase ADE (2026-06-04) — let the form warn on rename.
+            usageCount={usage?.get(form.row.name)?.length ?? 0}
             onSaved={async () => {
               setForm({ kind: "closed" });
               await refresh(ws.id);

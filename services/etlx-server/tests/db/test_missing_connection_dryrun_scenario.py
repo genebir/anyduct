@@ -343,3 +343,91 @@ async def test_aep_dry_run_returns_lint_warnings(session: AsyncSession, tmp_path
         assert len(body["warnings"]) > 0, body
         joined = " ".join(w["message"] for w in body["warnings"]).lower()
         assert "column_mapping" in joined or "column mapping" in joined, body
+
+
+async def test_dlq9_dry_run_returns_dlq_recommended_warning(
+    session: AsyncSession, tmp_path
+) -> None:
+    """DLQ-8 (ADR-0076) over REST: a custom_python transform with no
+    ``dlq`` makes the dry-run response carry a ``dlq_recommended`` advisory
+    — the data the builder DryRunPanel surfaces so the operator knows one
+    bad record would fail the whole run. Pins the new lint reaches the API.
+    """
+    app = _build_app(session)
+    async with _client(app) as client:
+        h = await _login(session, client, email="dlq9@example.com")
+        ws_id = await _make_ws(client, h, slug="dlq9-ws")
+        await _make_conn(client, h, ws_id, name="src", db=str(tmp_path / "src.db"))
+        await _make_conn(client, h, ws_id, name="dst", db=str(tmp_path / "dst.db"))
+
+        pipe = (
+            await client.post(
+                f"/workspaces/{ws_id}/pipelines",
+                headers=h,
+                json={
+                    "name": "no_dlq",
+                    "config": {
+                        "name": "no_dlq",
+                        "mode": "batch",
+                        "source": {"connection": "src", "query": "SELECT 1 AS n"},
+                        "transforms": [
+                            {
+                                "type": "custom_python",
+                                "code": "def transform(record):\n    return record\n",
+                            }
+                        ],
+                        "sink": {"connection": "dst", "table": "out"},
+                    },
+                },
+            )
+        ).json()
+        pipe_id = pipe["id"]
+
+        dry = await client.post(f"/workspaces/{ws_id}/pipelines/{pipe_id}/dry-run", headers=h)
+        assert dry.status_code == 200, dry.text
+        body = dry.json()
+        codes = [w["code"] for w in body["warnings"]]
+        assert "dlq_recommended" in codes, body
+        msg = next(w for w in body["warnings"] if w["code"] == "dlq_recommended")["message"]
+        assert "dlq" in msg.lower()
+
+
+async def test_dlq9_dry_run_no_dlq_warning_when_dlq_configured(
+    session: AsyncSession, tmp_path
+) -> None:
+    """The mirror: once a ``dlq`` is configured, the advisory disappears."""
+    app = _build_app(session)
+    async with _client(app) as client:
+        h = await _login(session, client, email="dlq9b@example.com")
+        ws_id = await _make_ws(client, h, slug="dlq9b-ws")
+        await _make_conn(client, h, ws_id, name="src", db=str(tmp_path / "src.db"))
+        await _make_conn(client, h, ws_id, name="dst", db=str(tmp_path / "dst.db"))
+
+        pipe = (
+            await client.post(
+                f"/workspaces/{ws_id}/pipelines",
+                headers=h,
+                json={
+                    "name": "with_dlq",
+                    "config": {
+                        "name": "with_dlq",
+                        "mode": "batch",
+                        "source": {"connection": "src", "query": "SELECT 1 AS n"},
+                        "transforms": [
+                            {
+                                "type": "custom_python",
+                                "code": "def transform(record):\n    return record\n",
+                            }
+                        ],
+                        "sink": {"connection": "dst", "table": "out"},
+                        "dlq": {"connection": "dst", "table": "bad", "mode": "append"},
+                    },
+                },
+            )
+        ).json()
+        pipe_id = pipe["id"]
+
+        dry = await client.post(f"/workspaces/{ws_id}/pipelines/{pipe_id}/dry-run", headers=h)
+        assert dry.status_code == 200, dry.text
+        codes = [w["code"] for w in dry.json()["warnings"]]
+        assert "dlq_recommended" not in codes

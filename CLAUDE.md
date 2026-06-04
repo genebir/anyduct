@@ -149,8 +149,13 @@ uv run mypy etl_plugins
 > - **ADK**: sensors orphaned 필터 + 대시보드 Sensors 카드 deeplink(`?filter=orphaned`).
 > - **ADL**: migration detail에 누락 connection 배너(ADD의 detail 버전).
 > - **ADM**: 변수 폼 create/update 명확성(이름 키 upsert footgun 완화).
+> - **ADN**: asset 상세 헤더에 freshness("마지막 생성 X 전") — 분석가 진입 즉시 신선도.
+> - **ADO**: members 목록에 현재 사용자 "(You)" — friendly-self 패턴(ABT/ABU) 3 surface 정합.
+> - **ADP**: workspaces 페이지 로딩 중 EmptyState 깜빡임 수정(provider loading 활용).
+> - **ADQ**: pipelines 컨텍스트 메뉴에 Dry run(검증→실행, 마이그레이션 ABP/ABQ 평행).
+> - **ADR**: audit row 시간 relative + tooltip — 시간 표기 전 surface 완전 통일.
 >
-> **누적 ABG→ADM = 61 슬라이스(+follow-up)** 단일 long-running 페르소나 dogfood 세션. 신규 pure 헬퍼 4(connection-usage/variable-usage/format-time/cron). 코어/서버 변화 0(매 슬라이스), web tsc clean, **production build 통과**(21 routes). dogfood가 잡은 silent/실버그 3건(ACJ/ACL·ACM/ACQ). 코어 단위 905 passed(회귀 0). 테마: **시간 표기 전 surface 지역화 통일** · **usage/broken-reference 안전망**(connections·variables used-by + 삭제/리네임 경고 + 누락 connection 플래그 list+detail + orphaned sensors) · **signal→action deeplink 3종**(ADH/ADI/ADK). i18n 신규 키 ~125개.
+> **누적 ABG→ADR = 66 슬라이스(+follow-up)** 단일 long-running 페르소나 dogfood 세션. 신규 pure 헬퍼 4(connection-usage/variable-usage/format-time/cron). 코어/서버 변화 0(매 슬라이스), web tsc clean, **production build 통과**(21 routes, 반복 인증). dogfood가 잡은 silent/실버그 4건(ACJ strategy 디폴트 / ACL·ACM walker / ACQ schedules 빈 목록 영구로딩 / ADP·variables 로딩 깜빡임). 코어 단위 905 passed(회귀 0). 테마: **시간 표기 8 surface 지역화 통일** · **usage/broken-reference 안전망**(connections·variables used-by + 삭제/리네임 경고 + 누락 connection 플래그 list+detail + orphaned sensors + cleanup 신호) · **signal→action deeplink 3종**(ADH/ADI/ADK) · **로딩/빈 상태 정합**(ACQ/ADP) · **검증 도구 확장**(ACT test-all, ADQ dry-run). i18n 신규 키 ~130개.
 >
 > **이전 마일스톤 (2026-06-01): Persona dogfood UX 폴리시 4th wave (Phase ACD → ACI).** 3rd wave 마무리 후 추가 6 슬라이스 — 마이그레이션 폼 smart-default + dashboard 정합 + audit click-to-filter + table picker 검색:
 > - **ACD**: 마이그레이션 source 테이블 선택 시 dest 테이블이 비어 있으면 같은 이름으로 자동 채움. 'same name, different DB' 케이스 마찰 0.

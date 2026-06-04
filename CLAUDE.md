@@ -185,6 +185,8 @@ uv run mypy etl_plugins
 > - **AFA**: migration detail Recent runs에 error_class 칩 — AEV/AEW/AEX 리스트 칩의 detail-page 평행. 실패 유형 triage가 list 3종 + 대시보드 + migration detail = 5 surface 정합.
 > - **AFB**: run 상세에 DLQ 라우팅 행 수 표시 — 코어 `etl_plugins.errors`(routed="dlq") 카운터를 run metrics `attrs_json`에서 합산해 Summary에 "N개 DLQ로 라우팅됨"(>0일 때) + tooltip. AEZ의 generic 필터 중 DLQ 몫 명시(나쁜 행이 버려진 게 아니라 포착). 기존 metrics 데이터 활용(서버 변화 0).
 > - **AFC**: schedules list에 Last run 컬럼 — 정시 fire해도 매 run 실패 시 schedules 페이지에서 안 보이던 갭. pipelines(ACS)/migrations(AAP) 패턴(workspace runs 단일 fetch + 10s 폴링 + StatusBadge + relative time + error_class 칩). Last run 컬럼 4 surface(pipelines/migrations/schedules/대시보드) 정합.
+> - **AFD**: 대시보드 Active schedules 카드 "N개 실패 중" 신호 — 활성 스케줄 중 파이프라인 최근 run이 failed인 수를 sub-line 최우선(next-firing/paused보다 우선). 기존 fetch한 runs(50) 재사용, 추가 fetch 0. AFC의 대시보드 평행.
+> - **AFE (schedules signal→action 루프 완성)**: schedules list Last run 축 필터(never/failed/ok, pipelines ADA 평행 + migrations 라벨 재사용) + URL preset `?lastRun=failed` + 대시보드 AFD 카드가 failing>0이면 그 subset으로 deep-link(ADH/ADI/ADK/ADT 패턴). preset 시 임계값 이하라도 필터 바 노출. AFC(컬럼)→AFD(신호)→AFE(필터+deeplink) 한 루프.
 >
 > **세션 green 확정(2026-06-04)**: 코어 단위 905 passed(코어 production 미변경, 회귀 0) · 신규 서버 시나리오 5 it green(testcontainers) · web tsc clean(매 슬라이스) · 실행 중 dev 서버 전 라우트 200 · production build 21 routes(반복). 검증 방법: dev 동시 실행으로 `next build` 금지(메모리), `tsc` + dev curl(런타임) + 서버 contract는 testcontainers e2e. ruff-format 커밋 중단은 `uv run ruff format` 사전 실행으로 회피.
 >

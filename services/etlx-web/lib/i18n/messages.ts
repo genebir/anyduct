@@ -1011,6 +1011,9 @@ export const en = {
   "runDetail.dlqReasonGeneric": "DLQ records aren't available to preview.",
   // Phase DLQ-3 (2026-06-04) — copy the DLQ records as JSON.
   "runDetail.dlqCopied": "Copied DLQ records to clipboard",
+  // Phase DLQ-4 (2026-06-04) — row limit + truncation hint.
+  "runDetail.dlqLimit": "Rows to fetch",
+  "runDetail.dlqTruncated": "Showing the first {count} — increase the limit to see more.",
   // Phase AEU (2026-06-04) — at-a-glance error/warning counts; click filters.
   "runDetail.logErrorCount": "{count} errors",
   "runDetail.logWarnCount": "{count} warnings",
@@ -2212,6 +2215,9 @@ export const ko: Messages = {
   "runDetail.dlqReasonGeneric": "미리볼 수 있는 DLQ 레코드가 없습니다.",
   // Phase DLQ-3 (2026-06-04) — DLQ 레코드를 JSON으로 복사.
   "runDetail.dlqCopied": "DLQ 레코드를 클립보드에 복사했습니다",
+  // Phase DLQ-4 (2026-06-04) — 행 수 제한 + truncation 안내.
+  "runDetail.dlqLimit": "가져올 행 수",
+  "runDetail.dlqTruncated": "처음 {count}개만 표시 — 더 보려면 제한을 늘리세요.",
   // Phase AEU (2026-06-04) — 오류/경고 개수 한눈에; 클릭 시 필터.
   "runDetail.logErrorCount": "오류 {count}개",
   "runDetail.logWarnCount": "경고 {count}개",

@@ -1231,12 +1231,14 @@ function DlqRecordsCard({
   const [data, setData] = useState<DlqPreviewResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [failed, setFailed] = useState(false);
+  // Phase DLQ-4 (2026-06-04) — how many rows to pull (server caps at 200).
+  const [limit, setLimit] = useState(50);
 
-  async function load() {
+  async function load(n: number = limit) {
     setLoading(true);
     setFailed(false);
     try {
-      setData(await pipelinesApi.dlqRecords(workspaceId, pipelineId));
+      setData(await pipelinesApi.dlqRecords(workspaceId, pipelineId, n));
     } catch {
       setFailed(true);
     } finally {
@@ -1302,6 +1304,24 @@ function DlqRecordsCard({
                 {t("common.refresh")}
               </button>
             ) : null}
+            {/* Phase DLQ-4 — row limit (server caps at 200). Refetches. */}
+            {open ? (
+              <select
+                value={limit}
+                onChange={(e) => {
+                  const n = Number(e.target.value);
+                  setLimit(n);
+                  void load(n);
+                }}
+                disabled={loading}
+                className="h-7 rounded-sm border border-border-subtle bg-overlay px-1 text-xs text-text-secondary"
+                title={t("runDetail.dlqLimit")}
+              >
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+                <option value={200}>200</option>
+              </select>
+            ) : null}
             <button type="button" onClick={toggle} className={btn}>
               {open ? t("runDetail.collapse") : t("runDetail.view")}
             </button>
@@ -1356,6 +1376,13 @@ function DlqRecordsCard({
                   ))}
                 </tbody>
               </table>
+              {/* Phase DLQ-4 — no-silent-truncation: a full page means
+                  there may be more rows than the current limit. */}
+              {data.records.length >= limit ? (
+                <div className="mt-2 text-[11px] text-text-muted">
+                  {t("runDetail.dlqTruncated", { count: limit })}
+                </div>
+              ) : null}
             </div>
           )
         ) : (

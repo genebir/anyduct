@@ -143,9 +143,13 @@ function nodeCard(n: NodeRunEntry, selected: boolean): React.ReactNode {
       </div>
       {showCounters || duration ? (
         <div className="mt-0.5 text-[10px] text-text-secondary">
-          {n.records_read > 0 ? `R ${n.records_read}` : null}
+          {/* Phase AFP (2026-06-04) — thousand-separated counts, matching
+              every other record count in the app (run summary, asset
+              materializations). "W 1,250,000" reads far quicker than the
+              raw digit run. */}
+          {n.records_read > 0 ? `R ${n.records_read.toLocaleString()}` : null}
           {n.records_read > 0 && n.records_written > 0 ? " · " : null}
-          {n.records_written > 0 ? `W ${n.records_written}` : null}
+          {n.records_written > 0 ? `W ${n.records_written.toLocaleString()}` : null}
           {(n.records_read > 0 || n.records_written > 0) && duration ? " · " : null}
           {/* Duration display (Phase N, 2026-05-28): turns the silent
               "this node took how long?" question into one glance. For

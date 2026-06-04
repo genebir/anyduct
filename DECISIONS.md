@@ -2348,4 +2348,22 @@ L1 출시 직후 사용자가 5개 회신:
 
 ---
 
+## ADR-0074: SQL 필드도 Monaco IDE — `CodeEditor` 일반화 + `kind: "sql"`
+
+**Date**: 2026-06-04
+**Status**: Accepted
+**Context**: 사용자 *"SQL 쿼리도 Python 처럼 IDE 활용해줘"*. 빌더에서 Python(`custom_python`)은 Monaco 에디터(문법 하이라이팅·줄번호·테마 동기화, ADR-0041 I2)를 쓰는데, SQL 입력 surface 2곳은 plain `<textarea>`였음 — ① source `sourceQuery`의 raw-SQL 모드, ② `sql_exec`("Run SQL") 노드의 statement(`kind: "string"` + `multiline`). 비자명한 JOIN/CTE를 textarea로 작성·검토하기 불편.
+
+**Decision**:
+1. **`components/builder/code-editor.tsx` 신설** — `PythonCodeEditor`의 Monaco 셋업(lazy-load + SSR off, `data-theme` 동기화, **uncontrolled `defaultValue`** = 2026-05-26 cursor-jump fix 계승)을 `language` prop을 받는 범용 `CodeEditor`로 추출. `PythonCodeEditor`는 `<CodeEditor language="python">`로 위임(공개 API·starter 불변).
+2. **`sourceQuery` SQL 모드** → `<CodeEditor language="sql">`. 모드 토글 시 에디터가 remount되어 visual에서 방금 만든 쿼리도 `defaultValue`로 들어옴.
+3. **신규 `FieldDef` kind `"sql"`** — `sql_exec` statement 필드를 `string`+multiline → `kind: "sql"`로 교체. properties-panel에 `sql` 렌더러(`<CodeEditor language="sql">`) + `composite` 집합 포함(Monaco 클릭이 textarea로 새지 않게, pythonCode와 동일 이유). starter 없음(SQL statement는 boilerplate shape 없음).
+
+**Consequences**:
+- ✅ Python/SQL 입력이 동일 IDE 경험으로 통일. 코어/서버 변화 0(순수 web). web tsc clean + production build 통과.
+- ⚠️ **Storybook 시각 baseline 변경** — `source-query-field.stories.tsx`의 JOIN 쿼리 스토리가 SQL 모드(Monaco lazy-load fallback)를 렌더 → 기존 textarea 스냅샷과 diff. Monaco 에디터는 SSR-disabled lazy-load라 의미 있는 스냅샷이 어려워 `PythonCodeEditor` 선례대로 전용 story는 두지 않음. ADR-0018(디자인 시스템) 맥락에서 이 변경을 기록.
+- backward-compat: 저장 wire shape 불변(둘 다 plain string). 기존 파이프라인 영향 0.
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

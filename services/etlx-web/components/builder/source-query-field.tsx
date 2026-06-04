@@ -4,6 +4,7 @@ import { useState } from "react";
 import { cn } from "@/lib/cn";
 import { useTables, groupBySchema } from "./table-picker";
 import { useColumns } from "./columns-field";
+import { CodeEditor } from "./code-editor";
 import type { Messages } from "@/lib/i18n/messages";
 
 type Translate = (key: keyof Messages, vars?: Record<string, string | number>) => string;
@@ -87,15 +88,17 @@ export function SourceQueryField({
       </div>
 
       {mode === "sql" ? (
-        <textarea
-          rows={4}
-          value={(value as string) ?? ""}
-          placeholder={placeholder}
-          onChange={(e) => onChange(e.target.value || undefined)}
-          className={cn(
-            "min-h-20 w-full rounded-md border border-border-subtle bg-elevated px-3 py-2 font-mono text-xs text-text",
-            "transition duration-200 focus-visible:border-accent focus-visible:outline-none",
-          )}
+        // Phase ADX (2026-06-04) — Monaco SQL editor (syntax highlighting +
+        // line numbers), same IDE the custom_python transform uses. The
+        // editor is uncontrolled; it mounts fresh each time the user
+        // toggles into SQL mode, so ``defaultValue`` picks up the latest
+        // query (incl. one just built in visual mode).
+        <CodeEditor
+          language="sql"
+          value={typeof value === "string" ? value : ""}
+          onChange={(v) => onChange(v.trim() ? v : undefined)}
+          height={180}
+          tabSize={2}
         />
       ) : (
         <VisualBuilder

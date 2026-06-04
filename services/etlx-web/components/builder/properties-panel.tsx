@@ -15,6 +15,7 @@ import { TableField } from "./table-picker";
 import { ColumnsField } from "./columns-field";
 import { SourceQueryField } from "./source-query-field";
 import { PythonCodeEditor, PYTHON_CODE_STARTER } from "./python-code-editor";
+import { CodeEditor } from "./code-editor";
 import type { BuilderNode } from "@/lib/pipeline-config";
 import {
   buildExpr,
@@ -377,7 +378,8 @@ function FieldEditor({
     field.kind === "columns" ||
     field.kind === "sourceQuery" ||
     field.kind === "table" ||
-    field.kind === "pythonCode";
+    field.kind === "pythonCode" ||
+    field.kind === "sql";
   const Wrapper = composite ? "div" : "label";
   // When a required field is empty, paint the closest interactive
   // descendant (select / input / textarea) with a red border via a
@@ -633,6 +635,22 @@ function FieldInput({
         // Pass empty strings through (don't coerce to undefined) so a
         // deliberate clear sticks across reloads.
         onChange={(next) => onChange(next)}
+      />
+    );
+  }
+  if (field.kind === "sql") {
+    // Phase ADX (2026-06-04) — SQL statement (sql_exec "Run SQL"). Same
+    // Monaco IDE as pythonCode, SQL grammar. No starter skeleton — a SQL
+    // statement has no boilerplate shape. 240px ≈ ~12 lines, enough for a
+    // DELETE/MERGE without dominating the panel. Uncontrolled (the
+    // wrapper keys per node:field, so node switches remount it).
+    return (
+      <CodeEditor
+        language="sql"
+        value={(value as string | undefined) ?? ""}
+        onChange={(next) => onChange(next)}
+        height={240}
+        tabSize={2}
       />
     );
   }

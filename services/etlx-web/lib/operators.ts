@@ -138,6 +138,13 @@ export type FieldDef =
       // the runtime compiles it once at build, executes it per record.
       kind: "pythonCode";
       placeholder?: string;
+    })
+  | (FieldBase & {
+      // Raw SQL statement (Phase ADX, 2026-06-04). Same Monaco IDE as
+      // ``pythonCode`` but pinned to the SQL grammar — used by the
+      // ``sql_exec`` "Run SQL" node. Stores a plain string.
+      kind: "sql";
+      placeholder?: string;
     });
 
 export interface OperatorSpec {
@@ -449,8 +456,7 @@ const SOURCES: OperatorSpec[] = [
       {
         key: "statement",
         label: "SQL statement",
-        kind: "string",
-        multiline: true,
+        kind: "sql",
         required: true,
         placeholder: "DELETE FROM public.orders WHERE batch_date = '2026-05-21'",
         help: "Runs once when the pipeline reaches this node. Pure side effect — emits no records.",

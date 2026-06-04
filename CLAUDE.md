@@ -122,7 +122,8 @@ uv run mypy etl_plugins
 > - **DLQ-2 (web)**: run 상세 우측에 collapsible `DlqRecordsCard`(dlqRouted>0일 때, lazy fetch). available이면 컬럼 union 테이블, 아니면 reason별 안내(Kafka/HTTP는 미리보기 불가 등). `pipelinesApi.dlqRecords` + `DlqPreviewResponse`.
 > - **DLQ-3 (web)**: 뷰어 카드에 Copy(records→JSON 클립보드, 티켓용) + Refresh(DLQ 테이블은 후속 run마다 증가, lazy fetch 캐시 갱신).
 > - **DLQ-4 (web)**: 행 수 selector(50/100/200, 서버 캡 200) + "처음 N개만 표시" truncation 안내(no-silent-cap, 로그 ADB 원칙). → DLQ 뷰어 view/copy/refresh/limit 운영 완결.
-> - **남은 후속(후보)**: per-run 필터(현재는 DLQ 테이블 전체 최신 N — run_id 태깅은 코어 변경 동반) / S3·object-storage DLQ 읽기 / 정렬·페이지네이션 / 빌더·마이그레이션 detail에서도 뷰어 노출.
+> - **DLQ-5 (서버)**: preview를 SQL-dialect allow-list(`_SQL_READABLE_TYPES` = sqlite/postgres/mysql/vertica/mssql)로 제한 — 비-RDBMS sink(S3/Kafka/HTTP)는 SELECT를 못 받으므로 connector build *전에* `sink_not_readable`로 short-circuit(무거운 import 회피, 혼란스러운 read_failed 방지). 서버 it 5.
+> - **남은 후속(후보)**: per-run 필터(코어 변경 동반 — DLQ는 사용자 sink라 core가 run_id를 모름, "core는 service를 모른다" 원칙과 충돌) / **S3·object-storage DLQ 읽기**(connector-specific) / 정렬·페이지네이션 / 빌더·마이그레이션 detail에서도 뷰어 노출.
 >
 > **이전 마일스톤 (2026-06-04): 운영-가시성 23슬라이스 (Phase AET → AFP).** 단일 슬라이스-단위 세션(web 전용, 코어/서버 변화 0, 매 슬라이스 tsc clean + dev 200). run 디버그(로그/오류 copy·카운트·records delta·DLQ count·heartbeat liveness·running 경과 3 surface) · 실패 triage error_class 5 surface · Last run 컬럼 5 surface · 헬스 signal→action 양축(schedules/sensors: 컬럼→대시보드 신호→필터+deeplink) · 분석가 asset 행수 delta · audit my-actions · builder dry-run 경고 수.
 >

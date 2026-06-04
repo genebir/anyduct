@@ -776,8 +776,7 @@ const SINKS: OperatorSpec[] = [
       {
         key: "pre_sql",
         label: "Pre-write SQL (atomic)",
-        kind: "string",
-        multiline: true,
+        kind: "sql",
         placeholder: "DELETE FROM public.orders WHERE batch_date = '2026-05-21'",
         help: "Runs inside the write transaction, before insert. DELETE + insert commit together — atomic, idempotent re-runs (no duplicates, no data loss on failure).",
       },
@@ -827,8 +826,7 @@ const SINKS: OperatorSpec[] = [
       {
         key: "pre_sql",
         label: "Pre-write SQL (atomic)",
-        kind: "string",
-        multiline: true,
+        kind: "sql",
         placeholder: "DELETE FROM orders WHERE batch_date = '2026-05-21'",
         help: "Runs inside the write transaction, before insert (use DELETE, not TRUNCATE, on MySQL). DELETE + insert commit together — atomic, idempotent re-runs.",
       },
@@ -877,8 +875,7 @@ const SINKS: OperatorSpec[] = [
       {
         key: "pre_sql",
         label: "Pre-write SQL (atomic)",
-        kind: "string",
-        multiline: true,
+        kind: "sql",
         placeholder: "DELETE FROM orders WHERE batch_date = '2026-05-21'",
         help: "Runs inside the write transaction, before insert. DELETE + insert commit together — atomic, idempotent re-runs.",
       },
@@ -933,8 +930,7 @@ const SINKS: OperatorSpec[] = [
       {
         key: "pre_sql",
         label: "Pre-write SQL (atomic)",
-        kind: "string",
-        multiline: true,
+        kind: "sql",
         placeholder: "DELETE FROM public.orders WHERE batch_date = '2026-05-21'",
       },
       {
@@ -989,8 +985,7 @@ const SINKS: OperatorSpec[] = [
       {
         key: "pre_sql",
         label: "Pre-write SQL (atomic)",
-        kind: "string",
-        multiline: true,
+        kind: "sql",
         placeholder: "DELETE FROM dbo.orders WHERE batch_date = '2026-05-21'",
       },
       {

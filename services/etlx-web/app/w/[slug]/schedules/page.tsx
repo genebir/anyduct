@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { CronExpressionParser } from "cron-parser";
+import cronstrue from "cronstrue";
 import {
   CalendarClockIcon,
   PauseIcon,
@@ -45,6 +46,17 @@ type FormState =
   | { kind: "closed" }
   | { kind: "create"; pipelineId: string | "" }
   | { kind: "edit"; row: ScheduleRow };
+
+/** Phase ADF (2026-06-04) — human-readable cron for a tooltip.
+ *  Returns undefined on parse failure so the title attribute is
+ *  simply omitted. */
+function cronHuman(cron: string): string | undefined {
+  try {
+    return cronstrue.toString(cron, { verbose: true });
+  } catch {
+    return undefined;
+  }
+}
 
 /** Phase ABV (2026-06-01) — compute "next firing in X" for active
  *  batch schedules. Used in the list column so the operator can see
@@ -100,7 +112,14 @@ function buildColumns(t: Translate): Column<ScheduleRow>[] {
       header: t("common.cron"),
       cell: (r) =>
         r.cron_expr ? (
-          <code className="font-mono text-xs text-text-secondary">
+          // Phase ADF (2026-06-04) — human-readable cron on hover
+          // (cronstrue, same lib as CronInput) so the operator reads
+          // intent without decoding "0 2 * * *". Parse errors fall back
+          // to no title.
+          <code
+            className="font-mono text-xs text-text-secondary"
+            title={cronHuman(r.cron_expr)}
+          >
             {r.cron_expr}
           </code>
         ) : (

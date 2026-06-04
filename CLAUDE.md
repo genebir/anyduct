@@ -190,6 +190,8 @@ uv run mypy etl_plugins
 > - **AFF**: sensors list에 타겟 파이프라인 Last run 컬럼 — 센서가 fire해도 트리거된 run이 매번 실패하면 안 보이던 갭. pipelines(ACS)/schedules(AFC) 패턴(runs 단일 fetch + 10s 폴링 + StatusBadge + relative time + error_class). Last run 컬럼 **5 surface**(pipelines/migrations/schedules/sensors/대시보드) 정합.
 > - **AFG**: 대시보드 Sensors 카드 "타겟 N개 실패 중" 신호 — 활성 센서 중 타겟 최근 run이 failed인 수를 sub-line 최우선(orphaned/paused보다 우선). 기존 runs(50) 재사용. AFD의 sensors 평행.
 > - **AFH (sensors signal→action 루프 완성)**: sensors list 타겟 Last run 축 필터(schedules AFE 평행) + URL preset `?lastRun=failed` + 대시보드 AFG 카드 failing>0 시 subset deep-link. AFF(컬럼)→AFG(신호)→AFH(필터+deeplink) 한 루프. **운영 헬스 신호→액션이 schedules·sensors 양축 완비**.
+> - **AFI**: run 상세 heartbeat liveness — absolute → relative time + tooltip, status=running인데 마지막 heartbeat >60s면 "멈췄을 수 있음" warning(ZombieReaper 실패 처리 전 stuck run 인지). 폴링마다 재평가.
+> - **AFJ**: run 상세 running run live 경과 시간 — duration_seconds가 완료 전 null이라 "—"였던 것을 started_at→now 기준 "Xm Ys · 진행 중"으로(폴링 갱신). AFI와 함께 in-flight 모니터링.
 >
 > **세션 green 확정(2026-06-04)**: 코어 단위 905 passed(코어 production 미변경, 회귀 0) · 신규 서버 시나리오 5 it green(testcontainers) · web tsc clean(매 슬라이스) · 실행 중 dev 서버 전 라우트 200 · production build 21 routes(반복). 검증 방법: dev 동시 실행으로 `next build` 금지(메모리), `tsc` + dev curl(런타임) + 서버 contract는 testcontainers e2e. ruff-format 커밋 중단은 `uv run ruff format` 사전 실행으로 회피.
 >

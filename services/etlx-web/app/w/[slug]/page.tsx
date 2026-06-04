@@ -38,7 +38,10 @@ import { relativeTime, absoluteTime } from "@/lib/format-time";
 import { cn } from "@/lib/cn";
 import { toast } from "sonner";
 import { migrationSummaryOf } from "@/lib/migration-utils";
-import { buildConnectionUsage } from "@/lib/connection-usage";
+import {
+  buildConnectionUsage,
+  extractConnectionNames,
+} from "@/lib/connection-usage";
 
 interface ScheduleRow extends ScheduleSummary {
   pipeline_name: string;
@@ -194,6 +197,23 @@ export default function WorkspaceHomePage() {
   const activeSchedules = (schedules ?? []).filter((s) => s.is_active).length;
   const activeSensors = (sensors ?? []).filter((s) => s.is_active).length;
 
+  // Phase ADS (2026-06-04) — regular pipelines that reference a
+  // connection no longer in the workspace (their next run fails to
+  // build). Surfaces ADC's per-row flag as a dashboard signal. Needs
+  // both payloads; counts non-migration pipelines only (migrations
+  // have their own surface + signals).
+  const brokenPipelines = useMemo(() => {
+    if (!pipelines || !connections) return 0;
+    const names = new Set(connections.map((c) => c.name));
+    let n = 0;
+    for (const p of pipelines) {
+      if (migrationSummaryOf(p.current_config_json)) continue;
+      const refs = extractConnectionNames(p.current_config_json);
+      if ([...refs].some((r) => !names.has(r))) n += 1;
+    }
+    return n;
+  }, [pipelines, connections]);
+
   // Phase ADJ (2026-06-04) — sensors whose target pipeline no longer
   // exists. They still poll but trigger nothing, so surface them as a
   // stronger signal than the paused count. Needs both payloads.
@@ -275,6 +295,13 @@ export default function WorkspaceHomePage() {
             }
             icon={<WorkflowIcon size={18} />}
             href={ws ? `/w/${ws.slug}/pipelines` : "#"}
+            // Phase ADS (2026-06-04) — flag pipelines that reference a
+            // missing connection (ADC) as a top-level health signal.
+            sub={
+              brokenPipelines > 0
+                ? t("overview.pipelinesBroken", { n: brokenPipelines })
+                : undefined
+            }
           />
           {/* Phase AAV (2026-06-01) — migrations as a first-class
               dashboard signal. Sub line shows the in-flight count or

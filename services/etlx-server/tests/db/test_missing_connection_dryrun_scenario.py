@@ -245,3 +245,51 @@ async def test_aee_config_json_roundtrips_for_web_walkers(session: AsyncSession,
         # referencedVariableNames sees ${var.region}; variables block survives.
         assert cfg["variables"]["region"] == "us"
         assert "${var.region}" in json.dumps(cfg)
+
+
+async def test_aef_graph_sql_exec_node_missing_connection_fails_dry_run(
+    session: AsyncSession, tmp_path
+) -> None:
+    """A graph-mode pipeline whose only node is a ``sql_exec`` ("Run SQL")
+    referencing a missing connection → dry-run fails naming it. Proves the
+    graph sql_exec node's connection is a tracked reference on the server,
+    matching the web walker which includes ``type === "sql_exec"`` graph
+    nodes (ACL/ACM follow-up). Closes the last shape of the broken-ref
+    web↔server agreement (linear + dlq covered by AEC, graph sql_exec here).
+    """
+    app = _build_app(session)
+    async with _client(app) as client:
+        h = await _login(session, client, email="aef@example.com")
+        ws_id = await _make_ws(client, h, slug="aef-ws")
+
+        pipe = (
+            await client.post(
+                f"/workspaces/{ws_id}/pipelines",
+                headers=h,
+                json={
+                    "name": "graph_run_sql",
+                    "config": {
+                        "name": "graph_run_sql",
+                        "mode": "batch",
+                        "graph": {
+                            "nodes": [
+                                {
+                                    "id": "n1",
+                                    "type": "sql_exec",
+                                    "connection": "ghost_wh",
+                                    "statement": "DELETE FROM staging.tmp",
+                                }
+                            ],
+                            "edges": [],
+                        },
+                    },
+                },
+            )
+        ).json()
+        pipe_id = pipe["id"]
+
+        dry = await client.post(f"/workspaces/{ws_id}/pipelines/{pipe_id}/dry-run", headers=h)
+        assert dry.status_code == 200, dry.text
+        body = dry.json()
+        assert body["ok"] is False, body
+        assert "ghost_wh" in " ".join(body["errors"]), body

@@ -330,6 +330,17 @@ export default function MigrationDetailPage() {
     }
   }
 
+  // Phase ADL/ADV (2026-06-04) — connection names this migration points
+  // at that no longer exist. Drives both the banner (ADL) and the
+  // disabled "Run now" (ADV). Only meaningful once connections loaded.
+  const missingConnections =
+    form && connections.length > 0
+      ? [form.sourceConnection, form.sinkConnection].filter(
+          (n) => n && !connections.some((c) => c.name === n),
+        )
+      : [];
+  const hasMissingConnection = missingConnections.length > 0;
+
   return (
     <>
       <Header
@@ -359,12 +370,19 @@ export default function MigrationDetailPage() {
               <Button
                 size="sm"
                 loading={triggering}
-                disabled={!pipeline.current_version}
+                // Phase ADV — block Run now when a connection is missing
+                // (the run would just fail to build). Dry run stays
+                // enabled so the operator can confirm the diagnosis.
+                disabled={!pipeline.current_version || hasMissingConnection}
                 onClick={() => void onRunNow()}
                 title={
-                  pipeline.current_version
-                    ? undefined
-                    : t("migrations.saveBeforeRun")
+                  !pipeline.current_version
+                    ? t("migrations.saveBeforeRun")
+                    : hasMissingConnection
+                      ? t("pipelines.missingConnection", {
+                          names: missingConnections.join(", "),
+                        })
+                      : undefined
                 }
               >
                 <PlayIcon size={14} />
@@ -424,23 +442,13 @@ export default function MigrationDetailPage() {
                 The form's connection selects would otherwise just show
                 empty with no explanation. Only once connections have
                 loaded (length>0) to avoid a load-race false positive. */}
-            {form && connections.length > 0
-              ? (() => {
-                  const missing = [
-                    form.sourceConnection,
-                    form.sinkConnection,
-                  ].filter(
-                    (n) => n && !connections.some((c) => c.name === n),
-                  );
-                  return missing.length > 0 ? (
-                    <div className="rounded-md border border-error/40 bg-error/10 px-4 py-3 text-sm text-error">
-                      {t("pipelines.missingConnection", {
-                        names: missing.join(", "),
-                      })}
-                    </div>
-                  ) : null;
-                })()
-              : null}
+            {hasMissingConnection ? (
+              <div className="rounded-md border border-error/40 bg-error/10 px-4 py-3 text-sm text-error">
+                {t("pipelines.missingConnection", {
+                  names: missingConnections.join(", "),
+                })}
+              </div>
+            ) : null}
             <MigrationForm
               workspaceId={ws?.id ?? ""}
               name={pipeline?.name ?? ""}

@@ -939,6 +939,7 @@ export const en = {
   "runDetail.dagDesc": "Per-node status — {count} node(s); refreshes while the run is in flight.",
   "runDetail.logs": "Logs",
   "runDetail.entries": "{count} entr(ies)",
+  "runDetail.entriesCapped": "{count} entries (limited to 1000)",
   "runDetail.noLogs":
     "No logs yet. They'll appear as the worker emits structlog events.",
   // Phase M (2026-05-26) — per-node log filtering.
@@ -2051,6 +2052,7 @@ export const ko: Messages = {
   "runDetail.dagDesc": "노드별 상태 — {count}개 노드; 실행 중에는 자동 갱신.",
   "runDetail.logs": "로그",
   "runDetail.entries": "{count}개 항목",
+  "runDetail.entriesCapped": "{count}개 항목 (최대 1000개 표시)",
   "runDetail.noLogs": "아직 로그가 없습니다. 워커가 structlog 이벤트를 내보내면 표시됩니다.",
   // Phase M (2026-05-26) — 노드별 로그 필터.
   "runDetail.noLogsForNode": "이 노드에서 발생한 로그가 아직 없습니다.",

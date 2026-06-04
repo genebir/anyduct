@@ -510,7 +510,12 @@ export default function RunDetailPage() {
               description={
                 logs === null
                   ? t("common.loading")
-                  : t("runDetail.entries", { count: logs.length })
+                  : // Phase ADB (2026-06-04) — the logs query is capped at
+                    // 1000; surface that instead of silently showing a
+                    // partial tail as if it were the whole log.
+                    logs.length >= 1000
+                    ? t("runDetail.entriesCapped", { count: logs.length })
+                    : t("runDetail.entries", { count: logs.length })
               }
               action={
                 nodeFilter ? (

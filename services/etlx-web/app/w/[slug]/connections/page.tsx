@@ -41,6 +41,23 @@ type FormState =
  *  latest test outcome without polluting backend audit. */
 type TestState = { kind: "ok"; at: number } | { kind: "fail"; at: number; error: string } | null;
 
+/** Phase AEQ (2026-06-04) — a one-line, secret-safe summary of a
+ *  connection's config for the name tooltip, so an operator can tell two
+ *  same-type connections apart ("which DB does pg_prod point at?")
+ *  without opening anything. Secret fields are ``${SECRET:...}``
+ *  placeholders in config_json — masked to ``***`` here; only the
+ *  non-secret bits (host / database / port / bucket …) are shown. */
+function connectionConfigSummary(config: Record<string, unknown>): string {
+  const parts: string[] = [];
+  for (const [k, v] of Object.entries(config)) {
+    if (v === null || v === undefined || typeof v === "object") continue;
+    const s = String(v);
+    // Placeholder for a secret-backed field → mask, don't leak the ref.
+    parts.push(`${k}: ${s.includes("${") || /secret/i.test(s) ? "***" : s}`);
+  }
+  return parts.join(" · ");
+}
+
 function buildColumns(
   t: Translate,
   testResults: Map<string, TestState>,
@@ -52,9 +69,10 @@ function buildColumns(
       header: t("common.name"),
       cell: (r) => {
         const tr = testResults.get(r.id);
+        const cfgSummary = connectionConfigSummary(r.config_json);
         return (
           <div className="flex items-center gap-2">
-            <span>{r.name}</span>
+            <span title={cfgSummary || undefined}>{r.name}</span>
             {tr?.kind === "ok" ? (
               <span
                 className="inline-flex h-4 items-center gap-1 rounded-sm bg-success/15 px-1 text-[10px] uppercase tracking-wider text-success"

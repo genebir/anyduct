@@ -299,6 +299,23 @@ export default function RunDetailPage() {
 
   const grouped = useMemo(() => groupMetrics(metrics ?? []), [metrics]);
 
+  // Phase AFB (2026-06-04) — records routed to the dead-letter queue.
+  // Core emits the ``etl_plugins.errors`` counter with ``routed: "dlq"``
+  // for each batch a transform fails on (pipeline.py). AEZ surfaces the
+  // generic read-vs-written gap; this names the DLQ portion specifically
+  // so the operator knows bad records were captured (not just dropped).
+  const dlqRouted = useMemo(
+    () =>
+      (metrics ?? [])
+        .filter(
+          (m) =>
+            m.name === "etl_plugins.errors" &&
+            (m.attrs_json as { routed?: unknown }).routed === "dlq",
+        )
+        .reduce((sum, m) => sum + m.value, 0),
+    [metrics],
+  );
+
   // First failed node in execution order — drives the "Failed at"
   // chip on the run-level error card (Phase N, 2026-05-28). Order
   // matters because a graph can have multiple failures; the first
@@ -561,6 +578,7 @@ export default function RunDetailPage() {
                   migrationSummaryOf(pipeline.current_config_json) !== null
                 }
                 currentUserId={currentUser?.id ?? null}
+                dlqRouted={dlqRouted}
                 t={t}
               />
             </Card>
@@ -892,6 +910,9 @@ function Summary({
   /** Phase ABW (2026-06-01) — used to render "by you" vs the bare
    *  UUID prefix on the trigger source line. */
   currentUserId,
+  /** Phase AFB (2026-06-04) — count of records routed to the DLQ,
+   *  derived from the run's metrics by the parent. */
+  dlqRouted,
   t,
 }: {
   run: RunDetail | null;
@@ -900,6 +921,7 @@ function Summary({
    *  migration; routes the link to /migrations/[id] instead. */
   isMigration: boolean;
   currentUserId: string | null;
+  dlqRouted: number;
   t: Translate;
 }) {
   if (!run) {
@@ -1030,6 +1052,19 @@ function Summary({
           </span>
         }
       />
+      {/* Phase AFB (2026-06-04) — name the DLQ-routed slice of the
+          filtered records (AEZ) when a transform sent bad rows to a
+          dead-letter queue, so the operator knows they were captured. */}
+      {dlqRouted > 0 ? (
+        <Field
+          label={t("runDetail.dlqLabel")}
+          value={
+            <span className="text-warning" title={t("runDetail.dlqHint")}>
+              {t("runDetail.dlqRouted", { count: dlqRouted })}
+            </span>
+          }
+        />
+      ) : null}
       {run.worker_id ? (
         <Field label={t("runDetail.worker")} value={<code>{run.worker_id}</code>} />
       ) : null}

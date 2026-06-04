@@ -981,6 +981,11 @@ export const en = {
   "runDetail.recordsDelta": "−{count} filtered",
   "runDetail.recordsDeltaHint":
     "Rows read from the source but not written to the sink — filtered, deduped, or routed to the DLQ.",
+  // Phase AFB (2026-06-04) — DLQ-routed record count from run metrics.
+  "runDetail.dlqLabel": "Dead-letter queue",
+  "runDetail.dlqRouted": "{count} routed to DLQ",
+  "runDetail.dlqHint":
+    "Records a transform failed on were routed to the dead-letter queue instead of failing the run.",
   // Phase AEU (2026-06-04) — at-a-glance error/warning counts; click filters.
   "runDetail.logErrorCount": "{count} errors",
   "runDetail.logWarnCount": "{count} warnings",
@@ -2145,6 +2150,11 @@ export const ko: Messages = {
   "runDetail.recordsDelta": "−{count}개 필터됨",
   "runDetail.recordsDeltaHint":
     "소스에서 읽었지만 싱크에 기록되지 않은 행 — 필터/중복제거/DLQ 경로.",
+  // Phase AFB (2026-06-04) — run 메트릭에서 DLQ 라우팅 행 수.
+  "runDetail.dlqLabel": "데드레터 큐",
+  "runDetail.dlqRouted": "{count}개 DLQ로 라우팅됨",
+  "runDetail.dlqHint":
+    "트랜스폼이 실패한 행을 run 실패 대신 데드레터 큐로 보냈습니다.",
   // Phase AEU (2026-06-04) — 오류/경고 개수 한눈에; 클릭 시 필터.
   "runDetail.logErrorCount": "오류 {count}개",
   "runDetail.logWarnCount": "경고 {count}개",

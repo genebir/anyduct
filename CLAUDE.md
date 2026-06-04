@@ -170,6 +170,8 @@ uv run mypy etl_plugins
 > - **AED**: 빌더 ValidationBanner 이슈 목록 max-height + 스크롤(많은 이슈 시 캔버스 잠식 방지).
 > - **AEG**: 센서 config JSON도 Monaco JSON 에디터(실시간 squiggle 검증) — 빌더 JSON(AEA)과 일관.
 >
+> - **AEH/AEI/AEJ (서버 노출 ↔ web 미소비 갭 해소)**: dogfood sweep으로 서버가 반환하지만 web이 안 쓰던 필드 3건 발견·활용 — **AEH** 카탈로그 list `column_lineage_opaque`(UU 서버 추가분) → opaque 자산 칩(분석가 traceability 한눈에); **AEI** run 상세 `result_json`(retry_of/trigger_chain/backfill) → 리니지 필드(재시도 원본/자동트리거 출처/백필 범위 링크); **AEJ** audit 확장 행 `ip`/`user_agent` → provenance(포렌식: 누가 어디서 무슨 클라이언트로).
+>
 > **SQL/code IDE 통일(ADX→AEB,AEG)**: Python/SQL/JSON 모든 코드·데이터 필드(빌더 + 센서 config)가 Monaco(하이라이팅·줄번호·테마 동기화·전체화면·예시 힌트). 라이브 dev 서버 curl로 런타임 검증(build 금지 — dev 동시 실행 중, 메모리 규칙). 서버 계약은 testcontainers e2e로 dogfood.
 >
 > **누적 ABG→AEB = 76 슬라이스(+follow-up)** — **broken-reference 안전망 완전 라이프사이클**: 탐지(list ADC/ADD · detail ADL · builder ADU · dashboard ADS/ADT) + 능동 차단(ADV/ADW Run/Trigger 비활성화) + 정리 deeplink(ADH/ADI/ADK/ADT). 대시보드 4종 주의 신호 모두 deep-link actionable. 코어/서버 변화 0(매 슬라이스), web tsc clean, production build 반복 통과, 코어 단위 905 passed(회귀 0).

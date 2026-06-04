@@ -56,7 +56,17 @@ export default function AssetDetailPage() {
     <>
       <Header
         title={lineage ? lineage.asset_key : t("assets.title")}
-        subtitle={t("assets.lineage")}
+        // Phase ADN (2026-06-04) — surface freshness in the header so an
+        // analyst sees "when was this last produced?" the moment they
+        // open the asset, not only by scrolling to the materializations
+        // table. mats[0] is the latest (API orders desc).
+        subtitle={
+          mats && mats.length > 0
+            ? t("assets.lastMaterializedAt", {
+                time: relativeTime(mats[0].materialized_at, t),
+              })
+            : t("assets.lineage")
+        }
         actions={
           <Link
             href={`/w/${slug}/assets`}

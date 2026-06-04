@@ -23,7 +23,23 @@ function buildColumns(t: Translate): Column<AssetSummary>[] {
     {
       key: "asset_key",
       header: t("assets.colKey"),
-      cell: (r) => <span className="font-mono text-xs text-text">{r.asset_key}</span>,
+      cell: (r) => (
+        <span className="flex items-center gap-2">
+          <span className="font-mono text-xs text-text">{r.asset_key}</span>
+          {/* Phase AEH (2026-06-04) — column-lineage traceability at a
+              glance (the server has exposed this since UU; the list now
+              uses it). Only the opaque exception is flagged so the
+              common traceable case stays uncluttered. */}
+          {r.column_lineage_opaque ? (
+            <span
+              className="inline-flex h-4 items-center rounded-sm bg-overlay px-1 text-[10px] uppercase tracking-wider text-text-muted"
+              title={t("assets.columnsOpaqueTitle")}
+            >
+              {t("assets.columnsOpaque")}
+            </span>
+          ) : null}
+        </span>
+      ),
     },
     {
       key: "kind",

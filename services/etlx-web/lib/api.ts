@@ -601,6 +601,12 @@ export interface AssetSummary {
   asset_key: string;
   kind: string | null;
   last_materialized_at: string | null;
+  /** Phase UU (server) / AEH (web) — false when column-level lineage is
+   *  traceable for this asset, true when it's opaque (no per-column
+   *  mapping, e.g. Kafka/HTTP sinks). Surfaced so the analyst sees
+   *  traceability in the list without opening each asset. Optional for
+   *  back-compat with older server builds. */
+  column_lineage_opaque?: boolean;
 }
 
 export interface AssetRef {

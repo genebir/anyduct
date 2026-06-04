@@ -358,13 +358,20 @@ function AuditRow({
                 onFilterResource(row.resource_type, row.resource_id!);
               }}
               className="ml-2 inline-block rounded-sm px-1 font-mono text-xs text-text-muted hover:bg-overlay hover:text-accent"
-              title={t("audit.filterByResourceTitle")}
+              // Phase ACW (2026-06-04) — show the full UUID on hover (the
+              // chip is truncated to 8 chars) alongside the filter hint,
+              // so operators can read the whole id without click-to-filter.
+              title={`${row.resource_id}\n${t("audit.filterByResourceTitle")}`}
             >
               {row.resource_id.slice(0, 8)}…
             </button>
           ) : null}
         </span>
-        <span className="truncate text-right font-mono text-xs text-text-muted">
+        <span
+          className="truncate text-right font-mono text-xs text-text-muted"
+          // Phase ACW (2026-06-04) — full actor UUID on hover.
+          title={row.actor_user_id ?? undefined}
+        >
           {row.actor_user_id
             ? row.actor_user_id === currentUserId
               ? youLabel

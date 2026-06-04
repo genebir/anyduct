@@ -47,6 +47,14 @@ export function PipelineSettingsPanel({
 }) {
   const { t } = useLocale();
   const enableLabel = t("builder.enable");
+  // Phase AFQ (2026-06-04) — a DLQ sink uses ``table`` (BatchSink) OR
+  // ``topic`` (StreamSink), never both. Show only the field that matches
+  // the selected connection's type so a sqlite DLQ doesn't display an
+  // irrelevant "topic" box (and vice versa for Kafka). Stream connector
+  // types per operators.ts (currently kafka). Default to table when no
+  // connection is picked yet — RDBMS DLQs are the common case.
+  const dlqConnType = connections.find((c) => c.name === dlq.connection)?.type;
+  const dlqIsStream = dlqConnType === "kafka";
   return (
     <aside className="flex w-80 shrink-0 flex-col gap-5 overflow-y-auto border-l border-border-subtle bg-surface px-4 py-5">
       <header>
@@ -140,22 +148,26 @@ export function PipelineSettingsPanel({
             ))}
           </select>
         </FieldRow>
-        <FieldRow label={t("common.table")} help={t("builder.dlqTableHelp")}>
-          <Input
-            value={dlq.table}
-            disabled={!dlq.enabled}
-            placeholder={t("builder.dlqTablePlaceholder")}
-            onChange={(e) => onChangeDlq({ ...dlq, table: e.target.value })}
-          />
-        </FieldRow>
-        <FieldRow label={t("common.topic")} help={t("builder.dlqTopicHelp")}>
-          <Input
-            value={dlq.topic}
-            disabled={!dlq.enabled}
-            placeholder={t("builder.dlqTopicPlaceholder")}
-            onChange={(e) => onChangeDlq({ ...dlq, topic: e.target.value })}
-          />
-        </FieldRow>
+        {/* Phase AFQ — table (BatchSink) vs topic (StreamSink) by type. */}
+        {dlqIsStream ? (
+          <FieldRow label={t("common.topic")} help={t("builder.dlqTopicHelp")}>
+            <Input
+              value={dlq.topic}
+              disabled={!dlq.enabled}
+              placeholder={t("builder.dlqTopicPlaceholder")}
+              onChange={(e) => onChangeDlq({ ...dlq, topic: e.target.value })}
+            />
+          </FieldRow>
+        ) : (
+          <FieldRow label={t("common.table")} help={t("builder.dlqTableHelp")}>
+            <Input
+              value={dlq.table}
+              disabled={!dlq.enabled}
+              placeholder={t("builder.dlqTablePlaceholder")}
+              onChange={(e) => onChangeDlq({ ...dlq, table: e.target.value })}
+            />
+          </FieldRow>
+        )}
         <FieldRow label={t("common.mode")}>
           <select
             value={dlq.mode}

@@ -195,6 +195,7 @@ export const en = {
   // Phase ABY (2026-06-01) — recent runs trigger icons
   "migrations.runTriggerSchedule": "Triggered by schedule",
   "migrations.runTriggerManual": "Manually triggered",
+  "migrations.runTriggerAuto": "Auto-triggered (sensor / upstream materialize)",
   "migrations.recentRuns": "Recent runs",
   "migrations.runsEmpty": "No runs yet. Hit Run now to start the first one.",
   "migrations.runRowsWritten": "rows",
@@ -1359,6 +1360,7 @@ export const ko: Messages = {
   // Phase ABY (2026-06-01) — recent runs trigger 아이콘
   "migrations.runTriggerSchedule": "스케줄로 실행됨",
   "migrations.runTriggerManual": "수동으로 실행됨",
+  "migrations.runTriggerAuto": "자동 실행됨 (센서 / 상류 머티리얼라이즈)",
   "migrations.recentRuns": "최근 실행",
   "migrations.runsEmpty": "아직 실행 기록이 없습니다. 지금 실행을 눌러 시작하세요.",
   "migrations.runRowsWritten": "행",

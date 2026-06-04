@@ -24,6 +24,7 @@ import {
   PlayIcon,
   ShieldCheckIcon,
   Trash2Icon,
+  ZapIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Header } from "@/components/shell/header";
@@ -580,7 +581,13 @@ function RecentRunsCard({
                     <title>{tx("migrations.runTriggerManual")}</title>
                   </HandIcon>
                 ) : (
-                  <span className="w-3" aria-hidden />
+                  <ZapIcon
+                    size={12}
+                    className="text-text-muted"
+                    aria-label={tx("migrations.runTriggerAuto")}
+                  >
+                    <title>{tx("migrations.runTriggerAuto")}</title>
+                  </ZapIcon>
                 )}
                 <Link
                   href={`/w/${slug}/runs/${r.id}`}

@@ -15,6 +15,7 @@ import {
   ShieldCheckIcon,
   Trash2Icon,
   WorkflowIcon,
+  ZapIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Header } from "@/components/shell/header";
@@ -171,7 +172,15 @@ function buildColumns(
               >
                 <title>{t("migrations.runTriggerManual")}</title>
               </HandIcon>
-            ) : null}
+            ) : (
+              <ZapIcon
+                size={12}
+                className="shrink-0 text-text-muted"
+                aria-label={t("migrations.runTriggerAuto")}
+              >
+                <title>{t("migrations.runTriggerAuto")}</title>
+              </ZapIcon>
+            )}
             <span className="text-text-muted" title={absoluteTime(when)}>
               {relativeTime(when, t)}
             </span>

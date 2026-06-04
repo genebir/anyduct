@@ -117,7 +117,22 @@ uv run mypy etl_plugins
 
 ## 5. 현재 단계
 
-> **최신 마일스톤 (2026-06-01): Persona dogfood UX 폴리시 4th wave (Phase ACD → ACI).** 3rd wave 마무리 후 추가 6 슬라이스 — 마이그레이션 폼 smart-default + dashboard 정합 + audit click-to-filter + table picker 검색:
+> **최신 마일스톤 (2026-06-04): Persona dogfood UX 폴리시 5th wave (Phase ACJ → ACS).** 4th wave 후 추가 10 슬라이스(+follow-up) — 분석가/데이터 엔지니어 양 페르소나 관점으로 매 슬라이스 검증·dogfooding. 핵심 축: trigger-source 가시화 확장 / connection·variable usage 인덱스(삭제 안전) / relative-time 지역화 통일 / 빈 목록 버그 / pipelines health 컬럼.
+> - **ACJ**: 마이그레이션 폼 ACG/ACH 스마트 디폴트가 컬럼 로드 effect 안에서만 동작 → strategy 기본값 snapshot이라 "테이블 선택 후 mirror/append 선택" 흐름에서 침묵하던 버그 수정. `suggestKeyColumn`/`suggestCursorColumn` 추출 + strategy-aware effect로 양 순서 커버.
+> - **ACK**: 마이그레이션 list Last run 컬럼에 trigger source 아이콘(ABG/ABW/ABY 패턴 확장 — 4 surface 정합).
+> - **ACL**: Connections list "Used by" 컬럼 — `lib/connection-usage.ts`(linear/fan-out/graph walk) 참조 파이프라인 수. usage=null은 중립 "—"(false "unused" 방지).
+> - **ACM**: connection 삭제 confirm에 사용 중 경고(ACL 인덱스 재사용, 깨질 파이프라인 목록). 운영 우선.
+> - **ACL/ACM follow-up**: dogfood로 walker가 graph `sql_exec` 노드 + `dlq.connection` 누락하던 silent miss 2건 수정.
+> - **ACN**: assets 카탈로그 relative time + absolute tooltip + Refresh. `lib/format-time.ts`로 relativeTime/absoluteTime 추출(NaN 가드) + 마이그레이션 2 페이지 dedup.
+> - **ACO**: runs list scheduled_at을 relative + tooltip으로(공유 헬퍼).
+> - **ACP**: relative time **지역화** 통일 — ACN/ACO 하드코딩 "5m ago"가 한국어 미지역화였던 점 교정. format-time이 `t`로 time.* 키 사용, migrations/runs/assets/dashboard 5 surface 단일 구현 + 대시보드 fmtTime dedup.
+> - **ACQ**: schedules 빈 목록(필터 없음)이 EmptyState 도달 전 `common.loading` 영구 표시하던 dogfood 버그 수정(assets/connections 패턴 정합).
+> - **ACR**: 변수 "Used by" + 삭제 경고 + 로딩 상태 — `lib/variable-usage.ts`(`${var.name}` 토큰 스캔)로 ACL/ACM 패턴을 워크스페이스 변수에 평행 적용.
+> - **ACS**: pipelines list에 Last run 상태 컬럼(migrations AAP/ACK 패턴 — workspace runs 단일 fetch + 폴링 + StatusBadge + trigger 아이콘 + 지역화 relative time).
+>
+> **누적 ABG→ACS = 40 슬라이스(+follow-up)** 단일 long-running 페르소나 dogfood 세션. 신규 pure 헬퍼 3(connection-usage/variable-usage/format-time). 코어/서버 변화 0(매 슬라이스), web tsc clean. dogfood가 잡은 silent/실버그 3건(ACJ strategy 디폴트 / ACL·ACM walker / ACQ 빈 목록). i18n 신규 키 ~95개. 882 unit + 53 server it green(회귀 0, 코어/서버 미변경).
+>
+> **이전 마일스톤 (2026-06-01): Persona dogfood UX 폴리시 4th wave (Phase ACD → ACI).** 3rd wave 마무리 후 추가 6 슬라이스 — 마이그레이션 폼 smart-default + dashboard 정합 + audit click-to-filter + table picker 검색:
 > - **ACD**: 마이그레이션 source 테이블 선택 시 dest 테이블이 비어 있으면 같은 이름으로 자동 채움. 'same name, different DB' 케이스 마찰 0.
 > - **ACE**: 대시보드 'Pipelines' 카드 카운트에서 마이그레이션 제외 — \`/pipelines\` 페이지가 이미 마이그레이션 hide함, 카드와 list 정합.
 > - **ACF**: Audit row의 resource_id chip을 클릭하면 필터(resource_type + resource_id) 자동 적용. UUID 복사·붙여넣기 마찰 0.

@@ -400,6 +400,18 @@ export default function RunDetailPage() {
             </Link>
             {t("runDetail.title", { id: id.slice(0, 8) })}
             {run ? <StatusBadge status={run.status} /> : null}
+            {/* Phase DLQ-6 (2026-06-04) — a "succeeded" run that routed
+                records to the DLQ looks fully healthy at a glance (green
+                badge). Flag it as partial so the operator notices data was
+                dropped, not just lost in the right-column count. */}
+            {run?.status === "succeeded" && dlqRouted > 0 ? (
+              <span
+                className="inline-flex items-center rounded-sm border border-warning/40 bg-warning/10 px-2 py-0.5 text-xs font-medium text-warning"
+                title={t("runDetail.partialHint", { count: dlqRouted })}
+              >
+                {t("runDetail.partial")}
+              </span>
+            ) : null}
           </span>
         }
         subtitle={

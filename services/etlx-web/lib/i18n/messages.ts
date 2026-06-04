@@ -1014,6 +1014,9 @@ export const en = {
   // Phase DLQ-4 (2026-06-04) — row limit + truncation hint.
   "runDetail.dlqLimit": "Rows to fetch",
   "runDetail.dlqTruncated": "Showing the first {count} — increase the limit to see more.",
+  // Phase DLQ-6 (2026-06-04) — succeeded run that routed records to the DLQ.
+  "runDetail.partial": "partial",
+  "runDetail.partialHint": "Succeeded, but {count} record(s) were routed to the dead-letter queue.",
   // Phase AEU (2026-06-04) — at-a-glance error/warning counts; click filters.
   "runDetail.logErrorCount": "{count} errors",
   "runDetail.logWarnCount": "{count} warnings",
@@ -2218,6 +2221,9 @@ export const ko: Messages = {
   // Phase DLQ-4 (2026-06-04) — 행 수 제한 + truncation 안내.
   "runDetail.dlqLimit": "가져올 행 수",
   "runDetail.dlqTruncated": "처음 {count}개만 표시 — 더 보려면 제한을 늘리세요.",
+  // Phase DLQ-6 (2026-06-04) — DLQ로 라우팅된 record가 있는 성공 run.
+  "runDetail.partial": "부분 성공",
+  "runDetail.partialHint": "성공했지만 {count}개 레코드가 데드레터 큐로 라우팅되었습니다.",
   // Phase AEU (2026-06-04) — 오류/경고 개수 한눈에; 클릭 시 필터.
   "runDetail.logErrorCount": "오류 {count}개",
   "runDetail.logWarnCount": "경고 {count}개",

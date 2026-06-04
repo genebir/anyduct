@@ -184,6 +184,16 @@ function buildColumns(
             <span className="text-text-muted" title={absoluteTime(when)}>
               {relativeTime(when, t)}
             </span>
+            {/* Phase AEW (2026-06-04) — failure type at a glance, parallel
+                to the runs list (AEV). error_class is only set on failures. */}
+            {run.error_class ? (
+              <span
+                className="max-w-[7rem] truncate font-mono text-[10px] text-error"
+                title={run.error_class}
+              >
+                {run.error_class}
+              </span>
+            ) : null}
           </div>
         );
       },

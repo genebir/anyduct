@@ -2364,6 +2364,13 @@ L1 출시 직후 사용자가 5개 회신:
 - ⚠️ **Storybook 시각 baseline 변경** — `source-query-field.stories.tsx`의 JOIN 쿼리 스토리가 SQL 모드(Monaco lazy-load fallback)를 렌더 → 기존 textarea 스냅샷과 diff. Monaco 에디터는 SSR-disabled lazy-load라 의미 있는 스냅샷이 어려워 `PythonCodeEditor` 선례대로 전용 story는 두지 않음. ADR-0018(디자인 시스템) 맥락에서 이 변경을 기록.
 - backward-compat: 저장 wire shape 불변(둘 다 plain string). 기존 파이프라인 영향 0.
 
+**Follow-ups (2026-06-04)**:
+- **ADY**: Monaco는 필드 placeholder를 렌더 안 함 → 사라진 SQL 예시를 "예: {example}" muted 힌트로 복원.
+- **ADZ**: `CodeEditor` 전체화면 토글 — remount 없이 container className만 inline ↔ `fixed inset-0` 토글(MonacoEditor 트리 동일 위치 유지 → 버퍼·커서 보존), `automaticLayout` 리사이즈, Esc 종료.
+- **AEA**: JSON 필드도 `CodeEditor language="json"` — Monaco 내장 JSON 언어 서비스로 실시간 squiggle 검증(SQL/Python엔 built-in validation 없음, JSON만 무료로 얻음).
+- **AEB**: 5 RDBMS sink `pre_sql`도 `kind:"sql"` → 빌더 전 SQL 입력(source/Run SQL/pre_sql) 동일 IDE.
+- 검증: dev 서버 동시 실행 중이라 `next build` 금지(메모리 규칙), `tsc` + 실행 중 dev에 curl(200/compile-error 확인)로 런타임 검증.
+
 ---
 
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

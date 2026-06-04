@@ -401,6 +401,8 @@ export const en = {
   "overview.sensorsFailing": "{n} target failing",
   "overview.runsToday": "Runs today",
   "overview.connectionsUnused": "{n} unused",
+  // Phase AFS (2026-06-04) — assets with no column-level lineage.
+  "overview.assetsOpaque": "{n} opaque",
   "overview.pipelinesBroken": "{n} broken",
   "overview.inLastBatch": "{n} in last batch",
   "overview.recentRuns": "Recent runs",
@@ -1631,6 +1633,8 @@ export const ko: Messages = {
   "overview.sensorsFailing": "타겟 {n}개 실패 중",
   "overview.runsToday": "오늘 실행",
   "overview.connectionsUnused": "{n}개 미사용",
+  // Phase AFS (2026-06-04) — 컬럼 리니지가 없는 자산.
+  "overview.assetsOpaque": "{n}개 불투명",
   "overview.pipelinesBroken": "{n}개 연결 누락",
   "overview.inLastBatch": "최근 배치에서 {n}개",
   "overview.recentRuns": "최근 실행",

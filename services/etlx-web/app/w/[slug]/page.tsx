@@ -10,6 +10,7 @@ import {
   CableIcon,
   CalendarClockIcon,
   ChevronRightIcon,
+  DatabaseIcon,
   RadarIcon,
   WorkflowIcon,
 } from "lucide-react";
@@ -19,11 +20,13 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import {
   ApiError,
+  assetsApi,
   connectionsApi,
   pipelinesApi,
   runsApi,
   schedulesApi,
   sensorsApi,
+  type AssetSummary,
   type ConnectionSummary,
   type PipelineSummary,
   type RunSummary,
@@ -60,6 +63,9 @@ export default function WorkspaceHomePage() {
   const [schedules, setSchedules] = useState<ScheduleRow[] | null>(null);
   const [runs, setRuns] = useState<RunSummary[] | null>(null);
   const [sensors, setSensors] = useState<SensorSummary[] | null>(null);
+  // Phase AFS (2026-06-04) — catalog asset count for the analyst's
+  // dashboard entry point.
+  const [assets, setAssets] = useState<AssetSummary[] | null>(null);
 
   useEffect(() => {
     if (!ws) return;
@@ -71,11 +77,12 @@ export default function WorkspaceHomePage() {
         // fan-out. Promise.allSettled instead of all so a single
         // failing endpoint doesn't blank the entire page — each panel
         // falls back to its own loading/empty state.
-        const [psR, connsR, rsR, sensR] = await Promise.allSettled([
+        const [psR, connsR, rsR, sensR, assetsR] = await Promise.allSettled([
           pipelinesApi.list(workspaceId),
           connectionsApi.list(workspaceId),
           runsApi.list(workspaceId, { limit: 50 }),
           sensorsApi.list(workspaceId),
+          assetsApi.list(workspaceId),
         ]);
         if (cancelled) return;
         const ps =
@@ -84,6 +91,7 @@ export default function WorkspaceHomePage() {
         if (connsR.status === "fulfilled") setConnections(connsR.value);
         if (rsR.status === "fulfilled") setRuns(rsR.value);
         if (sensR.status === "fulfilled") setSensors(sensR.value);
+        if (assetsR.status === "fulfilled") setAssets(assetsR.value);
 
         const groups = await Promise.all(
           ps.map(async (p) => {
@@ -463,6 +471,22 @@ export default function WorkspaceHomePage() {
             sub={
               unusedConnections && unusedConnections > 0
                 ? t("overview.connectionsUnused", { n: unusedConnections })
+                : undefined
+            }
+          />
+          {/* Phase AFS (2026-06-04) — catalog entry point for the analyst.
+              Sub-line flags opaque assets (no column-level lineage, AEH) as
+              a traceability signal. */}
+          <StatCard
+            label={t("nav.assets")}
+            value={assets?.length}
+            icon={<DatabaseIcon size={18} />}
+            href={ws ? `/w/${ws.slug}/assets` : "#"}
+            sub={
+              assets && assets.filter((a) => a.column_lineage_opaque).length > 0
+                ? t("overview.assetsOpaque", {
+                    n: assets.filter((a) => a.column_lineage_opaque).length,
+                  })
                 : undefined
             }
           />

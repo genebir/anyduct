@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ApiError, auditApi, type AuditLogEntry } from "@/lib/api";
+import { relativeTime, absoluteTime } from "@/lib/format-time";
 import { useCurrentUser } from "@/components/providers/auth-provider";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import { useLocale } from "@/components/providers/locale-provider";
@@ -342,8 +343,15 @@ function AuditRow({
             <span className="inline-block h-3.5 w-3.5" />
           )}
         </span>
-        <time className="font-mono text-xs text-text-muted">
-          {new Date(row.created_at).toLocaleString()}
+        {/* Phase ADR (2026-06-04) — relative time (scannable) with the
+            exact instant on hover for forensics, matching every other
+            list. */}
+        <time
+          dateTime={row.created_at}
+          className="font-mono text-xs text-text-muted"
+          title={absoluteTime(row.created_at)}
+        >
+          {relativeTime(row.created_at, t)}
         </time>
         <span className="rounded-sm border border-border-subtle bg-overlay px-2 py-0.5 text-xs font-semibold text-text-secondary">
           {row.action}

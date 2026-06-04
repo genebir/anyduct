@@ -379,7 +379,8 @@ function FieldEditor({
     field.kind === "sourceQuery" ||
     field.kind === "table" ||
     field.kind === "pythonCode" ||
-    field.kind === "sql";
+    field.kind === "sql" ||
+    field.kind === "json";
   const Wrapper = composite ? "div" : "label";
   // When a required field is empty, paint the closest interactive
   // descendant (select / input / textarea) with a red border via a
@@ -993,24 +994,22 @@ function JsonInput({
   field: Extract<FieldDef, { kind: "json" }>;
   t: Translate;
 }) {
-  const [text, setText] = useState<string>(() =>
-    value === undefined ? "" : JSON.stringify(value, null, 2),
-  );
+  // Phase AEA (2026-06-04) — Monaco JSON editor. Monaco ships a JSON
+  // language service so invalid JSON gets real red squiggles inline (the
+  // old textarea only surfaced a parse error after the fact). Uncontrolled
+  // like the Python/SQL editors: ``value`` is the initial buffer; the
+  // FieldEditor wrapper keys per node:field so node switches remount it.
+  const initial = value === undefined ? "" : JSON.stringify(value, null, 2);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setText(value === undefined ? "" : JSON.stringify(value, null, 2));
-  }, [value]);
 
   return (
     <div className="flex flex-col gap-1">
-      <textarea
-        rows={4}
-        value={text}
-        placeholder={field.placeholder}
-        onChange={(e) => {
-          const txt = e.target.value;
-          setText(txt);
+      <CodeEditor
+        language="json"
+        value={initial}
+        height={160}
+        tabSize={2}
+        onChange={(txt) => {
           if (txt.trim() === "") {
             setError(null);
             onChange(undefined);
@@ -1020,15 +1019,17 @@ function JsonInput({
             onChange(JSON.parse(txt));
             setError(null);
           } catch (err) {
+            // Keep the last valid value in the parent (don't push a broken
+            // parse); Monaco's squiggles + this line tell the user.
             setError(err instanceof Error ? err.message : String(err));
           }
         }}
-        className={cn(
-          "min-h-20 w-full rounded-md border border-border-subtle bg-elevated px-3 py-2 font-mono text-xs text-text",
-          "transition duration-200 focus-visible:border-accent focus-visible:outline-none",
-          error && "border-error",
-        )}
       />
+      {field.placeholder ? (
+        <span className="text-[11px] text-text-muted">
+          {t("builder.sqlExample", { example: field.placeholder })}
+        </span>
+      ) : null}
       {error ? (
         <span className="text-[11px] text-error">
           {t("builder.jsonError", { error })}

@@ -49,7 +49,7 @@ export function CodeEditor({
   height = 480,
   tabSize = 4,
 }: {
-  language: "python" | "sql";
+  language: "python" | "sql" | "json";
   /** Initial buffer — read once at mount (Monaco ``defaultValue``). */
   value: string;
   onChange: (next: string) => void;

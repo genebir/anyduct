@@ -138,6 +138,7 @@ uv run mypy etl_plugins
 > - **AFX (서버 e2e)**: retry-after-failure 운영자 여정 HTTP — sink 테이블 없음→FAILED(error_class)→테이블 생성→POST /retry→새 run SUCCEEDED+3행+result_json.retry_of 링크+원본 FAILED 유지. 시뮬 status flip 아닌 실제 실패→복구. retry 응답이 RunSummary(no result_json)임을 명문화. 신규 서버 it 1.
 > - **AFY (서버 e2e)**: fan-out 카탈로그 분석가 여정 HTTP — one-source→two-sink(when 술어) run 후 GET /assets에 양 sink+source, 각 sink lineage upstream에 공유 source. EE Scenario B(service-level)의 REST 변형, KK(chain)에 fan-out 추가. 신규 서버 it 1.
 > - **green-check sweep**: scenario/journey/dlq/backfill/retry/lint e2e 79 passed(오늘 밤 추가분 상호 정합 확인).
+> - **AFZ (서버 e2e)**: 데이터플레인 audit REST — custom_python+sql_exec run 후 GET /audit?action=run.sql_read/python_executed/sql_executed 세 이벤트가 run_id로 조회+payload 정확. QQ(service-level)/onboarding(sql_read만 REST)의 컴플라이언스 REST 변형. 신규 서버 it 1.
 >
 > **이전 마일스톤 (2026-06-04): 운영-가시성 23슬라이스 (Phase AET → AFP).** 단일 슬라이스-단위 세션(web 전용, 코어/서버 변화 0, 매 슬라이스 tsc clean + dev 200). run 디버그(로그/오류 copy·카운트·records delta·DLQ count·heartbeat liveness·running 경과 3 surface) · 실패 triage error_class 5 surface · Last run 컬럼 5 surface · 헬스 signal→action 양축(schedules/sensors: 컬럼→대시보드 신호→필터+deeplink) · 분석가 asset 행수 delta · audit my-actions · builder dry-run 경고 수.
 >

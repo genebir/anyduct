@@ -470,24 +470,48 @@ function FieldInput({
     );
   }
   if (field.kind === "connection") {
+    // Phase ADU (2026-06-04) — the value is a connection *name*. If it
+    // names a connection that no longer exists (deleted/renamed) the
+    // select silently falls back to the placeholder, so a stale-but-
+    // informative reference looks merely "unset" and the next run would
+    // fail to build. Flag it so the operator re-picks deliberately.
+    const connValue = (value as string) ?? "";
+    const missingRef =
+      connValue.length > 0 && !connections.some((c) => c.name === connValue);
     return (
-      <select
-        value={(value as string) ?? ""}
-        onChange={(e) => onChange(e.target.value || undefined)}
-        className="h-10 rounded-md border border-border-subtle bg-elevated px-2 text-sm text-text focus-visible:border-accent focus-visible:outline-none"
-      >
-        <option value="">{t("builder.selectConnection")}</option>
-        {connections.length === 0 ? (
-          <option disabled value="">
-            {t("builder.noConnectionsOfType")}
-          </option>
+      <>
+        <select
+          value={connValue}
+          onChange={(e) => onChange(e.target.value || undefined)}
+          className={`h-10 rounded-md border bg-elevated px-2 text-sm text-text focus-visible:outline-none ${
+            missingRef
+              ? "border-error focus-visible:border-error"
+              : "border-border-subtle focus-visible:border-accent"
+          }`}
+        >
+          <option value="">{t("builder.selectConnection")}</option>
+          {/* Keep the stale name selectable so the field shows what it
+              pointed at until the operator changes it. */}
+          {missingRef ? (
+            <option value={connValue}>{connValue}</option>
+          ) : null}
+          {connections.length === 0 ? (
+            <option disabled value="">
+              {t("builder.noConnectionsOfType")}
+            </option>
+          ) : null}
+          {connections.map((c) => (
+            <option key={c.id} value={c.name}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+        {missingRef ? (
+          <span className="mt-1 text-xs text-error">
+            {t("builder.missingConnectionRef", { name: connValue })}
+          </span>
         ) : null}
-        {connections.map((c) => (
-          <option key={c.id} value={c.name}>
-            {c.name}
-          </option>
-        ))}
-      </select>
+      </>
     );
   }
   if (field.kind === "table") {

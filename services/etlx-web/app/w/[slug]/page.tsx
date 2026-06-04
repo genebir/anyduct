@@ -273,7 +273,19 @@ export default function WorkspaceHomePage() {
             label={t("nav.migrations")}
             value={migrationStats?.count}
             icon={<ArrowRightLeftIcon size={18} />}
-            href={ws ? `/w/${ws.slug}/migrations` : "#"}
+            // Phase ADH (2026-06-04) — when the surfaced signal is
+            // "N never run" (no 24h activity), deep-link straight to the
+            // pre-filtered subset so the click lands on the actionable
+            // rows (matches ABM/ABZ deep-link presets).
+            href={
+              ws
+                ? migrationStats &&
+                  migrationStats.total24h === 0 &&
+                  migrationStats.neverRun > 0
+                  ? `/w/${ws.slug}/migrations?lastRun=never`
+                  : `/w/${ws.slug}/migrations`
+                : "#"
+            }
             sub={
               migrationStats && migrationStats.total24h > 0
                 ? migrationStats.inFlight > 0

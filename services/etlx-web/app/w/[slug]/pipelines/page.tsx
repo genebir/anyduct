@@ -12,6 +12,7 @@ import {
   HandIcon,
   PlayIcon,
   PlusIcon,
+  ShieldCheckIcon,
   Trash2Icon,
   WorkflowIcon,
 } from "lucide-react";
@@ -381,6 +382,38 @@ export default function PipelinesPage() {
     }
   }
 
+  // Phase ADQ (2026-06-04) — pre-flight validation from the list, so an
+  // operator can catch a missing connection / secret before triggering
+  // (the "validate → run" order the migrations surface already uses).
+  // Toast-only; the builder keeps the rich inline DryRunPanel.
+  async function onDryRun(row: PipelineSummary) {
+    if (!ws) return;
+    try {
+      const result = await pipelinesApi.dryRun(ws.id, row.id);
+      if (result.ok) {
+        const okCount = result.connectors.filter((c) => c.ok).length;
+        toast.success(
+          t("migrations.dryRunOk", {
+            n: okCount,
+            total: result.connectors.length,
+          }),
+        );
+      } else {
+        const errs =
+          result.errors.length > 0
+            ? result.errors
+            : result.connectors
+                .filter((c) => !c.ok)
+                .map((c) => `${c.name}: ${c.error ?? "unknown"}`);
+        for (const e of errs) {
+          toast.error(t("migrations.dryRunFailed", { error: e }));
+        }
+      }
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : String(err));
+    }
+  }
+
   return (
     <>
       <Header
@@ -624,6 +657,19 @@ export default function PipelinesPage() {
           {t("pipelines.menuViewRuns")}
         </ContextMenuItem>
         <ContextMenuSeparator />
+        <ContextMenuItem
+          icon={<ShieldCheckIcon size={14} />}
+          disabled={(() => {
+            const r = rowMenuTargetRef.current;
+            return !r || !r.current_version;
+          })()}
+          onSelect={() => {
+            const r = rowMenuTargetRef.current;
+            if (r) void onDryRun(r);
+          }}
+        >
+          {t("pipelines.menuDryRun")}
+        </ContextMenuItem>
         <ContextMenuItem
           icon={<PlayIcon size={14} />}
           disabled={(() => {

@@ -24,6 +24,7 @@ import {
   ApiError,
   pipelinesApi,
   runsApi,
+  type DlqPreviewResponse,
   type LogLevel,
   type NodeRunEntry,
   type PipelineSummary,
@@ -685,6 +686,17 @@ export default function RunDetailPage() {
               ranVersion={ranVersion}
               t={t}
             />
+            {/* Phase DLQ-2 (2026-06-04) — when this run routed records to
+                the DLQ (dlqRouted from metrics, AFB), let the operator
+                actually SEE them. Pipeline-scoped + lazy (opens a DB
+                read), so it's collapsed until clicked. */}
+            {dlqRouted > 0 && ws && run ? (
+              <DlqRecordsCard
+                workspaceId={ws.id}
+                pipelineId={run.pipeline_id}
+                t={t}
+              />
+            ) : null}
           </div>
         </div>
         ) : null}
@@ -1172,6 +1184,161 @@ function ConfigPanel({
         <pre className="max-h-[400px] overflow-auto rounded-md border border-border-subtle bg-bg p-3 font-mono text-[11px] text-text-secondary">
           {pretty}
         </pre>
+      ) : null}
+    </Card>
+  );
+}
+
+/** Render a DLQ cell value compactly: objects/arrays as JSON, null as a
+ *  dash, everything else stringified. */
+function fmtDlqCell(v: unknown): string {
+  if (v === null || v === undefined) return "—";
+  if (typeof v === "object") return JSON.stringify(v);
+  return String(v);
+}
+
+/** Map a server ``reason`` (ADR-0075) to a user-facing message key. */
+function dlqReasonKey(reason: string | null): keyof Messages {
+  switch (reason) {
+    case "sink_not_readable":
+      return "runDetail.dlqReasonSinkNotReadable";
+    case "stream_dlq":
+      return "runDetail.dlqReasonStream";
+    case "connection_missing":
+      return "runDetail.dlqReasonConnMissing";
+    case "read_failed":
+      return "runDetail.dlqReasonReadFailed";
+    default:
+      // no_dlq / unsafe_table / invalid_config / connection_build_failed
+      return "runDetail.dlqReasonGeneric";
+  }
+}
+
+/** Phase DLQ-2 (2026-06-04) — lazy viewer for the pipeline's dead-letter
+ *  queue records (ADR-0075 server endpoint). Collapsed by default because
+ *  expanding opens a bounded DB read; "unavailable" reasons map to a
+ *  friendly message so a write-only sink (Kafka/HTTP) doesn't look broken. */
+function DlqRecordsCard({
+  workspaceId,
+  pipelineId,
+  t,
+}: {
+  workspaceId: string;
+  pipelineId: string;
+  t: Translate;
+}) {
+  const [open, setOpen] = useState(false);
+  const [data, setData] = useState<DlqPreviewResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [failed, setFailed] = useState(false);
+
+  async function load() {
+    setLoading(true);
+    setFailed(false);
+    try {
+      setData(await pipelinesApi.dlqRecords(workspaceId, pipelineId));
+    } catch {
+      setFailed(true);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function toggle() {
+    const next = !open;
+    setOpen(next);
+    if (next && data === null && !loading) void load();
+  }
+
+  // Column union across the returned records, preserving first-seen order.
+  const columns = useMemo(() => {
+    const recs = data?.records ?? [];
+    const seen: string[] = [];
+    for (const r of recs) {
+      for (const k of Object.keys(r)) if (!seen.includes(k)) seen.push(k);
+    }
+    return seen;
+  }, [data]);
+
+  return (
+    <Card>
+      <CardHeader
+        title={t("runDetail.dlqRecordsTitle")}
+        description={
+          data?.available
+            ? t("runDetail.dlqRecordsCount", { count: data.records.length })
+            : undefined
+        }
+        action={
+          <button
+            type="button"
+            onClick={toggle}
+            className="rounded-sm border border-border-subtle bg-overlay px-2 py-1 text-xs text-text-secondary hover:text-text"
+          >
+            {open ? t("runDetail.collapse") : t("runDetail.view")}
+          </button>
+        }
+      />
+      {open ? (
+        loading ? (
+          <div className="py-6 text-center text-sm text-text-muted">
+            {t("common.loading")}
+          </div>
+        ) : failed ? (
+          <div className="py-6 text-center text-sm text-error">
+            {t("runDetail.dlqLoadFailed")}
+          </div>
+        ) : data?.available ? (
+          data.records.length === 0 ? (
+            <div className="py-6 text-center text-sm text-text-muted">
+              {t("runDetail.dlqEmpty")}
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <div className="mb-2 text-[11px] text-text-muted">
+                {t("runDetail.dlqSource", {
+                  connection: data.connection ?? "",
+                  table: data.table ?? "",
+                })}
+              </div>
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr className="border-b border-border-subtle text-text-muted">
+                    {columns.map((c) => (
+                      <th key={c} className="px-2 py-1 font-medium">
+                        {c}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.records.map((r, i) => (
+                    <tr key={i} className="border-b border-border-subtle/50">
+                      {columns.map((c) => (
+                        <td
+                          key={c}
+                          className="max-w-[16rem] truncate px-2 py-1 font-mono text-text-secondary"
+                          title={fmtDlqCell(r[c])}
+                        >
+                          {fmtDlqCell(r[c])}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )
+        ) : (
+          <div className="py-4 text-sm text-text-muted">
+            {t(dlqReasonKey(data?.reason ?? null))}
+            {data?.error ? (
+              <pre className="mt-2 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border-subtle bg-bg p-2 font-mono text-[11px] text-text-secondary">
+                {data.error}
+              </pre>
+            ) : null}
+          </div>
+        )
       ) : null}
     </Card>
   );

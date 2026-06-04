@@ -994,6 +994,21 @@ export const en = {
   "runDetail.dlqRouted": "{count} routed to DLQ",
   "runDetail.dlqHint":
     "Records a transform failed on were routed to the dead-letter queue instead of failing the run.",
+  // Phase DLQ-2 (2026-06-04) — view the actual DLQ records (ADR-0075).
+  "runDetail.view": "View",
+  "runDetail.dlqRecordsTitle": "Dead-letter queue records",
+  "runDetail.dlqRecordsCount": "{count} record(s)",
+  "runDetail.dlqEmpty": "The DLQ table is empty.",
+  "runDetail.dlqLoadFailed": "Couldn't load DLQ records.",
+  "runDetail.dlqSource": "Latest rows from {connection} / {table}",
+  "runDetail.dlqReasonSinkNotReadable":
+    "Preview isn't available for this sink type (e.g. Kafka / HTTP). Query the sink directly.",
+  "runDetail.dlqReasonStream":
+    "This DLQ routes to a stream topic — there's no table to preview here.",
+  "runDetail.dlqReasonConnMissing":
+    "The DLQ connection no longer exists in this workspace.",
+  "runDetail.dlqReasonReadFailed": "Couldn't read the DLQ table.",
+  "runDetail.dlqReasonGeneric": "DLQ records aren't available to preview.",
   // Phase AEU (2026-06-04) — at-a-glance error/warning counts; click filters.
   "runDetail.logErrorCount": "{count} errors",
   "runDetail.logWarnCount": "{count} warnings",
@@ -2178,6 +2193,21 @@ export const ko: Messages = {
   "runDetail.dlqRouted": "{count}개 DLQ로 라우팅됨",
   "runDetail.dlqHint":
     "트랜스폼이 실패한 행을 run 실패 대신 데드레터 큐로 보냈습니다.",
+  // Phase DLQ-2 (2026-06-04) — 실제 DLQ 레코드 보기 (ADR-0075).
+  "runDetail.view": "보기",
+  "runDetail.dlqRecordsTitle": "데드레터 큐 레코드",
+  "runDetail.dlqRecordsCount": "{count}개 레코드",
+  "runDetail.dlqEmpty": "DLQ 테이블이 비어 있습니다.",
+  "runDetail.dlqLoadFailed": "DLQ 레코드를 불러오지 못했습니다.",
+  "runDetail.dlqSource": "{connection} / {table}의 최근 행",
+  "runDetail.dlqReasonSinkNotReadable":
+    "이 sink 유형(예: Kafka / HTTP)은 미리보기를 지원하지 않습니다. sink를 직접 조회하세요.",
+  "runDetail.dlqReasonStream":
+    "이 DLQ는 스트림 토픽으로 라우팅되어 여기서 미리볼 테이블이 없습니다.",
+  "runDetail.dlqReasonConnMissing":
+    "DLQ connection이 이 워크스페이스에 더 이상 존재하지 않습니다.",
+  "runDetail.dlqReasonReadFailed": "DLQ 테이블을 읽지 못했습니다.",
+  "runDetail.dlqReasonGeneric": "미리볼 수 있는 DLQ 레코드가 없습니다.",
   // Phase AEU (2026-06-04) — 오류/경고 개수 한눈에; 클릭 시 필터.
   "runDetail.logErrorCount": "오류 {count}개",
   "runDetail.logWarnCount": "경고 {count}개",

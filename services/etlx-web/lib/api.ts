@@ -443,6 +443,12 @@ export const pipelinesApi = {
       `/workspaces/${workspaceId}/pipelines/${id}/dry-run`,
       { method: "POST", json: {} },
     ),
+  /** Phase DLQ-2 (2026-06-04) — read a bounded sample of the pipeline's
+   *  dead-letter-queue records (ADR-0075). Read-only. */
+  dlqRecords: (workspaceId: string, id: string, limit = 50) =>
+    api<DlqPreviewResponse>(
+      `/workspaces/${workspaceId}/pipelines/${id}/dlq/records?limit=${limit}`,
+    ),
   /** Phase ABR (2026-06-01) — versions list. Used by the run-detail
    *  page to show the *exact* config the run executed (the current
    *  pipeline may have been edited since). */
@@ -491,6 +497,21 @@ export interface DryRunResponse {
   /** Advisory lint hints (Phase AEN — web surfaces them). Optional for
    *  back-compat with older server builds. */
   warnings?: DryRunLintWarning[];
+}
+
+/** Phase DLQ-2 (2026-06-04) — GET .../pipelines/{id}/dlq/records (ADR-0075).
+ *  ``available`` is true only when records were read; otherwise ``reason``
+ *  is a stable code (no_dlq / stream_dlq / connection_missing /
+ *  connection_build_failed / sink_not_readable / unsafe_table /
+ *  invalid_config / read_failed) the UI maps to a message. */
+export interface DlqPreviewResponse {
+  available: boolean;
+  reason: string | null;
+  connection: string | null;
+  table: string | null;
+  connector_type: string | null;
+  records: Record<string, unknown>[];
+  error: string | null;
 }
 
 export interface ScheduleCreateBody {

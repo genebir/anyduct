@@ -325,6 +325,11 @@ function AuditRow({
   const hasDiff =
     row.before_json !== null ||
     (row.after_json !== null && Object.keys(row.after_json).length > 0);
+  // Phase AEJ (2026-06-04) — request provenance (IP / client) is captured
+  // by the audit middleware and returned by the API, but the page never
+  // showed it. A row with provenance is expandable even without a diff.
+  const hasMeta = !!(row.ip || row.user_agent);
+  const expandable = hasDiff || hasMeta;
   return (
     <li>
       <button
@@ -333,7 +338,7 @@ function AuditRow({
         className="grid w-full grid-cols-[auto_140px_180px_1fr_180px] items-center gap-3 px-2 py-3 text-left transition duration-150 hover:bg-overlay"
       >
         <span className="text-text-muted">
-          {hasDiff ? (
+          {expandable ? (
             open ? (
               <ChevronDownIcon size={14} />
             ) : (
@@ -387,10 +392,32 @@ function AuditRow({
             : systemLabel}
         </span>
       </button>
-      {open && hasDiff ? (
-        <div className="grid gap-3 px-8 pb-4 sm:grid-cols-2">
-          <JsonBlock label={beforeLabel} value={row.before_json} t={t} />
-          <JsonBlock label={afterLabel} value={row.after_json} t={t} />
+      {open && expandable ? (
+        <div className="px-8 pb-4">
+          {hasMeta ? (
+            <div className="mb-3 flex flex-wrap gap-x-5 gap-y-1 text-[11px] text-text-muted">
+              {row.ip ? (
+                <span>
+                  {t("audit.ip")}:{" "}
+                  <span className="font-mono text-text-secondary">{row.ip}</span>
+                </span>
+              ) : null}
+              {row.user_agent ? (
+                <span className="min-w-0 max-w-full truncate" title={row.user_agent}>
+                  {t("audit.client")}:{" "}
+                  <span className="font-mono text-text-secondary">
+                    {row.user_agent}
+                  </span>
+                </span>
+              ) : null}
+            </div>
+          ) : null}
+          {hasDiff ? (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <JsonBlock label={beforeLabel} value={row.before_json} t={t} />
+              <JsonBlock label={afterLabel} value={row.after_json} t={t} />
+            </div>
+          ) : null}
         </div>
       ) : null}
     </li>

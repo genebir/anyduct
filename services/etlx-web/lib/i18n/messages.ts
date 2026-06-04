@@ -435,6 +435,8 @@ export const en = {
   "audit.system": "system",
   // Phase ABT (2026-06-01) — friendly self-actor display
   "audit.you": "you",
+  "audit.ip": "IP",
+  "audit.client": "Client",
   // Phase ACC (2026-06-01) — JsonBlock copy feedback
   "audit.jsonCopied": "Copied JSON to clipboard",
   "audit.jsonCopyFailed": "Couldn't copy — browser blocked clipboard",
@@ -1589,6 +1591,8 @@ export const ko: Messages = {
   "audit.system": "시스템",
   // Phase ABT (2026-06-01) — 본인 액션 친화 표시
   "audit.you": "나",
+  "audit.ip": "IP",
+  "audit.client": "클라이언트",
   // Phase ACC (2026-06-01) — JsonBlock copy feedback
   "audit.jsonCopied": "JSON을 클립보드에 복사했습니다",
   "audit.jsonCopyFailed": "복사 실패 — 브라우저가 클립보드 접근을 막았습니다",

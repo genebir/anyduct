@@ -36,6 +36,7 @@ import {
   type SensorSummary,
   type SensorUpdateBody,
 } from "@/lib/api";
+import { relativeTime, absoluteTime } from "@/lib/format-time";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import { useLocale } from "@/components/providers/locale-provider";
 import type { Messages } from "@/lib/i18n/messages";
@@ -210,9 +211,14 @@ function buildColumns(
 function LastCheckCell({ sensor, t }: { sensor: SensorSummary; t: Translate }) {
   const result = sensor.last_result_json;
   const triggered = result?.triggered ?? false;
-  const when = sensor.last_check_at
-    ? new Date(sensor.last_check_at).toLocaleString()
-    : "—";
+  // Phase ACV (2026-06-04) — relative time like the other lists; the
+  // title carries both the exact instant and the check message.
+  const tooltip = [
+    absoluteTime(sensor.last_check_at),
+    result?.message ?? t("sensors.noMessage"),
+  ]
+    .filter(Boolean)
+    .join("\n");
   return (
     <div className="flex items-center gap-1.5">
       {triggered ? (
@@ -220,11 +226,8 @@ function LastCheckCell({ sensor, t }: { sensor: SensorSummary; t: Translate }) {
       ) : (
         <XCircleIcon size={14} className="text-text-muted" />
       )}
-      <span
-        className="text-xs text-text-secondary"
-        title={result?.message ?? t("sensors.noMessage")}
-      >
-        {when}
+      <span className="text-xs text-text-secondary" title={tooltip}>
+        {relativeTime(sensor.last_check_at, t)}
       </span>
     </div>
   );

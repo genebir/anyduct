@@ -166,7 +166,11 @@ uv run mypy etl_plugins
 > - **AEA**: JSON 필드도 Monaco JSON 에디터 — 내장 언어 서비스로 **실시간 빨강 squiggle** 검증(textarea 사후 메시지 개선).
 > - **AEB**: 5개 RDBMS sink의 pre_sql도 `kind:"sql"` → 빌더 모든 SQL 입력(source/Run SQL/pre_sql)이 동일 SQL IDE.
 >
-> **SQL/code IDE 통일(ADX→AEB)**: Python/SQL/JSON 모든 코드·데이터 필드가 Monaco(하이라이팅·줄번호·테마 동기화·전체화면·예시 힌트). 라이브 dev 서버 curl로 런타임 검증(build 금지 — dev 동시 실행 중).
+> - **AEC/AEE/AEF (서버 e2e, testcontainers)**: web broken-reference 안전망의 전제·계약을 실제 REST로 dogfood — 누락 connection(sink/dlq/graph sql_exec) → dry-run ok=False + connection명 명시(ADC/ADL/ADV/ADW 전제 입증); config_json verbatim round-trip(source/sink/dlq connection + variables + ${var} 토큰 보존 → web walker 데이터 충실성). web extractConnectionNames(dlq/sql_exec 포함, ACL/ACM f/u)가 서버 referenced_connection_names와 전 shape 일치 입증. tests-only.
+> - **AED**: 빌더 ValidationBanner 이슈 목록 max-height + 스크롤(많은 이슈 시 캔버스 잠식 방지).
+> - **AEG**: 센서 config JSON도 Monaco JSON 에디터(실시간 squiggle 검증) — 빌더 JSON(AEA)과 일관.
+>
+> **SQL/code IDE 통일(ADX→AEB,AEG)**: Python/SQL/JSON 모든 코드·데이터 필드(빌더 + 센서 config)가 Monaco(하이라이팅·줄번호·테마 동기화·전체화면·예시 힌트). 라이브 dev 서버 curl로 런타임 검증(build 금지 — dev 동시 실행 중, 메모리 규칙). 서버 계약은 testcontainers e2e로 dogfood.
 >
 > **누적 ABG→AEB = 76 슬라이스(+follow-up)** — **broken-reference 안전망 완전 라이프사이클**: 탐지(list ADC/ADD · detail ADL · builder ADU · dashboard ADS/ADT) + 능동 차단(ADV/ADW Run/Trigger 비활성화) + 정리 deeplink(ADH/ADI/ADK/ADT). 대시보드 4종 주의 신호 모두 deep-link actionable. 코어/서버 변화 0(매 슬라이스), web tsc clean, production build 반복 통과, 코어 단위 905 passed(회귀 0).
 >

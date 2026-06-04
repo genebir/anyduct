@@ -451,6 +451,10 @@ export const en = {
   "connections.colConnector": "Connector",
   "connections.colSecrets": "Secrets", // pragma: allowlist secret
   "connections.refs": "{count} ref(s)",
+  // Phase ACL (2026-06-04) — connection usage count
+  "connections.colUsedBy": "Used by",
+  "connections.usedByCount": "{count} pipeline(s)",
+  "connections.usedByNone": "unused",
   // Phase ABB (2026-06-01) — search + type filter
   "connections.searchPlaceholder": "Search connections by name or type…",
   "connections.filterTypeAll": "All types",
@@ -1568,6 +1572,9 @@ export const ko: Messages = {
   "sensors.filterNoMatch": "현재 검색/필터에 일치하는 센서가 없습니다.",
   "connections.colSecrets": "시크릿",
   "connections.refs": "참조 {count}개",
+  "connections.colUsedBy": "사용처",
+  "connections.usedByCount": "파이프라인 {count}개",
+  "connections.usedByNone": "미사용",
   "connections.connected": "{name} 연결됨",
   "connections.testErrorNamed": "{name}: {error}",
   "connections.unknownError": "알 수 없는 오류",

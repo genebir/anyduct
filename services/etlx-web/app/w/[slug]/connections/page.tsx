@@ -12,7 +12,13 @@ import { Input } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ConnectionForm } from "@/components/connections/connection-form";
-import { ApiError, connectionsApi, type ConnectionSummary } from "@/lib/api";
+import {
+  ApiError,
+  connectionsApi,
+  pipelinesApi,
+  type ConnectionSummary,
+} from "@/lib/api";
+import { buildConnectionUsage } from "@/lib/connection-usage";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import { useLocale } from "@/components/providers/locale-provider";
 import type { Messages } from "@/lib/i18n/messages";
@@ -32,6 +38,7 @@ type TestState = { kind: "ok"; at: number } | { kind: "fail"; at: number; error:
 function buildColumns(
   t: Translate,
   testResults: Map<string, TestState>,
+  usage: Map<string, { id: string; name: string }[]> | null,
 ): Column<ConnectionSummary>[] {
   return [
     {
@@ -82,6 +89,40 @@ function buildColumns(
           </span>
         ),
     },
+    {
+      // Phase ACL (2026-06-04) — "Used by" count. Lets the operator
+      // judge delete-safety at a glance ("0 pipelines" → safe to
+      // remove) and gives the analyst a feed-in context. Referencing
+      // pipeline names go in the title so hovering reveals exactly
+      // which pipelines pin the connection.
+      key: "used_by",
+      className: "w-28",
+      header: t("connections.colUsedBy"),
+      cell: (r) => {
+        // usage === null → pipelines not loaded (or fetch failed). Show
+        // a neutral "—" rather than "unused" so a transient fetch
+        // failure never reads as "safe to delete".
+        if (usage === null) {
+          return <span className="text-xs text-text-muted">—</span>;
+        }
+        const refs = usage.get(r.name) ?? [];
+        if (refs.length === 0) {
+          return (
+            <span className="text-xs text-text-muted">
+              {t("connections.usedByNone")}
+            </span>
+          );
+        }
+        return (
+          <span
+            className="text-xs text-text-secondary"
+            title={refs.map((p) => p.name).join("\n")}
+          >
+            {t("connections.usedByCount", { count: refs.length })}
+          </span>
+        );
+      },
+    },
   ];
 }
 
@@ -90,6 +131,11 @@ export default function ConnectionsPage() {
   const ws = useWorkspaceFromSlug(slug);
   const { t } = useLocale();
   const [rows, setRows] = useState<ConnectionSummary[] | null>(null);
+  /** Phase ACL (2026-06-04) — pipelines, fetched once, to compute the
+   *  "Used by" count. Usage changes rarely so no polling. */
+  const [usage, setUsage] = useState<
+    Map<string, { id: string; name: string }[]> | null
+  >(null);
   const [testing, setTesting] = useState<string | null>(null);
   /** Phase ABS (2026-06-01) — session-scope per-row test outcomes.
    *  Toast is transient; this gives the table a glanceable indicator
@@ -143,6 +189,35 @@ export default function ConnectionsPage() {
   useEffect(() => {
     if (!ws) return;
     void refresh(ws.id);
+  }, [ws]);
+
+  // Phase ACL (2026-06-04) — fetch pipelines once and index connection
+  // usage. Soft-fail: a usage lookup miss just renders "—".
+  useEffect(() => {
+    if (!ws) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const pipelines = await pipelinesApi.list(ws.id);
+        if (cancelled) return;
+        setUsage(
+          buildConnectionUsage(
+            pipelines.map((p) => ({
+              id: p.id,
+              name: p.name,
+              config: p.current_config_json,
+            })),
+          ),
+        );
+      } catch {
+        // Keep usage null on failure → cells render neutral "—",
+        // never a false "unused".
+        if (!cancelled) setUsage(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [ws]);
 
   async function onTest(row: ConnectionSummary) {
@@ -300,7 +375,7 @@ export default function ConnectionsPage() {
           ) : (
             <DataTable
               columns={[
-                ...buildColumns(t, testResults),
+                ...buildColumns(t, testResults, usage),
                 {
                   key: "actions",
                   header: "",

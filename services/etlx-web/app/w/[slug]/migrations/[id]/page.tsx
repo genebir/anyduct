@@ -419,6 +419,28 @@ export default function MigrationDetailPage() {
                 t={t}
               />
             ) : null}
+            {/* Phase ADL (2026-06-04) — warn when this migration points
+                at a connection that no longer exists (deleted/renamed).
+                The form's connection selects would otherwise just show
+                empty with no explanation. Only once connections have
+                loaded (length>0) to avoid a load-race false positive. */}
+            {form && connections.length > 0
+              ? (() => {
+                  const missing = [
+                    form.sourceConnection,
+                    form.sinkConnection,
+                  ].filter(
+                    (n) => n && !connections.some((c) => c.name === n),
+                  );
+                  return missing.length > 0 ? (
+                    <div className="rounded-md border border-error/40 bg-error/10 px-4 py-3 text-sm text-error">
+                      {t("pipelines.missingConnection", {
+                        names: missing.join(", "),
+                      })}
+                    </div>
+                  ) : null;
+                })()
+              : null}
             <MigrationForm
               workspaceId={ws?.id ?? ""}
               name={pipeline?.name ?? ""}

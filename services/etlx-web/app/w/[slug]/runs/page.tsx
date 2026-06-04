@@ -214,8 +214,10 @@ export default function RunsPage() {
    *  single ``schedule_id``, not a "scheduled or not" flag.
    *  URL-synced via ``?trigger=`` for share-link parity with status. */
   const triggerFilterRaw = search.get("trigger");
-  const triggerFilter: "manual" | "scheduled" | null =
-    triggerFilterRaw === "manual" || triggerFilterRaw === "scheduled"
+  const triggerFilter: "manual" | "scheduled" | "auto" | null =
+    triggerFilterRaw === "manual" ||
+    triggerFilterRaw === "scheduled" ||
+    triggerFilterRaw === "auto"
       ? triggerFilterRaw
       : null;
   const ws = useWorkspaceFromSlug(slug);
@@ -257,7 +259,7 @@ export default function RunsPage() {
 
   /** Phase ACA — URL-sync writer for the trigger filter. */
   const setTriggerFilter = useCallback(
-    (next: "" | "manual" | "scheduled") => {
+    (next: "" | "manual" | "scheduled" | "auto") => {
       const params = new URLSearchParams(search.toString());
       if (next) params.set("trigger", next);
       else params.delete("trigger");
@@ -342,6 +344,13 @@ export default function RunsPage() {
     if (triggerFilter === "scheduled") {
       return rows.filter((r) => r.schedule_id !== null);
     }
+    if (triggerFilter === "auto") {
+      // Phase AEM — system-fired (sensor / asset auto-materialize):
+      // neither a schedule nor a user.
+      return rows.filter(
+        (r) => r.schedule_id === null && r.triggered_by_user_id === null,
+      );
+    }
     // manual: triggered_by_user_id non-null AND schedule_id null
     return rows.filter(
       (r) => r.schedule_id === null && r.triggered_by_user_id !== null,
@@ -384,7 +393,7 @@ export default function RunsPage() {
                 value={triggerFilter ?? ""}
                 onChange={(e) =>
                   setTriggerFilter(
-                    e.target.value as "" | "manual" | "scheduled",
+                    e.target.value as "" | "manual" | "scheduled" | "auto",
                   )
                 }
                 className="h-8 rounded-md border border-border-subtle bg-elevated px-2 text-sm text-text focus-visible:border-accent focus-visible:outline-none"
@@ -392,6 +401,7 @@ export default function RunsPage() {
                 <option value="">{t("runs.triggerFilterAll")}</option>
                 <option value="manual">{t("runs.triggerFilterManual")}</option>
                 <option value="scheduled">{t("runs.triggerFilterScheduled")}</option>
+                <option value="auto">{t("runs.triggerFilterAuto")}</option>
               </select>
             </label>
           <label className="flex items-center gap-1.5 text-xs text-text-secondary">

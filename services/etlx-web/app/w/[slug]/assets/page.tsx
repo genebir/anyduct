@@ -50,7 +50,7 @@ function buildColumns(t: Translate): Column<AssetSummary>[] {
             className="text-text-secondary"
             title={absoluteTime(r.last_materialized_at)}
           >
-            {relativeTime(r.last_materialized_at, { ago: true })}
+            {relativeTime(r.last_materialized_at, t)}
           </span>
         ) : (
           <span className="text-text-muted">{t("assets.never")}</span>

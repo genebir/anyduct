@@ -43,7 +43,7 @@ import {
   type RunSummary,
   type ScheduleSummary,
 } from "@/lib/api";
-import { relativeTime } from "@/lib/format-time";
+import { relativeTime, absoluteTime } from "@/lib/format-time";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import { useLocale } from "@/components/providers/locale-provider";
 import { MigrationForm } from "@/components/migrations/migration-form";
@@ -564,10 +564,16 @@ function RecentRunsCard({
                 <span className="text-xs tabular-nums text-text-muted">
                   {formatDuration(r.duration_seconds)}
                 </span>
-                <span className="w-20 text-right text-xs text-text-muted">
-                  {relativeTime(r.finished_at ?? r.started_at ?? r.created_at, {
-                    ago: true,
-                  })}
+                <span
+                  className="w-20 text-right text-xs text-text-muted"
+                  title={absoluteTime(
+                    r.finished_at ?? r.started_at ?? r.created_at,
+                  )}
+                >
+                  {relativeTime(
+                    r.finished_at ?? r.started_at ?? r.created_at,
+                    tx,
+                  )}
                 </span>
               </li>
             ))}

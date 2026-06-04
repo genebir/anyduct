@@ -34,12 +34,10 @@ import { CronExpressionParser } from "cron-parser";
 import { useCurrentUser } from "@/components/providers/auth-provider";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import { useLocale } from "@/components/providers/locale-provider";
-import type { Messages } from "@/lib/i18n/messages";
+import { relativeTime, absoluteTime } from "@/lib/format-time";
 import { cn } from "@/lib/cn";
 import { toast } from "sonner";
 import { migrationSummaryOf } from "@/lib/migration-utils";
-
-type Translate = (key: keyof Messages, vars?: Record<string, string | number>) => string;
 
 interface ScheduleRow extends ScheduleSummary {
   pipeline_name: string;
@@ -435,8 +433,11 @@ export default function WorkspaceHomePage() {
                         <span className="font-mono text-error">
                           {r.error_class ?? t("status.failed")}
                         </span>
-                        <span className="text-text-muted">
-                          {fmtTime(r.finished_at ?? r.started_at, t)}
+                        <span
+                          className="text-text-muted"
+                          title={absoluteTime(r.finished_at ?? r.started_at)}
+                        >
+                          {relativeTime(r.finished_at ?? r.started_at, t)}
                         </span>
                       </div>
                       <div className="mt-0.5 truncate text-[11px] text-text-muted">
@@ -537,14 +538,4 @@ function fmtDuration(s: number | null): string {
   if (s < 1) return `${Math.round(s * 1000)}ms`;
   if (s < 60) return `${s.toFixed(1)}s`;
   return `${Math.floor(s / 60)}m ${Math.round(s % 60)}s`;
-}
-
-function fmtTime(ts: string | null, t: Translate): string {
-  if (!ts) return "—";
-  const d = new Date(ts);
-  const ms = Date.now() - d.getTime();
-  if (ms < 60_000) return t("time.justNow");
-  if (ms < 3600_000) return t("time.minutesAgo", { n: Math.floor(ms / 60_000) });
-  if (ms < 86_400_000) return t("time.hoursAgo", { n: Math.floor(ms / 3_600_000) });
-  return d.toLocaleDateString();
 }

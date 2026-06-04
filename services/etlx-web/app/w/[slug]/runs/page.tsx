@@ -129,7 +129,7 @@ function buildColumns(
           className="text-text-secondary"
           title={absoluteTime(r.scheduled_at)}
         >
-          {relativeTime(r.scheduled_at, { ago: true })}
+          {relativeTime(r.scheduled_at, t)}
         </span>
       ),
     },

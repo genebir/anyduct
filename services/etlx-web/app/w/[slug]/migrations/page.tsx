@@ -50,7 +50,7 @@ import {
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import { useLocale } from "@/components/providers/locale-provider";
 import type { Messages } from "@/lib/i18n/messages";
-import { relativeTime } from "@/lib/format-time";
+import { relativeTime, absoluteTime } from "@/lib/format-time";
 import {
   type MigrationSummary,
   migrationSummaryOf,
@@ -185,11 +185,19 @@ function buildColumns(t: Translate): Column<Row>[] {
                 <title>{t("migrations.runTriggerManual")}</title>
               </HandIcon>
             ) : null}
-            <span className="text-text-muted">
+            <span
+              className="text-text-muted"
+              title={absoluteTime(
+                r.lastRun.finished_at ??
+                  r.lastRun.started_at ??
+                  r.lastRun.created_at,
+              )}
+            >
               {relativeTime(
                 r.lastRun.finished_at ??
                   r.lastRun.started_at ??
                   r.lastRun.created_at,
+                t,
               )}
             </span>
           </div>

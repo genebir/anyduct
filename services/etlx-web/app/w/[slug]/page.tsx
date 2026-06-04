@@ -38,6 +38,7 @@ import { relativeTime, absoluteTime } from "@/lib/format-time";
 import { cn } from "@/lib/cn";
 import { toast } from "sonner";
 import { migrationSummaryOf } from "@/lib/migration-utils";
+import { buildConnectionUsage } from "@/lib/connection-usage";
 
 interface ScheduleRow extends ScheduleSummary {
   pipeline_name: string;
@@ -192,6 +193,22 @@ export default function WorkspaceHomePage() {
 
   const activeSchedules = (schedules ?? []).filter((s) => s.is_active).length;
   const activeSensors = (sensors ?? []).filter((s) => s.is_active).length;
+
+  // Phase ACY (2026-06-04) — count connections no pipeline references,
+  // a cleanup signal for the operator. Reuses ACL's usage index over
+  // the pipelines + connections the dashboard already fetched, so no
+  // extra request. null until both payloads land.
+  const unusedConnections = useMemo(() => {
+    if (!connections || !pipelines) return null;
+    const usage = buildConnectionUsage(
+      pipelines.map((p) => ({
+        id: p.id,
+        name: p.name,
+        config: p.current_config_json,
+      })),
+    );
+    return connections.filter((c) => !(usage.get(c.name)?.length)).length;
+  }, [connections, pipelines]);
   /** Phase ACB (2026-06-01) — earliest next-firing across all active
    *  cron schedules. Used to give the "Active schedules" card a
    *  forward-looking sub-line ("next in 12m"). Returns ``null`` when
@@ -310,6 +327,11 @@ export default function WorkspaceHomePage() {
             value={connections?.length}
             icon={<CableIcon size={18} />}
             href={ws ? `/w/${ws.slug}/connections` : "#"}
+            sub={
+              unusedConnections && unusedConnections > 0
+                ? t("overview.connectionsUnused", { n: unusedConnections })
+                : undefined
+            }
           />
           <StatCard
             label={t("overview.runsToday")}

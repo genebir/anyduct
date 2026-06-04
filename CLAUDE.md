@@ -129,6 +129,8 @@ uv run mypy etl_plugins
 > - **남은 후속(후보)**: per-run 필터(코어 변경 동반 — DLQ는 사용자 sink라 core가 run_id를 모름) / **S3·object-storage DLQ 읽기**(connector-specific) / 정렬·페이지네이션 / 빌더·마이그레이션 detail에서도 뷰어 노출.
 > - **AFQ (post-DLQ dogfood)**: 빌더 DLQ 설정이 table(BatchSink)+topic(StreamSink)을 항상 둘 다 노출하던 것을, 선택된 connection 타입(kafka=stream)에 맞는 하나만 표시(미선택 시 table 기본). FieldDef.showWhen(AAF) 평행.
 > - **AFR**: schedules 행에 "지금 실행"(Run now, ZapIcon) — 다음 cron tick 안 기다리고 pipelinesApi.trigger 후 새 run으로 이동(migrations Run now/ABK 평행).
+> - **AFS**: 대시보드에 Assets 카드(자산 수 + /assets 링크 + opaque(컬럼 리니지 없음) sub-line) — 분석가 카탈로그 entry point. dashboard fan-out에 assetsApi.list 추가.
+> - **AFT**: assets list "불투명만" 필터 + URL preset `?lineage=opaque` + 대시보드 Assets 카드 opaque>0 시 subset deep-link(ADI/ADK 패턴). AFS(신호)→AFT(필터+deeplink) 루프.
 >
 > **이전 마일스톤 (2026-06-04): 운영-가시성 23슬라이스 (Phase AET → AFP).** 단일 슬라이스-단위 세션(web 전용, 코어/서버 변화 0, 매 슬라이스 tsc clean + dev 200). run 디버그(로그/오류 copy·카운트·records delta·DLQ count·heartbeat liveness·running 경과 3 surface) · 실패 triage error_class 5 surface · Last run 컬럼 5 surface · 헬스 signal→action 양축(schedules/sensors: 컬럼→대시보드 신호→필터+deeplink) · 분석가 asset 행수 delta · audit my-actions · builder dry-run 경고 수.
 >

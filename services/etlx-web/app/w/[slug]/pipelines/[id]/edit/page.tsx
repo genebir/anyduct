@@ -663,7 +663,12 @@ export default function PipelineEditorPage() {
           settingsPanel={settingsPanel}
           dryRunPanel={
             dryRunResult ? (
-              <DryRunPanel result={dryRunResult} onDismiss={() => setDryRunResult(null)} t={t} />
+              <DryRunPanel
+                result={dryRunResult}
+                onDismiss={() => setDryRunResult(null)}
+                onFocus={focusNode}
+                t={t}
+              />
             ) : null
           }
         />
@@ -768,13 +773,24 @@ function ValidationBanner({
 //     full text without selecting through highlighted bullets.
 //   * The whole panel respects the same theme tokens as the rest of
 //     the builder (border-error / bg-error/5 banding for failed rows).
+/** Phase AEO — pull the node id out of a lint warning's location
+ *  (``graph.nodes.<id>``) so the builder can jump to it. Returns null
+ *  for non-graph locations (the builder only ever emits graph shape). */
+function nodeIdFromLocation(location: string | null): string | null {
+  if (!location) return null;
+  const m = /^graph\.nodes\.(.+)$/.exec(location);
+  return m ? m[1] : null;
+}
+
 function DryRunPanel({
   result,
   onDismiss,
+  onFocus,
   t,
 }: {
   result: DryRunResponse;
   onDismiss: () => void;
+  onFocus: (nodeId: string) => void;
   t: Translate;
 }) {
   const checkedCount = result.connectors.length;
@@ -831,19 +847,37 @@ function DryRunPanel({
           them. Non-blocking accuracy nudges (e.g. "add column_mapping"). */}
       {result.warnings && result.warnings.length > 0 ? (
         <ul className="mt-2 space-y-1">
-          {result.warnings.map((w, i) => (
-            <li
-              key={i}
-              className="rounded-md border border-warning/40 bg-warning/5 p-2 text-xs text-warning"
-            >
-              <div className="whitespace-pre-wrap break-words">{w.message}</div>
-              {w.location ? (
-                <div className="mt-0.5 font-mono text-[11px] text-warning/70">
-                  {w.location}
-                </div>
-              ) : null}
-            </li>
-          ))}
+          {result.warnings.map((w, i) => {
+            const nodeId = nodeIdFromLocation(w.location);
+            return (
+              <li
+                key={i}
+                className="rounded-md border border-warning/40 bg-warning/5 p-2 text-xs text-warning"
+              >
+                {/* Phase AEO — clickable when the warning points at a
+                    graph node, jumping to it like the validation banner. */}
+                {nodeId ? (
+                  <button
+                    type="button"
+                    onClick={() => onFocus(nodeId)}
+                    className="text-left underline-offset-2 hover:underline focus-visible:underline focus-visible:outline-none"
+                    title={t("graph.menuEdit")}
+                  >
+                    {w.message}
+                  </button>
+                ) : (
+                  <div className="whitespace-pre-wrap break-words">
+                    {w.message}
+                  </div>
+                )}
+                {w.location ? (
+                  <div className="mt-0.5 font-mono text-[11px] text-warning/70">
+                    {w.location}
+                  </div>
+                ) : null}
+              </li>
+            );
+          })}
         </ul>
       ) : null}
       {/* Connector outcomes — show ALL of them (not just failures), so

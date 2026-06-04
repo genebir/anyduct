@@ -977,6 +977,10 @@ export const en = {
   "runDetail.logsCopyFailed": "Couldn't copy — your browser blocked clipboard access",
   // Phase AEY (2026-06-04) — copy the full failure from the error card.
   "runDetail.errorCopied": "Copied error to clipboard",
+  // Phase AEZ (2026-06-04) — read-vs-written delta (silent data loss).
+  "runDetail.recordsDelta": "−{count} filtered",
+  "runDetail.recordsDeltaHint":
+    "Rows read from the source but not written to the sink — filtered, deduped, or routed to the DLQ.",
   // Phase AEU (2026-06-04) — at-a-glance error/warning counts; click filters.
   "runDetail.logErrorCount": "{count} errors",
   "runDetail.logWarnCount": "{count} warnings",
@@ -2137,6 +2141,10 @@ export const ko: Messages = {
   "runDetail.logsCopyFailed": "복사 실패 — 브라우저가 클립보드 접근을 막았습니다",
   // Phase AEY (2026-06-04) — 오류 카드에서 실패 전체 복사.
   "runDetail.errorCopied": "오류를 클립보드에 복사했습니다",
+  // Phase AEZ (2026-06-04) — read 대비 written 차이(조용한 데이터 손실).
+  "runDetail.recordsDelta": "−{count}개 필터됨",
+  "runDetail.recordsDeltaHint":
+    "소스에서 읽었지만 싱크에 기록되지 않은 행 — 필터/중복제거/DLQ 경로.",
   // Phase AEU (2026-06-04) — 오류/경고 개수 한눈에; 클릭 시 필터.
   "runDetail.logErrorCount": "오류 {count}개",
   "runDetail.logWarnCount": "경고 {count}개",

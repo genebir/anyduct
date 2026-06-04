@@ -1009,10 +1009,25 @@ function Summary({
       <Field
         label={t("runDetail.records")}
         value={
-          <code>
-            {run.records_read.toLocaleString()} /{" "}
-            {run.records_written.toLocaleString()}
-          </code>
+          <span className="inline-flex items-baseline gap-2">
+            <code>
+              {run.records_read.toLocaleString()} /{" "}
+              {run.records_written.toLocaleString()}
+            </code>
+            {/* Phase AEZ (2026-06-04) — surface the read-vs-written gap so a
+                silent data drop (filter / dedupe / DLQ route) is visible
+                instead of hidden inside the "X / Y" pair. */}
+            {run.records_read > run.records_written ? (
+              <span
+                className="text-xs text-text-muted"
+                title={t("runDetail.recordsDeltaHint")}
+              >
+                {t("runDetail.recordsDelta", {
+                  count: run.records_read - run.records_written,
+                })}
+              </span>
+            ) : null}
+          </span>
         }
       />
       {run.worker_id ? (

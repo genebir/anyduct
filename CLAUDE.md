@@ -196,6 +196,9 @@ uv run mypy etl_plugins
 > - **AFM**: asset 상세 materializations 행수 delta — records_written 옆에 이전(더 오래된) materialization 대비 "+N/−N"(newest-first → 이전은 mats[i+1]) + tooltip. 분석가가 행 수 급감/급증(데이터 품질 이상)을 즉시 포착. 변화 없으면 숨김.
 > - **AFN**: audit "My actions only" 필터 — 서버가 이미 받는 actor_user_id 파라미터 + useCurrentUser로 "내 작업만" 체크박스(toggle 시 offset 리셋, reset 포함, 미로그인 비활성). UUID 복붙 마찰 0. 서버 변화 0.
 > - **AFO**: builder dry-run 헤더에 advisory 경고 수("권고 N개", warning tone) — connectorsChecked만 보이던 헤더에 AEN 경고 개수 추가(connector 실패 footer와 동일 calibration). >0일 때만.
+> - **AFP**: run DAG 노드 카드 R/W record 수 천단위 포맷(toLocaleString) — 앱 전역 record 카운트 표기와 정합.
+>
+> **AET→AFP = 23 web 슬라이스(+문서 13)**: 단일 슬라이스-단위 세션. 코어/서버 코드 변화 0(매 슬라이스, 코어 905 회귀 없음), web tsc clean + dev 라우트 200(매 슬라이스), i18n en/ko 동기. 테마: run 디버그(로그/오류 copy·카운트·records delta·DLQ·heartbeat·running 경과) · 실패 triage error_class 5 surface · Last run 컬럼 5 surface · 헬스 signal→action 양축(schedules/sensors: 컬럼→대시보드 신호→필터+deeplink) · 분석가 asset 행수 delta · audit my-actions · builder dry-run 경고 수. **주요 surface 폴리시 포화 — 다음은 DLQ UI(서버+web) 등 더 큰 축 권장.**
 >
 > **세션 green 확정(2026-06-04)**: 코어 단위 905 passed(코어 production 미변경, 회귀 0) · 신규 서버 시나리오 5 it green(testcontainers) · web tsc clean(매 슬라이스) · 실행 중 dev 서버 전 라우트 200 · production build 21 routes(반복). 검증 방법: dev 동시 실행으로 `next build` 금지(메모리), `tsc` + dev curl(런타임) + 서버 contract는 testcontainers e2e. ruff-format 커밋 중단은 `uv run ruff format` 사전 실행으로 회피.
 >

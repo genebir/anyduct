@@ -743,7 +743,8 @@ export default function PipelinesPage() {
           icon={<CalendarPlusIcon size={14} />}
           disabled={(() => {
             const r = rowMenuTargetRef.current;
-            return !r || !r.current_version;
+            // Phase ADW — backfill is also a run; block when broken.
+            return !r || !r.current_version || isBroken(r);
           })()}
           onSelect={() => {
             const r = rowMenuTargetRef.current;

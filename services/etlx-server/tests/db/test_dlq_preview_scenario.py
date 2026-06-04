@@ -116,3 +116,36 @@ async def test_dlqp4_missing_dlq_connection_reports_reason(
     assert preview.available is False
     assert preview.reason == "connection_missing"
     assert preview.connection == "ghost"
+
+
+async def test_dlqp5_non_sql_sink_reports_not_readable(
+    session: AsyncSession, tmp_path: Path
+) -> None:
+    """A DLQ on a non-SQL sink (e.g. S3) can't take a ``SELECT`` — the
+    preview short-circuits to ``sink_not_readable`` *before* trying to
+    build the connector (no heavy import), rather than a cryptic read
+    failure. Phase DLQ-5."""
+    ws = await _seed_workspace(session, slug="dlqp5")
+    db_path = _seed_orders_warehouse(tmp_path)
+    await _seed_connection(
+        session, workspace_id=ws.id, name="src", config={"database": str(db_path)}
+    )
+    await _seed_connection(
+        session, workspace_id=ws.id, name="dst", config={"database": str(db_path)}
+    )
+    # Non-SQL DLQ sink. Config is arbitrary — we never build it.
+    await _seed_connection(
+        session,
+        workspace_id=ws.id,
+        name="lake",
+        type="s3",
+        config={"bucket": "dlq", "prefix": "failed/"},
+    )
+    cfg = _dlq_cfg(dlq_connection="lake")
+    p, pv = await _seed_pipeline(session, workspace_id=ws.id, name="p", config=cfg)
+
+    preview = await DlqPreviewService(session, StaticSecretBackend()).preview(p, pv, limit=50)
+
+    assert preview.available is False
+    assert preview.reason == "sink_not_readable"
+    assert preview.connector_type == "s3"

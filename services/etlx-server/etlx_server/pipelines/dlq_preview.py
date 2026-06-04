@@ -50,6 +50,14 @@ _SAFE_TABLE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?
 # ship (sqlite / postgres / mysql / vertica) uses ``LIMIT``.
 _TOP_DIALECTS = {"mssql"}
 
+# Only RDBMS connectors take a SQL ``SELECT`` (what the preview builds).
+# A non-SQL sink (S3 object store, Kafka topic, HTTP endpoint) may still
+# be a ``BatchSource``, but feeding it ``SELECT * FROM t`` would either
+# error cryptically or misbehave — so we gate on a known-SQL allow-list
+# and report such sinks as ``sink_not_readable`` (the UI says "query the
+# sink directly"). Reading an object-store DLQ is a separate slice.
+_SQL_READABLE_TYPES = {"sqlite", "postgres", "mysql", "vertica", "mssql"}
+
 
 @dataclass(frozen=True)
 class DlqPreview:
@@ -116,6 +124,18 @@ class DlqPreviewService:
                 reason="connection_missing",
                 connection=dlq.connection,
                 table=dlq.table,
+            )
+
+        # Gate on a known SQL allow-list *before* building the connector:
+        # cheaper (no heavy boto3/aiokafka import) and avoids feeding SQL
+        # to a sink that doesn't speak it.
+        if row.type not in _SQL_READABLE_TYPES:
+            return DlqPreview(
+                available=False,
+                reason="sink_not_readable",
+                connection=dlq.connection,
+                table=dlq.table,
+                connector_type=row.type,
             )
 
         try:

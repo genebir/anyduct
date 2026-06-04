@@ -27,10 +27,14 @@ import {
 import {
   ApiError,
   pipelinesApi,
+  runsApi,
   schedulesApi,
   type PipelineSummary,
+  type RunSummary,
   type ScheduleSummary,
 } from "@/lib/api";
+import { relativeTime, absoluteTime } from "@/lib/format-time";
+import { StatusBadge } from "@/components/ui/status-badge";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import { useLocale } from "@/components/providers/locale-provider";
 import type { Messages } from "@/lib/i18n/messages";
@@ -77,7 +81,10 @@ function nextFireHint(
   }
 }
 
-function buildColumns(t: Translate): Column<ScheduleRow>[] {
+function buildColumns(
+  t: Translate,
+  lastRunByPipeline: Map<string, RunSummary>,
+): Column<ScheduleRow>[] {
   return [
     { key: "name", header: t("schedules.colSchedule"), cell: (r) => r.name },
     {
@@ -140,6 +147,41 @@ function buildColumns(t: Translate): Column<ScheduleRow>[] {
           <span className="text-text-muted">{t("common.paused")}</span>
         ),
     },
+    {
+      // Phase AFC (2026-06-04) — last run of the scheduled pipeline, so a
+      // schedule that fires on time but fails every run is visible here
+      // (not just on the runs page). Mirrors pipelines (ACS) / migrations
+      // (AAP) Last run columns + the error_class chip (AEW/AEX).
+      key: "last_run",
+      header: t("pipelines.colLastRun"),
+      cell: (r) => {
+        const run = lastRunByPipeline.get(r.pipeline_id);
+        if (!run) {
+          return (
+            <span className="text-xs text-text-muted">
+              {t("pipelines.neverRun")}
+            </span>
+          );
+        }
+        const when = run.finished_at ?? run.started_at ?? run.created_at;
+        return (
+          <div className="flex items-center gap-2 text-xs">
+            <StatusBadge status={run.status} />
+            <span className="text-text-muted" title={absoluteTime(when)}>
+              {relativeTime(when, t)}
+            </span>
+            {run.error_class ? (
+              <span
+                className="max-w-[7rem] truncate font-mono text-[10px] text-error"
+                title={run.error_class}
+              >
+                {run.error_class}
+              </span>
+            ) : null}
+          </div>
+        );
+      },
+    },
   ];
 }
 
@@ -149,6 +191,11 @@ export default function SchedulesPage() {
   const { t } = useLocale();
   const [pipelines, setPipelines] = useState<PipelineSummary[]>([]);
   const [rows, setRows] = useState<ScheduleRow[] | null>(null);
+  /** Phase AFC (2026-06-04) — most recent run per pipeline_id, for the
+   *  Last run column. Mirrors the pipelines list (ACS). */
+  const [lastRunByPipeline, setLastRunByPipeline] = useState<
+    Map<string, RunSummary>
+  >(new Map());
   const [form, setForm] = useState<FormState>({ kind: "closed" });
   const [pendingDelete, setPendingDelete] = useState<ScheduleRow | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -198,6 +245,33 @@ export default function SchedulesPage() {
   useEffect(() => {
     if (!ws) return;
     void refresh(ws.id);
+  }, [ws]);
+
+  // Phase AFC (2026-06-04) — poll workspace runs and keep the most recent
+  // per pipeline (same pattern as the pipelines list, ACS). Soft-fail:
+  // the list still renders without the Last run chip.
+  useEffect(() => {
+    if (!ws) return;
+    let cancelled = false;
+    const fetchRuns = async () => {
+      try {
+        const list = await runsApi.list(ws.id, { limit: 200 });
+        if (cancelled) return;
+        const m = new Map<string, RunSummary>();
+        for (const r of list) {
+          if (!m.has(r.pipeline_id)) m.set(r.pipeline_id, r);
+        }
+        setLastRunByPipeline(m);
+      } catch {
+        // soft-fail
+      }
+    };
+    void fetchRuns();
+    const handle = setInterval(() => void fetchRuns(), 10000);
+    return () => {
+      cancelled = true;
+      clearInterval(handle);
+    };
   }, [ws]);
 
   async function onToggle(row: ScheduleRow) {
@@ -368,7 +442,7 @@ export default function SchedulesPage() {
           ) : (
             <DataTable
               columns={[
-                ...buildColumns(t),
+                ...buildColumns(t, lastRunByPipeline),
                 {
                   key: "actions",
                   header: "",

@@ -236,6 +236,16 @@ function buildColumns(
                 t,
               )}
             </span>
+            {/* Phase AEX (2026-06-04) — failure type at a glance, parallel
+                to runs/pipelines lists (AEV/AEW). Only set on failures. */}
+            {r.lastRun.error_class ? (
+              <span
+                className="max-w-[7rem] truncate font-mono text-[10px] text-error"
+                title={r.lastRun.error_class}
+              >
+                {r.lastRun.error_class}
+              </span>
+            ) : null}
           </div>
         ) : (
           <span className="text-xs text-text-muted">

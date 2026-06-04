@@ -34,6 +34,7 @@ import {
   type RunStatus,
   type RunSummary,
 } from "@/lib/api";
+import { relativeTime, absoluteTime } from "@/lib/format-time";
 import { migrationSummaryOf } from "@/lib/migration-utils";
 import { useCurrentUser } from "@/components/providers/auth-provider";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
@@ -41,12 +42,6 @@ import { useLocale } from "@/components/providers/locale-provider";
 import type { Messages } from "@/lib/i18n/messages";
 
 type Translate = (key: keyof Messages, vars?: Record<string, string | number>) => string;
-
-function formatTimestamp(ts: string | null): string {
-  if (!ts) return "—";
-  const d = new Date(ts);
-  return d.toLocaleString();
-}
 
 function formatDuration(s: number | null): string {
   if (s == null) return "—";
@@ -125,9 +120,16 @@ function buildColumns(
     {
       key: "scheduled",
       header: t("common.scheduled"),
+      // Phase ACO (2026-06-04) — relative time + absolute on hover,
+      // matching the migrations / assets lists. A 100-row runs list is
+      // far quicker to scan as "5m ago" than full locale timestamps;
+      // the exact instant stays one hover away.
       cell: (r) => (
-        <span className="text-text-secondary">
-          {formatTimestamp(r.scheduled_at)}
+        <span
+          className="text-text-secondary"
+          title={absoluteTime(r.scheduled_at)}
+        >
+          {relativeTime(r.scheduled_at, { ago: true })}
         </span>
       ),
     },

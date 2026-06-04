@@ -402,6 +402,15 @@ export default function PipelinesPage() {
     }
   }
 
+  // Phase ADW (2026-06-04) — does this pipeline reference a connection
+  // no longer in the workspace? Drives the disabled "Trigger" (a run
+  // would just fail to build). connNames null → not loaded → not broken.
+  function isBroken(p: PipelineSummary): boolean {
+    if (connNames === null) return false;
+    const refs = extractConnectionNames(p.current_config_json);
+    return [...refs].some((r) => !connNames.has(r));
+  }
+
   // Phase ADQ (2026-06-04) — pre-flight validation from the list, so an
   // operator can catch a missing connection / secret before triggering
   // (the "validate → run" order the migrations surface already uses).
@@ -576,7 +585,22 @@ export default function PipelinesPage() {
                           e.stopPropagation();
                           void onTrigger(row);
                         }}
-                        disabled={!row.current_version}
+                        // Phase ADW — block Trigger when a connection is
+                        // missing; the run would fail to build.
+                        disabled={!row.current_version || isBroken(row)}
+                        title={
+                          isBroken(row)
+                            ? t("pipelines.missingConnection", {
+                                names: [
+                                  ...extractConnectionNames(
+                                    row.current_config_json,
+                                  ),
+                                ]
+                                  .filter((n) => !connNames?.has(n))
+                                  .join(", "),
+                              })
+                            : undefined
+                        }
                       >
                         {t("common.trigger")}
                       </Button>
@@ -705,7 +729,8 @@ export default function PipelinesPage() {
           icon={<PlayIcon size={14} />}
           disabled={(() => {
             const r = rowMenuTargetRef.current;
-            return !r || !r.current_version;
+            // Phase ADW — also block when a connection is missing.
+            return !r || !r.current_version || isBroken(r);
           })()}
           onSelect={() => {
             const r = rowMenuTargetRef.current;

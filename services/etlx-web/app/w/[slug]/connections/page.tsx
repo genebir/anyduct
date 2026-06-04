@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import {
   CableIcon,
   PencilIcon,
@@ -161,6 +161,13 @@ export default function ConnectionsPage() {
    *  migration list UX. Stays hidden when the list is short. */
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("");
+  /** Phase ADI (2026-06-04) — usage filter, URL-presettable via
+   *  ``?usage=unused`` so the dashboard "N unused" card deep-links
+   *  straight to the cleanup subset. */
+  const searchParams = useSearchParams();
+  const [usageFilter, setUsageFilter] = useState<"" | "unused">(
+    searchParams.get("usage") === "unused" ? "unused" : "",
+  );
 
   const distinctTypes = useMemo(() => {
     if (!rows) return [];
@@ -178,9 +185,14 @@ export default function ConnectionsPage() {
       )
         return false;
       if (typeFilter && r.type !== typeFilter) return false;
+      // usage===null → not loaded; don't hide rows (avoid a false
+      // "everything unused" view while pipelines are still fetching).
+      if (usageFilter === "unused" && usage !== null) {
+        if ((usage.get(r.name)?.length ?? 0) > 0) return false;
+      }
       return true;
     });
-  }, [rows, search, typeFilter]);
+  }, [rows, search, typeFilter, usageFilter, usage]);
 
   async function refresh(workspaceId: string) {
     try {
@@ -388,8 +400,11 @@ export default function ConnectionsPage() {
         {/* Phase ABB (2026-06-01) — search + type filter. Hidden
             when the list is short so a fresh workspace doesn't look
             cluttered. */}
-        {rows !== null && rows.length > 5 ? (
-          <div className="grid items-end gap-2 sm:grid-cols-[1fr_auto_auto]">
+        {/* Phase ADI — also render when a usage filter is active (e.g.
+            from the dashboard deep-link) so it can be cleared even with
+            ≤5 connections. */}
+        {rows !== null && (rows.length > 5 || usageFilter) ? (
+          <div className="grid items-end gap-2 sm:grid-cols-[1fr_auto_auto_auto]">
             <Input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -407,13 +422,24 @@ export default function ConnectionsPage() {
                 </option>
               ))}
             </select>
-            {search || typeFilter ? (
+            <select
+              value={usageFilter}
+              onChange={(e) =>
+                setUsageFilter(e.target.value as "" | "unused")
+              }
+              className="h-10 rounded-md border border-border-subtle bg-elevated px-2 text-sm text-text focus-visible:border-accent focus-visible:outline-none"
+            >
+              <option value="">{t("connections.filterUsageAll")}</option>
+              <option value="unused">{t("connections.filterUsageUnused")}</option>
+            </select>
+            {search || typeFilter || usageFilter ? (
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => {
                   setSearch("");
                   setTypeFilter("");
+                  setUsageFilter("");
                 }}
               >
                 {t("connections.clearFilters")}
@@ -427,7 +453,7 @@ export default function ConnectionsPage() {
             <div className="py-12 text-center text-sm text-text-muted">
               {t("common.loading")}
             </div>
-          ) : filteredRows.length === 0 && (search || typeFilter) ? (
+          ) : filteredRows.length === 0 && (search || typeFilter || usageFilter) ? (
             <div className="py-8 text-center text-sm text-text-muted">
               {t("connections.filterNoMatch")}
             </div>

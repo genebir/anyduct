@@ -338,7 +338,15 @@ export default function WorkspaceHomePage() {
             label={t("nav.connections")}
             value={connections?.length}
             icon={<CableIcon size={18} />}
-            href={ws ? `/w/${ws.slug}/connections` : "#"}
+            // Phase ADI (2026-06-04) — deep-link to the unused subset
+            // when that's the surfaced signal, mirroring ADH.
+            href={
+              ws
+                ? unusedConnections && unusedConnections > 0
+                  ? `/w/${ws.slug}/connections?usage=unused`
+                  : `/w/${ws.slug}/connections`
+                : "#"
+            }
             sub={
               unusedConnections && unusedConnections > 0
                 ? t("overview.connectionsUnused", { n: unusedConnections })

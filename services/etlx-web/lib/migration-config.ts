@@ -269,6 +269,42 @@ export function parseMigrationConfig(
   };
 }
 
+// ---------- Phase ACJ (2026-06-04) smart-default column guesses -----------
+
+export interface SourceColumn {
+  name: string;
+  type: string;
+}
+
+/** Mirror's PRIMARY KEY guess — the conventional ``id`` column,
+ *  preferring an exact ``id`` then any case-insensitive match.
+ *  Returns ``null`` when there's no obvious key. Pure + exported so
+ *  the form can apply it both when columns first load *and* when the
+ *  strategy changes after the columns are already in hand (ACG only
+ *  fired in the columns-load effect, which missed the common
+ *  pick-table-then-choose-strategy ordering). */
+export function suggestKeyColumn(columns: SourceColumn[]): string | null {
+  const exact = columns.find((c) => c.name === "id");
+  if (exact) return exact.name;
+  const ci = columns.find((c) => c.name.toLowerCase() === "id");
+  return ci ? ci.name : null;
+}
+
+/** Append's cursor column guess — prefer ``updated_at`` (most
+ *  accurate watermark), then ``created_at`` (fine for insert-only
+ *  tables), then any ``*_at`` column. Case-insensitive. Counterpart
+ *  to {@link suggestKeyColumn}; see ACH for the original inline
+ *  version. */
+export function suggestCursorColumn(columns: SourceColumn[]): string | null {
+  const ci = (n: string) => (c: SourceColumn) => c.name.toLowerCase() === n;
+  const updated = columns.find(ci("updated_at"));
+  if (updated) return updated.name;
+  const created = columns.find(ci("created_at"));
+  if (created) return created.name;
+  const anyAt = columns.find((c) => c.name.toLowerCase().endsWith("_at"));
+  return anyAt ? anyAt.name : null;
+}
+
 /** Extract the table name from a strict ``SELECT * FROM <name>``
  *  query. Returns null for anything richer. */
 export function parseSelectStarTable(query: string): string | null {

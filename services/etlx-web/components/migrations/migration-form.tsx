@@ -29,6 +29,8 @@ import {
   type MigrationMode,
   type MigrationStrategy,
   parseQualifiedTable,
+  suggestCursorColumn,
+  suggestKeyColumn,
   validateMigrationForm,
 } from "@/lib/migration-config";
 import { translateType } from "@/lib/cross-db-type-mapping";
@@ -166,46 +168,9 @@ export function MigrationForm({
         if (cancelled) return;
         setSourceColumns(resp.columns);
         setColumnsState("ok");
-        // Phase ACG (2026-06-01) — smart default for mirror's PK
-        // input. Most real schemas have an ``id`` (or ``ID`` / ``Id``)
-        // column. When the user picks mirror and leaves keyColumns
-        // empty, fill in the obvious primary key so they don't have
-        // to type it. Non-destructive: only fills when empty + only
-        // when mirror is selected. Free-text keyColumns input
-        // remains, so the user can edit or clear it.
-        if (
-          form.strategy === "mirror" &&
-          !form.keyColumns.trim() &&
-          resp.columns.length > 0
-        ) {
-          const id =
-            resp.columns.find((c) => c.name === "id") ??
-            resp.columns.find((c) => c.name.toLowerCase() === "id");
-          if (id) {
-            onChange({ ...form, keyColumns: id.name });
-          }
-        }
-        // Phase ACH (2026-06-01) — same idea for append's cursor
-        // column. Prefer ``updated_at`` (most accurate watermark),
-        // fall back to ``created_at`` (acceptable for insert-only
-        // tables), then any column whose name ends in ``_at``.
-        if (
-          form.strategy === "append" &&
-          !form.cursorColumn.trim() &&
-          resp.columns.length > 0
-        ) {
-          const ci = (n: string) => (c: { name: string }) =>
-            c.name.toLowerCase() === n;
-          const updated = resp.columns.find(ci("updated_at"));
-          const created = resp.columns.find(ci("created_at"));
-          const anyAt = resp.columns.find((c) =>
-            c.name.toLowerCase().endsWith("_at"),
-          );
-          const pick = updated ?? created ?? anyAt;
-          if (pick) {
-            onChange({ ...form, cursorColumn: pick.name });
-          }
-        }
+        // ACG/ACH smart defaults now live in the strategy-aware
+        // effect below (Phase ACJ) so they fire on either ordering —
+        // columns-then-strategy *or* strategy-then-columns.
       } catch (err) {
         if (cancelled) return;
         setSourceColumns([]);
@@ -216,6 +181,32 @@ export function MigrationForm({
       cancelled = true;
     };
   }, [sourceConnRow, form?.sourceTable, workspaceId]);
+
+  // Phase ACJ (2026-06-04) — apply the mirror keyColumns (ACG) and
+  // append cursorColumn (ACH) smart defaults whenever EITHER the
+  // source columns load OR the strategy changes afterward. The
+  // original ACG/ACH lived inside the columns-load effect, so they
+  // only fired if the strategy was already mirror/append at pick
+  // time. The common flow is the opposite — pick the table (strategy
+  // still the default ``snapshot``, so nothing fired) then choose
+  // mirror/append — which left the smart defaults silent. Keying on
+  // ``strategy`` + loaded columns covers both orderings.
+  //
+  // Non-destructive: only fills when the target field is empty. After
+  // a fill, ``form`` changes but neither ``strategy`` nor
+  // ``sourceColumns`` does, so the effect doesn't re-run — and a
+  // manual clear sticks because clearing changes neither dep either.
+  useEffect(() => {
+    if (!form || sourceColumns.length === 0) return;
+    if (form.strategy === "mirror" && !form.keyColumns.trim()) {
+      const id = suggestKeyColumn(sourceColumns);
+      if (id) onChange({ ...form, keyColumns: id });
+    } else if (form.strategy === "append" && !form.cursorColumn.trim()) {
+      const cur = suggestCursorColumn(sourceColumns);
+      if (cur) onChange({ ...form, cursorColumn: cur });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form?.strategy, sourceColumns]);
 
   const errors = form ? validateMigrationForm(form) : {};
 

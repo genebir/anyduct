@@ -570,6 +570,26 @@ class DryRunResponse(BaseModel):
     warnings: list[DryRunLintWarning] = Field(default_factory=list)
 
 
+class DlqPreviewResponse(BaseModel):
+    """Response of ``GET /workspaces/{ws}/pipelines/{pid}/dlq/records``.
+
+    A bounded sample of the records the pipeline routed to its dead-letter
+    queue (Phase DLQ-1, ADR-0075). ``available`` is true only when records
+    were read; otherwise ``reason`` is a stable code the UI maps to a
+    message (e.g. ``no_dlq``, ``sink_not_readable``, ``read_failed``).
+    ``records`` is a list of raw row objects (the failed records as
+    written to the DLQ sink).
+    """
+
+    available: bool
+    reason: str | None = None
+    connection: str | None = None
+    table: str | None = None
+    connector_type: str | None = None
+    records: list[dict[str, Any]] = Field(default_factory=list)
+    error: str | None = None
+
+
 class RunTriggerRequest(BaseModel):
     """Body of ``POST /workspaces/{ws}/pipelines/{pid}/trigger``.
 
@@ -619,6 +639,7 @@ __all__ = [
     "ConnectionTestResult",
     "ConnectionUpdateRequest",
     "CurrentUser",
+    "DlqPreviewResponse",
     "DryRunConnectorCheck",
     "DryRunResponse",
     "LoginRequest",

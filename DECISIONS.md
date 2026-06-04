@@ -2373,4 +2373,27 @@ L1 출시 직후 사용자가 5개 회신:
 
 ---
 
+## ADR-0075: DLQ record preview — 동기 bounded 읽기 엔드포인트
+
+**Date**: 2026-06-04
+**Status**: Accepted
+**Context**: 운영자 요청 *"DLQ UI — 실패 record를 실제로 본다"*. 기존엔 (a) 빌더에서 DLQ를 *설정*하고, (b) run 상세에서 DLQ로 라우팅된 *수*만(Phase AFB, metrics `etl_plugins.errors` `routed=dlq`) 봤다. 실패 record의 **내용**은 못 봤다. DLQ는 사용자가 지정한 sink(connection+table)일 뿐이라 그 안의 record를 보려면 그 테이블을 읽어야 한다. 서버엔 임의 sink/table을 읽는 엔드포인트가 없었다. `dry_run.py`는 "record sampling은 worker-side `run_pipeline_yaml(stop_after_records=N)` 경로로, 여기 재구현 금지"라고 명시적으로 scope-out 해뒀다 — 단, 그건 source 샘플링(transaction/stream/back-pressure)에 대한 주의였다.
+
+**Decision**:
+1. **`GET /workspaces/{ws}/pipelines/{pid}/dlq/records?limit=N`** (Viewer+, read-only, audit 없음). `limit`은 서버에서 `[1, 200]`로 클램프(기본 50).
+2. **`etlx_server/pipelines/dlq_preview.py` `DlqPreviewService`** — dry-run의 connection 해석 헬퍼(`load_connections_by_name` / `resolve_placeholders` / `build_connector` + `WorkspaceVariableRepository.as_dict`)를 재사용해 현재 버전의 `dlq` config를 해석한다. DLQ sink가 `BatchSource`이면(모든 RDBMS 커넥터) 최대 N행을 읽어 raw record 리스트를 반환.
+3. **동기 bounded 읽기**: `connect()` → `read(query=…, chunk_size=limit)`를 `asyncio.to_thread`에서 열고/닫는다. `dry_run.py`의 worker-path 주의는 **source 샘플링**(긴 트랜잭션/스트림)에 대한 것 — DLQ는 작은 단방향 테이블이고 `LIMIT`으로 bounded이므로 동기 읽기가 적절. 스트림/트랜잭션-heavy 경로가 **아니다**.
+4. **dialect-aware preview query**: MSSQL은 `SELECT TOP n *`, 나머지(sqlite/postgres/mysql/vertica)는 `SELECT * … LIMIT n`. 이 dialect 지식은 **서버에 둔다**(코어를 서비스 편의로 바꾸지 않는다 — 코어 격리 규칙).
+5. **방어**: 테이블명을 `^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$`로 제한(`unsafe_table` 거부). 값은 워크스페이스 자체 config에서 오지만 SELECT에 splice하므로 defense-in-depth.
+6. **읽을 수 없는 경우 graceful**: `available=False` + 안정적 머신 `reason`(`no_dlq` / `stream_dlq`(topic) / `connection_missing` / `connection_build_failed` / `sink_not_readable`(Kafka/HTTP/write-only) / `unsafe_table` / `invalid_config` / `read_failed`)으로 UI가 안내 문구로 매핑.
+
+**Consequences**:
+- ✅ DLQ record 내용을 처음으로 조회 가능 — AFB(수) 다음 자연 단계. 서버 단독으로 동작, web은 후속 슬라이스(DLQ-2).
+- ✅ **코어 변화 0** — 기존 `BatchSource.read()` 사용. 서버 신규 모듈 1 + 엔드포인트 1 + 스키마 1.
+- ✅ 신규 서버 시나리오 4 it green(testcontainers): 실제 DLQ 라우팅 run(Phase II) 위에 preview를 얹어 라운드트립 검증(happy/limit/no_dlq/connection_missing). mypy + ruff clean.
+- ⚠️ **RDBMS sink만 읽힘** — Kafka/HTTP/S3 DLQ는 `sink_not_readable`. 그 경우 UI는 "이 sink 유형은 미리보기 불가" 안내(사용자가 직접 조회). S3/object-storage 읽기는 후속 슬라이스 후보.
+- ⚠️ **`SELECT *` 순서 비결정** — 어떤 N행인지는 connector/DB 순서에 의존. 미리보기 용도라 허용; 정렬/페이지네이션은 후속.
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

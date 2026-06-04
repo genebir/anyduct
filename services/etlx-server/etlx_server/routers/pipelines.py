@@ -36,6 +36,7 @@ from etl_plugins.config.secrets import SecretBackend
 from etlx_server.audit.dependencies import get_audit_service
 from etlx_server.audit.service import AuditService
 from etlx_server.auth.schemas import (
+    DlqPreviewResponse,
     DryRunConnectorCheck,
     DryRunLintWarning,
     DryRunResponse,
@@ -55,6 +56,7 @@ from etlx_server.auth.workspace_context import (
 from etlx_server.db.enums import WorkspaceRole
 from etlx_server.db.models import Pipeline, PipelineVersion
 from etlx_server.dependencies import get_secret_backend_dep, get_session
+from etlx_server.pipelines.dlq_preview import DlqPreviewService
 from etlx_server.pipelines.dry_run import DryRunService
 from etlx_server.pipelines.repository import (
     PipelineNameTakenError,
@@ -378,6 +380,38 @@ async def dry_run_pipeline(
             DryRunLintWarning(code=w.code, message=w.message, location=w.location)
             for w in outcome.warnings
         ],
+    )
+
+
+@router.get("/{pipeline_id}/dlq/records", response_model=DlqPreviewResponse)
+async def preview_dlq_records(
+    pipeline_id: UUID,
+    limit: int = 50,
+    ctx: WorkspaceContext = _require_viewer,
+    session: AsyncSession = Depends(get_session),  # noqa: B008
+    backend: SecretBackend = Depends(get_secret_backend_dep),  # noqa: B008
+) -> DlqPreviewResponse:
+    """Read a bounded sample of the pipeline's dead-letter-queue records.
+
+    Read-only (no audit). Resolves the current version's ``dlq`` config,
+    and — when the DLQ sink is readable (an RDBMS table) — returns up to
+    ``limit`` rows. When it isn't (no DLQ, a Kafka topic, a write-only
+    sink) the response carries ``available=False`` + a ``reason`` the UI
+    turns into guidance. See ADR-0075 / Phase DLQ-1.
+    """
+    limit = max(1, min(limit, 200))
+    pipeline, current = await _load_pipeline_and_current(
+        session, workspace_id=ctx.workspace.id, pipeline_id=pipeline_id
+    )
+    p = await DlqPreviewService(session, backend).preview(pipeline, current, limit=limit)
+    return DlqPreviewResponse(
+        available=p.available,
+        reason=p.reason,
+        connection=p.connection,
+        table=p.table,
+        connector_type=p.connector_type,
+        records=p.records,
+        error=p.error,
     )
 
 

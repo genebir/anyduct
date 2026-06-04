@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
   ActivityIcon,
   AlertTriangleIcon,
@@ -217,6 +217,13 @@ export default function PipelinesPage() {
   const [lastRunFilter, setLastRunFilter] = useState<
     "" | "never" | "failed" | "ok"
   >("");
+  /** Phase ADT (2026-06-04) — "broken" filter (references a missing
+   *  connection), URL-presettable via ``?broken=1`` for the dashboard
+   *  ADS deep-link. */
+  const searchParams = useSearchParams();
+  const [brokenFilter, setBrokenFilter] = useState(
+    searchParams.get("broken") === "1",
+  );
   const filteredRows = useMemo(() => {
     if (visibleRows === null) return null;
     const term = search.trim().toLowerCase();
@@ -233,9 +240,22 @@ export default function PipelinesPage() {
         if (lastRunFilter === "failed" && run?.status !== "failed") return false;
         if (lastRunFilter === "ok" && run?.status !== "succeeded") return false;
       }
+      if (brokenFilter) {
+        // connNames null = not loaded → don't hide anything yet.
+        if (connNames === null) return false;
+        const refs = extractConnectionNames(p.current_config_json);
+        if (![...refs].some((r) => !connNames.has(r))) return false;
+      }
       return true;
     });
-  }, [visibleRows, search, lastRunFilter, lastRunByPipeline]);
+  }, [
+    visibleRows,
+    search,
+    lastRunFilter,
+    lastRunByPipeline,
+    brokenFilter,
+    connNames,
+  ]);
   const [triggering, setTriggering] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
@@ -470,8 +490,10 @@ export default function PipelinesPage() {
         ) : null}
         {/* Phase ABD (2026-06-01) — search box. Hidden below 5 rows
             so a fresh workspace stays uncluttered. */}
-        {visibleRows !== null && visibleRows.length > 5 ? (
-          <div className="grid items-end gap-2 sm:grid-cols-[1fr_auto_auto]">
+        {/* Phase ADT — also render when the broken filter is active
+            (dashboard deep-link) so it's clearable with a short list. */}
+        {visibleRows !== null && (visibleRows.length > 5 || brokenFilter) ? (
+          <div className="grid items-end gap-2 sm:grid-cols-[1fr_auto_auto_auto]">
             <Input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -493,13 +515,22 @@ export default function PipelinesPage() {
               <option value="failed">{t("migrations.filterLastRunFailed")}</option>
               <option value="ok">{t("migrations.filterLastRunOk")}</option>
             </select>
-            {search || lastRunFilter ? (
+            <select
+              value={brokenFilter ? "broken" : ""}
+              onChange={(e) => setBrokenFilter(e.target.value === "broken")}
+              className="h-10 rounded-md border border-border-subtle bg-elevated px-2 text-sm text-text focus-visible:border-accent focus-visible:outline-none"
+            >
+              <option value="">{t("pipelines.filterHealthAll")}</option>
+              <option value="broken">{t("pipelines.filterHealthBroken")}</option>
+            </select>
+            {search || lastRunFilter || brokenFilter ? (
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => {
                   setSearch("");
                   setLastRunFilter("");
+                  setBrokenFilter(false);
                 }}
               >
                 {t("common.clear")}
@@ -514,7 +545,7 @@ export default function PipelinesPage() {
             </div>
           ) : filteredRows !== null &&
             filteredRows.length === 0 &&
-            (search || lastRunFilter) ? (
+            (search || lastRunFilter || brokenFilter) ? (
             <div className="py-8 text-center text-sm text-text-muted">
               {t("pipelines.searchNoMatch")}
             </div>

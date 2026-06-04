@@ -294,7 +294,15 @@ export default function WorkspaceHomePage() {
                 : undefined
             }
             icon={<WorkflowIcon size={18} />}
-            href={ws ? `/w/${ws.slug}/pipelines` : "#"}
+            // Phase ADT (2026-06-04) — deep-link to the broken subset
+            // when that's the signal (ADH/ADI/ADK pattern).
+            href={
+              ws
+                ? brokenPipelines > 0
+                  ? `/w/${ws.slug}/pipelines?broken=1`
+                  : `/w/${ws.slug}/pipelines`
+                : "#"
+            }
             // Phase ADS (2026-06-04) — flag pipelines that reference a
             // missing connection (ADC) as a top-level health signal.
             sub={

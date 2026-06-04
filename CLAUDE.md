@@ -117,7 +117,14 @@ uv run mypy etl_plugins
 
 ## 5. 현재 단계
 
-> **최신 마일스톤 (2026-06-04): Persona dogfood UX 폴리시 5th wave (Phase ACJ → ACS).** 4th wave 후 추가 10 슬라이스(+follow-up) — 분석가/데이터 엔지니어 양 페르소나 관점으로 매 슬라이스 검증·dogfooding. 핵심 축: trigger-source 가시화 확장 / connection·variable usage 인덱스(삭제 안전) / relative-time 지역화 통일 / 빈 목록 버그 / pipelines health 컬럼.
+> **최신 마일스톤 (2026-06-04): DLQ record 뷰어 — 실패 record 내용 조회 (Phase DLQ-1/DLQ-2, ADR-0075).** 운영-가시성 23슬라이스(AET→AFP) 포화 후 더 큰 축으로 전환. 그동안 DLQ는 빌더에서 *설정*하고 run 상세에서 라우팅 *수*(AFB)만 봤지 실패 record의 **내용**은 못 봤다.
+> - **DLQ-1 (서버, ADR-0075)**: `GET /workspaces/{ws}/pipelines/{pid}/dlq/records?limit=N`(Viewer+, read-only, limit [1,200]). `DlqPreviewService`가 dry-run의 connection 해석을 재사용해 현재 버전 dlq config를 풀고, DLQ sink가 `BatchSource`면(모든 RDBMS) `asyncio.to_thread`에서 connect→read(dialect-aware `LIMIT`/mssql `TOP`)→close로 최대 N행 반환. 테이블명 화이트리스트 정규식(SQL splice 방어). 읽기 불가 시 `available=False`+안정적 reason(no_dlq/stream_dlq/connection_missing/sink_not_readable/read_failed 등). **코어 변화 0**(기존 `BatchSource.read`). 신규 서버 it 4(testcontainers — 실제 DLQ 라우팅 run 위 round-trip).
+> - **DLQ-2 (web)**: run 상세 우측에 collapsible `DlqRecordsCard`(dlqRouted>0일 때, lazy fetch). available이면 컬럼 union 테이블, 아니면 reason별 안내(Kafka/HTTP는 미리보기 불가 등). `pipelinesApi.dlqRecords` + `DlqPreviewResponse`. i18n en/ko 각 11.
+> - **남은 후속(후보)**: per-run 필터(현재는 DLQ 테이블 전체 최신 N) / S3·object-storage DLQ 읽기 / 정렬·페이지네이션 / 빌더·마이그레이션 detail에서도 뷰어 노출.
+>
+> **이전 마일스톤 (2026-06-04): 운영-가시성 23슬라이스 (Phase AET → AFP).** 단일 슬라이스-단위 세션(web 전용, 코어/서버 변화 0, 매 슬라이스 tsc clean + dev 200). run 디버그(로그/오류 copy·카운트·records delta·DLQ count·heartbeat liveness·running 경과 3 surface) · 실패 triage error_class 5 surface · Last run 컬럼 5 surface · 헬스 signal→action 양축(schedules/sensors: 컬럼→대시보드 신호→필터+deeplink) · 분석가 asset 행수 delta · audit my-actions · builder dry-run 경고 수.
+>
+> **이전 마일스톤 (2026-06-04): Persona dogfood UX 폴리시 5th wave (Phase ACJ → ACS).** 4th wave 후 추가 10 슬라이스(+follow-up) — 분석가/데이터 엔지니어 양 페르소나 관점으로 매 슬라이스 검증·dogfooding. 핵심 축: trigger-source 가시화 확장 / connection·variable usage 인덱스(삭제 안전) / relative-time 지역화 통일 / 빈 목록 버그 / pipelines health 컬럼.
 > - **ACJ**: 마이그레이션 폼 ACG/ACH 스마트 디폴트가 컬럼 로드 effect 안에서만 동작 → strategy 기본값 snapshot이라 "테이블 선택 후 mirror/append 선택" 흐름에서 침묵하던 버그 수정. `suggestKeyColumn`/`suggestCursorColumn` 추출 + strategy-aware effect로 양 순서 커버.
 > - **ACK**: 마이그레이션 list Last run 컬럼에 trigger source 아이콘(ABG/ABW/ABY 패턴 확장 — 4 surface 정합).
 > - **ACL**: Connections list "Used by" 컬럼 — `lib/connection-usage.ts`(linear/fan-out/graph walk) 참조 파이프라인 수. usage=null은 중립 "—"(false "unused" 방지).

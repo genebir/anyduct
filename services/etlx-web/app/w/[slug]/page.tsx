@@ -481,7 +481,15 @@ export default function WorkspaceHomePage() {
             label={t("nav.assets")}
             value={assets?.length}
             icon={<DatabaseIcon size={18} />}
-            href={ws ? `/w/${ws.slug}/assets` : "#"}
+            // Phase AFT (2026-06-04) — deep-link to the opaque subset when
+            // that's the surfaced signal (ADI/ADK pattern).
+            href={
+              ws
+                ? assets && assets.some((a) => a.column_lineage_opaque)
+                  ? `/w/${ws.slug}/assets?lineage=opaque`
+                  : `/w/${ws.slug}/assets`
+                : "#"
+            }
             sub={
               assets && assets.filter((a) => a.column_lineage_opaque).length > 0
                 ? t("overview.assetsOpaque", {

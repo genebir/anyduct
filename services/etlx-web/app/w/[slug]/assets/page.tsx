@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { LayersIcon, RefreshCwIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Header } from "@/components/shell/header";
@@ -88,6 +88,13 @@ export default function AssetsPage() {
    *  to scan dozens within seconds. */
   const [search, setSearch] = useState("");
   const [kindFilter, setKindFilter] = useState("");
+  /** Phase AFT (2026-06-04) — "opaque only" filter (no column lineage),
+   *  URL-presettable via ``?lineage=opaque`` for the dashboard AFS card
+   *  deep-link (mirrors connections ADI / sensors ADK). */
+  const searchParams = useSearchParams();
+  const [opaqueOnly, setOpaqueOnly] = useState(
+    searchParams.get("lineage") === "opaque",
+  );
 
   const availableKinds = useMemo(() => {
     if (!rows) return [] as string[];
@@ -104,9 +111,10 @@ export default function AssetsPage() {
     return rows.filter((r) => {
       if (term && !r.asset_key.toLowerCase().includes(term)) return false;
       if (kindFilter && r.kind !== kindFilter) return false;
+      if (opaqueOnly && !r.column_lineage_opaque) return false;
       return true;
     });
-  }, [rows, search, kindFilter]);
+  }, [rows, search, kindFilter, opaqueOnly]);
 
   useEffect(() => {
     if (!ws) return;
@@ -167,8 +175,8 @@ export default function AssetsPage() {
       <main className="mx-auto w-full max-w-6xl flex-1 space-y-6 overflow-y-auto px-6 py-8">
         {/* Phase ABH (2026-06-01) — search + kind filter. Hidden
             below 5 rows so a fresh workspace stays uncluttered. */}
-        {rows !== null && rows.length > 5 ? (
-          <div className="grid items-end gap-2 sm:grid-cols-[1fr_auto_auto]">
+        {rows !== null && (rows.length > 5 || opaqueOnly) ? (
+          <div className="grid items-end gap-2 sm:grid-cols-[1fr_auto_auto_auto]">
             <Input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -186,13 +194,24 @@ export default function AssetsPage() {
                 </option>
               ))}
             </select>
-            {search || kindFilter ? (
+            {/* Phase AFT — opaque-only toggle (no column lineage). */}
+            <label className="flex items-center gap-2 pb-2 text-sm text-text-secondary">
+              <input
+                type="checkbox"
+                checked={opaqueOnly}
+                onChange={(e) => setOpaqueOnly(e.target.checked)}
+                className="h-4 w-4 rounded border-border-subtle"
+              />
+              {t("assets.filterOpaqueOnly")}
+            </label>
+            {search || kindFilter || opaqueOnly ? (
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => {
                   setSearch("");
                   setKindFilter("");
+                  setOpaqueOnly(false);
                 }}
               >
                 {t("common.clear")}
@@ -203,7 +222,9 @@ export default function AssetsPage() {
         <Card>
           {rows === null ? (
             <div className="py-12 text-center text-sm text-text-muted">{t("common.loading")}</div>
-          ) : filteredRows !== null && filteredRows.length === 0 && (search || kindFilter) ? (
+          ) : filteredRows !== null &&
+            filteredRows.length === 0 &&
+            (search || kindFilter || opaqueOnly) ? (
             <div className="py-8 text-center text-sm text-text-muted">
               {t("assets.searchNoMatch")}
             </div>

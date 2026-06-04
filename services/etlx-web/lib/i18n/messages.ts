@@ -1093,6 +1093,8 @@ export const en = {
   // Phase ABH (2026-06-01) — list search/filter
   "assets.searchPlaceholder": "Search by asset key…",
   "assets.filterKindAll": "All kinds",
+  // Phase AFT (2026-06-04) — show only opaque (no column lineage) assets.
+  "assets.filterOpaqueOnly": "Opaque only",
   "assets.searchNoMatch": "No assets match this filter.",
   "assets.backAria": "Back to catalog",
   "assets.lineage": "Lineage",
@@ -2305,6 +2307,8 @@ export const ko: Messages = {
   // Phase ABH (2026-06-01) — 리스트 검색/필터
   "assets.searchPlaceholder": "asset key로 검색…",
   "assets.filterKindAll": "모든 종류",
+  // Phase AFT (2026-06-04) — 불투명(컬럼 리니지 없음) 자산만 표시.
+  "assets.filterOpaqueOnly": "불투명만",
   "assets.searchNoMatch": "조건과 일치하는 자산이 없습니다.",
   "assets.backAria": "카탈로그로",
   "assets.lineage": "리니지",

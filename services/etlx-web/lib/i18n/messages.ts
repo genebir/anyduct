@@ -1141,6 +1141,10 @@ export const en = {
   "schedules.loadFailed": "Couldn't load schedules.",
   "schedules.toggled": "{name}: {state}",
   "schedules.toggleFailed": "Toggle failed.",
+  // Phase AFR (2026-06-04) — Run now (trigger the scheduled pipeline).
+  "schedules.runNow": "Run now",
+  "schedules.runQueued": "Queued a run for {name}",
+  "schedules.runFailed": "Couldn't start the run.",
   "schedules.deleted": "Deleted {name}",
   "schedules.deleteFailed": "Couldn't delete schedule.",
   // Phase ABE (2026-06-01) — list search + status filter
@@ -2346,6 +2350,10 @@ export const ko: Messages = {
   "schedules.loadFailed": "스케줄을 불러올 수 없습니다.",
   "schedules.toggled": "{name}: {state}",
   "schedules.toggleFailed": "전환에 실패했습니다.",
+  // Phase AFR (2026-06-04) — 지금 실행(스케줄 파이프라인 즉시 트리거).
+  "schedules.runNow": "지금 실행",
+  "schedules.runQueued": "{name} 실행을 큐에 넣었습니다",
+  "schedules.runFailed": "실행을 시작하지 못했습니다.",
   "schedules.deleted": "{name} 삭제됨",
   "schedules.deleteFailed": "스케줄을 삭제할 수 없습니다.",
   // Phase ABE (2026-06-01) — 리스트 검색 + 상태 필터

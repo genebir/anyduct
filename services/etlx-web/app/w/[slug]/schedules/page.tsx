@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useParams, useSearchParams } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { CronExpressionParser } from "cron-parser";
 import { cronHuman } from "@/lib/cron";
 import {
@@ -11,6 +11,7 @@ import {
   PlayIcon,
   PlusIcon,
   Trash2Icon,
+  ZapIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Header } from "@/components/shell/header";
@@ -200,6 +201,9 @@ export default function SchedulesPage() {
   const [pendingDelete, setPendingDelete] = useState<ScheduleRow | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [toggling, setToggling] = useState<string | null>(null);
+  // Phase AFR (2026-06-04) — per-row "Run now" in flight.
+  const [running, setRunning] = useState<string | null>(null);
+  const router = useRouter();
   /** Phase ABE (2026-06-01) — list-level search + active filter. */
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"" | "active" | "paused">(
@@ -308,6 +312,23 @@ export default function SchedulesPage() {
       );
     } finally {
       setToggling(null);
+    }
+  }
+
+  // Phase AFR (2026-06-04) — fire the scheduled pipeline immediately
+  // instead of waiting for the next cron tick, then jump to the new run
+  // to monitor it (mirrors migrations Run now / retry navigation ABK).
+  async function onRunNow(row: ScheduleRow) {
+    if (!ws) return;
+    setRunning(row.id);
+    try {
+      const run = await pipelinesApi.trigger(ws.id, row.pipeline_id);
+      toast.success(t("schedules.runQueued", { name: row.name }));
+      router.push(`/w/${ws.slug}/runs/${run.id}`);
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : t("schedules.runFailed"));
+    } finally {
+      setRunning(null);
     }
   }
 
@@ -486,6 +507,20 @@ export default function SchedulesPage() {
                   className: "w-64 text-right",
                   cell: (row) => (
                     <div className="flex justify-end gap-1">
+                      {/* Phase AFR — Run now (trigger immediately). */}
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        loading={running === row.id}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void onRunNow(row);
+                        }}
+                        aria-label={t("schedules.runNow")}
+                        title={t("schedules.runNow")}
+                      >
+                        <ZapIcon size={14} />
+                      </Button>
                       <Button
                         size="sm"
                         variant="ghost"

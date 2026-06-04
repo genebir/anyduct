@@ -43,13 +43,23 @@ export function extractConnectionNames(
   // Fan-in / fan-out arrays.
   if (Array.isArray(config.sources)) config.sources.forEach(add);
   if (Array.isArray(config.sinks)) config.sinks.forEach(add);
-  // Graph mode — source/sink nodes carry a ``connection``.
+  // DLQ target (both linear and graph) — a dead-letter sink is a real
+  // connection reference; a connection used *only* as a DLQ target
+  // would otherwise read as "unused" and be deleted out from under a
+  // pipeline. ``serializeGraph`` emits ``config.dlq = { connection }``.
+  add(config.dlq);
+  // Graph mode — source / sink nodes carry a flat ``connection`` (the
+  // builder spreads ``node.data`` onto the wire node). ``sql_exec`` is
+  // a source-kind "Run SQL" node emitted with ``type: "sql_exec"``
+  // (not "source"), so include it or its connection goes uncounted.
   const graph = config.graph as { nodes?: unknown[] } | undefined;
   if (graph && Array.isArray(graph.nodes)) {
     for (const node of graph.nodes) {
       if (!node || typeof node !== "object") continue;
       const type = (node as Record<string, unknown>).type;
-      if (type === "source" || type === "sink") add(node);
+      if (type === "source" || type === "sink" || type === "sql_exec") {
+        add(node);
+      }
     }
   }
   return names;

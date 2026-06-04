@@ -40,6 +40,7 @@ import { CronInput } from "@/components/schedules/cron-input";
 import { StatusBadge } from "@/components/ui/status-badge";
 import {
   ApiError,
+  connectionsApi,
   pipelinesApi,
   runsApi,
   schedulesApi,
@@ -105,7 +106,16 @@ function strategyChip(
   };
 }
 
-function buildColumns(t: Translate): Column<Row>[] {
+function buildColumns(
+  t: Translate,
+  connNames: Set<string> | null,
+): Column<Row>[] {
+  // Phase ADD (2026-06-04) — a connection name that no longer exists in
+  // the workspace (deleted/renamed) means this migration's next run
+  // fails to build. Red-flag it like the pipelines list (ADC).
+  // connNames null = not loaded → treat everything as present.
+  const isMissing = (name: string | null): boolean =>
+    !!name && connNames !== null && !connNames.has(name);
   return [
     {
       key: "name",
@@ -124,18 +134,34 @@ function buildColumns(t: Translate): Column<Row>[] {
       // migration intent is the first thing the operator sees.
       key: "direction",
       header: `${t("migrations.from")} → ${t("migrations.to")}`,
-      cell: (r) => (
-        <div className="flex items-center gap-1.5 text-xs">
-          <span className="font-mono text-text-secondary">
-            {r.migration.sourceConnection ?? "—"}
-          </span>
-          <span className="text-accent">→</span>
-          <span className="font-mono text-text-secondary">
-            {r.migration.sinkConnection ?? "—"}
-            {r.migration.sinkTable ? ` / ${r.migration.sinkTable}` : ""}
-          </span>
-        </div>
-      ),
+      cell: (r) => {
+        const srcMissing = isMissing(r.migration.sourceConnection);
+        const dstMissing = isMissing(r.migration.sinkConnection);
+        return (
+          <div className="flex items-center gap-1.5 text-xs">
+            <span
+              className={`font-mono ${srcMissing ? "text-error" : "text-text-secondary"}`}
+              title={srcMissing ? t("pipelines.missingConnection", {
+                names: r.migration.sourceConnection ?? "",
+              }) : undefined}
+            >
+              {r.migration.sourceConnection ?? "—"}
+              {srcMissing ? " ⚠" : ""}
+            </span>
+            <span className="text-accent">→</span>
+            <span
+              className={`font-mono ${dstMissing ? "text-error" : "text-text-secondary"}`}
+              title={dstMissing ? t("pipelines.missingConnection", {
+                names: r.migration.sinkConnection ?? "",
+              }) : undefined}
+            >
+              {r.migration.sinkConnection ?? "—"}
+              {dstMissing ? " ⚠" : ""}
+              {r.migration.sinkTable ? ` / ${r.migration.sinkTable}` : ""}
+            </span>
+          </div>
+        );
+      },
     },
     {
       key: "strategy",
@@ -258,6 +284,9 @@ export default function MigrationsPage() {
   const [lastRunByPipeline, setLastRunByPipeline] = useState<
     Map<string, RunSummary>
   >(new Map());
+  /** Phase ADD (2026-06-04) — existing connection names, to red-flag
+   *  migrations referencing a deleted/renamed one. null until loaded. */
+  const [connNames, setConnNames] = useState<Set<string> | null>(null);
   /** Phase AAZ (2026-06-01) — schedule status per pipeline. We
    *  fetch schedules per migration in parallel (N+1 over the list,
    *  acceptable for the typical <100 migrations workspace) so the
@@ -551,6 +580,24 @@ export default function MigrationsPage() {
     };
   }, [ws, t]);
 
+  // Phase ADD (2026-06-04) — connection names to red-flag migrations
+  // that reference a missing connection. Soft-fail → null.
+  useEffect(() => {
+    if (!ws) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const list = await connectionsApi.list(ws.id);
+        if (!cancelled) setConnNames(new Set(list.map((c) => c.name)));
+      } catch {
+        if (!cancelled) setConnNames(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [ws]);
+
   // Recent runs across the whole workspace, indexed by pipeline_id.
   // Phase AAP: gives every migration row a "last status + when" chip
   // so the operator sees health at a glance without clicking in. We
@@ -695,7 +742,7 @@ export default function MigrationsPage() {
     filterLastRun,
   ]);
 
-  const columns = buildColumns(t);
+  const columns = buildColumns(t, connNames);
   // Phase AAW (2026-06-01) — checkbox column injected as the first
   // column. Header has a tri-state "select all visible" toggle.
   const allVisibleSelected =

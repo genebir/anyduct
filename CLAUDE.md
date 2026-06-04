@@ -172,6 +172,11 @@ uv run mypy etl_plugins
 >
 > - **AEH/AEI/AEJ/AEN (서버 노출 ↔ web 미소비 갭 해소)**: dogfood sweep으로 서버가 반환하지만 web이 안 쓰던 필드 4건 발견·활용 — **AEH** 카탈로그 list `column_lineage_opaque`(UU 서버 추가분) → opaque 자산 칩(분석가 traceability 한눈에); **AEI** run 상세 `result_json`(retry_of/trigger_chain/backfill) → 리니지 필드(재시도 원본/자동트리거 출처/백필 범위 링크); **AEJ** audit 확장 행 `ip`/`user_agent` → provenance(포렌식); **AEN** dry-run `warnings`(DD column_mapping 권장/AAK auto_create 안내/FF typo) → 빌더 DryRunPanel + 마이그레이션 DryRunResultCard에 표시(DD가 "Builder UI 통합 별개 슬라이스"라 했으나 미구현이던 lint 권고 기능 전체).
 > - **AEK/AEL/AEM (자동 트리거 가시화)**: schedule/user 둘 다 null인 시스템 트리거 run(센서/asset auto-materialize)이 "—"(runs list)/"manual"(대시보드 오표시)였음 → "auto" 칩/라벨(AEK, 대시보드 버그 수정) + 전 trigger-icon surface 전파(AEL: migrations/pipelines list, migration detail) + runs Trigger 필터 "auto" 옵션(AEM).
+> - **AEO**: 빌더 dry-run warning(AEN) 클릭 시 해당 노드 포커스(location `graph.nodes.<id>` 파싱, ValidationBanner와 동일 UX) — 권고를 actionable하게.
+> - **AEP (서버 e2e)**: custom_python(column_mapping 없음) → dry-run REST가 warnings 반환 검증 → AEN/AEO 전체 데이터 흐름(서버 lint→REST→web) 입증. 신규 서버 시나리오 파일 누적 5 it(AEC1/AEC2/AEE/AEF/AEP).
+> - **AEQ**: connections name hover에 config 요약(비-secret만, `${SECRET}`→`***` 마스킹) — 같은 타입 connection 식별. 거의 미사용이던 config_json 안전 활용.
+>
+> **세션 green 확정(2026-06-04)**: 코어 단위 905 passed(코어 production 미변경, 회귀 0) · 신규 서버 시나리오 5 it green(testcontainers) · web tsc clean(매 슬라이스) · 실행 중 dev 서버 전 라우트 200 · production build 21 routes(반복). 검증 방법: dev 동시 실행으로 `next build` 금지(메모리), `tsc` + dev curl(런타임) + 서버 contract는 testcontainers e2e. ruff-format 커밋 중단은 `uv run ruff format` 사전 실행으로 회피.
 >
 > **SQL/code IDE 통일(ADX→AEB,AEG)**: Python/SQL/JSON 모든 코드·데이터 필드(빌더 + 센서 config)가 Monaco(하이라이팅·줄번호·테마 동기화·전체화면·예시 힌트). 라이브 dev 서버 curl로 런타임 검증(build 금지 — dev 동시 실행 중, 메모리 규칙). 서버 계약은 testcontainers e2e로 dogfood.
 >

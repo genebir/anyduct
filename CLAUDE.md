@@ -141,7 +141,8 @@ uv run mypy etl_plugins
 > - **AFZ (서버 e2e)**: 데이터플레인 audit REST — custom_python+sql_exec run 후 GET /audit?action=run.sql_read/python_executed/sql_executed 세 이벤트가 run_id로 조회+payload 정확. QQ(service-level)/onboarding(sql_read만 REST)의 컴플라이언스 REST 변형. 신규 서버 it 1.
 > - **AGA (서버 e2e)**: auto-materialize 체인 REST — A를 REST trigger→drain→B(auto_materialize) 자동 실행, runs A+B 각 1 succeeded, catalog raw→staging→mart, mart 데이터 정확. GG(service-level)의 REST 변형(asset-driven orchestration 비전). 신규 서버 it 1. 코어 단위 재확인 **911 passed**(905 base + DLQ-8 6).
 > - **AGB (서버 e2e)**: multi-workspace 격리 REST — 동일 connection명/테이블/asset_key 두 ws가 runs·catalog 격리(ws_a run 후 ws_b 비어있음, 동일 키가 ws별 다른 row id, 교차 자산 조회 404). HH(service-level)의 REST 변형.
-> - **AGC (서버 e2e)**: workspace-variable 해석 lineage REST — 변수 PUT 후 `${var.target_table}` sink 파이프라인 run → catalog key가 해석된 "dst/marts_prod"(literal `${var}` 누출 0). MM/ADR-0057의 REST 변형. **오늘 밤 서버 HTTP e2e 9건**(DLQ-7/9, AFW/AFX/AFY/AFZ/AGA/AGB/AGC); 신규 e2e 파일 green-check 18 passed.
+> - **AGC (서버 e2e)**: workspace-variable 해석 lineage REST — 변수 PUT 후 `${var.target_table}` sink 파이프라인 run → catalog key가 해석된 "dst/marts_prod"(literal `${var}` 누출 0). MM/ADR-0057의 REST 변형.
+> - **AGD (서버 e2e)**: pipeline-evolution 카탈로그 REST — PATCH로 sink v1→v2 변경 후에도 GET /assets에 v1·v2 자산 둘 다(append-only 이력), 버전 2개. PP(service-level)의 REST 변형. **오늘 밤 서버 HTTP e2e 10건**(DLQ-7/9, AFW/AFX/AFY/AFZ/AGA/AGB/AGC/AGD) — service-level 시나리오의 REST 변형 well 사실상 소진. 이후 lean(green-check 위주).
 >
 > **이전 마일스톤 (2026-06-04): 운영-가시성 23슬라이스 (Phase AET → AFP).** 단일 슬라이스-단위 세션(web 전용, 코어/서버 변화 0, 매 슬라이스 tsc clean + dev 200). run 디버그(로그/오류 copy·카운트·records delta·DLQ count·heartbeat liveness·running 경과 3 surface) · 실패 triage error_class 5 surface · Last run 컬럼 5 surface · 헬스 signal→action 양축(schedules/sensors: 컬럼→대시보드 신호→필터+deeplink) · 분석가 asset 행수 delta · audit my-actions · builder dry-run 경고 수.
 >

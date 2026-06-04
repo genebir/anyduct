@@ -451,6 +451,9 @@ export const en = {
     "{count} secret(s) will be removed from the backend. Pipelines that reference this connection by name will fail until you create a replacement.",
   "connections.deleteInUseWarn":
     "Still referenced by {count} pipeline(s) — their next run will fail:",
+  "connections.testAll": "Test all",
+  "connections.testAllOk": "All {count} connection(s) OK",
+  "connections.testAllSummary": "{ok} OK, {fail} failed",
   "connections.colConnector": "Connector",
   "connections.colSecrets": "Secrets", // pragma: allowlist secret
   "connections.refs": "{count} ref(s)",
@@ -1571,6 +1574,9 @@ export const ko: Messages = {
     "시크릿 {count}개가 백엔드에서 제거됩니다. 이 연결을 이름으로 참조하는 파이프라인은 대체 연결을 만들기 전까지 실패합니다.",
   "connections.deleteInUseWarn":
     "아직 파이프라인 {count}개가 참조 중 — 다음 실행이 실패합니다:",
+  "connections.testAll": "전체 테스트",
+  "connections.testAllOk": "{count}개 연결 모두 정상",
+  "connections.testAllSummary": "{ok}개 정상, {fail}개 실패",
   "connections.colConnector": "커넥터",
   // Phase ABB (2026-06-01) — 검색 + 필터
   "connections.searchPlaceholder": "이름이나 타입으로 검색…",

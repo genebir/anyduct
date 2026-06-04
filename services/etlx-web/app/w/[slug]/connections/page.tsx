@@ -2,7 +2,13 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
-import { CableIcon, PencilIcon, PlusIcon, Trash2Icon } from "lucide-react";
+import {
+  CableIcon,
+  PencilIcon,
+  PlusIcon,
+  ShieldCheckIcon,
+  Trash2Icon,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Header } from "@/components/shell/header";
 import { Card } from "@/components/ui/card";
@@ -137,6 +143,8 @@ export default function ConnectionsPage() {
     Map<string, { id: string; name: string }[]> | null
   >(null);
   const [testing, setTesting] = useState<string | null>(null);
+  /** Phase ACT (2026-06-04) — bulk "Test all" in progress. */
+  const [testingAll, setTestingAll] = useState(false);
   /** Phase ABS (2026-06-01) — session-scope per-row test outcomes.
    *  Toast is transient; this gives the table a glanceable indicator
    *  ("green" / "red") so the operator can scan the list afterwards
@@ -220,43 +228,72 @@ export default function ConnectionsPage() {
     };
   }, [ws]);
 
-  async function onTest(row: ConnectionSummary) {
-    if (!ws) return;
-    setTesting(row.id);
+  /** Run one connection test and record its outcome in the per-row
+   *  chip (ABS) — no toast, so the bulk path (ACT) doesn't spam. */
+  async function runTest(
+    workspaceId: string,
+    row: ConnectionSummary,
+  ): Promise<{ ok: boolean; error?: string }> {
     try {
-      const result = await connectionsApi.test(ws.id, row.id);
+      const result = await connectionsApi.test(workspaceId, row.id);
       if (result.ok) {
-        toast.success(t("connections.connected", { name: row.name }));
-        setTestResults((prev) => {
-          const next = new Map(prev);
-          next.set(row.id, { kind: "ok", at: Date.now() });
-          return next;
-        });
-      } else {
-        const errMsg = result.error ?? t("connections.unknownError");
-        toast.error(
-          t("connections.testErrorNamed", {
-            name: row.name,
-            error: errMsg,
-          }),
+        setTestResults((prev) =>
+          new Map(prev).set(row.id, { kind: "ok", at: Date.now() }),
         );
-        setTestResults((prev) => {
-          const next = new Map(prev);
-          next.set(row.id, { kind: "fail", at: Date.now(), error: errMsg });
-          return next;
-        });
+        return { ok: true };
       }
+      const errMsg = result.error ?? t("connections.unknownError");
+      setTestResults((prev) =>
+        new Map(prev).set(row.id, { kind: "fail", at: Date.now(), error: errMsg }),
+      );
+      return { ok: false, error: errMsg };
     } catch (err) {
       const errMsg =
         err instanceof ApiError ? err.message : t("connections.testFailed");
-      toast.error(errMsg);
-      setTestResults((prev) => {
-        const next = new Map(prev);
-        next.set(row.id, { kind: "fail", at: Date.now(), error: errMsg });
-        return next;
-      });
-    } finally {
-      setTesting(null);
+      setTestResults((prev) =>
+        new Map(prev).set(row.id, { kind: "fail", at: Date.now(), error: errMsg }),
+      );
+      return { ok: false, error: errMsg };
+    }
+  }
+
+  async function onTest(row: ConnectionSummary) {
+    if (!ws) return;
+    setTesting(row.id);
+    const res = await runTest(ws.id, row);
+    if (res.ok) {
+      toast.success(t("connections.connected", { name: row.name }));
+    } else {
+      toast.error(
+        t("connections.testErrorNamed", { name: row.name, error: res.error ?? "" }),
+      );
+    }
+    setTesting(null);
+  }
+
+  // Phase ACT (2026-06-04) — test every connection in the current
+  // (filtered) view sequentially. Sequential rather than parallel so
+  // we don't open N backend connections at once; each row's chip
+  // updates as it completes. One summary toast at the end.
+  async function onTestAll() {
+    if (!ws || testingAll) return;
+    setTestingAll(true);
+    let ok = 0;
+    let fail = 0;
+    // Test ALL connections, not just the filtered view, so the label
+    // ("Test all") is honest even when a type filter is applied.
+    for (const row of rows ?? []) {
+      setTesting(row.id);
+      const res = await runTest(ws.id, row);
+      if (res.ok) ok += 1;
+      else fail += 1;
+    }
+    setTesting(null);
+    setTestingAll(false);
+    if (fail === 0) {
+      toast.success(t("connections.testAllOk", { count: ok }));
+    } else {
+      toast.error(t("connections.testAllSummary", { ok, fail }));
     }
   }
 
@@ -293,18 +330,32 @@ export default function ConnectionsPage() {
             : t("common.loadingWorkspace")
         }
         actions={
-          <Button
-            variant="primary"
-            size="md"
-            onClick={() =>
-              setForm((f) =>
-                f.kind === "create" ? { kind: "closed" } : { kind: "create" },
-              )
-            }
-          >
-            <PlusIcon size={16} />
-            {t("connections.new")}
-          </Button>
+          <div className="flex items-center gap-2">
+            {/* Phase ACT (2026-06-04) — test the whole (filtered) list
+                in one gesture after setting up several connections. */}
+            <Button
+              variant="ghost"
+              size="md"
+              onClick={onTestAll}
+              loading={testingAll}
+              disabled={!ws || (rows?.length ?? 0) === 0}
+            >
+              <ShieldCheckIcon size={16} />
+              {t("connections.testAll")}
+            </Button>
+            <Button
+              variant="primary"
+              size="md"
+              onClick={() =>
+                setForm((f) =>
+                  f.kind === "create" ? { kind: "closed" } : { kind: "create" },
+                )
+              }
+            >
+              <PlusIcon size={16} />
+              {t("connections.new")}
+            </Button>
+          </div>
         }
       />
       <main className="mx-auto w-full max-w-6xl flex-1 space-y-6 overflow-y-auto px-6 py-8">

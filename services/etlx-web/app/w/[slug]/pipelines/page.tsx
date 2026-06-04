@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
   ActivityIcon,
+  AlertTriangleIcon,
   CalendarClockIcon,
   CalendarPlusIcon,
   EditIcon,
@@ -32,6 +33,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { BackfillDialog } from "@/components/pipelines/backfill-dialog";
 import {
   ApiError,
+  connectionsApi,
   pipelinesApi,
   runsApi,
   type PipelineSummary,
@@ -40,6 +42,7 @@ import {
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import { useLocale } from "@/components/providers/locale-provider";
 import { relativeTime, absoluteTime } from "@/lib/format-time";
+import { extractConnectionNames } from "@/lib/connection-usage";
 import type { Messages } from "@/lib/i18n/messages";
 import {
   DEFAULT_DLQ,
@@ -56,19 +59,41 @@ const RUNS_POLL_MS = 5_000;
 function buildColumns(
   t: Translate,
   lastRunByPipeline: Map<string, RunSummary>,
+  connNames: Set<string> | null,
 ): Column<PipelineSummary>[] {
   return [
     {
       key: "name",
       header: t("common.pipeline"),
-      cell: (r) => (
-        <div>
-          <div className="font-medium text-text">{r.name}</div>
-          {r.description ? (
-            <div className="text-xs text-text-muted">{r.description}</div>
-          ) : null}
-        </div>
-      ),
+      cell: (r) => {
+        // Phase ADC (2026-06-04) — flag pipelines that reference a
+        // connection no longer in the workspace (deleted/renamed). The
+        // next run would fail to build; surfacing it here catches the
+        // breakage before the operator triggers it. connNames null =
+        // not loaded → no warning (avoids false positives).
+        const missing = connNames
+          ? [...extractConnectionNames(r.current_config_json)].filter(
+              (n) => !connNames.has(n),
+            )
+          : [];
+        return (
+          <div>
+            <div className="font-medium text-text">{r.name}</div>
+            {r.description ? (
+              <div className="text-xs text-text-muted">{r.description}</div>
+            ) : null}
+            {missing.length > 0 ? (
+              <div
+                className="mt-0.5 inline-flex items-center gap-1 rounded-sm bg-error/10 px-1.5 py-0.5 text-[11px] text-error"
+                title={missing.join(", ")}
+              >
+                <AlertTriangleIcon size={11} />
+                {t("pipelines.missingConnection", { names: missing.join(", ") })}
+              </div>
+            ) : null}
+          </div>
+        );
+      },
     },
     {
       key: "mode",
@@ -168,6 +193,10 @@ export default function PipelinesPage() {
   const [lastRunByPipeline, setLastRunByPipeline] = useState<
     Map<string, RunSummary>
   >(new Map());
+  /** Phase ADC (2026-06-04) — set of existing connection names, to flag
+   *  pipelines that reference a deleted/renamed one. null until loaded
+   *  so we don't warn on missing data. */
+  const [connNames, setConnNames] = useState<Set<string> | null>(null);
   // Phase AAR (2026-06-01) — user request "마이그레이션 job을
   // 파이프라인이 아니라 마이그레이션 탭에서 관리하도록 해주고".
   // Migration pipelines are surfaced on /migrations; hide them
@@ -238,6 +267,24 @@ export default function PipelinesPage() {
       cancelled = true;
     };
   }, [ws, t]);
+
+  // Phase ADC (2026-06-04) — fetch connection names once to flag
+  // pipelines referencing a missing connection. Soft-fail → null.
+  useEffect(() => {
+    if (!ws) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const list = await connectionsApi.list(ws.id);
+        if (!cancelled) setConnNames(new Set(list.map((c) => c.name)));
+      } catch {
+        if (!cancelled) setConnNames(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [ws]);
 
   // Phase ACS (2026-06-04) — poll workspace runs and keep the most
   // recent per pipeline. Soft-fail: the list still renders without the
@@ -441,7 +488,7 @@ export default function PipelinesPage() {
           ) : (
             <DataTable
               columns={[
-                ...buildColumns(t, lastRunByPipeline),
+                ...buildColumns(t, lastRunByPipeline, connNames),
                 {
                   key: "actions",
                   header: "",

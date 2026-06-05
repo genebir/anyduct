@@ -23,7 +23,8 @@ import {
   type NodeMouseHandler,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { CopyIcon, DatabaseIcon, KeyIcon, PlusIcon, TrashIcon, XIcon } from "lucide-react";
+import Link from "next/link";
+import { ArrowLeftIcon, CopyIcon, DatabaseIcon, KeyIcon, PlusIcon, TrashIcon, XIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -34,7 +35,9 @@ import {
   ERD_TYPES,
   mergeDesign,
   newId,
+  type Cardinality,
   type DesignColumn,
+  type DesignRelation,
   type DesignTable,
   type ErdDesign,
   toSql,
@@ -42,15 +45,7 @@ import {
 import { useLocale } from "@/components/providers/locale-provider";
 import { ERD_EDGE_TYPES } from "@/components/erd/crowsfoot-edge";
 import { ImportTablesDialog } from "@/components/erd/import-tables-dialog";
-import {
-  createDoc,
-  deleteDoc as deleteStoredDoc,
-  listDocs,
-  loadDesign,
-  renameDoc,
-  saveDoc,
-  type ErdDoc,
-} from "@/lib/erd-store";
+import { listDocs, loadDesign, renameDoc, saveDoc } from "@/lib/erd-store";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import type { Messages } from "@/lib/i18n/messages";
 
@@ -172,84 +167,101 @@ function TablePanel({
   );
 }
 
-export function ErdDesigner({ slug }: { slug: string }) {
+// Cardinality presets — value is "<sourceCard>:<targetCard>".
+const CARD_OPTIONS: { value: string; source: Cardinality; target: Cardinality; label: string }[] = [
+  { value: "one:one", source: "one", target: "one", label: "1 : 1" },
+  { value: "one:many", source: "one", target: "many", label: "1 : N" },
+  { value: "many:one", source: "many", target: "one", label: "N : 1" },
+  { value: "many:many", source: "many", target: "many", label: "N : M" },
+];
+
+function EdgePanel({
+  relation,
+  fromName,
+  toName,
+  t,
+  onChange,
+  onDelete,
+  onClose,
+}: {
+  relation: DesignRelation;
+  fromName: string;
+  toName: string;
+  t: Translate;
+  onChange: (patch: Partial<DesignRelation>) => void;
+  onDelete: () => void;
+  onClose: () => void;
+}) {
+  const current = `${relation.sourceCard ?? "many"}:${relation.targetCard ?? "one"}`;
+  return (
+    <div className="flex w-72 shrink-0 flex-col gap-3 border-l border-border-subtle bg-surface p-3">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-semibold uppercase tracking-wide text-text-secondary">
+          {t("erdEdge.title")}
+        </span>
+        <button onClick={onClose} aria-label={t("common.close")} className="text-text-muted hover:text-text">
+          <XIcon size={14} />
+        </button>
+      </div>
+      <div className="rounded-md border border-border-subtle bg-bg p-2 text-xs text-text-secondary">
+        <span className="font-mono text-text">{fromName}</span>
+        <span className="text-text-muted">.{relation.fromColumn} → </span>
+        <span className="font-mono text-text">{toName}</span>
+      </div>
+      <label className="text-[11px] uppercase tracking-wide text-text-muted">
+        {t("erdEdge.cardinality")}
+      </label>
+      <select
+        value={current}
+        onChange={(e) => {
+          const opt = CARD_OPTIONS.find((o) => o.value === e.target.value);
+          if (opt) onChange({ sourceCard: opt.source, targetCard: opt.target });
+        }}
+        className="h-8 rounded-md border border-border-subtle bg-bg px-2 text-sm text-text"
+      >
+        {CARD_OPTIONS.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label} ({fromName} : {toName})
+          </option>
+        ))}
+      </select>
+      <Button size="sm" variant="ghost" onClick={onDelete} className="mt-2 self-start hover:text-error">
+        <TrashIcon size={13} />
+        {t("erdEdge.delete")}
+      </Button>
+    </div>
+  );
+}
+
+export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
   const { t } = useLocale();
   const ws = useWorkspaceFromSlug(slug);
   const [design, setDesign] = useState<ErdDesign>(EMPTY_DESIGN);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [dialect, setDialect] = useState("postgres");
   const [sql, setSql] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [menu, setMenu] = useState<Menu | null>(null);
-  const [docs, setDocs] = useState<ErdDoc[]>([]);
-  const [docId, setDocId] = useState("");
   const [docName, setDocName] = useState("");
   const [renaming, setRenaming] = useState(false);
 
-  // Open the most-recent diagram (or create one) on mount.
+  // Load the requested diagram by id (the list page picks which one).
   useEffect(() => {
-    const list = listDocs(slug);
-    if (list.length > 0) {
-      setDocId(list[0].id);
-      setDocName(list[0].name);
-      setDesign(loadDesign(slug, list[0].id));
-    } else {
-      const name = "Untitled";
-      const id = createDoc(slug, name);
-      setDocId(id);
-      setDocName(name);
-    }
-    setDocs(listDocs(slug));
-    setLoaded(true);
-  }, [slug]);
-
-  // Auto-save the active diagram on change.
-  useEffect(() => {
-    if (!loaded || !docId) return;
-    saveDoc(slug, docId, docName, design);
-  }, [slug, design, docName, docId, loaded]);
-
-  const refreshDocs = useCallback(() => setDocs(listDocs(slug)), [slug]);
-
-  const openDoc = useCallback(
-    (id: string) => {
-      const meta = listDocs(slug).find((d) => d.id === id);
-      setDocId(id);
-      setDocName(meta?.name ?? "");
-      setDesign(loadDesign(slug, id));
-      setSelectedId(null);
-      setRenaming(false);
-    },
-    [slug],
-  );
-
-  const onNewDoc = useCallback(() => {
-    const name = `Untitled ${listDocs(slug).length + 1}`;
-    const id = createDoc(slug, name);
-    setDocId(id);
-    setDocName(name);
-    setDesign(EMPTY_DESIGN);
+    const meta = listDocs(slug).find((d) => d.id === docId);
+    setDocName(meta?.name ?? "Untitled");
+    setDesign(loadDesign(slug, docId));
     setSelectedId(null);
-    refreshDocs();
-  }, [slug, refreshDocs]);
+    setSelectedEdgeId(null);
+    setLoaded(true);
+  }, [slug, docId]);
 
-  const onDeleteDoc = useCallback(() => {
-    if (!docId) return;
-    deleteStoredDoc(slug, docId);
-    const rest = listDocs(slug);
-    if (rest.length > 0) {
-      openDoc(rest[0].id);
-    } else {
-      const name = "Untitled";
-      const id = createDoc(slug, name);
-      setDocId(id);
-      setDocName(name);
-      setDesign(EMPTY_DESIGN);
-      setSelectedId(null);
-    }
-    refreshDocs();
-  }, [slug, docId, openDoc, refreshDocs]);
+  // Auto-save on change (upserts the list entry too).
+  useEffect(() => {
+    if (!loaded) return;
+    saveDoc(slug, docId, docName, design);
+  }, [slug, docId, design, docName, loaded]);
 
   const nodes = useMemo<Node[]>(
     () =>
@@ -283,10 +295,14 @@ export function ErdDesigner({ slug }: { slug: string }) {
         target: r.to,
         label: r.fromColumn,
         type: "crowsfoot",
-        style: { stroke: "rgb(var(--accent))", strokeWidth: 1.5 },
+        data: { sourceCard: r.sourceCard ?? "many", targetCard: r.targetCard ?? "one" },
+        style: {
+          stroke: "rgb(var(--accent))",
+          strokeWidth: r.id === selectedEdgeId ? 2.5 : 1.5,
+        },
         labelStyle: { fontSize: 10, fill: "rgb(var(--text-muted))" },
       })),
-    [design],
+    [design, selectedEdgeId],
   );
 
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState(nodes);
@@ -307,7 +323,19 @@ export function ErdDesigner({ slug }: { slug: string }) {
     }));
   }, []);
 
-  const onNodeClick: NodeMouseHandler = (_e, node) => setSelectedId(node.id);
+  const onNodeClick: NodeMouseHandler = (_e, node) => {
+    setSelectedId(node.id);
+    setSelectedEdgeId(null);
+  };
+
+  const updateRelation = (id: string, patch: Partial<ErdDesign["relations"][number]>) =>
+    setDesign((d) => ({
+      ...d,
+      relations: d.relations.map((r) => (r.id === id ? { ...r, ...patch } : r)),
+    }));
+
+  const deleteRelation = (id: string) =>
+    setDesign((d) => ({ ...d, relations: d.relations.filter((r) => r.id !== id) }));
 
   const updateTable = (id: string, patch: Partial<DesignTable>) =>
     setDesign((d) => ({ ...d, tables: d.tables.map((tb) => (tb.id === id ? { ...tb, ...patch } : tb)) }));
@@ -351,24 +379,17 @@ export function ErdDesigner({ slug }: { slug: string }) {
   }, []);
 
   const selected = design.tables.find((tb) => tb.id === selectedId) ?? null;
+  const selectedEdge = design.relations.find((r) => r.id === selectedEdgeId) ?? null;
+  const tableName = (id: string) => design.tables.find((tb) => tb.id === id)?.name ?? "?";
 
   return (
     <div className="flex h-full flex-col">
       <div className="flex flex-wrap items-center gap-2 border-b border-border-subtle bg-surface px-4 py-2">
-        <span className="mr-1 text-sm font-semibold text-text">{t("nav.erd")}</span>
-        {/* Diagram manager: pick / rename / new / delete named ERDs. */}
-        <select
-          value={docId}
-          onChange={(e) => openDoc(e.target.value)}
-          className="h-8 max-w-44 rounded-md border border-border-subtle bg-bg px-2 text-xs text-text"
-          aria-label={t("erdDoc.select")}
-        >
-          {docs.map((d) => (
-            <option key={d.id} value={d.id}>
-              {d.name}
-            </option>
-          ))}
-        </select>
+        <Link href={`/w/${slug}/erd`}>
+          <Button size="sm" variant="ghost" aria-label={t("erdDoc.backToList")}>
+            <ArrowLeftIcon size={14} />
+          </Button>
+        </Link>
         {renaming ? (
           <Input
             autoFocus
@@ -377,24 +398,21 @@ export function ErdDesigner({ slug }: { slug: string }) {
             onBlur={() => {
               renameDoc(slug, docId, docName || "Untitled");
               setRenaming(false);
-              refreshDocs();
             }}
             onKeyDown={(e) => {
               if (e.key === "Enter") (e.target as HTMLInputElement).blur();
             }}
-            className="h-8 w-40 text-xs"
+            className="h-8 w-44 text-sm"
           />
         ) : (
-          <Button size="sm" variant="ghost" onClick={() => setRenaming(true)}>
-            {t("erdDoc.rename")}
-          </Button>
+          <button
+            className="text-sm font-semibold text-text hover:underline"
+            onClick={() => setRenaming(true)}
+            title={t("erdDoc.rename")}
+          >
+            {docName || "Untitled"}
+          </button>
         )}
-        <Button size="sm" variant="ghost" onClick={onNewDoc}>
-          {t("erdDoc.new")}
-        </Button>
-        <Button size="sm" variant="ghost" onClick={onDeleteDoc} className="hover:text-error">
-          {t("erdDoc.delete")}
-        </Button>
         <span className="mx-1 h-5 w-px bg-border-subtle" />
         <Button size="sm" variant="secondary" onClick={onAddTable}>
           <PlusIcon size={14} />
@@ -452,8 +470,13 @@ export function ErdDesigner({ slug }: { slug: string }) {
               onConnect={onConnect}
               onNodeDragStop={onNodeDragStop}
               onNodeClick={onNodeClick}
+              onEdgeClick={(_e, edge) => {
+                setSelectedEdgeId(edge.id);
+                setSelectedId(null);
+              }}
               onPaneClick={() => {
                 setSelectedId(null);
+                setSelectedEdgeId(null);
                 setMenu(null);
               }}
               onPaneContextMenu={onPaneContextMenu}
@@ -476,6 +499,19 @@ export function ErdDesigner({ slug }: { slug: string }) {
               setSelectedId(null);
             }}
             onClose={() => setSelectedId(null)}
+          />
+        ) : selectedEdge ? (
+          <EdgePanel
+            relation={selectedEdge}
+            fromName={tableName(selectedEdge.from)}
+            toName={tableName(selectedEdge.to)}
+            t={t}
+            onChange={(patch) => updateRelation(selectedEdge.id, patch)}
+            onDelete={() => {
+              deleteRelation(selectedEdge.id);
+              setSelectedEdgeId(null);
+            }}
+            onClose={() => setSelectedEdgeId(null)}
           />
         ) : null}
       </div>

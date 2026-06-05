@@ -16,6 +16,28 @@ import { BaseEdge, EdgeLabelRenderer, getSmoothStepPath, type EdgeProps } from "
 
 const STROKE = "rgb(var(--accent))";
 
+/** Crow's foot (many) at the source end — prongs open toward the node. */
+function sourceFoot(x: number, y: number): string {
+  return (
+    `M ${x + 16},${y} L ${x},${y - 7} ` +
+    `M ${x + 16},${y} L ${x},${y} ` +
+    `M ${x + 16},${y} L ${x},${y + 7}`
+  );
+}
+/** Crow's foot (many) at the target end — prongs open toward the node. */
+function targetFoot(x: number, y: number): string {
+  return (
+    `M ${x - 16},${y} L ${x},${y - 7} ` +
+    `M ${x - 16},${y} L ${x},${y} ` +
+    `M ${x - 16},${y} L ${x},${y + 7}`
+  );
+}
+/** "one" bar near an end. */
+function bar(x: number, y: number, dir: 1 | -1): string {
+  const bx = x + dir * 12;
+  return `M ${bx},${y - 7} L ${bx},${y + 7}`;
+}
+
 export function CrowsFootEdge({
   id,
   sourceX,
@@ -26,6 +48,7 @@ export function CrowsFootEdge({
   targetPosition,
   label,
   style,
+  data,
 }: EdgeProps) {
   const [path, labelX, labelY] = getSmoothStepPath({
     sourceX,
@@ -36,21 +59,16 @@ export function CrowsFootEdge({
     targetPosition,
   });
 
-  // Many (crow's foot) at the source end — three prongs converging to a
-  // point ~16px out along the line, spreading back to the node edge.
-  const foot =
-    `M ${sourceX + 16},${sourceY} L ${sourceX},${sourceY - 7} ` +
-    `M ${sourceX + 16},${sourceY} L ${sourceX},${sourceY} ` +
-    `M ${sourceX + 16},${sourceY} L ${sourceX},${sourceY + 7}`;
-
-  // One (bar) at the target end — a short perpendicular tick ~12px out.
-  const bar = `M ${targetX - 12},${targetY - 7} L ${targetX - 12},${targetY + 7}`;
+  const sourceCard = (data?.sourceCard as string) ?? "many";
+  const targetCard = (data?.targetCard as string) ?? "one";
+  const sourceMark = sourceCard === "many" ? sourceFoot(sourceX, sourceY) : bar(sourceX, sourceY, 1);
+  const targetMark = targetCard === "many" ? targetFoot(targetX, targetY) : bar(targetX, targetY, -1);
 
   return (
     <>
       <BaseEdge id={id} path={path} style={style} />
-      <path d={foot} stroke={STROKE} strokeWidth={1.5} fill="none" />
-      <path d={bar} stroke={STROKE} strokeWidth={1.5} fill="none" />
+      <path d={sourceMark} stroke={STROKE} strokeWidth={1.5} fill="none" />
+      <path d={targetMark} stroke={STROKE} strokeWidth={1.5} fill="none" />
       {label ? (
         <EdgeLabelRenderer>
           <div

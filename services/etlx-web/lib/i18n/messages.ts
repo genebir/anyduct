@@ -111,11 +111,22 @@ export const en = {
   "erdImport.empty": "No tables found.",
   "erdImport.error": "Could not introspect this connection.",
   "erdImport.import": "Import ({n})",
-  // ERD diagram manager (Phase AHB)
+  // ERD diagram manager (Phase AHB/AHC)
   "erdDoc.select": "Diagram",
   "erdDoc.rename": "Rename",
   "erdDoc.new": "New",
   "erdDoc.delete": "Delete",
+  "erdDoc.backToList": "Back to ERD list",
+  // ERD list page (Phase AHC)
+  "erdList.new": "New diagram",
+  "erdList.emptyTitle": "No ERDs yet",
+  "erdList.emptyDesc": "Create a diagram to model tables and relationships, or import a connection's schema.",
+  "erdList.tableCount": "{n} tables",
+  "erdList.deleteAria": "Delete {name}",
+  // ERD edge / relationship editor (Phase AHC)
+  "erdEdge.title": "Relationship",
+  "erdEdge.cardinality": "Cardinality",
+  "erdEdge.delete": "Delete relationship",
   "nav.sensors": "Sensors",
   // migrations page (Phase AAN, 2026-05-29) — filtered view of
   // pipelines whose at-least-one sink auto-creates its destination.
@@ -1394,11 +1405,22 @@ export const ko: Messages = {
   "erdImport.empty": "테이블이 없습니다.",
   "erdImport.error": "이 커넥션을 조사할 수 없습니다.",
   "erdImport.import": "가져오기 ({n})",
-  // ERD diagram manager (Phase AHB)
+  // ERD diagram manager (Phase AHB/AHC)
   "erdDoc.select": "다이어그램",
   "erdDoc.rename": "이름변경",
   "erdDoc.new": "새로 만들기",
   "erdDoc.delete": "삭제",
+  "erdDoc.backToList": "ERD 목록으로",
+  // ERD list page (Phase AHC)
+  "erdList.new": "새 다이어그램",
+  "erdList.emptyTitle": "아직 ERD가 없습니다",
+  "erdList.emptyDesc": "테이블과 관계를 모델링할 다이어그램을 만들거나, 커넥션 스키마를 가져오세요.",
+  "erdList.tableCount": "테이블 {n}개",
+  "erdList.deleteAria": "{name} 삭제",
+  // ERD edge / relationship editor (Phase AHC)
+  "erdEdge.title": "관계",
+  "erdEdge.cardinality": "카디널리티",
+  "erdEdge.delete": "관계 삭제",
   // 마이그레이션 페이지 (Phase AAN, 2026-05-29)
   "migrations.title": "DB 마이그레이션",
   "migrations.desc":

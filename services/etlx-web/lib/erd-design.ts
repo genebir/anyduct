@@ -26,6 +26,9 @@ export interface DesignTable {
   columns: DesignColumn[];
 }
 
+/** Cardinality at one end of a relationship. */
+export type Cardinality = "one" | "many";
+
 export interface DesignRelation {
   id: string;
   /** table id holding the FK column */
@@ -34,6 +37,10 @@ export interface DesignRelation {
   fromColumn: string;
   /** referenced table id */
   to: string;
+  /** cardinality at the ``from`` (source) end — default "many" (FK side) */
+  sourceCard?: Cardinality;
+  /** cardinality at the ``to`` (target) end — default "one" (referenced) */
+  targetCard?: Cardinality;
 }
 
 export interface ErdDesign {
@@ -118,7 +125,17 @@ export function connect(design: ErdDesign, fromId: string, toId: string): ErdDes
   );
   const relations = exists
     ? design.relations
-    : [...design.relations, { id: newId("rel"), from: fromId, fromColumn: colName, to: toId }];
+    : [
+        ...design.relations,
+        {
+          id: newId("rel"),
+          from: fromId,
+          fromColumn: colName,
+          to: toId,
+          sourceCard: "many" as const,
+          targetCard: "one" as const,
+        },
+      ];
   return { tables, relations };
 }
 
@@ -161,7 +178,14 @@ export function rawTablesToDesign(raw: ImportTable[], offsetX = 0, offsetY = 0):
       const base = lc.slice(0, -3);
       const targetId = [base, `${base}s`, `${base}es`].map((b) => byName.get(b)).find(Boolean);
       if (targetId && targetId !== t.id) {
-        relations.push({ id: newId("rel"), from: t.id, fromColumn: c.name, to: targetId });
+        relations.push({
+          id: newId("rel"),
+          from: t.id,
+          fromColumn: c.name,
+          to: targetId,
+          sourceCard: "many",
+          targetCard: "one",
+        });
       }
     }
   }

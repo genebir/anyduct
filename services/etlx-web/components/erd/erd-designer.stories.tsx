@@ -26,5 +26,5 @@ export default meta;
 type Story = StoryObj<typeof ErdDesigner>;
 
 export const Empty: Story = {
-  args: { slug: "storybook" },
+  args: { slug: "storybook", docId: "storybook-demo" },
 };

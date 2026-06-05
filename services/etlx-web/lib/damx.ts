@@ -24,6 +24,7 @@ import {
   type DesignRelation,
   type DesignTable,
   type ErdDesign,
+  inferRelationsByPk,
   newId,
   normalizeImportType,
   rawTablesToDesign,
@@ -171,12 +172,22 @@ function toDesign(parsed: ParsedTable[]): ErdDesign {
     if (!pkset) return t;
     return { ...t, columns: t.columns.map((c) => ({ ...c, pk: pkset.has(c.name) || c.pk })) };
   });
-  // (relations already inferred by rawTablesToDesign)
-  const relations: DesignRelation[] = base.relations.map((r) => ({
-    ...r,
-    id: r.id || newId("rel"),
-    sourceCard: (r.sourceCard ?? "many") as Cardinality,
-    targetCard: (r.targetCard ?? "one") as Cardinality,
-  }));
+
+  // FK edges: primary-key-name match (uses the recovered PKs — the main
+  // signal for these models) plus the shared <x>_id inference, deduped.
+  const pkRels = inferRelationsByPk(tables);
+  const seen = new Set(pkRels.map((r) => `${r.from}.${r.fromColumn}->${r.to}`));
+  const relations: DesignRelation[] = [...pkRels];
+  for (const r of base.relations) {
+    const key = `${r.from}.${r.fromColumn}->${r.to}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    relations.push({
+      ...r,
+      id: r.id || newId("rel"),
+      sourceCard: (r.sourceCard ?? "many") as Cardinality,
+      targetCard: (r.targetCard ?? "one") as Cardinality,
+    });
+  }
   return { tables, relations };
 }

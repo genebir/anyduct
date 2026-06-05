@@ -2690,4 +2690,26 @@ L1 출시 직후 사용자가 5개 회신:
 
 ---
 
+## ADR-0091: .damx (DA#/DA Modeler) ERD import — best-effort 바이너리 파서
+
+**Date**: 2026-06-05
+**Status**: Accepted
+**Context**: 사용자가 DA# ERD export(.damx)를 ERD 디자이너로 import하고 싶어함. .damx = 공개 스펙 없는 독자 .NET 바이너리 객체 그래프(표준 BinaryFormatter도 아님). 실제 4개 샘플 분석으로 포맷 해독.
+
+**Decision** (`lib/damx.ts`, 브라우저에서 ArrayBuffer 파싱):
+1. **문자열 프레이밍**: `FF FE FF <len(1byte)> <UTF-16LE×len>`. 잘못 정렬된 프레임은 replacement char/C0 제어문자로 거부.
+2. **컬럼**: `PHYSICAL(^[A-Z][A-Z0-9_]+) + SQL TYPE (+ LENGTH digits)` 패턴. `normalizeImportType`로 vendor 타입 정규화.
+3. **테이블 묶음**: 컬럼은 테이블별로 파일 순서대로 연속 저장됨. 테이블명 = 컬럼 블록 직후 첫 plain 문자열(뒤에 GUID 참조 run ≥2 + 다음에 컬럼 없음). 한국어 엔티티명까지 복원.
+4. **PK**: `PK` 마커 뒤 컬럼 GUID → 해당 컬럼 pk=true(doubled-GUID로 컬럼 매핑).
+5. **FK 추론** (AHG 핵심, `inferRelationsByPk`): "자식 컬럼명 = **정확히 한** 다른 테이블의 PK명"이면 FK(고정밀 — 공유/복합 PK명 제외). audit/boilerplate PK(RGTR_ID/REG_DT/USE_YN 등) 제외. `UP_<pk>` self-ref. + 기존 `<x>_id` 추론 병합. **거부된 대안**: (a) PK-name 전체 매칭 → 공유 코드/복합키 컬럼명이 수만 edge 양산(TMS 24k), (b) attr-GUID 인접 co-occurrence → 형제 컬럼 noise.
+
+**검증**: 4 샘플(공통코드/CTC&ARS/TMS/안전지원) → 35/306/345/269 테이블, FK 5/76/81/22(고정밀, self-ref 부서/공통코드/메뉴 포함). Python 프로토타입 동일 로직 TS 포팅.
+
+**Consequences**:
+- ✅ 사용자 실제 .damx가 테이블·컬럼·타입·PK·FK로 import됨. 코어/서버 변화 0(순수 web).
+- ⚠️ **best-effort**: 테이블 묶음 휴리스틱(특이 모델/긴 설명이 테이블명으로 잡힐 수 있음), FK는 명명 기반(이름 안 맞으면 누락, 바이너리 관계 그래프는 신뢰 복원 불가), DA# 버전 변경 시 깨질 수 있음.
+- 대용량 샘플 .damx는 `.gitignore`(repo 미포함).
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

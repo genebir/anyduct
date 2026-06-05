@@ -283,6 +283,60 @@ export function mergeDesign(base: ErdDesign, incoming: ErdDesign): ErdDesign {
   };
 }
 
+// Columns that are commonly part of composite keys / boilerplate and would
+// create false FK edges if treated as a parent key.
+const FK_IGNORE_PK_NAMES = new Set([
+  "RGTR_ID", "REG_DT", "MDFR_ID", "MDFCN_DT", "USE_YN", "RMRK_CN", "SORT_SEQ", "VER_NO",
+]);
+
+/**
+ * Infer FK relationships from primary-key column names (Phase AHG). A child
+ * column whose name is the PK of **exactly one other** table is treated as a
+ * FK to that table (high precision — ambiguous/shared PK names are skipped).
+ * Also handles ``UP_<pk>`` self-references. Requires tables with ``pk`` flags
+ * (recovered from a .damx import); naming-only imports get nothing here.
+ */
+export function inferRelationsByPk(tables: DesignTable[]): DesignRelation[] {
+  const pkNameToTables = new Map<string, string[]>();
+  for (const t of tables) {
+    for (const c of t.columns) {
+      if (c.pk && !FK_IGNORE_PK_NAMES.has(c.name)) {
+        const arr = pkNameToTables.get(c.name) ?? [];
+        arr.push(t.id);
+        pkNameToTables.set(c.name, arr);
+      }
+    }
+  }
+  // PK names owned by exactly one table → safe FK targets.
+  const uniquePk = new Map<string, string>();
+  for (const [name, ids] of pkNameToTables) if (ids.length === 1) uniquePk.set(name, ids[0]);
+
+  const relations: DesignRelation[] = [];
+  const seen = new Set<string>();
+  for (const t of tables) {
+    const ownPk = new Set(t.columns.filter((c) => c.pk).map((c) => c.name));
+    for (const c of t.columns) {
+      let target: string | undefined;
+      const unique = uniquePk.get(c.name);
+      if (unique && unique !== t.id) target = unique;
+      else if (c.name.startsWith("UP_") && ownPk.has(c.name.slice(3))) target = t.id;
+      if (!target) continue;
+      const key = `${t.id}.${c.name}->${target}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      relations.push({
+        id: newId("rel"),
+        from: t.id,
+        fromColumn: c.name,
+        to: target,
+        sourceCard: "many",
+        targetCard: "one",
+      });
+    }
+  }
+  return relations;
+}
+
 function quoteIdent(ident: string, dialect: string): string {
   return dialect === "mysql" ? `\`${ident}\`` : `"${ident}"`;
 }

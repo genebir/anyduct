@@ -520,6 +520,21 @@ const SOURCES: OperatorSpec[] = [
     ],
   },
   {
+    // Phase AGM (2026-06-05, ADR-0084) — SQS queue source.
+    id: "source:sqs",
+    kind: "source",
+    connectorType: "sqs",
+    label: "SQS queue",
+    description: "Stream-source messages from an SQS queue (deleted on commit).",
+    icon: RadioTowerIcon,
+    accent: "#EC4899",
+    streaming: true,
+    fields: [
+      { key: "connection", label: "Connection", kind: "connection", required: true },
+      { key: "topic", label: "Queue", kind: "string", placeholder: "etl-jobs (name or URL)" },
+    ],
+  },
+  {
     id: "source:http",
     kind: "source",
     connectorType: "http",
@@ -1507,6 +1522,21 @@ const SINKS: OperatorSpec[] = [
           { label: "avro", value: "avro" },
         ],
       },
+    ],
+  },
+  {
+    // Phase AGM (2026-06-05, ADR-0084) — SQS queue sink.
+    id: "sink:sqs",
+    kind: "sink",
+    connectorType: "sqs",
+    label: "SQS queue",
+    description: "Stream-sink messages to an SQS queue (send_message).",
+    icon: RadioTowerIcon,
+    accent: "#4ADE80",
+    streaming: true,
+    fields: [
+      { key: "connection", label: "Connection", kind: "connection", required: true },
+      { key: "topic", label: "Queue", kind: "string", placeholder: "etl-jobs (name or URL)" },
     ],
   },
   {

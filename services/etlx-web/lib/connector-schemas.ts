@@ -239,6 +239,25 @@ const KINESIS: ConnectorSchema = {
   ],
 };
 
+// Phase AGM (2026-06-05, ADR-0084) — SQS queue.
+const SQS: ConnectorSchema = {
+  type: "sqs",
+  label: "SQS",
+  description: "boto3-backed stream source + sink for Amazon SQS queues.",
+  fields: [
+    { key: "region", label: "Region", type: "string", defaultValue: "us-east-1" },
+    {
+      key: "endpoint_url",
+      label: "Endpoint URL",
+      type: "string",
+      placeholder: "leave blank for AWS; http://localhost:4566 for LocalStack",
+      help: "Leave blank for AWS SQS; set for LocalStack / local testing.",
+    },
+    { key: "aws_access_key_id", label: "Access key", type: "password", isSecret: true },
+    { key: "aws_secret_access_key", label: "Secret key", type: "password", isSecret: true },
+  ],
+};
+
 const HTTP: ConnectorSchema = {
   type: "http",
   label: "HTTP / REST",
@@ -477,6 +496,7 @@ export const CONNECTOR_SCHEMAS: ConnectorSchema[] = [
   S3,
   KAFKA,
   KINESIS,
+  SQS,
   HTTP,
 ];
 

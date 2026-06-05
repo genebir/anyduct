@@ -166,7 +166,7 @@ function buildColumns(
         }
         const when = run.finished_at ?? run.started_at ?? run.created_at;
         return (
-          <div className="flex items-center gap-2 text-xs">
+          <div className="flex items-center gap-2 whitespace-nowrap text-xs">
             <StatusBadge status={run.status} />
             <span className="text-text-muted" title={absoluteTime(when)}>
               {relativeTime(when, t)}

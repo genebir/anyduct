@@ -172,7 +172,7 @@ function buildColumns(
         const { label, cls, title } = strategyChip(r.migration.strategy, t);
         return (
           <span
-            className={`inline-flex h-5 items-center rounded-sm px-1.5 text-[11px] font-medium ${cls}`}
+            className={`inline-flex h-5 items-center whitespace-nowrap rounded-sm px-1.5 text-[11px] font-medium ${cls}`}
             title={title}
           >
             {label}
@@ -189,7 +189,7 @@ function buildColumns(
       header: t("migrations.colLastRun"),
       cell: (r) =>
         r.lastRun ? (
-          <div className="flex items-center gap-2 text-xs">
+          <div className="flex items-center gap-2 whitespace-nowrap text-xs">
             <StatusBadge status={r.lastRun.status} />
             {/* Phase ACK (2026-06-04) — trigger source icon-only chip,
                 same vocabulary as the runs list (ABG) and migration

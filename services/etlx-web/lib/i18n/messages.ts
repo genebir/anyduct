@@ -111,6 +111,11 @@ export const en = {
   "erdImport.empty": "No tables found.",
   "erdImport.error": "Could not introspect this connection.",
   "erdImport.import": "Import ({n})",
+  // ERD diagram manager (Phase AHB)
+  "erdDoc.select": "Diagram",
+  "erdDoc.rename": "Rename",
+  "erdDoc.new": "New",
+  "erdDoc.delete": "Delete",
   "nav.sensors": "Sensors",
   // migrations page (Phase AAN, 2026-05-29) — filtered view of
   // pipelines whose at-least-one sink auto-creates its destination.
@@ -1389,6 +1394,11 @@ export const ko: Messages = {
   "erdImport.empty": "테이블이 없습니다.",
   "erdImport.error": "이 커넥션을 조사할 수 없습니다.",
   "erdImport.import": "가져오기 ({n})",
+  // ERD diagram manager (Phase AHB)
+  "erdDoc.select": "다이어그램",
+  "erdDoc.rename": "이름변경",
+  "erdDoc.new": "새로 만들기",
+  "erdDoc.delete": "삭제",
   // 마이그레이션 페이지 (Phase AAN, 2026-05-29)
   "migrations.title": "DB 마이그레이션",
   "migrations.desc":

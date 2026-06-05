@@ -42,6 +42,15 @@ import {
 import { useLocale } from "@/components/providers/locale-provider";
 import { ERD_EDGE_TYPES } from "@/components/erd/crowsfoot-edge";
 import { ImportTablesDialog } from "@/components/erd/import-tables-dialog";
+import {
+  createDoc,
+  deleteDoc as deleteStoredDoc,
+  listDocs,
+  loadDesign,
+  renameDoc,
+  saveDoc,
+  type ErdDoc,
+} from "@/lib/erd-store";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import type { Messages } from "@/lib/i18n/messages";
 
@@ -51,7 +60,6 @@ type Menu =
 
 type Translate = (key: keyof Messages, vars?: Record<string, string | number>) => string;
 
-const storageKey = (slug: string) => `etlx:erd:${slug}`;
 const DIALECTS = ["postgres", "mysql", "sqlite", "snowflake", "bigquery"];
 
 function nodeLabel(tb: DesignTable): React.ReactNode {
@@ -174,25 +182,74 @@ export function ErdDesigner({ slug }: { slug: string }) {
   const [loaded, setLoaded] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [menu, setMenu] = useState<Menu | null>(null);
+  const [docs, setDocs] = useState<ErdDoc[]>([]);
+  const [docId, setDocId] = useState("");
+  const [docName, setDocName] = useState("");
+  const [renaming, setRenaming] = useState(false);
 
+  // Open the most-recent diagram (or create one) on mount.
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(storageKey(slug));
-      if (raw) setDesign(JSON.parse(raw) as ErdDesign);
-    } catch {
-      /* ignore corrupt local state */
+    const list = listDocs(slug);
+    if (list.length > 0) {
+      setDocId(list[0].id);
+      setDocName(list[0].name);
+      setDesign(loadDesign(slug, list[0].id));
+    } else {
+      const name = "Untitled";
+      const id = createDoc(slug, name);
+      setDocId(id);
+      setDocName(name);
     }
+    setDocs(listDocs(slug));
     setLoaded(true);
   }, [slug]);
 
+  // Auto-save the active diagram on change.
   useEffect(() => {
-    if (!loaded) return;
-    try {
-      localStorage.setItem(storageKey(slug), JSON.stringify(design));
-    } catch {
-      /* quota / private mode — non-fatal */
+    if (!loaded || !docId) return;
+    saveDoc(slug, docId, docName, design);
+  }, [slug, design, docName, docId, loaded]);
+
+  const refreshDocs = useCallback(() => setDocs(listDocs(slug)), [slug]);
+
+  const openDoc = useCallback(
+    (id: string) => {
+      const meta = listDocs(slug).find((d) => d.id === id);
+      setDocId(id);
+      setDocName(meta?.name ?? "");
+      setDesign(loadDesign(slug, id));
+      setSelectedId(null);
+      setRenaming(false);
+    },
+    [slug],
+  );
+
+  const onNewDoc = useCallback(() => {
+    const name = `Untitled ${listDocs(slug).length + 1}`;
+    const id = createDoc(slug, name);
+    setDocId(id);
+    setDocName(name);
+    setDesign(EMPTY_DESIGN);
+    setSelectedId(null);
+    refreshDocs();
+  }, [slug, refreshDocs]);
+
+  const onDeleteDoc = useCallback(() => {
+    if (!docId) return;
+    deleteStoredDoc(slug, docId);
+    const rest = listDocs(slug);
+    if (rest.length > 0) {
+      openDoc(rest[0].id);
+    } else {
+      const name = "Untitled";
+      const id = createDoc(slug, name);
+      setDocId(id);
+      setDocName(name);
+      setDesign(EMPTY_DESIGN);
+      setSelectedId(null);
     }
-  }, [slug, design, loaded]);
+    refreshDocs();
+  }, [slug, docId, openDoc, refreshDocs]);
 
   const nodes = useMemo<Node[]>(
     () =>
@@ -299,6 +356,46 @@ export function ErdDesigner({ slug }: { slug: string }) {
     <div className="flex h-full flex-col">
       <div className="flex flex-wrap items-center gap-2 border-b border-border-subtle bg-surface px-4 py-2">
         <span className="mr-1 text-sm font-semibold text-text">{t("nav.erd")}</span>
+        {/* Diagram manager: pick / rename / new / delete named ERDs. */}
+        <select
+          value={docId}
+          onChange={(e) => openDoc(e.target.value)}
+          className="h-8 max-w-44 rounded-md border border-border-subtle bg-bg px-2 text-xs text-text"
+          aria-label={t("erdDoc.select")}
+        >
+          {docs.map((d) => (
+            <option key={d.id} value={d.id}>
+              {d.name}
+            </option>
+          ))}
+        </select>
+        {renaming ? (
+          <Input
+            autoFocus
+            value={docName}
+            onChange={(e) => setDocName(e.target.value)}
+            onBlur={() => {
+              renameDoc(slug, docId, docName || "Untitled");
+              setRenaming(false);
+              refreshDocs();
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+            }}
+            className="h-8 w-40 text-xs"
+          />
+        ) : (
+          <Button size="sm" variant="ghost" onClick={() => setRenaming(true)}>
+            {t("erdDoc.rename")}
+          </Button>
+        )}
+        <Button size="sm" variant="ghost" onClick={onNewDoc}>
+          {t("erdDoc.new")}
+        </Button>
+        <Button size="sm" variant="ghost" onClick={onDeleteDoc} className="hover:text-error">
+          {t("erdDoc.delete")}
+        </Button>
+        <span className="mx-1 h-5 w-px bg-border-subtle" />
         <Button size="sm" variant="secondary" onClick={onAddTable}>
           <PlusIcon size={14} />
           {t("erdDesign.addTable")}

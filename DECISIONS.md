@@ -2533,4 +2533,24 @@ L1 출시 직후 사용자가 5개 회신:
 
 ---
 
+## ADR-0083: Kinesis 커넥터 추가 — Streaming 확장(StreamSource/Sink) + LocalStack 검증
+
+**Date**: 2026-06-05
+**Status**: Accepted
+**Context**: Streaming 카테고리는 Kafka뿐이었음. Kinesis 추가 — **boto3+localstack가 이미 dev-deps**라 DynamoDB처럼 **실제 testcontainers 왕복 검증** 가능 + Streaming 확장 + 신규 의존 0. Kafka(aiokafka, 네이티브 async)와 달리 boto3는 동기라 async 컨트랙트를 `asyncio.to_thread`로 래핑.
+
+**Decision**:
+1. **`kinesis.py`** — StreamSource/StreamSink(Kafka 패턴). `connect`이 boto3 client 생성, async 메서드가 blocking 호출을 `asyncio.to_thread`로 감쌈.
+2. **subscribe** — describe_stream으로 샤드 열거 → 샤드별 shard iterator(기본 TRIM_HORIZON) → round-robin `get_records` 폴링, JSON 디코드 후 yield(unbounded — caller가 break). metadata에 shard_id/sequence_number/partition_key.
+3. **publish** — `put_record`(JSON value + partition key). **commit/flush는 no-op**(raw Kinesis는 server-side checkpoint 없음 — KCL이 DynamoDB 사용, 범위 밖; put_record는 호출당 동기).
+4. **배선** — pyproject [kinesis] extra(boto3 재사용) + entry-point + registry builtin. 스트림이라 SQL/마이그레이션/audit-SQL 목록 미추가(Kafka 동일). web operators stream source/sink(streaming:true, topic=stream, iterator_type) + connector-schemas 폼(region/endpoint_url/credentials).
+
+**Consequences**:
+- ✅ **LocalStack 실제 통합 it 2** — create_stream→publish(put_record)→subscribe(shard iterator get_records) 왕복 + metadata 검증. 단위 8(fake-client publish/subscribe 로직 + 인코딩 + driver-missing). DynamoDB와 함께 boto3-계열 커넥터는 실검증 라인.
+- ✅ Streaming 2종(Kafka + Kinesis). mypy/ruff clean. 코어 production 무영향.
+- ⚠️ subscribe는 단순 폴링(샤드 동적 분할/병합 미추적, enhanced fan-out 미사용) — 고처리량/리샤딩은 후속. checkpoint 없음(at-least-once는 caller 책임, Kafka commit과 대비).
+- ⚠️ testcontainers 통합 it는 `-m it` 게이트(기본 unit run 미포함).
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

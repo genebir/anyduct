@@ -91,6 +91,10 @@ export const en = {
   // ERD designer (Phase AGX)
   "erdDesign.addTable": "Add table",
   "erdDesign.import": "Import from connection",
+  "erdDesign.importDamx": "Import .damx (DA#)",
+  "erdDesign.damxImported": "Imported {n} tables from .damx",
+  "erdDesign.damxEmpty": "No tables found in this .damx file.",
+  "erdDesign.damxError": "Could not parse this .damx file.",
   "erdDesign.connectHint": "Drag from a table's edge to another to add a foreign key. Right-click for more.",
   "erdDesign.exportSql": "Export SQL",
   "erdDesign.clear": "Clear",
@@ -1386,6 +1390,10 @@ export const ko: Messages = {
   // ERD designer (Phase AGX)
   "erdDesign.addTable": "테이블 추가",
   "erdDesign.import": "커넥션에서 가져오기",
+  "erdDesign.importDamx": ".damx 가져오기 (DA#)",
+  "erdDesign.damxImported": ".damx에서 테이블 {n}개를 가져왔습니다",
+  "erdDesign.damxEmpty": "이 .damx 파일에서 테이블을 찾지 못했습니다.",
+  "erdDesign.damxError": "이 .damx 파일을 해석하지 못했습니다.",
   "erdDesign.connectHint": "테이블 가장자리에서 다른 테이블로 드래그하면 외래키가 추가됩니다. 우클릭으로 더 많은 메뉴.",
   "erdDesign.exportSql": "SQL 내보내기",
   "erdDesign.clear": "전체 지우기",

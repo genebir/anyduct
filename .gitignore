@@ -73,3 +73,6 @@ storybook-static/
 
 # --- mkdocs (Step 6.4) ---
 /site/
+
+# DA# ERD sample exports (large binaries — local only)
+erd_sample/

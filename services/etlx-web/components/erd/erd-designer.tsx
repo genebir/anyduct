@@ -54,6 +54,7 @@ import {
 import { useLocale } from "@/components/providers/locale-provider";
 import { ERD_EDGE_TYPES } from "@/components/erd/crowsfoot-edge";
 import { ImportTablesDialog } from "@/components/erd/import-tables-dialog";
+import { parseDamx } from "@/lib/damx";
 import { erdApi } from "@/lib/api";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import type { Messages } from "@/lib/i18n/messages";
@@ -420,6 +421,24 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
       relations: d.relations.filter((r) => r.from !== id && r.to !== id),
     }));
 
+  const damxRef = useRef<HTMLInputElement>(null);
+  const onDamxFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    try {
+      const incoming = parseDamx(await file.arrayBuffer());
+      if (incoming.tables.length === 0) {
+        toast.error(t("erdDesign.damxEmpty"));
+        return;
+      }
+      setDesign((d) => mergeDesign(d, incoming));
+      toast.success(t("erdDesign.damxImported", { n: incoming.tables.length }));
+    } catch {
+      toast.error(t("erdDesign.damxError"));
+    }
+  };
+
   const onAddTable = () =>
     setDesign((d) => {
       const n = d.tables.length;
@@ -496,6 +515,17 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
           <DatabaseIcon size={14} />
           {t("erdDesign.import")}
         </Button>
+        <Button size="sm" variant="secondary" onClick={() => damxRef.current?.click()}>
+          <DatabaseIcon size={14} />
+          {t("erdDesign.importDamx")}
+        </Button>
+        <input
+          ref={damxRef}
+          type="file"
+          accept=".damx"
+          className="hidden"
+          onChange={(e) => void onDamxFile(e)}
+        />
         <span className="text-xs text-text-muted">{t("erdDesign.connectHint")}</span>
         <div className="ml-auto flex items-center gap-2">
           <select

@@ -16,6 +16,8 @@ import {
   Position,
   ReactFlow,
   ReactFlowProvider,
+  getNodesBounds,
+  getViewportForBounds,
   useEdgesState,
   useNodesState,
   type Connection,
@@ -30,6 +32,7 @@ import {
   ArrowLeftIcon,
   CopyIcon,
   DatabaseIcon,
+  ImageIcon,
   KeyIcon,
   LayoutGridIcon,
   LinkIcon,
@@ -59,6 +62,7 @@ import { ERD_EDGE_TYPES } from "@/components/erd/crowsfoot-edge";
 import { ImportTablesDialog } from "@/components/erd/import-tables-dialog";
 import { parseDamx } from "@/lib/damx";
 import { autoLayout } from "@/lib/erd-layout";
+import { toPng } from "html-to-image";
 import { erdApi } from "@/lib/api";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import type { Messages } from "@/lib/i18n/messages";
@@ -433,6 +437,36 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
     setTimeout(() => rfRef.current?.fitView({ padding: 0.2, duration: 300 }), 60);
   };
 
+  const onExportPng = async () => {
+    if (design.tables.length === 0) return;
+    const el = document.querySelector<HTMLElement>(".react-flow__viewport");
+    if (!el) return;
+    const pad = 80;
+    const bounds = getNodesBounds(rfNodes);
+    const imgW = Math.min(Math.max(bounds.width + pad * 2, 600), 5000);
+    const imgH = Math.min(Math.max(bounds.height + pad * 2, 400), 5000);
+    const vp = getViewportForBounds(bounds, imgW, imgH, 0.2, 2, pad);
+    const bg = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim();
+    try {
+      const url = await toPng(el, {
+        backgroundColor: bg ? `rgb(${bg})` : "#ffffff",
+        width: imgW,
+        height: imgH,
+        style: {
+          width: `${imgW}px`,
+          height: `${imgH}px`,
+          transform: `translate(${vp.x}px, ${vp.y}px) scale(${vp.zoom})`,
+        },
+      });
+      const a = document.createElement("a");
+      a.download = `${docName || "erd"}.png`;
+      a.href = url;
+      a.click();
+    } catch {
+      toast.error(t("erdDesign.exportImageError"));
+    }
+  };
+
   const onJumpToTable = (name: string) => {
     const tb = design.tables.find(
       (t) => t.name === name || t.name.toLowerCase() === name.toLowerCase(),
@@ -595,6 +629,15 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
             disabled={design.tables.length === 0}
           >
             {t("erdDesign.exportSql")}
+          </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => void onExportPng()}
+            disabled={design.tables.length === 0}
+          >
+            <ImageIcon size={14} />
+            {t("erdDesign.exportImage")}
           </Button>
           <Button
             size="sm"

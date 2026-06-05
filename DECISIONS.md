@@ -2436,4 +2436,23 @@ L1 출시 직후 사용자가 5개 회신:
 
 ---
 
+## ADR-0078: BigQuery 커넥터 추가 — DBAPI 기반, 서버리스 DW
+
+**Date**: 2026-06-05
+**Status**: Accepted (진행 중 — type_mapping 먼저, 커넥터/web/wiring 후속)
+**Context**: Snowflake(ADR-0077) 직후 같은 DW 축으로 BigQuery 추가. BigQuery는 전통 RDBMS와 달라 적응 필요: (a) host/port/user/password 대신 **service-account JSON 인증**, (b) 백틱 식별자 quoting, (c) `INFORMATION_SCHEMA`가 데이터셋-스코프, (d) DML INSERT 쿼터(행단위 INSERT 비권장), (e) GoogleSQL(INT64/FLOAT64/STRING/NUMERIC/JSON/BYTES).
+
+**Decision**:
+1. **`core/type_mapping.py` bigquery dialect** (이 슬라이스): INT64(INTEGER/BIGINT/SMALLINT 통합), FLOAT64(REAL/DOUBLE), NUMERIC(DECIMAL, precision 부착), STRING(TEXT+VARCHAR — STRING은 길이 무의미라 length 자동 drop), BOOL, TIMESTAMP, DATE, JSON(네이티브), BYTES. vendor 파싱: int64/byteint/float64/bignumeric/bytes(+ 기존 string/numeric/bool/json/datetime 재사용).
+2. **커넥터 `bigquery.py`** (후속): `google-cloud-bigquery`의 **DB-API**(`google.cloud.bigquery.dbapi`)를 써서 vertica/snowflake와 동일 cursor 패턴(execute/executemany/fetchmany/description, paramstyle `%s`). 인증: `credentials_json`(서비스계정 dict/JSON, secret) 또는 ADC. 식별자는 **백틱**(`` `dataset.table` ``). `INFORMATION_SCHEMA`는 `<dataset>.INFORMATION_SCHEMA.{TABLES,COLUMNS}` 형태. lazy import. `@ConnectorRegistry.register("bigquery")`.
+3. **web/배선** (후속): operators.ts source/sink, connector-schemas.ts 폼(project/dataset/credentials_json/location), migration-config → 7×7, pyproject `[bigquery]` extra+entry-point, registry builtin, 서버 audit + DLQ readable 타입.
+
+**Consequences**:
+- ✅ type_mapping 단독 완결·테스트(드라이버 불요). 코어 unit +26 bigquery. cross-DW(snowflake→bigquery: VARIANT→JSON, NUMBER→NUMERIC, TIMESTAMP_TZ→TIMESTAMP) 검증.
+- ✅ STRING length-drop은 render_canonical의 기존 "VARCHAR in base" 가드로 자동(코드 변경 0).
+- ⚠️ **DML INSERT 쿼터** — BigQuery는 행단위 DML INSERT가 비싸고 일일 쿼터 존재. 본 커넥터는 contract 일관성 위해 executemany INSERT 사용(vertica/mssql 선례). 대용량은 load job / Storage Write API가 정석 → **후속 최적화 슬라이스 후보**. ADR에 명시.
+- ⚠️ **testcontainers 미포함** — BigQuery는 로컬 에뮬레이터가 제한적(쿼리 비호환). 커넥터는 fake-cursor 단위(생성 SQL) + live 프로젝트 게이트(snowflake/vertica/mssql 선례).
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

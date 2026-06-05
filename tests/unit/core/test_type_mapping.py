@@ -314,3 +314,67 @@ def test_number_precision_round_trips_to_snowflake() -> None:
     spec = normalize_db_type("NUMBER(12,4)")
     assert render_canonical(spec, dialect="snowflake") == "NUMBER(12,4)"
     assert render_canonical(spec, dialect="postgres") == "NUMERIC(12,4)"
+
+
+# ---------- Phase AGF: BigQuery / GoogleSQL (ADR-0078) ----------
+
+
+@pytest.mark.parametrize(
+    "canonical, expected",
+    [
+        (CanonicalType.INTEGER, "INT64"),
+        (CanonicalType.BIGINT, "INT64"),
+        (CanonicalType.SMALLINT, "INT64"),
+        (CanonicalType.REAL, "FLOAT64"),
+        (CanonicalType.DOUBLE, "FLOAT64"),
+        (CanonicalType.DECIMAL, "NUMERIC"),
+        (CanonicalType.TEXT, "STRING"),
+        (CanonicalType.VARCHAR, "STRING"),
+        (CanonicalType.BOOLEAN, "BOOL"),
+        (CanonicalType.TIMESTAMP, "TIMESTAMP"),
+        (CanonicalType.DATE, "DATE"),
+        (CanonicalType.JSON, "JSON"),
+        (CanonicalType.BLOB, "BYTES"),
+    ],
+)
+def test_render_canonical_bigquery(canonical: CanonicalType, expected: str) -> None:
+    assert render_canonical(TypeSpec(canonical), dialect="bigquery") == expected
+
+
+def test_render_varchar_drops_length_bigquery() -> None:
+    """BigQuery STRING has no practical length cap — VARCHAR(64) → STRING."""
+    spec = TypeSpec(CanonicalType.VARCHAR, length=64)
+    assert render_canonical(spec, dialect="bigquery") == "STRING"
+
+
+def test_render_decimal_keeps_precision_scale_bigquery() -> None:
+    spec = TypeSpec(CanonicalType.DECIMAL, precision=10, scale=2)
+    assert render_canonical(spec, dialect="bigquery") == "NUMERIC(10,2)"
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("INT64", CanonicalType.BIGINT),
+        ("BYTEINT", CanonicalType.BIGINT),
+        ("FLOAT64", CanonicalType.DOUBLE),
+        ("NUMERIC", CanonicalType.DECIMAL),
+        ("BIGNUMERIC", CanonicalType.DECIMAL),
+        ("STRING", CanonicalType.TEXT),
+        ("BYTES", CanonicalType.BLOB),
+        ("BOOL", CanonicalType.BOOLEAN),
+        ("JSON", CanonicalType.JSON),
+        ("TIMESTAMP", CanonicalType.TIMESTAMP),
+    ],
+)
+def test_normalize_bigquery_vendor_types(raw: str, expected: CanonicalType) -> None:
+    assert normalize_db_type(raw).canonical is expected
+
+
+def test_cross_dw_snowflake_to_bigquery_shapes() -> None:
+    """A Snowflake VARIANT/NUMBER/TIMESTAMP_TZ source lands as the right
+    BigQuery types (the 6x6 → 7x7 migration matrix in one assertion)."""
+    assert translate("VARIANT", target_dialect="bigquery") == "JSON"
+    assert translate("NUMBER(12,4)", target_dialect="bigquery") == "NUMERIC(12,4)"
+    assert translate("TIMESTAMP_TZ", target_dialect="bigquery") == "TIMESTAMP"
+    assert translate("STRING", target_dialect="bigquery") == "STRING"

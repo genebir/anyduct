@@ -165,6 +165,17 @@ _VENDOR_TO_CANONICAL: dict[str, CanonicalType] = {
     "timestamp_ntz": CanonicalType.TIMESTAMP,
     "timestamp_tz": CanonicalType.TIMESTAMP,
     "timestamp_ltz": CanonicalType.TIMESTAMP,
+    # ---- Phase AGF — BigQuery (GoogleSQL) vendor types (ADR-0078) -----
+    # BigQuery has one 64-bit integer (INT64) and one 64-bit float (FLOAT64);
+    # all integer/float aliases collapse to those.
+    "int64": CanonicalType.BIGINT,
+    "byteint": CanonicalType.BIGINT,
+    "float64": CanonicalType.DOUBLE,
+    # BIGNUMERIC is the extended-precision decimal.
+    "bignumeric": CanonicalType.DECIMAL,
+    # BYTES is BigQuery's binary type.
+    "bytes": CanonicalType.BLOB,
+    # (string / numeric / bool / json / datetime / date already mapped above.)
 }
 
 
@@ -326,6 +337,28 @@ _DIALECT_DDL: dict[str, dict[CanonicalType, str]] = {
         CanonicalType.DATE: "DATE",
         CanonicalType.JSON: "VARIANT",
         CanonicalType.BLOB: "BINARY",
+    },
+    # BigQuery / GoogleSQL (Phase AGF, ADR-0078) — serverless cloud DW.
+    #   * One integer type (INT64) and one float (FLOAT64).
+    #   * NUMERIC (38,9) fixed-precision; renders length when given.
+    #   * STRING is the only text type (no length cap in practice) — so
+    #     both TEXT and VARCHAR render as STRING and drop the length
+    #     (render_canonical only appends length when "VARCHAR" is in base).
+    #   * BOOL, native JSON type, TIMESTAMP (tz-aware UTC), BYTES for blobs.
+    "bigquery": {
+        CanonicalType.INTEGER: "INT64",
+        CanonicalType.BIGINT: "INT64",
+        CanonicalType.SMALLINT: "INT64",
+        CanonicalType.REAL: "FLOAT64",
+        CanonicalType.DOUBLE: "FLOAT64",
+        CanonicalType.DECIMAL: "NUMERIC",
+        CanonicalType.TEXT: "STRING",
+        CanonicalType.VARCHAR: "STRING",
+        CanonicalType.BOOLEAN: "BOOL",
+        CanonicalType.TIMESTAMP: "TIMESTAMP",
+        CanonicalType.DATE: "DATE",
+        CanonicalType.JSON: "JSON",
+        CanonicalType.BLOB: "BYTES",
     },
 }
 

@@ -10,6 +10,16 @@
 ## [Unreleased]
 
 ### Added
+- **커넥터 10종 추가 — DW·NoSQL·Streaming (Phases AGE→AGN, 2026-06-05, ADR-0077~0085)**:
+  - **Data Warehouse (4)**: Snowflake(`[snowflake]`), BigQuery(`[bigquery]`, DBAPI/백틱/PK NOT ENFORCED), Redshift(`[redshift]`, SUPER/VARBYTE/MERGE), ClickHouse(`[clickhouse]`, MergeTree/no row-upsert). 로드맵 DW 완주.
+  - **NoSQL (2)**: DynamoDB(`[dynamodb]`, schemaless, float↔Decimal), Cassandra(`[cassandra]`, CQL tabular라 마이그레이션 대상, INSERT=upsert).
+  - **Streaming (3)**: Kinesis(`[kinesis]`), SQS(`[sqs]`, commit=delete ack), Redis Streams(`[redis]`, XADD/XREADGROUP/XACK).
+  - 모두 `core/type_mapping.py` dialect + lazy import + registry/entry-point/extra + web operators/연결폼. SQL-capable 9 dialect로 **10×10 마이그레이션 매트릭스**. DynamoDB/Kinesis/SQS는 LocalStack 실통합검증.
+- **cross-dialect 마이그레이션 매트릭스 lock-in 테스트 (Phase AGO)** — 70 셀 하드코딩 + 커버리지/totality 가드.
+- **examples 2종 + 문서 (Phases AGP→AGS)** — `cross_cloud_dw_migration.yaml`, `stream_queue_to_stream.yaml` + `docs/guides/connectors.md` 카탈로그 전체 갱신.
+- **목록 줄바꿈 수정 (Phase AGI)** — 방식·최근실행 셀 + DataTable 헤더 `whitespace-nowrap`.
+
+### Added
 - **마이그레이션 리스트에 schedule indicator chip (Phase AAZ, 2026-06-01)** — bulk schedule(AAY) 후 시각적 confirmation:
   - 새 컬럼 **Schedule**: 행마다 `⏰ <cron_expr>` chip(active=accent 색 / paused=warning 색). 스케줄 없으면 `—`.
   - **tooltip**으로 전체 cron 표시(긴 표현식 대응).

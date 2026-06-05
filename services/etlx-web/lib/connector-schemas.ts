@@ -333,6 +333,26 @@ const SNOWFLAKE: ConnectorSchema = {
   ],
 };
 
+// Phase AGF (2026-06-05, ADR-0078) — BigQuery serverless DW.
+const BIGQUERY: ConnectorSchema = {
+  type: "bigquery",
+  label: "BigQuery",
+  description:
+    "google-cloud-bigquery-backed batch source + sink for Google BigQuery (GoogleSQL).",
+  fields: [
+    { key: "project", label: "Project", type: "string", required: true, help: "GCP project id." },
+    { key: "dataset", label: "Dataset", type: "string", required: true, help: "Default dataset for unqualified table names." },
+    {
+      key: "credentials_json",
+      label: "Service account JSON",
+      type: "password",
+      isSecret: true,
+      help: "Service-account key (JSON). Stored in the secret backend. Leave blank to use Application Default Credentials.",
+    },
+    { key: "location", label: "Location", type: "string", defaultValue: "US", help: "Dataset region, e.g. US, EU, asia-northeast3." },
+  ],
+};
+
 export const CONNECTOR_SCHEMAS: ConnectorSchema[] = [
   POSTGRES,
   MYSQL,
@@ -340,6 +360,7 @@ export const CONNECTOR_SCHEMAS: ConnectorSchema[] = [
   VERTICA,
   MSSQL,
   SNOWFLAKE,
+  BIGQUERY,
   MONGODB,
   S3,
   KAFKA,

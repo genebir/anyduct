@@ -33,6 +33,7 @@ export const MIGRATION_SUPPORTED_TYPES = new Set([
   "vertica",
   "mssql",
   "snowflake",
+  "bigquery",
 ]);
 
 /** Phase AAS (2026-06-01) — what *unit* the migration replicates.

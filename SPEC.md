@@ -464,7 +464,7 @@ commit:
 | 카테고리 | 대상 | 비고 |
 |---|---|---|
 | **RDBMS** | PostgreSQL ✅, MySQL ✅, SQLite ✅, Vertica ✅, MSSQL ✅, Oracle | 네이티브 드라이버 lazy import |
-| **NoSQL** | MongoDB ✅, DynamoDB ✅, Cassandra ✅, Redis | DynamoDB schemaless(scan); Cassandra는 CQL tabular라 마이그레이션 대상 |
+| **NoSQL** | MongoDB ✅, DynamoDB ✅, Cassandra ✅, Redis ✅ | DynamoDB schemaless(scan); Cassandra CQL tabular(마이그레이션 대상); Redis는 Streams(XADD/XREADGROUP, stream 컨트랙트) |
 | **Data Warehouse** | Snowflake ✅, BigQuery ✅, Redshift ✅, ClickHouse ✅ | bulk load API 우선 (ClickHouse는 append/overwrite만 — 행단위 upsert 미지원; load job·COPY는 후속) |
 | **Streaming** | Kafka ✅, Kinesis ✅, SQS ✅, Pulsar, RabbitMQ, NATS | at-least-once 보장 (Kinesis checkpoint 미구현; SQS commit=delete ack) |
 | **CDC** | Debezium(Kafka 위), PostgreSQL logical replication | StreamSource로 래핑 |

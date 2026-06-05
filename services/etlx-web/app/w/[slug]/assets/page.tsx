@@ -219,6 +219,11 @@ export default function AssetsPage() {
             ) : null}
           </div>
         ) : null}
+        {rows !== null && (search || kindFilter || opaqueOnly) ? (
+          <p className="mb-2 text-xs text-text-muted">
+            {t("assets.showingFiltered", { visible: filteredRows?.length ?? 0, total: rows.length })}
+          </p>
+        ) : null}
         <Card>
           {rows === null ? (
             <div className="py-12 text-center text-sm text-text-muted">{t("common.loading")}</div>

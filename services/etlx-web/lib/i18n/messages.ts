@@ -495,6 +495,7 @@ export const en = {
   "audit.emptyDesc":
     "Make a change in another tab (create a connection, add a member, etc.) — it'll appear here on next load.",
   "audit.showing": "Showing {from}–{to}",
+  "assets.showingFiltered": "Showing {visible} of {total}",
   "audit.moreAvailable": "(more available)",
   "audit.before": "Before",
   "audit.after": "After",
@@ -1796,6 +1797,7 @@ export const ko: Messages = {
   "audit.emptyDesc":
     "다른 탭에서 변경(연결 생성, 멤버 추가 등)하면 다음 로드 시 여기에 표시됩니다.",
   "audit.showing": "{from}–{to} 표시 중",
+  "assets.showingFiltered": "{total}건 중 {visible}건 표시",
   "audit.moreAvailable": "(더 있음)",
   "audit.before": "이전",
   "audit.after": "이후",

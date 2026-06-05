@@ -14,7 +14,7 @@ import {
 import "@xyflow/react/dist/style.css";
 import { KeyIcon } from "lucide-react";
 import { buildErdModel, type ErdColumn, type RawTable } from "@/lib/erd";
-import { ErdMarkers, ERD_MARKER_MANY, ERD_MARKER_ONE } from "@/components/erd/erd-markers";
+import { ERD_EDGE_TYPES } from "@/components/erd/crowsfoot-edge";
 
 const NODE_W = 240;
 const COL_GAP = 320;
@@ -90,9 +90,7 @@ export function SchemaErdGraph({ tables }: { tables: RawTable[] }) {
       source: r.from,
       target: r.to,
       label: r.column,
-      type: "smoothstep",
-      markerStart: ERD_MARKER_MANY,
-      markerEnd: ERD_MARKER_ONE,
+      type: "crowsfoot",
       style: edgeStyle,
       labelStyle: { fontSize: 10, fill: "rgb(var(--text-muted))" },
     }));
@@ -102,10 +100,10 @@ export function SchemaErdGraph({ tables }: { tables: RawTable[] }) {
   return (
     <ReactFlowProvider>
       <div className="h-[600px] w-full rounded-md border border-border-subtle bg-bg">
-        <ErdMarkers />
         <ReactFlow
           nodes={nodes}
           edges={edges}
+          edgeTypes={ERD_EDGE_TYPES}
           fitView
           fitViewOptions={{ padding: 0.2 }}
           nodesConnectable={false}

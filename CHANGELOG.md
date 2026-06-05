@@ -10,11 +10,12 @@
 ## [Unreleased]
 
 ### Added
-- **커넥터 10종 추가 — DW·NoSQL·Streaming (Phases AGE→AGN, 2026-06-05, ADR-0077~0085)**:
+- **커넥터 12종 추가 — DW·NoSQL·Streaming (Phases AGE→AGN, AGT, AGU, 2026-06-05, ADR-0077~0087)**:
   - **Data Warehouse (4)**: Snowflake(`[snowflake]`), BigQuery(`[bigquery]`, DBAPI/백틱/PK NOT ENFORCED), Redshift(`[redshift]`, SUPER/VARBYTE/MERGE), ClickHouse(`[clickhouse]`, MergeTree/no row-upsert). 로드맵 DW 완주.
   - **NoSQL (2)**: DynamoDB(`[dynamodb]`, schemaless, float↔Decimal), Cassandra(`[cassandra]`, CQL tabular라 마이그레이션 대상, INSERT=upsert).
-  - **Streaming (3)**: Kinesis(`[kinesis]`), SQS(`[sqs]`, commit=delete ack), Redis Streams(`[redis]`, XADD/XREADGROUP/XACK).
-  - 모두 `core/type_mapping.py` dialect + lazy import + registry/entry-point/extra + web operators/연결폼. SQL-capable 9 dialect로 **10×10 마이그레이션 매트릭스**. DynamoDB/Kinesis/SQS는 LocalStack 실통합검증.
+  - **Streaming (6)**: Kafka(기존) + Kinesis(`[kinesis]`), SQS(`[sqs]`, commit=delete ack), Redis Streams(`[redis]`, XADD/XREADGROUP/XACK), RabbitMQ(`[rabbitmq]`, aio-pika AMQP, commit=ack), NATS(`[nats]`, JetStream pull, commit=ack).
+  - 모두 lazy import + registry/entry-point/extra + web operators/연결폼. SQL-capable 9 dialect로 **10×10 마이그레이션 매트릭스**.
+  - **테스트 성숙도**: DynamoDB/Kinesis/SQS는 **LocalStack testcontainers 실통합검증**; 나머지(DW 4 / Cassandra / Redis / RabbitMQ / NATS)는 fake-cursor/client 단위 + live 서버 게이트(드라이버 API에 대한 모델 검증 — 실서버 검증 권장).
 - **cross-dialect 마이그레이션 매트릭스 lock-in 테스트 (Phase AGO)** — 70 셀 하드코딩 + 커버리지/totality 가드.
 - **examples 2종 + 문서 (Phases AGP→AGS)** — `cross_cloud_dw_migration.yaml`, `stream_queue_to_stream.yaml` + `docs/guides/connectors.md` 카탈로그 전체 갱신.
 - **목록 줄바꿈 수정 (Phase AGI)** — 방식·최근실행 셀 + DataTable 헤더 `whitespace-nowrap`.

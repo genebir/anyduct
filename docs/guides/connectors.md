@@ -55,6 +55,22 @@ SQL-capable migration targets form a 10×10 cross-DB matrix.
 | NATS | `[nats]` | `StreamSource`, `StreamSink` | nats-py JetStream; durable pull; commit = ack |
 | HTTP / REST | — (httpx, core dep) | `BatchSource` | paginated GET |
 
+### Testing maturity
+
+Every connector ships driver-free **unit tests** (registry resolution,
+protocol surface, generated SQL/messages, the "driver not installed"
+error). Beyond that, a subset has **live integration tests** that
+exercise the real driver against a container:
+
+- **Integration-verified** (testcontainers): PostgreSQL, MySQL, SQLite,
+  MongoDB, S3/MinIO, Kafka, **DynamoDB, Kinesis, SQS** (the last three
+  via LocalStack).
+- **Unit + live-gated**: Vertica, MSSQL, Snowflake, BigQuery, Redshift,
+  ClickHouse, Cassandra, Redis, RabbitMQ, NATS. These have no local
+  container (managed SaaS, heavy/native drivers), so their fake-client
+  unit tests verify the connector's *model* of the driver API — validate
+  against a real server before relying on them in production.
+
 ## Picking + naming a connector
 
 Connectors are looked up via `ConnectorRegistry` by the string set on

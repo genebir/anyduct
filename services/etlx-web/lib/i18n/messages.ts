@@ -1021,6 +1021,8 @@ export const en = {
   "overview.scheduleFireInMinutes": "next in {n}m",
   "overview.scheduleFireInHours": "next in {n}h",
   "overview.scheduleFireInDays": "next in {n}d",
+  "runs.exportCsv": "Export CSV",
+  "runs.csvExported": "Exported {n} runs to CSV",
   "runs.showing": "Showing {count} run(s)",
   "runs.loadMore": "Load more",
   "runs.atCap": "Showing the most recent {cap} runs (server cap).",
@@ -2295,6 +2297,8 @@ export const ko: Messages = {
   "runs.triggerFilterScheduled": "스케줄",
   "runs.triggerFilterAuto": "자동",
   "runs.showingFiltered": "{visible}/{total}건 표시 중 (트리거 필터)",
+  "runs.exportCsv": "CSV 내보내기",
+  "runs.csvExported": "{n}건의 run을 CSV로 내보냈습니다",
   "runs.statusFilterAll": "전체",
   // Phase T (2026-05-28) — 워크스페이스 대시보드 강화.
   "overview.inFlightCount": "{n}건 진행 중",

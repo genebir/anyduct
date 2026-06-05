@@ -398,6 +398,52 @@ export default function RunsPage() {
     ? pipelineNameById.get(pipelineFilter) ?? pipelineFilter.slice(0, 8) + "…"
     : null;
 
+  // Phase AHX — export the visible runs to CSV for run-history reports.
+  function exportCsv() {
+    if (!filteredRows || filteredRows.length === 0) return;
+    const cols = [
+      "status",
+      "pipeline",
+      "trigger",
+      "started_at",
+      "duration_seconds",
+      "records_written",
+      "error_class",
+      "run_id",
+    ];
+    const esc = (v: unknown) => {
+      const s = v == null ? "" : String(v);
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const trig = (r: RunSummary) =>
+      r.schedule_id ? "scheduled" : r.triggered_by_user_id ? "manual" : "auto";
+    const lines = [cols.join(",")];
+    for (const r of filteredRows) {
+      lines.push(
+        [
+          r.status,
+          pipelineNameById.get(r.pipeline_id) ?? r.pipeline_id,
+          trig(r),
+          r.started_at,
+          r.duration_seconds,
+          r.records_written,
+          r.error_class,
+          r.id,
+        ]
+          .map(esc)
+          .join(","),
+      );
+    }
+    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `runs-${ws?.slug ?? "log"}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success(t("runs.csvExported", { n: filteredRows.length }));
+  }
+
   return (
     <>
       <Header
@@ -447,6 +493,14 @@ export default function RunsPage() {
               ))}
             </select>
           </label>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={exportCsv}
+            disabled={!filteredRows || filteredRows.length === 0}
+          >
+            {t("runs.exportCsv")}
+          </Button>
           </div>
         }
       />

@@ -430,9 +430,11 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
     }));
 
   const rfRef = useRef<ReactFlowInstance<Node, Edge> | null>(null);
-  const onAutoLayout = () => {
+  const [layoutDir, setLayoutDir] = useState<"TB" | "LR">("TB");
+  const onAutoLayout = (dir: "TB" | "LR" = layoutDir) => {
     if (design.tables.length === 0) return;
-    setDesign((d) => autoLayout(d));
+    setLayoutDir(dir);
+    setDesign((d) => autoLayout(d, dir));
     // Re-fit after the new positions render.
     setTimeout(() => rfRef.current?.fitView({ padding: 0.2, duration: 300 }), 60);
   };
@@ -616,12 +618,23 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
           <Button
             size="sm"
             variant="secondary"
-            onClick={onAutoLayout}
+            onClick={() => onAutoLayout()}
             disabled={design.tables.length === 0}
           >
             <LayoutGridIcon size={14} />
             {t("erdDesign.autoLayout")}
           </Button>
+          <select
+            value={layoutDir}
+            onChange={(e) => onAutoLayout(e.target.value as "TB" | "LR")}
+            disabled={design.tables.length === 0}
+            className="h-8 rounded-md border border-border-subtle bg-bg px-1 text-xs text-text"
+            aria-label={t("erdDesign.layoutDir")}
+            title={t("erdDesign.layoutDir")}
+          >
+            <option value="TB">{t("erdDesign.layoutTB")}</option>
+            <option value="LR">{t("erdDesign.layoutLR")}</option>
+          </select>
           <Button
             size="sm"
             variant="secondary"

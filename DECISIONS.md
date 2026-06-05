@@ -2650,4 +2650,24 @@ L1 출시 직후 사용자가 5개 회신:
 
 ---
 
+## ADR-0089: 인터랙티브 ERD 디자이너 (web) — 직접 그리기 + SQL DDL 내보내기
+
+**Date**: 2026-06-05
+**Status**: Accepted
+**Context**: ADR-0088(연결 스키마 ERD *뷰어*) 후 사용자가 *"직접 그릴 수 있는 기능"*을 명확히 요청 — 기존 스키마 시각화가 아니라 테이블·컬럼·관계를 손으로 만드는 **디자인 도구**. 파이프라인 빌더가 이미 @xyflow/react 인터랙티브 편집을 하므로 그 패턴 재사용.
+
+**Decision**:
+1. **web-only, 클라이언트 전용** — 코어/서버/메타DB 변경 0. 신규: `lib/erd-design.ts`(순수 모델+SQL 내보내기) + `components/erd/erd-designer.tsx`(+story) + `/w/[slug]/erd` 페이지 + 사이드바 nav "ERD designer" + i18n(erdDesign.*).
+2. **드래그로 FK 생성** — 테이블 A→B 연결 시 A에 `<b 단수형>_id` 컬럼 자동 추가(없으면) + 관계 기록. 컬럼/PK는 우측 패널에서 편집.
+3. **영속화는 localStorage**(워크스페이스 slug별 키) — 서버 저장 다이어그램은 후속(메타DB 테이블/엔드포인트 필요). v1은 ephemeral + 자동저장.
+4. **SQL DDL 내보내기** — `toSql(design, dialect)`이 CREATE TABLE + PK + FK 생성, dialect는 식별자 quoting만 차등(타입은 사용자가 SQL 타입 선택). 5 dialect 선택.
+
+**Consequences**:
+- ✅ 코어/서버 변화 0. 빌더의 xyflow 편집 패턴 재사용. web tsc clean, dev /erd 200, 스토리 포함. ADR-0088 뷰어(연결→ERD)와 상보적(이쪽은 draw-your-own).
+- ⚠️ **클라이언트 전용** — 다이어그램이 브라우저 localStorage에만 존재(공유/서버 저장 안 됨). 서버 백킹은 후속.
+- ⚠️ SQL 내보내기는 quoting만 dialect-aware(타입 변환 없음 — 사용자가 고른 타입 그대로). 코어 type_mapping 연동(정확한 dialect 타입)은 후속.
+- ⚠️ 관계는 단일 컬럼 FK(드래그 생성), composite FK·다대다 조인테이블 UI는 후속.
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

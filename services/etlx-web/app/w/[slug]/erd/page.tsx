@@ -33,13 +33,19 @@ export default function ErdListPage() {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameVal, setRenameVal] = useState("");
 
-  const refresh = useCallback(async (wsId: string) => {
-    try {
-      setRows(await erdApi.list(wsId));
-    } catch {
-      setRows([]);
-    }
-  }, []);
+  const refresh = useCallback(
+    async (wsId: string) => {
+      try {
+        setRows(await erdApi.list(wsId));
+      } catch (e) {
+        // Surface the failure instead of silently showing the empty state —
+        // an operator must be able to tell "load failed" from "no diagrams".
+        toast.error(e instanceof ApiError ? e.message : t("common.loadFailed"));
+        setRows([]);
+      }
+    },
+    [t],
+  );
 
   useEffect(() => {
     if (ws?.id) void refresh(ws.id);

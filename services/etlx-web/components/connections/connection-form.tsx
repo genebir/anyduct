@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, type FormEvent } from "react";
+import { EyeIcon, EyeOffIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader } from "@/components/ui/card";
@@ -236,6 +237,8 @@ function FieldInput({
   // "omit the key" so the runtime falls back to its connector
   // default at construction time. Same effect on the wire, much
   // less surprise in the UI.
+  const { t } = useLocale();
+  const [reveal, setReveal] = useState(false);
   if (field.type === "number") {
     return (
       <Input
@@ -278,14 +281,26 @@ function FieldInput({
   }
   if (field.type === "password") {
     return (
-      <Input
-        type="password"
-        value={(value as string) ?? ""}
-        placeholder={field.placeholder ?? "••••••••"}
-        required={field.required}
-        autoComplete="new-password"
-        onChange={(e) => onChange(e.target.value)}
-      />
+      <div className="relative">
+        <Input
+          type={reveal ? "text" : "password"}
+          value={(value as string) ?? ""}
+          placeholder={field.placeholder ?? "••••••••"}
+          required={field.required}
+          autoComplete="new-password"
+          onChange={(e) => onChange(e.target.value)}
+          className="pr-9"
+        />
+        <button
+          type="button"
+          onClick={() => setReveal((v) => !v)}
+          aria-label={reveal ? t("connForm.concealValue") : t("connForm.revealValue")}
+          title={reveal ? t("connForm.concealValue") : t("connForm.revealValue")}
+          className="absolute inset-y-0 right-0 flex items-center px-2.5 text-text-muted hover:text-text"
+        >
+          {reveal ? <EyeOffIcon size={15} /> : <EyeIcon size={15} />}
+        </button>
+      </div>
     );
   }
   return (

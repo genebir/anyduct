@@ -583,6 +583,8 @@ export const en = {
   "connections.deleteFailed": "Couldn't delete connection.",
   // connection form
   "connForm.newTitle": "New connection",
+  "connForm.revealValue": "Show",
+  "connForm.concealValue": "Hide",
   "connForm.newDesc":
     "Credentials marked Password are stored in the configured secret backend — the metadata DB only keeps a reference.",
   "connForm.name": "Connection name",
@@ -1895,6 +1897,8 @@ export const ko: Messages = {
   "connections.loadFailed": "연결을 불러올 수 없습니다.",
   "connections.deleteFailed": "연결을 삭제할 수 없습니다.",
   "connForm.newTitle": "새 연결",
+  "connForm.revealValue": "표시",
+  "connForm.concealValue": "숨기기",
   "connForm.newDesc":
     "Password로 표시된 자격 증명은 구성된 시크릿 백엔드에 저장되며, 메타데이터 DB에는 참조만 남습니다.",
   "connForm.name": "연결 이름",

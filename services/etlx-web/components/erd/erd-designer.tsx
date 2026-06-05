@@ -607,6 +607,14 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
             {saveState === "saving" ? t("erdDoc.saving") : t("erdDoc.saved")}
           </span>
         ) : null}
+        {design.tables.length > 0 ? (
+          <span className="text-[11px] text-text-muted">
+            {t("erdDesign.counts", {
+              tables: design.tables.length,
+              rels: design.relations.length,
+            })}
+          </span>
+        ) : null}
         <span className="mx-1 h-5 w-px bg-border-subtle" />
         {design.tables.length > 8 ? (
           <>

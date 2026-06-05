@@ -21,6 +21,7 @@ import {
   type Edge,
   type Node,
   type NodeMouseHandler,
+  type ReactFlowInstance,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import Link from "next/link";
@@ -29,6 +30,7 @@ import {
   CopyIcon,
   DatabaseIcon,
   KeyIcon,
+  LayoutGridIcon,
   LinkIcon,
   PlusIcon,
   TrashIcon,
@@ -55,6 +57,7 @@ import { useLocale } from "@/components/providers/locale-provider";
 import { ERD_EDGE_TYPES } from "@/components/erd/crowsfoot-edge";
 import { ImportTablesDialog } from "@/components/erd/import-tables-dialog";
 import { parseDamx } from "@/lib/damx";
+import { autoLayout } from "@/lib/erd-layout";
 import { erdApi } from "@/lib/api";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import type { Messages } from "@/lib/i18n/messages";
@@ -421,6 +424,14 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
       relations: d.relations.filter((r) => r.from !== id && r.to !== id),
     }));
 
+  const rfRef = useRef<ReactFlowInstance<Node, Edge> | null>(null);
+  const onAutoLayout = () => {
+    if (design.tables.length === 0) return;
+    setDesign((d) => autoLayout(d));
+    // Re-fit after the new positions render.
+    setTimeout(() => rfRef.current?.fitView({ padding: 0.2, duration: 300 }), 60);
+  };
+
   const damxRef = useRef<HTMLInputElement>(null);
   const onDamxFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -432,7 +443,8 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
         toast.error(t("erdDesign.damxEmpty"));
         return;
       }
-      setDesign((d) => mergeDesign(d, incoming));
+      setDesign((d) => autoLayout(mergeDesign(d, incoming)));
+      setTimeout(() => rfRef.current?.fitView({ padding: 0.2, duration: 300 }), 60);
       toast.success(t("erdDesign.damxImported", { n: incoming.tables.length }));
     } catch {
       toast.error(t("erdDesign.damxError"));
@@ -542,6 +554,15 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
           <Button
             size="sm"
             variant="secondary"
+            onClick={onAutoLayout}
+            disabled={design.tables.length === 0}
+          >
+            <LayoutGridIcon size={14} />
+            {t("erdDesign.autoLayout")}
+          </Button>
+          <Button
+            size="sm"
+            variant="secondary"
             onClick={() => setSql(toSql(design, dialect))}
             disabled={design.tables.length === 0}
           >
@@ -566,6 +587,9 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
         <div className="min-w-0 flex-1 bg-bg">
           <ReactFlowProvider>
             <ReactFlow
+              onInit={(inst) => {
+                rfRef.current = inst;
+              }}
               nodes={rfNodes}
               edges={rfEdges}
               edgeTypes={ERD_EDGE_TYPES}

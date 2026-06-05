@@ -102,6 +102,8 @@ export function parseDamx(buf: ArrayBuffer): ErdDesign {
   const S = frameStrings(buf);
   const tables: ParsedTable[] = [];
   const colByGuid = new Map<string, ParsedColumn>();
+  const entGuidToName = new Map<string, string>();
+  const nameSeen = new Set<string>();
   let cols: ParsedColumn[] = [];
   let doubledGuid: string | null = null;
   const N = S.length;
@@ -154,6 +156,13 @@ export function parseDamx(buf: ArrayBuffer): ErdDesign {
       if (guidCount >= 2 && !hasColumnAhead) {
         for (const c of cols) c.table = s;
         tables.push({ name: s, columns: cols });
+        // Entity GUID = the token just before the table name at its first
+        // (definition) occurrence; relationship records reference it.
+        const eg = i > 0 && GUID_RE.test(S[i - 1]) ? S[i - 1] : null;
+        if (eg && !nameSeen.has(s) && !/clipboard|before_?id/i.test(s)) {
+          entGuidToName.set(eg, s);
+          nameSeen.add(s);
+        }
         cols = [];
         i += 1;
         continue;
@@ -169,62 +178,83 @@ export function parseDamx(buf: ArrayBuffer): ErdDesign {
   }
 
   const deduped = dedupeTables(tables);
-  const rels = extractKeyGroupRelations(S, colByGuid, deduped);
+  const rels = extractRelationships(S, entGuidToName, colByGuid, deduped);
   return toDesign(deduped, rels);
 }
 
 /**
- * Parse the **real** FK relationships from DA#'s key-inheritance groups
- * (Phase AHL). In the relationship section DA stores runs of consecutive
- * attribute GUIDs that share one key domain, e.g.
- * ``[부서.DEPT_NO(PK), 사용자별부서.DEPT_NO, 사용자별부서변경이력.DEPT_NO]``.
- * The parent is the member that is its table's sole primary key; every other
- * member is a FK child pointing at it. This is exact (no name guessing) —
- * only columns DA actually linked appear in a group.
+ * Parse the **real** FK relationships from DA#'s relationship section
+ * (Phase AHM). Each relationship is stored as two consecutive entity GUIDs
+ * — ``[parent][child]`` — followed by the parent's key attribute(s), e.g.
+ * ``[E:부서][E:사용자별부서] · · (a:부서.DEPT_NO)``. The parent is the entity
+ * whose key attribute follows; the FK is child → parent. This is the actual
+ * link data DA# draws the diagram from (not name/domain guessing).
+ *
+ * Filtering: the key attribute is preferred to be the parent's primary key
+ * (disambiguates direction + skips the junk self-pairs in later sections);
+ * self-references are only kept when the child table has an ``UP_*`` column
+ * (a real recursive FK like 상위부서번호).
  */
-function extractKeyGroupRelations(
+function extractRelationships(
   S: string[],
+  entGuidToName: Map<string, string>,
   colByGuid: Map<string, ParsedColumn>,
   tables: ParsedTable[],
 ): RawRelation[] {
   const valid = new Set(tables.map((t) => t.name));
-  const pkByTable = new Map<string, Set<string>>();
+  const upColByTable = new Map<string, string>();
   for (const t of tables) {
-    pkByTable.set(t.name, new Set(t.columns.filter((c) => c.pk).map((c) => c.name)));
+    const up = t.columns.find((c) => c.name.startsWith("UP_"));
+    if (up) upColByTable.set(t.name, up.name);
   }
-  const isSolePk = (table: string | null, col: string) =>
-    table != null && pkByTable.get(table)?.size === 1 && pkByTable.get(table)?.has(col);
-  const base = (name: string) => (name.startsWith("UP_") ? name.slice(3) : name);
 
   const out: RawRelation[] = [];
   const seen = new Set<string>();
+  const add = (fromTable: string, fromColumn: string, toTable: string) => {
+    const key = `${fromTable}.${fromColumn}->${toTable}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({ fromTable, fromColumn, toTable });
+  };
+
   const N = S.length;
   let k = 0;
-  while (k < N) {
-    if (!colByGuid.has(S[k])) {
+  while (k < N - 1) {
+    const e1 = entGuidToName.get(S[k]);
+    const e2 = entGuidToName.get(S[k + 1]);
+    if (!e1 || !e2) {
       k += 1;
       continue;
     }
-    // Maximal run of consecutive attribute GUIDs = one key group.
-    const run: ParsedColumn[] = [];
-    while (k < N && colByGuid.has(S[k])) {
-      run.push(colByGuid.get(S[k])!);
+    // Key attribute in the look-ahead window; prefer the one that is a PK.
+    let keyAttr: ParsedColumn | null = null;
+    let firstAttr: ParsedColumn | null = null;
+    for (let j = k + 2; j < Math.min(k + 8, N); j++) {
+      const a = colByGuid.get(S[j]);
+      if (a) {
+        if (!firstAttr) firstAttr = a;
+        if (a.pk) {
+          keyAttr = a;
+          break;
+        }
+      }
+    }
+    keyAttr = keyAttr ?? firstAttr;
+    if (!keyAttr) {
       k += 1;
+      continue;
     }
-    if (run.length < 2) continue;
-    // All members must share one key domain (same base column name).
-    const bases = new Set(run.map((c) => base(c.name)));
-    if (bases.size !== 1) continue;
-    const parent = run.find((c) => isSolePk(c.table, c.name) && c.table && valid.has(c.table));
-    if (!parent || !parent.table) continue;
-    for (const c of run) {
-      if (c === parent || !c.table || !valid.has(c.table)) continue;
-      if (c.table === parent.table && c.name === parent.name) continue;
-      const key = `${c.table}.${c.name}->${parent.table}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      out.push({ fromTable: c.table, fromColumn: c.name, toTable: parent.table });
+    const parent = keyAttr.table === e1 ? e1 : keyAttr.table === e2 ? e2 : e1;
+    const child = parent === e1 ? e2 : e1;
+    if (valid.has(child) && valid.has(parent)) {
+      if (child !== parent) {
+        add(child, keyAttr.name, parent);
+      } else {
+        const up = upColByTable.get(child);
+        if (up) add(child, up, parent);
+      }
     }
+    k += 2;
   }
   return out;
 }

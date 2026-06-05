@@ -2514,4 +2514,23 @@ L1 출시 직후 사용자가 5개 회신:
 
 ---
 
+## ADR-0082: Cassandra 커넥터 추가 — 와이드칼럼(CQL), 마이그레이션 대상
+
+**Date**: 2026-06-05
+**Status**: Accepted (진행 중 — type_mapping 먼저)
+**Context**: DynamoDB(AGJ) 후 NoSQL 추가 확장. Cassandra는 와이드칼럼이지만 **CQL이 tabular**(CREATE TABLE + PRIMARY KEY)라 DynamoDB와 달리 SchemaWriter/마이그레이션 대상이 됨. 차이: (a) **모든 INSERT가 upsert**(PK로 교체 — append/upsert 동일), (b) **decimal은 arbitrary-precision, (p,s) 미허용**, (c) JOIN/서브쿼리 없음, (d) lowercase CQL 타입(int/bigint/text/timestamp), (e) `cassandra-driver`(C-ext, 무거움).
+
+**Decision**:
+1. **type_mapping cassandra dialect** (이 슬라이스): int/bigint/smallint/float/double/decimal/text(TEXT+VARCHAR)/boolean/timestamp/date/blob. JSON→text(native 없음). vendor 파싱: varint/counter→BIGINT, ascii/uuid/timeuuid/inet→TEXT. **`_NO_PRECISION_DECIMAL_DIALECTS={"cassandra"}` 신설** — render_canonical이 cassandra decimal에 (p,s) 안 붙임(다른 dialect는 영향 0).
+2. **커넥터 `cassandra.py`** (후속): `cassandra-driver`(Cluster/Session), double-quote quoting, system_schema.tables/columns 인스펙션, ensure_table(CREATE TABLE + PRIMARY KEY 필수), read=SELECT(paging), write=prepared INSERT(=upsert). overwrite=TRUNCATE+insert. lazy import. **fake-session 단위**(DW 패턴 — cassandra-driver 무거워 dev-dep 미포함, live 게이트).
+3. **web/배선** (후속): operators source/sink, connector-schemas 폼(contact_points/port/keyspace/username/password), migration → 10×10, pyproject [cassandra] extra+entry-point, registry builtin, 서버 audit + DLQ readable(CQL은 SELECT/LIMIT 지원).
+
+**Consequences**:
+- ✅ type_mapping 단독 완결. 코어 unit +22 cassandra. cross-DB(clickhouse→cassandra) 검증. `_NO_PRECISION_DECIMAL_DIALECTS` 가드로 cassandra decimal 유효 CQL 보장.
+- ✅ **SchemaWriter 대상** — DynamoDB와 달리 마이그레이션 매트릭스 합류(10×10). INSERT=upsert는 멱등 복제에 유리.
+- ⚠️ **testcontainers 미포함** — cassandra-driver는 C-ext(빌드 부담) + Cassandra 컨테이너 기동 느림(~40s). DW 패턴(fake-session 단위 + live 게이트) 채택. DynamoDB의 실제 통합검증과 대비.
+- ⚠️ CQL 제약(JOIN 없음, ALLOW FILTERING 비권장) — source는 단순 SELECT 위주, 복잡 쿼리는 사용자 책임.
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

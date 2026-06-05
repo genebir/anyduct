@@ -497,3 +497,63 @@ def test_cross_dw_redshift_to_clickhouse_shapes() -> None:
     assert translate("SUPER", target_dialect="clickhouse") == "String"
     assert translate("TIMESTAMPTZ", target_dialect="clickhouse") == "DateTime64(3)"
     assert translate("BIGINT", target_dialect="clickhouse") == "Int64"
+
+
+# ---------- Phase AGK: Cassandra / CQL (ADR-0082) ----------
+
+
+@pytest.mark.parametrize(
+    "canonical, expected",
+    [
+        (CanonicalType.INTEGER, "int"),
+        (CanonicalType.BIGINT, "bigint"),
+        (CanonicalType.SMALLINT, "smallint"),
+        (CanonicalType.REAL, "float"),
+        (CanonicalType.DOUBLE, "double"),
+        (CanonicalType.DECIMAL, "decimal"),
+        (CanonicalType.TEXT, "text"),
+        (CanonicalType.VARCHAR, "text"),
+        (CanonicalType.BOOLEAN, "boolean"),
+        (CanonicalType.TIMESTAMP, "timestamp"),
+        (CanonicalType.DATE, "date"),
+        (CanonicalType.JSON, "text"),
+        (CanonicalType.BLOB, "blob"),
+    ],
+)
+def test_render_canonical_cassandra(canonical: CanonicalType, expected: str) -> None:
+    assert render_canonical(TypeSpec(canonical), dialect="cassandra") == expected
+
+
+def test_cassandra_decimal_drops_precision() -> None:
+    """Cassandra ``decimal`` is arbitrary-precision — no (p,s) suffix."""
+    spec = TypeSpec(CanonicalType.DECIMAL, precision=10, scale=2)
+    assert render_canonical(spec, dialect="cassandra") == "decimal"
+    # other dialects still keep precision (guard is cassandra-only).
+    assert render_canonical(spec, dialect="postgres") == "NUMERIC(10,2)"
+
+
+def test_cassandra_varchar_drops_length() -> None:
+    spec = TypeSpec(CanonicalType.VARCHAR, length=64)
+    assert render_canonical(spec, dialect="cassandra") == "text"
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("varint", CanonicalType.BIGINT),
+        ("counter", CanonicalType.BIGINT),
+        ("ascii", CanonicalType.TEXT),
+        ("uuid", CanonicalType.TEXT),
+        ("timeuuid", CanonicalType.TEXT),
+        ("inet", CanonicalType.TEXT),
+    ],
+)
+def test_normalize_cassandra_vendor_types(raw: str, expected: CanonicalType) -> None:
+    assert normalize_db_type(raw).canonical is expected
+
+
+def test_cross_clickhouse_to_cassandra_shapes() -> None:
+    """ClickHouse Int64/String/DateTime64 → Cassandra types (10x10 matrix)."""
+    assert translate("Int64", target_dialect="cassandra") == "bigint"
+    assert translate("String", target_dialect="cassandra") == "text"
+    assert translate("DateTime64", target_dialect="cassandra") == "timestamp"

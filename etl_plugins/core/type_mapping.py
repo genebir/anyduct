@@ -196,6 +196,15 @@ _VENDOR_TO_CANONICAL: dict[str, CanonicalType] = {
     "float32": CanonicalType.REAL,
     "fixedstring": CanonicalType.TEXT,
     "datetime64": CanonicalType.TIMESTAMP,
+    # ---- Phase AGK — Cassandra (CQL) vendor types (ADR-0082) -----
+    # varint/counter are arbitrary-precision integers → widen to BIGINT.
+    # uuid/timeuuid/inet/ascii are stored as text across DBs.
+    "varint": CanonicalType.BIGINT,
+    "counter": CanonicalType.BIGINT,
+    "ascii": CanonicalType.TEXT,
+    "uuid": CanonicalType.TEXT,
+    "timeuuid": CanonicalType.TEXT,
+    "inet": CanonicalType.TEXT,
 }
 
 
@@ -423,7 +432,35 @@ _DIALECT_DDL: dict[str, dict[CanonicalType, str]] = {
         CanonicalType.JSON: "String",
         CanonicalType.BLOB: "String",
     },
+    # Cassandra / CQL (Phase AGK, ADR-0082) — wide-column store.
+    #   * Type names are lowercase CQL: int/bigint/smallint/float/double.
+    #   * ``decimal`` is arbitrary-precision and takes NO (p,s) suffix —
+    #     see _NO_PRECISION_DECIMAL_DIALECTS.
+    #   * ``text`` is the string type (no length cap; varchar is an alias).
+    #   * No native JSON — text holds JSON payloads.
+    #   * ``timestamp`` (ms since epoch), ``date``, ``blob`` for binary.
+    "cassandra": {
+        CanonicalType.INTEGER: "int",
+        CanonicalType.BIGINT: "bigint",
+        CanonicalType.SMALLINT: "smallint",
+        CanonicalType.REAL: "float",
+        CanonicalType.DOUBLE: "double",
+        CanonicalType.DECIMAL: "decimal",
+        CanonicalType.TEXT: "text",
+        CanonicalType.VARCHAR: "text",
+        CanonicalType.BOOLEAN: "boolean",
+        CanonicalType.TIMESTAMP: "timestamp",
+        CanonicalType.DATE: "date",
+        CanonicalType.JSON: "text",
+        CanonicalType.BLOB: "blob",
+    },
 }
+
+
+# Dialects whose DECIMAL type is arbitrary-precision and rejects a
+# ``(p,s)`` suffix — e.g. Cassandra's ``decimal`` (ADR-0082). For these we
+# render the bare type even when the source carried precision/scale.
+_NO_PRECISION_DECIMAL_DIALECTS = {"cassandra"}
 
 
 def render_canonical(spec: TypeSpec, dialect: str) -> str:
@@ -448,6 +485,7 @@ def render_canonical(spec: TypeSpec, dialect: str) -> str:
     if (
         spec.canonical is CanonicalType.DECIMAL
         and spec.precision
+        and dialect not in _NO_PRECISION_DECIMAL_DIALECTS
         and any(name in base_upper for name in ("NUMERIC", "DECIMAL", "NUMBER"))
     ):
         if spec.scale is not None:

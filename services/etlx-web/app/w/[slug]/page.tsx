@@ -7,6 +7,7 @@ import {
   ActivityIcon,
   AlertTriangleIcon,
   ArrowRightLeftIcon,
+  BoxesIcon,
   CableIcon,
   CalendarClockIcon,
   ChevronRightIcon,
@@ -22,12 +23,14 @@ import {
   ApiError,
   assetsApi,
   connectionsApi,
+  erdApi,
   pipelinesApi,
   runsApi,
   schedulesApi,
   sensorsApi,
   type AssetSummary,
   type ConnectionSummary,
+  type ErdDiagramSummary,
   type PipelineSummary,
   type RunSummary,
   type ScheduleSummary,
@@ -66,6 +69,7 @@ export default function WorkspaceHomePage() {
   // Phase AFS (2026-06-04) — catalog asset count for the analyst's
   // dashboard entry point.
   const [assets, setAssets] = useState<AssetSummary[] | null>(null);
+  const [erds, setErds] = useState<ErdDiagramSummary[] | null>(null);
 
   useEffect(() => {
     if (!ws) return;
@@ -77,12 +81,13 @@ export default function WorkspaceHomePage() {
         // fan-out. Promise.allSettled instead of all so a single
         // failing endpoint doesn't blank the entire page — each panel
         // falls back to its own loading/empty state.
-        const [psR, connsR, rsR, sensR, assetsR] = await Promise.allSettled([
+        const [psR, connsR, rsR, sensR, assetsR, erdsR] = await Promise.allSettled([
           pipelinesApi.list(workspaceId),
           connectionsApi.list(workspaceId),
           runsApi.list(workspaceId, { limit: 50 }),
           sensorsApi.list(workspaceId),
           assetsApi.list(workspaceId),
+          erdApi.list(workspaceId),
         ]);
         if (cancelled) return;
         const ps =
@@ -92,6 +97,7 @@ export default function WorkspaceHomePage() {
         if (rsR.status === "fulfilled") setRuns(rsR.value);
         if (sensR.status === "fulfilled") setSensors(sensR.value);
         if (assetsR.status === "fulfilled") setAssets(assetsR.value);
+        if (erdsR.status === "fulfilled") setErds(erdsR.value);
 
         const groups = await Promise.all(
           ps.map(async (p) => {
@@ -498,6 +504,12 @@ export default function WorkspaceHomePage() {
                   })
                 : undefined
             }
+          />
+          <StatCard
+            label={t("nav.erd")}
+            value={erds?.length}
+            icon={<BoxesIcon size={18} />}
+            href={ws ? `/w/${ws.slug}/erd` : "#"}
           />
           <StatCard
             label={t("overview.runsToday")}

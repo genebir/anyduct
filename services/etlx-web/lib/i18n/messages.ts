@@ -456,6 +456,17 @@ export const en = {
 
   // connections
   "connections.new": "New connection",
+  // ERD (Phase AGW)
+  "erd.title": "Schema ERD",
+  "erd.viewAria": "View ERD for {name}",
+  "erd.loading": "Introspecting schema…",
+  "erd.empty": "No tables found for this connection.",
+  "erd.error": "Could not introspect this connection's schema.",
+  "erd.refresh": "Refresh",
+  "erd.back": "Back to connections",
+  "erd.inferredNote": "Relationships are inferred from <x>_id column names (connectors don't expose foreign keys yet).",
+  "erd.truncated": "Showing the first {n} of {total} tables.",
+  "erd.tableCount": "{n} tables",
   "connections.editAria": "Edit {name}",
   "connections.deleteAria": "Delete {name}",
   "connections.emptyTitle": "No connections yet",
@@ -1689,6 +1700,17 @@ export const ko: Messages = {
   "audit.loadFailed": "감사 로그를 불러올 수 없습니다.",
 
   "connections.new": "새 연결",
+  // ERD (Phase AGW)
+  "erd.title": "스키마 ERD",
+  "erd.viewAria": "{name} ERD 보기",
+  "erd.loading": "스키마 조사 중…",
+  "erd.empty": "이 연결에서 테이블을 찾지 못했습니다.",
+  "erd.error": "이 연결의 스키마를 조사하지 못했습니다.",
+  "erd.refresh": "새로고침",
+  "erd.back": "연결 목록으로",
+  "erd.inferredNote": "관계는 <x>_id 컬럼명에서 추론됩니다 (커넥터가 아직 외래키를 노출하지 않음).",
+  "erd.truncated": "전체 {total}개 중 처음 {n}개 테이블만 표시합니다.",
+  "erd.tableCount": "테이블 {n}개",
   "connections.editAria": "{name} 편집",
   "connections.deleteAria": "{name} 삭제",
   "connections.emptyTitle": "아직 연결이 없습니다",

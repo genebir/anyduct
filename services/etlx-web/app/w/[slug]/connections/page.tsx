@@ -2,8 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
+import Link from "next/link";
 import {
   CableIcon,
+  NetworkIcon,
   PencilIcon,
   PlusIcon,
   ShieldCheckIcon,
@@ -496,6 +498,15 @@ export default function ConnectionsPage() {
                       >
                         {t("common.test")}
                       </Button>
+                      <Link
+                        href={`/w/${slug}/connections/${row.id}/erd`}
+                        onClick={(e) => e.stopPropagation()}
+                        aria-label={t("erd.viewAria", { name: row.name })}
+                      >
+                        <Button size="sm" variant="ghost">
+                          <NetworkIcon size={14} />
+                        </Button>
+                      </Link>
                       <Button
                         size="sm"
                         variant="ghost"

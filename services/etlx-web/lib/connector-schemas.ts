@@ -220,6 +220,25 @@ const CASSANDRA: ConnectorSchema = {
   ],
 };
 
+// Phase AGL (2026-06-05, ADR-0083) — Kinesis Data Streams.
+const KINESIS: ConnectorSchema = {
+  type: "kinesis",
+  label: "Kinesis",
+  description: "boto3-backed stream source + sink for Amazon Kinesis Data Streams.",
+  fields: [
+    { key: "region", label: "Region", type: "string", defaultValue: "us-east-1" },
+    {
+      key: "endpoint_url",
+      label: "Endpoint URL",
+      type: "string",
+      placeholder: "leave blank for AWS; http://localhost:4566 for LocalStack",
+      help: "Leave blank for AWS Kinesis; set for LocalStack / local testing.",
+    },
+    { key: "aws_access_key_id", label: "Access key", type: "password", isSecret: true },
+    { key: "aws_secret_access_key", label: "Secret key", type: "password", isSecret: true },
+  ],
+};
+
 const HTTP: ConnectorSchema = {
   type: "http",
   label: "HTTP / REST",
@@ -457,6 +476,7 @@ export const CONNECTOR_SCHEMAS: ConnectorSchema[] = [
   CASSANDRA,
   S3,
   KAFKA,
+  KINESIS,
   HTTP,
 ];
 

@@ -496,6 +496,30 @@ const SOURCES: OperatorSpec[] = [
     ],
   },
   {
+    // Phase AGL (2026-06-05, ADR-0083) — Kinesis stream source.
+    id: "source:kinesis",
+    kind: "source",
+    connectorType: "kinesis",
+    label: "Kinesis stream",
+    description: "Stream-source records from a Kinesis data stream (use a stream-mode pipeline).",
+    icon: RadioTowerIcon,
+    accent: "#EC4899",
+    streaming: true,
+    fields: [
+      { key: "connection", label: "Connection", kind: "connection", required: true },
+      { key: "topic", label: "Stream", kind: "string", placeholder: "events" },
+      {
+        key: "iterator_type",
+        label: "Start position",
+        kind: "select",
+        options: [
+          { label: "TRIM_HORIZON (oldest)", value: "TRIM_HORIZON" },
+          { label: "LATEST (new only)", value: "LATEST" },
+        ],
+      },
+    ],
+  },
+  {
     id: "source:http",
     kind: "source",
     connectorType: "http",
@@ -1483,6 +1507,21 @@ const SINKS: OperatorSpec[] = [
           { label: "avro", value: "avro" },
         ],
       },
+    ],
+  },
+  {
+    // Phase AGL (2026-06-05, ADR-0083) — Kinesis stream sink.
+    id: "sink:kinesis",
+    kind: "sink",
+    connectorType: "kinesis",
+    label: "Kinesis stream",
+    description: "Stream-sink records to a Kinesis data stream (put_record).",
+    icon: RadioTowerIcon,
+    accent: "#4ADE80",
+    streaming: true,
+    fields: [
+      { key: "connection", label: "Connection", kind: "connection", required: true },
+      { key: "topic", label: "Stream", kind: "string", placeholder: "events" },
     ],
   },
 ];

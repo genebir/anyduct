@@ -9,11 +9,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { BoxesIcon, PlusIcon, Trash2Icon } from "lucide-react";
+import { BoxesIcon, PencilIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { toast } from "sonner";
 import { Header } from "@/components/shell/header";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ApiError, erdApi, type ErdDiagramSummary } from "@/lib/api";
 import { EMPTY_DESIGN } from "@/lib/erd-design";
@@ -28,6 +29,9 @@ export default function ErdListPage() {
   const { t } = useLocale();
   const [rows, setRows] = useState<ErdDiagramSummary[] | null>(null);
   const [creating, setCreating] = useState(false);
+  const [query, setQuery] = useState("");
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameVal, setRenameVal] = useState("");
 
   const refresh = useCallback(async (wsId: string) => {
     try {
@@ -66,6 +70,22 @@ export default function ErdListPage() {
     }
   };
 
+  const onRename = async (id: string) => {
+    const name = renameVal.trim();
+    setRenamingId(null);
+    if (!ws?.id || !name) return;
+    try {
+      await erdApi.update(ws.id, id, { name });
+      await refresh(ws.id);
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : t("common.error"));
+    }
+  };
+
+  const filtered = (rows ?? []).filter((d) =>
+    d.name.toLowerCase().includes(query.trim().toLowerCase()),
+  );
+
   return (
     <div>
       <Header
@@ -88,28 +108,71 @@ export default function ErdListPage() {
             description={t("erdList.emptyDesc")}
           />
         ) : (
-          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-            {rows.map((d) => (
-              <Card key={d.id} className="flex items-center justify-between gap-2 p-3">
-                <Link href={`/w/${slug}/erd/${d.id}`} className="min-w-0 flex-1">
-                  <div className="truncate font-medium text-text">{d.name}</div>
-                  <div className="mt-0.5 text-xs text-text-muted">
-                    {t("erdList.tableCount", { n: d.table_count })} ·{" "}
-                    <span title={absoluteTime(d.updated_at)}>{relativeTime(d.updated_at, t)}</span>
-                  </div>
-                </Link>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  aria-label={t("erdList.deleteAria", { name: d.name })}
-                  className="hover:text-error"
-                  onClick={() => void onDelete(d.id)}
-                >
-                  <Trash2Icon size={14} />
-                </Button>
-              </Card>
-            ))}
-          </div>
+          <>
+            {rows.length > 6 ? (
+              <Input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder={t("erdList.search")}
+                className="mb-3 max-w-xs"
+              />
+            ) : null}
+            {filtered.length === 0 ? (
+              <p className="py-6 text-center text-sm text-text-muted">{t("common.noResults")}</p>
+            ) : (
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {filtered.map((d) => (
+                  <Card key={d.id} className="flex items-center justify-between gap-2 p-3">
+                    {renamingId === d.id ? (
+                      <Input
+                        autoFocus
+                        value={renameVal}
+                        onChange={(e) => setRenameVal(e.target.value)}
+                        onBlur={() => void onRename(d.id)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                          if (e.key === "Escape") setRenamingId(null);
+                        }}
+                        className="h-8 flex-1 text-sm"
+                      />
+                    ) : (
+                      <Link href={`/w/${slug}/erd/${d.id}`} className="min-w-0 flex-1">
+                        <div className="truncate font-medium text-text">{d.name}</div>
+                        <div className="mt-0.5 text-xs text-text-muted">
+                          {t("erdList.tableCount", { n: d.table_count })} ·{" "}
+                          <span title={absoluteTime(d.updated_at)}>
+                            {relativeTime(d.updated_at, t)}
+                          </span>
+                        </div>
+                      </Link>
+                    )}
+                    <div className="flex shrink-0 items-center">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        aria-label={t("erdList.renameAria", { name: d.name })}
+                        onClick={() => {
+                          setRenameVal(d.name);
+                          setRenamingId(d.id);
+                        }}
+                      >
+                        <PencilIcon size={14} />
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        aria-label={t("erdList.deleteAria", { name: d.name })}
+                        className="hover:text-error"
+                        onClick={() => void onDelete(d.id)}
+                      >
+                        <Trash2Icon size={14} />
+                      </Button>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>

@@ -47,3 +47,18 @@ def test_cross_db_upsert_example_validates() -> None:
     assert pc.sink.mode == "upsert"
     assert pc.sink.key_columns == ["id"]
     assert pc.sink.auto_create_table is True
+
+
+def test_cross_cloud_dw_migration_example_validates() -> None:
+    """Phase AGE→AGH: cross-cloud DW migration (Snowflake → BigQuery)
+    exercising the new connector types + canonical type translation."""
+    pc = load_pipeline(EXAMPLES / "cross_cloud_dw_migration.yaml")
+    assert pc.name == "warehouse_sync"
+    assert pc.mode == "batch"
+    assert pc.source is not None and pc.source.connection == "snowflake_dw"
+    assert pc.sink is not None
+    assert pc.sink.connection == "bigquery_dw"
+    assert pc.sink.table == "analytics.events_mirror"
+    assert pc.sink.mode == "upsert"
+    assert pc.sink.key_columns == ["id"]
+    assert pc.sink.auto_create_table is True

@@ -16,3 +16,21 @@ connections:
     type: sqlite
     config:
       database: /tmp/analytics.db
+  # Cloud DW connectors (Phases AGE→AGH) — companions for
+  # examples/cross_cloud_dw_migration.yaml. Install the matching extra
+  # ([snowflake] / [bigquery]) before a live run.
+  - name: snowflake_dw
+    type: snowflake
+    config:
+      account: xy12345.eu-west-1
+      user: etl_loader
+      password: !secret snowflake_dw.password
+      warehouse: LOAD_WH
+      database: ANALYTICS
+      schema: PUBLIC
+  - name: bigquery_dw
+    type: bigquery
+    config:
+      project: my-gcp-project
+      dataset: analytics
+      credentials_json: !secret bigquery_dw.credentials_json

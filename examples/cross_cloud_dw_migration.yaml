@@ -1,0 +1,38 @@
+# Cross-cloud data-warehouse migration (Phases AGE→AGH, 2026-06-05).
+#
+# Replicates a Snowflake table into BigQuery without hand-writing the
+# destination DDL. ``auto_create_table`` inspects the Snowflake schema
+# and translates each column through the canonical type mapping into
+# GoogleSQL — the interesting cross-cloud cases:
+#
+#   Snowflake          → BigQuery
+#   ----------------------------------
+#   NUMBER(p,s)        → NUMERIC(p,s)
+#   VARIANT            → JSON
+#   TIMESTAMP_TZ       → TIMESTAMP
+#   VARCHAR            → STRING
+#   BINARY             → BYTES
+#
+# ``mode: upsert`` + ``key_columns`` makes the run idempotent: BigQuery
+# MERGEs on ``id`` and the auto-created table gets an (unenforced)
+# PRIMARY KEY so re-runs replace rather than duplicate.
+#
+# Pair this with ``examples/connections.example.yaml`` and run with:
+#
+#     uv run etlx validate examples/cross_cloud_dw_migration.yaml \
+#         --connections examples/connections.example.yaml
+#
+# (A live run needs the [snowflake] + [bigquery] extras and real
+# credentials behind the !secret markers.)
+name: warehouse_sync
+mode: batch
+source:
+  connection: snowflake_dw
+  query: SELECT id, payload, amount, updated_at FROM analytics.events
+sink:
+  connection: bigquery_dw
+  table: analytics.events_mirror
+  mode: upsert
+  key_columns: [id]
+  auto_create_table: true
+  auto_create_if_exists: skip   # try also: drop (rebuild) | error (fail-loud)

@@ -13,8 +13,10 @@ repos:
       - id: check-yaml
         # mkdocs-material uses !!python/name: tags (e.g. for the Mermaid
         # superfences fence formatter) that check-yaml's safe loader
-        # cannot construct. yamllint still lints the file structure.
-        exclude: ^mkdocs\.yml$
+        # cannot construct. The example connections file uses the custom
+        # ``!secret`` tag (ADR-0024) for the same reason. yamllint still
+        # lints both files' structure.
+        exclude: ^(mkdocs\.yml|examples/connections\.example\.yaml)$
       - id: check-toml
       - id: check-json
       - id: check-added-large-files

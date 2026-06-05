@@ -73,6 +73,14 @@ const NAV: NavEntry[] = [
     icon: <ArrowRightLeftIcon size={18} />,
   },
   {
+    // Phase AGX (2026-06-05): interactive ERD designer — draw tables,
+    // columns, relationships by hand; export to SQL DDL.
+    id: "erd",
+    href: (s) => `/w/${s}/erd`,
+    labelKey: "nav.erd",
+    icon: <BoxesIcon size={18} />,
+  },
+  {
     id: "schedules",
     href: (s) => `/w/${s}/schedules`,
     labelKey: "nav.schedules",

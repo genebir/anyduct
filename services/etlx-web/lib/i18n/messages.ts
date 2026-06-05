@@ -86,7 +86,20 @@ export const en = {
   "nav.connections": "Connections",
   "nav.pipelines": "Pipelines",
   "nav.migrations": "Migrations",
+  "nav.erd": "ERD designer",
   "nav.schedules": "Schedules",
+  // ERD designer (Phase AGX)
+  "erdDesign.addTable": "Add table",
+  "erdDesign.connectHint": "Drag from a table's edge to another to add a foreign key.",
+  "erdDesign.exportSql": "Export SQL",
+  "erdDesign.clear": "Clear",
+  "erdDesign.table": "Table",
+  "erdDesign.columns": "Columns",
+  "erdDesign.pk": "Toggle primary key",
+  "erdDesign.deleteTable": "Delete table",
+  "erdDesign.sqlTitle": "CREATE TABLE — {dialect}",
+  "erdDesign.copy": "Copy",
+  "erdDesign.copied": "SQL copied to clipboard",
   "nav.sensors": "Sensors",
   // migrations page (Phase AAN, 2026-05-29) — filtered view of
   // pipelines whose at-least-one sink auto-creates its destination.
@@ -1340,7 +1353,20 @@ export const ko: Messages = {
   "nav.connections": "연결",
   "nav.pipelines": "파이프라인",
   "nav.migrations": "마이그레이션",
+  "nav.erd": "ERD 디자이너",
   "nav.schedules": "스케줄",
+  // ERD designer (Phase AGX)
+  "erdDesign.addTable": "테이블 추가",
+  "erdDesign.connectHint": "테이블 가장자리에서 다른 테이블로 드래그하면 외래키가 추가됩니다.",
+  "erdDesign.exportSql": "SQL 내보내기",
+  "erdDesign.clear": "전체 지우기",
+  "erdDesign.table": "테이블",
+  "erdDesign.columns": "컬럼",
+  "erdDesign.pk": "기본키 토글",
+  "erdDesign.deleteTable": "테이블 삭제",
+  "erdDesign.sqlTitle": "CREATE TABLE — {dialect}",
+  "erdDesign.copy": "복사",
+  "erdDesign.copied": "SQL을 클립보드에 복사했습니다",
   // 마이그레이션 페이지 (Phase AAN, 2026-05-29)
   "migrations.title": "DB 마이그레이션",
   "migrations.desc":

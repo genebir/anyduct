@@ -117,7 +117,14 @@ uv run mypy etl_plugins
 
 ## 5. 현재 단계
 
-> **최신 마일스톤 (2026-06-04): DLQ record 뷰어 — 실패 record 내용 조회 (Phase DLQ-1/DLQ-2, ADR-0075).** 운영-가시성 23슬라이스(AET→AFP) 포화 후 더 큰 축으로 전환. 그동안 DLQ는 빌더에서 *설정*하고 run 상세에서 라우팅 *수*(AFB)만 봤지 실패 record의 **내용**은 못 봤다.
+> **최신 마일스톤 (2026-06-05): Snowflake 커넥터 추가 — 첫 클라우드 DW (Phase AGE, ADR-0077).** 야간 DLQ/dogfood 백로그 소진 후 사용자가 "신규 DW 커넥터" 축 선택. AAQ(vertica/mssql) 패턴으로 5 슬라이스:
+> - **type_mapping**: snowflake dialect(NUMBER/FLOAT/VARCHAR/TIMESTAMP_TZ/VARIANT/BINARY) + vendor 파싱(number/string/variant/object/array/timestamp_ntz|tz|ltz) + render_canonical DECIMAL precision에 NUMBER 추가. 코어 unit +25.
+> - **커넥터** `snowflake.py`: BatchSource/Sink + SchemaInspector(information_schema) + ensure_table(auto_create+PK) + execute_statement + read/write/MERGE upsert. driver lazy import. fake-cursor 단위 9건(생성 SQL 검증 — live 계정 불요, testcontainers 미포함은 SaaS 게이트).
+> - **배선**: pyproject [snowflake] extra+entry-point, registry _BUILTIN_MODULES, 서버 _SQL_CONNECTION_TYPES + DLQ _SQL_READABLE_TYPES(LIMIT 지원).
+> - **web**: operators.ts source/sink, connector-schemas.ts 연결 폼(account/warehouse/role 등), migration-config MIGRATION_SUPPORTED_TYPES → **6×6 = 36 마이그레이션 페어**.
+> - 검증: 코어 945 passed(+34 snowflake type+smoke), mypy/ruff clean, web tsc clean + dev 200. 코어 production 무영향(신규 모듈+목록 추가). **남은 DW 후보**: BigQuery/Redshift/ClickHouse.
+>
+> **이전 마일스톤 (2026-06-04): DLQ record 뷰어 — 실패 record 내용 조회 (Phase DLQ-1/DLQ-2, ADR-0075).** 운영-가시성 23슬라이스(AET→AFP) 포화 후 더 큰 축으로 전환. 그동안 DLQ는 빌더에서 *설정*하고 run 상세에서 라우팅 *수*(AFB)만 봤지 실패 record의 **내용**은 못 봤다.
 > - **DLQ-1 (서버, ADR-0075)**: `GET /workspaces/{ws}/pipelines/{pid}/dlq/records?limit=N`(Viewer+, read-only, limit [1,200]). `DlqPreviewService`가 dry-run의 connection 해석을 재사용해 현재 버전 dlq config를 풀고, DLQ sink가 `BatchSource`면(모든 RDBMS) `asyncio.to_thread`에서 connect→read(dialect-aware `LIMIT`/mssql `TOP`)→close로 최대 N행 반환. 테이블명 화이트리스트 정규식(SQL splice 방어). 읽기 불가 시 `available=False`+안정적 reason(no_dlq/stream_dlq/connection_missing/sink_not_readable/read_failed 등). **코어 변화 0**(기존 `BatchSource.read`). 신규 서버 it 4(testcontainers — 실제 DLQ 라우팅 run 위 round-trip).
 > - **DLQ-2 (web)**: run 상세 우측에 collapsible `DlqRecordsCard`(dlqRouted>0일 때, lazy fetch). available이면 컬럼 union 테이블, 아니면 reason별 안내(Kafka/HTTP는 미리보기 불가 등). `pipelinesApi.dlqRecords` + `DlqPreviewResponse`.
 > - **DLQ-3 (web)**: 뷰어 카드에 Copy(records→JSON 클립보드, 티켓용) + Refresh(DLQ 테이블은 후속 run마다 증가, lazy fetch 캐시 갱신).

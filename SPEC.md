@@ -463,9 +463,9 @@ commit:
 
 | 카테고리 | 대상 | 비고 |
 |---|---|---|
-| **RDBMS** | PostgreSQL ✅, MySQL ✅, SQLite ✅, Oracle, MSSQL | SQLAlchemy + 네이티브 드라이버 병행 |
-| **NoSQL** | MongoDB, Redis, Cassandra, DynamoDB | |
-| **Data Warehouse** | Snowflake, BigQuery, Redshift, ClickHouse | bulk load API 우선 |
+| **RDBMS** | PostgreSQL ✅, MySQL ✅, SQLite ✅, Vertica ✅, MSSQL ✅, Oracle | 네이티브 드라이버 lazy import |
+| **NoSQL** | MongoDB ✅, Redis, Cassandra, DynamoDB | |
+| **Data Warehouse** | Snowflake ✅, BigQuery, Redshift, ClickHouse | bulk load API 우선 |
 | **Streaming** | Kafka ✅, Kinesis, Pulsar, RabbitMQ, NATS | exactly-once는 best-effort, at-least-once 보장 |
 | **CDC** | Debezium(Kafka 위), PostgreSQL logical replication | StreamSource로 래핑 |
 | **Object Storage** | S3 ✅, GCS, Azure Blob, Local FS | parquet/csv/jsonl 지원 |

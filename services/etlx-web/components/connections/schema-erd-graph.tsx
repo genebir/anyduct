@@ -14,6 +14,7 @@ import {
 import "@xyflow/react/dist/style.css";
 import { KeyIcon } from "lucide-react";
 import { buildErdModel, type ErdColumn, type RawTable } from "@/lib/erd";
+import { ErdMarkers, ERD_MARKER_MANY, ERD_MARKER_ONE } from "@/components/erd/erd-markers";
 
 const NODE_W = 240;
 const COL_GAP = 320;
@@ -89,7 +90,9 @@ export function SchemaErdGraph({ tables }: { tables: RawTable[] }) {
       source: r.from,
       target: r.to,
       label: r.column,
-      animated: true,
+      type: "smoothstep",
+      markerStart: ERD_MARKER_MANY,
+      markerEnd: ERD_MARKER_ONE,
       style: edgeStyle,
       labelStyle: { fontSize: 10, fill: "rgb(var(--text-muted))" },
     }));
@@ -99,6 +102,7 @@ export function SchemaErdGraph({ tables }: { tables: RawTable[] }) {
   return (
     <ReactFlowProvider>
       <div className="h-[600px] w-full rounded-md border border-border-subtle bg-bg">
+        <ErdMarkers />
         <ReactFlow
           nodes={nodes}
           edges={edges}

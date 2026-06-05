@@ -38,6 +38,7 @@ import {
   toSql,
 } from "@/lib/erd-design";
 import { useLocale } from "@/components/providers/locale-provider";
+import { ErdMarkers, ERD_MARKER_MANY, ERD_MARKER_ONE } from "@/components/erd/erd-markers";
 import type { Messages } from "@/lib/i18n/messages";
 
 type Translate = (key: keyof Messages, vars?: Record<string, string | number>) => string;
@@ -213,7 +214,9 @@ export function ErdDesigner({ slug }: { slug: string }) {
         source: r.from,
         target: r.to,
         label: r.fromColumn,
-        animated: true,
+        type: "smoothstep",
+        markerStart: ERD_MARKER_MANY,
+        markerEnd: ERD_MARKER_ONE,
         style: { stroke: "rgb(var(--accent))", strokeWidth: 1.5 },
         labelStyle: { fontSize: 10, fill: "rgb(var(--text-muted))" },
       })),
@@ -303,6 +306,7 @@ export function ErdDesigner({ slug }: { slug: string }) {
 
       <div className="flex min-h-0 flex-1">
         <div className="min-w-0 flex-1 bg-bg">
+          <ErdMarkers />
           <ReactFlowProvider>
             <ReactFlow
               nodes={rfNodes}

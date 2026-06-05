@@ -2474,4 +2474,23 @@ L1 출시 직후 사용자가 5개 회신:
 
 ---
 
+## ADR-0080: ClickHouse 커넥터 추가 — 컬럼지향 OLAP, 부분 parity
+
+**Date**: 2026-06-05
+**Status**: Accepted (진행 중 — type_mapping 먼저)
+**Context**: Snowflake/BigQuery/Redshift에 이어 네 번째이자 마지막 로드맵 DW. ClickHouse는 가장 이질적: (a) CREATE TABLE에 **ENGINE 절 필수**(MergeTree + ORDER BY), (b) 행단위 **UPSERT/MERGE 미지원**(append 최적화 — ReplacingMergeTree+머지 또는 비동기 mutation이 정석), (c) **Nullable(T)/LowCardinality(T) 래퍼**, (d) 폭-명명 정수(Int8/16/32/64, 대소문자 구분), (e) String이 text/binary/JSON 통합.
+
+**Decision**:
+1. **type_mapping clickhouse dialect** (이 슬라이스): Int32/Int64/Int16, Float32/Float64, Decimal(P,S), String(TEXT/VARCHAR/JSON/BLOB 통합), Bool, Date, DateTime64(3). 케이스 보존(Int64≠INT64). vendor 파싱: int16/int32/uint8|16|32|64/float32/fixedstring/datetime64(int8은 postgres BIGINT 유지 — ClickHouse Int8→BIGINT widening 안전).
+2. **커넥터 `clickhouse.py`** (후속): `clickhouse_connect` DBAPI, 백틱 quoting, ensure_table는 **ENGINE = MergeTree() ORDER BY (pk|tuple())**(PK → 정렬키), list_columns에서 **Nullable()/LowCardinality() 언랩**, append(multi-row INSERT)/overwrite(TRUNCATE). **upsert는 명확한 WriteError**(ClickHouse는 ReplacingMergeTree 필요 — append 권장). lazy import.
+3. **web/배선** (후속): operators source/sink(upsert 옵션은 노출하되 help에 제약 명시), connector-schemas 폼(host/port/database/user/password), migration → 9×9, pyproject [clickhouse] extra+entry-point, registry builtin, 서버 audit + DLQ readable.
+
+**Consequences**:
+- ✅ type_mapping 단독 완결. 코어 unit +25 clickhouse. cross-DW(redshift→clickhouse: SUPER→String, TIMESTAMPTZ→DateTime64(3)) 검증.
+- ⚠️ **부분 parity** — ClickHouse sink는 snapshot(overwrite)/append만 완전 지원, **mirror(upsert)는 런타임 WriteError**(정직한 실패 + 안내). 마이그레이션 "mirror" 전략은 ClickHouse 대상에서 안 됨(문서화).
+- ⚠️ ENGINE/ORDER BY 필수라 ensure_table이 MergeTree 가정(다른 엔진은 수동 pre_sql). Nullable 언랩은 커넥터에 한정(type_mapping은 generic 유지).
+- ⚠️ **testcontainers 미포함** — fake-cursor 단위 + live 서버 게이트(타 DW 선례).
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

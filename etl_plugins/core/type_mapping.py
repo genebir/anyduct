@@ -182,6 +182,20 @@ _VENDOR_TO_CANONICAL: dict[str, CanonicalType] = {
     # are already mapped above.)
     "super": CanonicalType.JSON,
     "varbyte": CanonicalType.BLOB,
+    # ---- Phase AGH — ClickHouse vendor types (ADR-0080) -----
+    # ClickHouse names integers by exact width (Int8/16/32/64 + unsigned).
+    # NOTE: ``int8`` already maps to BIGINT above (postgres semantics =
+    # 8-byte int); a ClickHouse Int8 (1-byte) widening to BIGINT is safe.
+    "int16": CanonicalType.SMALLINT,
+    "int32": CanonicalType.INTEGER,
+    # Unsigned → next-wider signed canonical so the value still fits.
+    "uint8": CanonicalType.SMALLINT,
+    "uint16": CanonicalType.INTEGER,
+    "uint32": CanonicalType.BIGINT,
+    "uint64": CanonicalType.BIGINT,
+    "float32": CanonicalType.REAL,
+    "fixedstring": CanonicalType.TEXT,
+    "datetime64": CanonicalType.TIMESTAMP,
 }
 
 
@@ -386,6 +400,28 @@ _DIALECT_DDL: dict[str, dict[CanonicalType, str]] = {
         CanonicalType.DATE: "DATE",
         CanonicalType.JSON: "SUPER",
         CanonicalType.BLOB: "VARBYTE",
+    },
+    # ClickHouse (Phase AGH, ADR-0080) — column-oriented OLAP DB.
+    #   * Width-named integers: Int32/Int64/Int16/Float32/Float64.
+    #   * Decimal(P,S) fixed-precision.
+    #   * String is the catch-all text/binary/JSON type (no length cap).
+    #   * Bool, Date, DateTime64(3) (millisecond timestamp).
+    #   NOTE: ClickHouse type names are case-sensitive (``Int64`` not
+    #   ``INT64``), so these render strings preserve camel case.
+    "clickhouse": {
+        CanonicalType.INTEGER: "Int32",
+        CanonicalType.BIGINT: "Int64",
+        CanonicalType.SMALLINT: "Int16",
+        CanonicalType.REAL: "Float32",
+        CanonicalType.DOUBLE: "Float64",
+        CanonicalType.DECIMAL: "Decimal",
+        CanonicalType.TEXT: "String",
+        CanonicalType.VARCHAR: "String",
+        CanonicalType.BOOLEAN: "Bool",
+        CanonicalType.TIMESTAMP: "DateTime64(3)",
+        CanonicalType.DATE: "Date",
+        CanonicalType.JSON: "String",
+        CanonicalType.BLOB: "String",
     },
 }
 

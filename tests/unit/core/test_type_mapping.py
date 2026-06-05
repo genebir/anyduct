@@ -435,3 +435,65 @@ def test_cross_dw_bigquery_to_redshift_shapes() -> None:
     assert translate("JSON", target_dialect="redshift") == "SUPER"
     assert translate("STRING", target_dialect="redshift") == "VARCHAR(65535)"
     assert translate("TIMESTAMP", target_dialect="redshift") == "TIMESTAMPTZ"
+
+
+# ---------- Phase AGH: ClickHouse (ADR-0080) ----------
+
+
+@pytest.mark.parametrize(
+    "canonical, expected",
+    [
+        (CanonicalType.INTEGER, "Int32"),
+        (CanonicalType.BIGINT, "Int64"),
+        (CanonicalType.SMALLINT, "Int16"),
+        (CanonicalType.REAL, "Float32"),
+        (CanonicalType.DOUBLE, "Float64"),
+        (CanonicalType.DECIMAL, "Decimal"),
+        (CanonicalType.TEXT, "String"),
+        (CanonicalType.VARCHAR, "String"),
+        (CanonicalType.BOOLEAN, "Bool"),
+        (CanonicalType.TIMESTAMP, "DateTime64(3)"),
+        (CanonicalType.DATE, "Date"),
+        (CanonicalType.JSON, "String"),
+        (CanonicalType.BLOB, "String"),
+    ],
+)
+def test_render_canonical_clickhouse(canonical: CanonicalType, expected: str) -> None:
+    assert render_canonical(TypeSpec(canonical), dialect="clickhouse") == expected
+
+
+def test_render_varchar_drops_length_clickhouse() -> None:
+    """ClickHouse String has no length cap — VARCHAR(64) → String."""
+    spec = TypeSpec(CanonicalType.VARCHAR, length=64)
+    assert render_canonical(spec, dialect="clickhouse") == "String"
+
+
+def test_render_decimal_keeps_precision_scale_clickhouse() -> None:
+    spec = TypeSpec(CanonicalType.DECIMAL, precision=10, scale=2)
+    assert render_canonical(spec, dialect="clickhouse") == "Decimal(10,2)"
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("Int16", CanonicalType.SMALLINT),
+        ("Int32", CanonicalType.INTEGER),
+        ("Int64", CanonicalType.BIGINT),
+        ("UInt8", CanonicalType.SMALLINT),
+        ("UInt32", CanonicalType.BIGINT),
+        ("Float32", CanonicalType.REAL),
+        ("Float64", CanonicalType.DOUBLE),
+        ("FixedString", CanonicalType.TEXT),
+        ("DateTime64", CanonicalType.TIMESTAMP),
+    ],
+)
+def test_normalize_clickhouse_vendor_types(raw: str, expected: CanonicalType) -> None:
+    assert normalize_db_type(raw).canonical is expected
+
+
+def test_cross_dw_redshift_to_clickhouse_shapes() -> None:
+    """A Redshift SUPER/VARCHAR/TIMESTAMPTZ source lands as ClickHouse
+    types (the 8x8 → 9x9 migration matrix in one assertion)."""
+    assert translate("SUPER", target_dialect="clickhouse") == "String"
+    assert translate("TIMESTAMPTZ", target_dialect="clickhouse") == "DateTime64(3)"
+    assert translate("BIGINT", target_dialect="clickhouse") == "Int64"

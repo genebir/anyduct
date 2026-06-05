@@ -53,6 +53,7 @@ _BUILTIN_MODULES: dict[str, str] = {
     "kinesis": "etl_plugins.connectors.stream.kinesis",
     "sqs": "etl_plugins.connectors.stream.sqs",
     "rabbitmq": "etl_plugins.connectors.stream.rabbitmq",
+    "nats": "etl_plugins.connectors.stream.nats",
     "http": "etl_plugins.connectors.http.connector",
 }
 

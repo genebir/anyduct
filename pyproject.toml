@@ -57,6 +57,7 @@ kafka = ["aiokafka>=0.11"]
 kinesis = ["boto3>=1.34"]
 sqs = ["boto3>=1.34"]
 rabbitmq = ["aio-pika>=9.0"]
+nats = ["nats-py>=2.6"]
 airflow = ["apache-airflow>=2.10"]
 dagster = ["dagster>=1.9"]
 prefect = ["prefect>=3.0"]
@@ -99,6 +100,7 @@ kafka = "etl_plugins.connectors.stream.kafka:KafkaConnector"
 kinesis = "etl_plugins.connectors.stream.kinesis:KinesisConnector"
 sqs = "etl_plugins.connectors.stream.sqs:SQSConnector"
 rabbitmq = "etl_plugins.connectors.stream.rabbitmq:RabbitMQConnector"
+nats = "etl_plugins.connectors.stream.nats:NatsConnector"
 http = "etl_plugins.connectors.http.connector:HttpConnector"
 
 [build-system]
@@ -286,6 +288,12 @@ ignore_missing_imports = true
 # Lazy-imported in etl_plugins.connectors.stream.rabbitmq; not a dev dep.
 [[tool.mypy.overrides]]
 module = ["aio_pika", "aio_pika.*"]
+ignore_missing_imports = true
+
+# nats-py — installed via [nats] extra only (ADR-0087).
+# Lazy-imported in etl_plugins.connectors.stream.nats; not a dev dep.
+[[tool.mypy.overrides]]
+module = ["nats", "nats.*"]
 ignore_missing_imports = true
 
 # prometheus_client — pulled in transitively via opentelemetry-exporter-prometheus

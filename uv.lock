@@ -1532,6 +1532,9 @@ mssql = [
 mysql = [
     { name = "pymysql" },
 ]
+nats = [
+    { name = "nats-py" },
+]
 observability = [
     { name = "opentelemetry-exporter-otlp-proto-grpc" },
     { name = "opentelemetry-exporter-prometheus" },
@@ -1618,6 +1621,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.27" },
     { name = "hvac", marker = "extra == 'vault'", specifier = ">=2.0" },
     { name = "jinja2", specifier = ">=3.1" },
+    { name = "nats-py", marker = "extra == 'nats'", specifier = ">=2.6" },
     { name = "opentelemetry-exporter-otlp-proto-grpc", marker = "extra == 'observability'", specifier = ">=1.25" },
     { name = "opentelemetry-exporter-prometheus", marker = "extra == 'observability'", specifier = ">=0.46b0" },
     { name = "opentelemetry-sdk", marker = "extra == 'observability'", specifier = ">=1.25" },
@@ -1639,7 +1643,7 @@ requires-dist = [
     { name = "typer", specifier = ">=0.12" },
     { name = "vertica-python", marker = "extra == 'vertica'", specifier = ">=1.4" },
 ]
-provides-extras = ["airflow", "aws-sm", "bigquery", "cassandra", "clickhouse", "dagster", "dynamodb", "gcp-sm", "kafka", "kinesis", "mongodb", "mssql", "mysql", "observability", "postgres", "prefect", "rabbitmq", "redis", "redshift", "s3", "snowflake", "sqs", "vault", "vertica"]
+provides-extras = ["airflow", "aws-sm", "bigquery", "cassandra", "clickhouse", "dagster", "dynamodb", "gcp-sm", "kafka", "kinesis", "mongodb", "mssql", "mysql", "nats", "observability", "postgres", "prefect", "rabbitmq", "redis", "redshift", "s3", "snowflake", "sqs", "vault", "vertica"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -3398,6 +3402,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/a2/6e/371856a3fb9d31ca8dac321cda606860fa4548858c0cc45d9d1d4ca2628b/mypy_extensions-1.1.0.tar.gz", hash = "sha256:52e68efc3284861e772bbcd66823fde5ae21fd2fdb51c62a211403730b916558", size = 6343, upload-time = "2025-04-22T14:54:24.164Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/79/7b/2c79738432f5c924bef5071f933bcc9efd0473bac3b4aa584a6f7c1c8df8/mypy_extensions-1.1.0-py3-none-any.whl", hash = "sha256:1be4cccdb0f2482337c4743e60421de3a356cd97508abadd57d47403e94f5505", size = 4963, upload-time = "2025-04-22T14:54:22.983Z" },
+]
+
+[[package]]
+name = "nats-py"
+version = "2.14.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/c3/f8/b956c4621ba88748ed707c52e69f95b7a50c8914e750edca59a5bef84a76/nats_py-2.14.0.tar.gz", hash = "sha256:4ed02cb8e3b55c68074a063aa2687087115d805d1513297da90cb2068fb07bed", size = 120751, upload-time = "2026-02-23T22:44:58.988Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f9/39/0e87753df1072254bac190b33ed34b264f28f6aa9bea0f01b7e818071756/nats_py-2.14.0-py3-none-any.whl", hash = "sha256:4116f5d2233ce16e63c3d5538fa40a5e207f75fcf42a741773929ddf1e29d19d", size = 82259, upload-time = "2026-02-23T22:45:00.152Z" },
 ]
 
 [[package]]

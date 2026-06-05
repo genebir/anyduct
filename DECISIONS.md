@@ -2612,4 +2612,24 @@ L1 출시 직후 사용자가 5개 회신:
 
 ---
 
+## ADR-0087: NATS JetStream 커넥터 추가 — 클라우드 네이티브 Streaming
+
+**Date**: 2026-06-05
+**Status**: Accepted
+**Context**: RabbitMQ(AGT) 후 스트리밍 추가. NATS는 경량 클라우드 네이티브 메시징. **core NATS는 fire-and-forget(ack 없음)**이라 commit 컨트랙트를 못 채움 → **JetStream**(영속+ack) 사용. nats-py 네이티브 async(aio-pika/Kafka 패턴 동형).
+
+**Decision**:
+1. **`nats.py`** — StreamSource/Sink. connect flag-only, `_ensure_js()`에서 `nats.connect()`+`nc.jetstream()` lazy. servers는 콤마 문자열/리스트 normalize.
+2. **subscribe** — durable **pull** consumer(`js.pull_subscribe` + `psub.fetch(batch, timeout)`). fetch 타임아웃(메시지 없음)은 정상 → 폴링 계속(예외 클래스명에 "timeout" 포함 시 continue). 메시지 `_pending` 보관.
+3. **commit** — `msg.ack()`(JetStream ack, at-least-once). publish=`js.publish(subject, body)`. flush no-op.
+4. **배선** — pyproject [nats] extra(nats-py>=2.6) + entry-point + registry + mypy override. web stream source/sink(subject + durable consumer) + 연결 폼(servers/user/password/token).
+
+**Consequences**:
+- ✅ 단위 9(fake JetStream pull/fetch/ack/publish, servers 파싱, driver-missing). Streaming **6종**(Kafka/Kinesis/SQS/Redis/RabbitMQ/NATS).
+- ✅ nats-py 네이티브 async. mypy/ruff clean. 코어 production 무영향.
+- ⚠️ **JetStream 필수** — subject가 서버에 JetStream stream으로 구성돼 있어야 함(core NATS subject 아님). pull consumer만(push/큐그룹은 후속).
+- ⚠️ **testcontainers 미포함** — nats-py dev-dep 미포함(extra-only) + live 서버 게이트. fake-client가 검증하는 건 nats-py API에 대한 *우리 모델*이므로 실서버 검증 권장(boto3 계열의 localstack 실검증과 대비).
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

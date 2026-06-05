@@ -1007,6 +1007,7 @@ class RunExecutor:
             "vertica",
             "mssql",
             "snowflake",
+            "bigquery",
         }
         connection_type_by_name: dict[str, str] = {}
         try:

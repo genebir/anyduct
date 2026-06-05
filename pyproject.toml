@@ -56,6 +56,7 @@ s3 = ["boto3>=1.34", "pyarrow>=16.0"]
 kafka = ["aiokafka>=0.11"]
 kinesis = ["boto3>=1.34"]
 sqs = ["boto3>=1.34"]
+rabbitmq = ["aio-pika>=9.0"]
 airflow = ["apache-airflow>=2.10"]
 dagster = ["dagster>=1.9"]
 prefect = ["prefect>=3.0"]
@@ -97,6 +98,7 @@ s3 = "etl_plugins.connectors.object_storage.s3:S3Connector"
 kafka = "etl_plugins.connectors.stream.kafka:KafkaConnector"
 kinesis = "etl_plugins.connectors.stream.kinesis:KinesisConnector"
 sqs = "etl_plugins.connectors.stream.sqs:SQSConnector"
+rabbitmq = "etl_plugins.connectors.stream.rabbitmq:RabbitMQConnector"
 http = "etl_plugins.connectors.http.connector:HttpConnector"
 
 [build-system]
@@ -278,6 +280,12 @@ ignore_missing_imports = true
 # Lazy-imported in etl_plugins.connectors.nosql.redis; not a dev dep.
 [[tool.mypy.overrides]]
 module = ["redis", "redis.*"]
+ignore_missing_imports = true
+
+# aio-pika — installed via [rabbitmq] extra only (ADR-0086).
+# Lazy-imported in etl_plugins.connectors.stream.rabbitmq; not a dev dep.
+[[tool.mypy.overrides]]
+module = ["aio_pika", "aio_pika.*"]
 ignore_missing_imports = true
 
 # prometheus_client — pulled in transitively via opentelemetry-exporter-prometheus

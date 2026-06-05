@@ -2592,4 +2592,24 @@ L1 출시 직후 사용자가 5개 회신:
 
 ---
 
+## ADR-0086: RabbitMQ 커넥터 추가 — AMQP Streaming, aio-pika 네이티브 async
+
+**Date**: 2026-06-05
+**Status**: Accepted
+**Context**: "무거운 의존"이라 미뤘던 스트리밍 브로커도 extra-only + lazy import + fake-client 단위(DW/Redis 패턴)로 설치 부담 없이 추가 가능함을 인지. RabbitMQ가 가장 흔한 AMQP 브로커. **드라이버 선택**: pika(BlockingConnection)는 thread-unsafe라 `asyncio.to_thread`(풀 스레드 가변)와 충돌 → **aio-pika(네이티브 asyncio)** 채택, Kafka(aiokafka) 패턴과 동형(to_thread 불요).
+
+**Decision**:
+1. **`rabbitmq.py`** — StreamSource/Sink. Kafka 패턴: 동기 `connect()` flag-only, AMQP 연결/채널은 `_ensure_channel()`에서 lazy 생성, `aclose()`로 정리.
+2. **subscribe** — durable queue 선언 후 `queue.iterator()` async 소비, body JSON 디코드. 메시지를 `_pending`에 보관(미ack).
+3. **commit** — 보관 메시지 `message.ack()`(AMQP at-least-once ack; SQS delete/Redis XACK와 동형). publish=durable queue 선언 + default_exchange에 PERSISTENT 메시지. flush no-op.
+4. **배선** — pyproject [rabbitmq] extra(aio-pika>=9.0) + entry-point + registry + mypy override. web stream source/sink + 연결 폼(host/port/virtual_host/user/password).
+
+**Consequences**:
+- ✅ 단위 9(fake aio-pika channel/queue async iterator: subscribe→yield→ack, publish, driver-missing, flag lifecycle). Streaming 5종(Kafka/Kinesis/SQS/Redis/RabbitMQ), ack-commit 4종(SQS/Redis/RabbitMQ/Kafka).
+- ✅ aio-pika 네이티브 async라 thread 안전성 문제 없음(pika 회피). mypy/ruff clean. 코어 production 무영향.
+- ⚠️ **testcontainers 미포함** — aio-pika dev-dep 미포함(extra-only) + live 브로커 게이트. fake-client 단위로 생성 메시지/흐름 검증.
+- ⚠️ exchange/routing은 default exchange + queue명 routing_key만(토픽 exchange·바인딩은 후속). prefetch/QoS 기본값.
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

@@ -391,6 +391,22 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
     setSelectedEdgeId(null);
   };
 
+  // Delete/Backspace removes the selected table(s) or edge(s).
+  const onNodesDelete = useCallback((deleted: Node[]) => {
+    const ids = new Set(deleted.map((n) => n.id));
+    setDesign((d) => ({
+      tables: d.tables.filter((t) => !ids.has(t.id)),
+      relations: d.relations.filter((r) => !ids.has(r.from) && !ids.has(r.to)),
+    }));
+    setSelectedId(null);
+  }, []);
+
+  const onEdgesDelete = useCallback((deleted: Edge[]) => {
+    const ids = new Set(deleted.map((e) => e.id));
+    setDesign((d) => ({ ...d, relations: d.relations.filter((r) => !ids.has(r.id)) }));
+    setSelectedEdgeId(null);
+  }, []);
+
   const updateRelation = (id: string, patch: Partial<ErdDesign["relations"][number]>) =>
     setDesign((d) => ({
       ...d,
@@ -679,6 +695,9 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
               edgeTypes={ERD_EDGE_TYPES}
               onNodesChange={onNodesChange}
               onEdgesChange={onEdgesChange}
+              onNodesDelete={onNodesDelete}
+              onEdgesDelete={onEdgesDelete}
+              deleteKeyCode={["Delete", "Backspace"]}
               onConnect={onConnect}
               onNodeDragStop={onNodeDragStop}
               onNodeClick={onNodeClick}

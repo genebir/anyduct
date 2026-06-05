@@ -78,11 +78,15 @@ interface ParsedTable {
   columns: ParsedColumn[];
 }
 
+// Constraint / index pseudo-entity names (e.g. ``<table>_PK``) — DA# emits
+// these and they must not be mistaken for real tables.
+const CONSTRAINT_RE = /_(PK|FK|UK|UQ|IDX|IX|AK)\d*$/i;
+
 function isEntityName(s: string): boolean {
   if (!s || s.length > 80) return false;
   if (GUID_RE.test(s) || s.startsWith("K_") || /^\d+$/.test(s)) return false;
   if (SQL_TYPES.has(s) || PHYS_RE.test(s)) return false;
-  if (s.includes("--")) return false;
+  if (s.includes("--") || CONSTRAINT_RE.test(s)) return false;
   const c = s.trim()[0];
   return !(c === ":" || c === "," || c === "(" || c === ";" || c === "-");
 }

@@ -2701,7 +2701,7 @@ L1 출시 직후 사용자가 5개 회신:
 2. **컬럼**: `PHYSICAL(^[A-Z][A-Z0-9_]+) + SQL TYPE (+ LENGTH digits)` 패턴. `normalizeImportType`로 vendor 타입 정규화.
 3. **테이블 묶음**: 컬럼은 테이블별로 파일 순서대로 연속 저장됨. 테이블명 = 컬럼 블록 직후 첫 plain 문자열(뒤에 GUID 참조 run ≥2 + 다음에 컬럼 없음). 한국어 엔티티명까지 복원.
 4. **PK**: `PK` 마커 뒤 컬럼 GUID → 해당 컬럼 pk=true(doubled-GUID로 컬럼 매핑).
-5. **FK 추론** (AHG 핵심, `inferRelationsByPk`): "자식 컬럼명 = **정확히 한** 다른 테이블의 PK명"이면 FK(고정밀 — 공유/복합 PK명 제외). audit/boilerplate PK(RGTR_ID/REG_DT/USE_YN 등) 제외. `UP_<pk>` self-ref. + 기존 `<x>_id` 추론 병합. **거부된 대안**: (a) PK-name 전체 매칭 → 공유 코드/복합키 컬럼명이 수만 edge 양산(TMS 24k), (b) attr-GUID 인접 co-occurrence → 형제 컬럼 noise.
+5. **FK 추론** (AHG→**AHH 정제**, `inferRelationsByPk`): 실제 DA# 다이어그램(i.png)과 대조해 보정. 부모 = "**PK가 정확히 그 단일 컬럼인** 테이블"(차원 테이블) — 복합 PK junction(권한별기능=권한아이디+기능아이디)은 부모 아님 → 공유 키명(AUTHRT_ID: 권한 단일 PK vs 권한별기능 복합) 모호성 해소. 자식 컬럼이 그런 sole-PK명과 일치하면 FK, `UP_<pk>`는 self-ref. + 기존 `<x>_id` 병합. 엔티티명 검출에서 `_PK/_FK/_IDX` 등 제약/인덱스 pseudo-entity 제외. **거부된 대안**: (a) PK-name 전체 매칭 → 공유 코드/복합키 컬럼명이 수만 edge 양산(TMS 24k), (b) attr-GUID 인접 co-occurrence → 형제 컬럼 noise, (c) unique-PK-name → PK 검출 누락 시 잘못된 단일 후보로 오연결. 검증: i.png의 16 관계 중 ~14 정확 복원(공통코드그룹→공통코드, 권한→사용자정보/권한별기능, 메뉴→메뉴기능, 부서/메뉴 self, 근무정보→사용자별근무정보 등).
 
 **검증**: 4 샘플(공통코드/CTC&ARS/TMS/안전지원) → 35/306/345/269 테이블, FK 5/76/81/22(고정밀, self-ref 부서/공통코드/메뉴 포함). Python 프로토타입 동일 로직 TS 포팅.
 

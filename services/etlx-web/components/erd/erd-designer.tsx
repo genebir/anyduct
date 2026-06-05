@@ -612,7 +612,21 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
               fitView
               proOptions={{ hideAttribution: true }}
             >
-              <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="rgb(var(--border-subtle) / 0.6)" />
+              {/* Graph-paper grid: fine 20px lines + bolder 100px lines. */}
+              <Background
+                id="erd-grid-minor"
+                variant={BackgroundVariant.Lines}
+                gap={20}
+                lineWidth={1}
+                color="rgb(var(--border-subtle) / 0.35)"
+              />
+              <Background
+                id="erd-grid-major"
+                variant={BackgroundVariant.Lines}
+                gap={100}
+                lineWidth={1.2}
+                color="rgb(var(--border-subtle) / 0.7)"
+              />
               <Controls showInteractive={false} className="!rounded-md !border !border-border-subtle !bg-elevated" />
             </ReactFlow>
           </ReactFlowProvider>

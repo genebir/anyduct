@@ -15,15 +15,43 @@ All four extend `Connector`, which contributes `connect()` /
 
 ## Built-in catalog
 
-| Connector | Extra | Implements |
-|-----------|-------|------------|
-| PostgreSQL | `[postgres]` | `BatchSource`, `BatchSink` |
-| MySQL / MariaDB | `[mysql]` | `BatchSource`, `BatchSink` |
-| SQLite | — (stdlib) | `BatchSource`, `BatchSink` |
-| MongoDB | `[mongodb]` | `BatchSource`, `BatchSink` |
-| S3 / MinIO | `[s3]` | `BatchSource`, `BatchSink` |
-| Kafka | `[kafka]` | `StreamSource`, `StreamSink` |
-| HTTP / REST | — (httpx, core dep) | `BatchSource` |
+A **migration target** implements `SchemaInspector` + `SchemaWriter`
+(`ensure_table`), so cross-DB migrations can auto-create the destination
+and translate column types through the canonical type mapping. The
+SQL-capable migration targets form a 10×10 cross-DB matrix.
+
+### RDBMS / Data Warehouse (batch, migration targets)
+
+| Connector | Extra | Migration target | Notes |
+|-----------|-------|:---:|-------|
+| PostgreSQL | `[postgres]` | ✅ | |
+| MySQL / MariaDB | `[mysql]` | ✅ | |
+| SQLite | — (stdlib) | ✅ | type affinity |
+| Vertica | `[vertica]` | ✅ | analytical column-store |
+| SQL Server / Azure SQL | `[mssql]` | ✅ | `NVARCHAR(MAX)`, `BIT`, `DATETIME2` |
+| Snowflake | `[snowflake]` | ✅ | `NUMBER`, `VARIANT`, `TIMESTAMP_TZ` |
+| BigQuery | `[bigquery]` | ✅ | backtick quoting, PK `NOT ENFORCED`, multi-row DML |
+| Redshift | `[redshift]` | ✅ | `SUPER`, `VARBYTE`; MERGE upsert (2023+) |
+| ClickHouse | `[clickhouse]` | ✅ | `MergeTree` engine; **no row-level upsert** |
+
+### NoSQL
+
+| Connector | Extra | Implements | Notes |
+|-----------|-------|------------|-------|
+| MongoDB | `[mongodb]` | `BatchSource`, `BatchSink` | filter / sort / projection |
+| DynamoDB | `[dynamodb]` | `BatchSource`, `BatchSink` | schemaless (scan); `put` = upsert by key |
+| Cassandra | `[cassandra]` | `BatchSource`, `BatchSink`, migration target ✅ | CQL; INSERT = upsert; `decimal` no precision |
+| Redis | `[redis]` | `StreamSource`, `StreamSink` | Redis Streams (XADD / XREADGROUP / XACK) |
+
+### Object storage / Streaming / HTTP
+
+| Connector | Extra | Implements | Notes |
+|-----------|-------|------------|-------|
+| S3 / MinIO | `[s3]` | `BatchSource`, `BatchSink` | parquet / csv / jsonl |
+| Kafka | `[kafka]` | `StreamSource`, `StreamSink` | aiokafka; offset commit |
+| Kinesis | `[kinesis]` | `StreamSource`, `StreamSink` | boto3; shard polling; commit no-op |
+| SQS | `[sqs]` | `StreamSource`, `StreamSink` | boto3; commit = message delete (ack) |
+| HTTP / REST | — (httpx, core dep) | `BatchSource` | paginated GET |
 
 ## Picking + naming a connector
 

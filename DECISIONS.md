@@ -2632,4 +2632,22 @@ L1 출시 직후 사용자가 5개 회신:
 
 ---
 
+## ADR-0088: 연결 스키마 ERD 뷰어 (web) — FK는 명명 규칙 추론
+
+**Date**: 2026-06-05
+**Status**: Accepted
+**Context**: 사용자가 "ERD 그리는 것도 넣고 싶어". ETL 도구에서 소스/싱크 DB 스키마를 파이프라인 작성 전에 시각적으로 탐색하는 건 실질 가치. 이미 있는 자산만으로 구현 가능: SchemaInspector 기반 REST(`/connections/{id}/tables`, `/columns?table=`, ADR-0033) + `@xyflow/react`(빌더/lineage 그래프). **핵심 제약**: 커넥터는 현재 외래키(FK)를 노출하지 않음(SchemaInspector는 list_columns만) → 진짜 관계선을 못 그림.
+
+**Decision**:
+1. **web-only 슬라이스** — 코어/서버 변경 0. 신규: `lib/erd.ts`(순수 ERD 모델 빌더) + `components/connections/schema-erd-graph.tsx`(xyflow, 테이블=엔티티 박스+컬럼 목록) + story + `app/w/[slug]/connections/[id]/erd/page.tsx` + connections list 행에 ERD 링크 + i18n(en/ko erd.*).
+2. **관계는 명명 규칙으로 추론** — `<x>_id` 컬럼을 테이블 `x`/`xs`/`xes`가 존재하면 그 테이블 참조로 간주(엣지). `id`는 PK 휴리스틱(key 아이콘). UI에 "추론됨(<x>_id 기반)"을 명시 — 거짓 정밀도 회피. 진짜 FK introspection은 SchemaInspector 확장(후속).
+3. **N+1 컬럼 fetch** — 테이블별 columns 병렬 fetch, 테이블당 soft-fail, **최대 60 테이블**(초과 시 truncation 안내, no-silent-cap 원칙).
+
+**Consequences**:
+- ✅ 코어/서버 변화 0. 기존 endpoint·그래프 라이브러리 재사용. web tsc clean, dev /erd 200. 스토리 포함(시각 컴포넌트 규칙).
+- ⚠️ 관계는 **휴리스틱**(명명 규칙) — 실제 FK 아님. composite key, 비표준 명명, cross-schema FK는 못 잡음. UI에 명시 + FK introspection은 후속 ADR.
+- ⚠️ 대형 스키마는 60 테이블 캡(성능). 페이지네이션/검색은 후속.
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

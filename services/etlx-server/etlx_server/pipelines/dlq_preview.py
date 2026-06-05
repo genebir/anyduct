@@ -65,6 +65,7 @@ _SQL_READABLE_TYPES = {
     "snowflake",
     "bigquery",
     "redshift",
+    "clickhouse",
 }
 
 

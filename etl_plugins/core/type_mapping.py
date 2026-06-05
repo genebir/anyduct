@@ -176,6 +176,12 @@ _VENDOR_TO_CANONICAL: dict[str, CanonicalType] = {
     # BYTES is BigQuery's binary type.
     "bytes": CanonicalType.BLOB,
     # (string / numeric / bool / json / datetime / date already mapped above.)
+    # ---- Phase AGG — Redshift vendor types (ADR-0079) -----
+    # SUPER is Redshift's semi-structured (JSON-like) type; VARBYTE its
+    # binary type. (postgres-derived types like int4/varchar/timestamptz
+    # are already mapped above.)
+    "super": CanonicalType.JSON,
+    "varbyte": CanonicalType.BLOB,
 }
 
 
@@ -359,6 +365,27 @@ _DIALECT_DDL: dict[str, dict[CanonicalType, str]] = {
         CanonicalType.DATE: "DATE",
         CanonicalType.JSON: "JSON",
         CanonicalType.BLOB: "BYTES",
+    },
+    # Amazon Redshift (Phase AGG, ADR-0079) — postgres-derived cloud DW.
+    #   * No TEXT type — VARCHAR maxes at 65535 bytes; TEXT → VARCHAR(65535).
+    #   * SUPER is the native semi-structured / JSON type.
+    #   * VARBYTE is the binary type.
+    #   * TIMESTAMPTZ for tz-aware timestamps (postgres-style).
+    #   * DOUBLE PRECISION / REAL / DECIMAL / BOOLEAN as in postgres.
+    "redshift": {
+        CanonicalType.INTEGER: "INTEGER",
+        CanonicalType.BIGINT: "BIGINT",
+        CanonicalType.SMALLINT: "SMALLINT",
+        CanonicalType.REAL: "REAL",
+        CanonicalType.DOUBLE: "DOUBLE PRECISION",
+        CanonicalType.DECIMAL: "DECIMAL",
+        CanonicalType.TEXT: "VARCHAR(65535)",
+        CanonicalType.VARCHAR: "VARCHAR",
+        CanonicalType.BOOLEAN: "BOOLEAN",
+        CanonicalType.TIMESTAMP: "TIMESTAMPTZ",
+        CanonicalType.DATE: "DATE",
+        CanonicalType.JSON: "SUPER",
+        CanonicalType.BLOB: "VARBYTE",
     },
 }
 

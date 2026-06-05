@@ -378,3 +378,60 @@ def test_cross_dw_snowflake_to_bigquery_shapes() -> None:
     assert translate("NUMBER(12,4)", target_dialect="bigquery") == "NUMERIC(12,4)"
     assert translate("TIMESTAMP_TZ", target_dialect="bigquery") == "TIMESTAMP"
     assert translate("STRING", target_dialect="bigquery") == "STRING"
+
+
+# ---------- Phase AGG: Redshift (ADR-0079) ----------
+
+
+@pytest.mark.parametrize(
+    "canonical, expected",
+    [
+        (CanonicalType.INTEGER, "INTEGER"),
+        (CanonicalType.BIGINT, "BIGINT"),
+        (CanonicalType.SMALLINT, "SMALLINT"),
+        (CanonicalType.REAL, "REAL"),
+        (CanonicalType.DOUBLE, "DOUBLE PRECISION"),
+        (CanonicalType.DECIMAL, "DECIMAL"),
+        (CanonicalType.TEXT, "VARCHAR(65535)"),
+        (CanonicalType.VARCHAR, "VARCHAR"),
+        (CanonicalType.BOOLEAN, "BOOLEAN"),
+        (CanonicalType.TIMESTAMP, "TIMESTAMPTZ"),
+        (CanonicalType.DATE, "DATE"),
+        (CanonicalType.JSON, "SUPER"),
+        (CanonicalType.BLOB, "VARBYTE"),
+    ],
+)
+def test_render_canonical_redshift(canonical: CanonicalType, expected: str) -> None:
+    assert render_canonical(TypeSpec(canonical), dialect="redshift") == expected
+
+
+def test_render_varchar_keeps_length_redshift() -> None:
+    spec = TypeSpec(CanonicalType.VARCHAR, length=64)
+    assert render_canonical(spec, dialect="redshift") == "VARCHAR(64)"
+
+
+def test_render_decimal_keeps_precision_scale_redshift() -> None:
+    spec = TypeSpec(CanonicalType.DECIMAL, precision=10, scale=2)
+    assert render_canonical(spec, dialect="redshift") == "DECIMAL(10,2)"
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("SUPER", CanonicalType.JSON),
+        ("VARBYTE", CanonicalType.BLOB),
+        ("INT4", CanonicalType.INTEGER),
+        ("TIMESTAMPTZ", CanonicalType.TIMESTAMP),
+        ("DOUBLE PRECISION", CanonicalType.DOUBLE),
+    ],
+)
+def test_normalize_redshift_vendor_types(raw: str, expected: CanonicalType) -> None:
+    assert normalize_db_type(raw).canonical is expected
+
+
+def test_cross_dw_bigquery_to_redshift_shapes() -> None:
+    """A BigQuery JSON/STRING/TIMESTAMP source lands as the right Redshift
+    types (the 7x7 migration matrix in one assertion)."""
+    assert translate("JSON", target_dialect="redshift") == "SUPER"
+    assert translate("STRING", target_dialect="redshift") == "VARCHAR(65535)"
+    assert translate("TIMESTAMP", target_dialect="redshift") == "TIMESTAMPTZ"

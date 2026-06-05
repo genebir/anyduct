@@ -2455,4 +2455,23 @@ L1 출시 직후 사용자가 5개 회신:
 
 ---
 
+## ADR-0079: Redshift 커넥터 추가 — postgres-derived 클라우드 DW
+
+**Date**: 2026-06-05
+**Status**: Accepted (진행 중 — type_mapping 먼저)
+**Context**: Snowflake(ADR-0077)/BigQuery(ADR-0078)에 이어 세 번째 클라우드 DW. Redshift는 postgres 와이어 프로토콜 파생이라 식별자 double-quote·대부분 타입이 postgres와 동일 — snowflake 커넥터가 가장 가까운 템플릿. 차이: SUPER(semi-structured), VARBYTE(binary), TEXT 없음(VARCHAR 최대 65535), official `redshift_connector` DBAPI.
+
+**Decision**:
+1. **type_mapping redshift dialect** (이 슬라이스): INTEGER/BIGINT/SMALLINT/REAL/DOUBLE PRECISION/DECIMAL(postgres와 동일), **TEXT→VARCHAR(65535)**(Redshift TEXT 미지원), VARCHAR(length), BOOLEAN, **TIMESTAMPTZ**, DATE, **SUPER**(JSON), **VARBYTE**(BLOB). vendor 파싱: super/varbyte(+ postgres int4/varchar/timestamptz 등 재사용).
+2. **커넥터 `redshift.py`** (후속): `redshift_connector` DBAPI, host/port(5439)/database/user/password, double-quote quoting, information_schema 인스펙션, ensure_table(auto_create + PRIMARY KEY — Redshift는 미강제지만 DDL 유효), read/write, upsert는 MERGE(Redshift 2023+ GA). lazy import.
+3. **web/배선** (후속): operators source/sink, connector-schemas 폼(host/port/database/user/password), migration → 8×8, pyproject [redshift] extra+entry-point, registry builtin, 서버 audit + DLQ readable 타입.
+
+**Consequences**:
+- ✅ type_mapping 단독 완결. 코어 unit +21 redshift. cross-DW(bigquery→redshift: JSON→SUPER, STRING→VARCHAR(65535), TIMESTAMP→TIMESTAMPTZ) 검증.
+- ⚠️ **Redshift MERGE는 2023-04 GA** — 구 클러스터는 MERGE 미지원(그 경우 DELETE+INSERT 패턴이 정석). constant-SELECT-without-FROM USING 소스가 엔진에 따라 거부될 수 있음 → live 검증 게이트. ADR에 명시.
+- ⚠️ **testcontainers 미포함** — Redshift는 로컬 컨테이너 없는 AWS 매니지드. fake-cursor 단위 + live 클러스터 게이트(snowflake/bigquery/vertica/mssql 선례).
+- ⚠️ 대용량은 COPY(S3 경유)가 정석 — 본 커넥터는 행단위/배치 INSERT(contract 일관성). COPY 최적화는 후속.
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

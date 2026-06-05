@@ -5,6 +5,7 @@ import {
   Background,
   BackgroundVariant,
   Controls,
+  MiniMap,
   Position,
   ReactFlow,
   ReactFlowProvider,
@@ -126,6 +127,14 @@ export function LineageGraph({
         >
           <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="rgb(var(--border-subtle) / 0.6)" />
           <Controls showInteractive={false} className="!rounded-md !border !border-border-subtle !bg-elevated" />
+          <MiniMap
+            pannable
+            zoomable
+            className="!rounded-md !border !border-border-subtle !bg-elevated"
+            maskColor="rgb(var(--bg) / 0.6)"
+            nodeColor="rgb(var(--accent) / 0.45)"
+            nodeStrokeColor="rgb(var(--border-subtle))"
+          />
         </ReactFlow>
       </div>
     </ReactFlowProvider>

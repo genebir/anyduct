@@ -32,6 +32,7 @@ export const MIGRATION_SUPPORTED_TYPES = new Set([
   "sqlite",
   "vertica",
   "mssql",
+  "snowflake",
 ]);
 
 /** Phase AAS (2026-06-01) — what *unit* the migration replicates.

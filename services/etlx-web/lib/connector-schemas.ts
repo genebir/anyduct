@@ -304,12 +304,42 @@ const MSSQL: ConnectorSchema = {
   ],
 };
 
+// Phase AGE (2026-06-05, ADR-0077) — Snowflake cloud DW.
+const SNOWFLAKE: ConnectorSchema = {
+  type: "snowflake",
+  label: "Snowflake",
+  description:
+    "snowflake-connector-python-backed batch source + sink for the Snowflake cloud data warehouse.",
+  fields: [
+    {
+      key: "account",
+      label: "Account",
+      type: "string",
+      required: true,
+      help: "Snowflake account identifier, e.g. xy12345.eu-west-1.",
+    },
+    { key: "user", label: "User", type: "string", required: true },
+    {
+      key: "password",
+      label: "Password",
+      type: "password",
+      isSecret: true,
+      help: "Stored in the secret backend; never written to the metadata DB.",
+    },
+    { key: "warehouse", label: "Warehouse", type: "string", help: "Virtual warehouse to run queries on." },
+    { key: "database", label: "Database", type: "string", required: true },
+    { key: "schema", label: "Schema", type: "string", defaultValue: "PUBLIC" },
+    { key: "role", label: "Role", type: "string", help: "Optional session role." },
+  ],
+};
+
 export const CONNECTOR_SCHEMAS: ConnectorSchema[] = [
   POSTGRES,
   MYSQL,
   SQLITE,
   VERTICA,
   MSSQL,
+  SNOWFLAKE,
   MONGODB,
   S3,
   KAFKA,

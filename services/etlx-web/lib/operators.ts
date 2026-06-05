@@ -309,6 +309,22 @@ const SOURCES: OperatorSpec[] = [
     ],
   },
   {
+    // Phase AGE (2026-06-05, ADR-0077) — Snowflake cloud DW.
+    id: "source:snowflake",
+    kind: "source",
+    connectorType: "snowflake",
+    label: "Snowflake",
+    description: "Read rows from a Snowflake table / view via a SQL query.",
+    icon: DatabaseIcon,
+    accent: "#29B5E8",
+    fields: [
+      { key: "connection", label: "Connection", kind: "connection", required: true },
+      { key: "query", label: "Read", kind: "sourceQuery" },
+      { key: "chunk_size", label: "Chunk size", kind: "number", defaultValue: 10000 },
+      CURSOR_COLUMN_FIELD,
+    ],
+  },
+  {
     id: "source:mongodb",
     kind: "source",
     connectorType: "mongodb",
@@ -993,6 +1009,61 @@ const SINKS: OperatorSpec[] = [
         label: "Create table if missing",
         kind: "boolean",
         help: "Cross-DB types translate automatically — TEXT → NVARCHAR(MAX), TIMESTAMPTZ → DATETIME2, BOOLEAN → BIT.",
+      },
+      {
+        key: "auto_create_if_exists",
+        label: "If table exists",
+        kind: "select",
+        showWhen: { field: "auto_create_table", equals: true },
+        options: [
+          { label: "skip — use existing table as-is", value: "skip" },
+          { label: "drop — DROP and recreate (snapshot rebuild)", value: "drop" },
+          { label: "error — refuse to clobber", value: "error" },
+        ],
+        help: "‘drop’ is the right choice for nightly snapshot rebuilds.",
+      },
+    ],
+  },
+  {
+    // Phase AGE (2026-06-05, ADR-0077) — Snowflake cloud DW sink.
+    id: "sink:snowflake",
+    kind: "sink",
+    connectorType: "snowflake",
+    label: "Snowflake",
+    description: "Write records into a Snowflake table.",
+    icon: DatabaseIcon,
+    accent: "#29B5E8",
+    fields: [
+      { key: "connection", label: "Connection", kind: "connection", required: true },
+      { key: "table", label: "Table", kind: "table", placeholder: "schema.table" },
+      {
+        key: "mode",
+        label: "Mode",
+        kind: "select",
+        defaultValue: "append",
+        options: [
+          { label: "append", value: "append" },
+          { label: "overwrite", value: "overwrite" },
+          { label: "upsert", value: "upsert" },
+        ],
+      },
+      {
+        key: "key_columns",
+        label: "Key columns",
+        kind: "columns",
+        help: "Required for upsert mode. Used as MERGE join keys; promoted to PRIMARY KEY when the destination is auto-created.",
+      },
+      {
+        key: "pre_sql",
+        label: "Pre-write SQL (atomic)",
+        kind: "sql",
+        placeholder: "DELETE FROM analytics.orders WHERE batch_date = '2026-05-21'",
+      },
+      {
+        key: "auto_create_table",
+        label: "Create table if missing",
+        kind: "boolean",
+        help: "Cross-DB types translate automatically — JSON → VARIANT, TIMESTAMPTZ → TIMESTAMP_TZ, DECIMAL → NUMBER.",
       },
       {
         key: "auto_create_if_exists",

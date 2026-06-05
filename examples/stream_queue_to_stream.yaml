@@ -1,0 +1,35 @@
+# Streaming ingest: SQS queue → Redis Stream (Phases AGM/AGN, 2026-06-05).
+#
+# A stream-mode pipeline that consumes job messages from an SQS queue and
+# republishes them onto a Redis Stream. Both connectors are new in this
+# session and both have *real* acknowledgement on commit:
+#
+#   * SQS    — commit deletes the received messages (no delete ⇒ they
+#     reappear after the visibility timeout).
+#   * Redis  — XACK on the consumer group.
+#
+# ``commit.strategy: after_sink_flush`` ties them together: the source is
+# only acknowledged once the sink buffer has flushed, giving at-least-once
+# delivery end-to-end.
+#
+# Validate (a live run needs the [sqs] + [redis] extras + credentials):
+#
+#     uv run etlx validate examples/stream_queue_to_stream.yaml \
+#         --connections examples/connections.example.yaml
+#
+#     uv run etlx run-stream examples/stream_queue_to_stream.yaml \
+#         --connections examples/connections.example.yaml \
+#         --stop-after-records 1000
+name: queue_to_stream
+mode: stream
+source:
+  connection: sqs_jobs
+  topic: etl-jobs
+sink:
+  connection: redis_events
+  topic: events
+  buffer:
+    max_records: 100
+    max_seconds: 5
+commit:
+  strategy: after_sink_flush

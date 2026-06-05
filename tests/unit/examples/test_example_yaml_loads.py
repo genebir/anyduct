@@ -62,3 +62,15 @@ def test_cross_cloud_dw_migration_example_validates() -> None:
     assert pc.sink.mode == "upsert"
     assert pc.sink.key_columns == ["id"]
     assert pc.sink.auto_create_table is True
+
+
+def test_stream_queue_to_stream_example_validates() -> None:
+    """Phases AGM/AGN: stream-mode SQS → Redis Stream ingest with
+    after_sink_flush commit (at-least-once)."""
+    pc = load_pipeline(EXAMPLES / "stream_queue_to_stream.yaml")
+    assert pc.name == "queue_to_stream"
+    assert pc.mode == "stream"
+    assert pc.source is not None and pc.source.connection == "sqs_jobs"
+    assert pc.sink is not None and pc.sink.connection == "redis_events"
+    assert pc.commit is not None
+    assert pc.commit.strategy == "after_sink_flush"

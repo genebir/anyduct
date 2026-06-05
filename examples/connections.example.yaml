@@ -34,3 +34,18 @@ connections:
       project: my-gcp-project
       dataset: analytics
       credentials_json: !secret bigquery_dw.credentials_json
+  # Streaming connectors (Phases AGM/AGN) — companions for
+  # examples/stream_queue_to_stream.yaml. Install [sqs] / [redis].
+  - name: sqs_jobs
+    type: sqs
+    config:
+      region: us-east-1
+      aws_access_key_id: !secret sqs_jobs.access_key
+      aws_secret_access_key: !secret sqs_jobs.secret_key
+  - name: redis_events
+    type: redis
+    config:
+      host: localhost
+      port: 6379
+      db: 0
+      password: !secret redis_events.password

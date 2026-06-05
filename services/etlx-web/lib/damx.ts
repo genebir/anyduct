@@ -110,7 +110,8 @@ export function parseDamx(buf: ArrayBuffer): ErdDesign {
     }
 
     // Column: PHYSICAL then a SQL TYPE, optional numeric length.
-    if (PHYS_RE.test(s) && i + 1 < N && SQL_TYPES.has(S[i + 1])) {
+    // Exclude ``K_*`` property keys (e.g. K_ATTR_PRIVACY_TYPE) — not columns.
+    if (PHYS_RE.test(s) && !s.startsWith("K_") && i + 1 < N && SQL_TYPES.has(S[i + 1])) {
       const length = i + 2 < N && /^\d+$/.test(S[i + 2]) ? S[i + 2] : null;
       const col: ParsedColumn = {
         name: s,
@@ -156,7 +157,33 @@ export function parseDamx(buf: ArrayBuffer): ErdDesign {
   }
   if (cols.length > 0) tables.push({ name: cols[0]?.name ?? "table", columns: cols });
 
-  return toDesign(tables);
+  return toDesign(dedupeTables(tables));
+}
+
+/**
+ * DA# files have the real table definitions first, then later sections
+ * (diagram/clipboard) that re-list leaked key columns under duplicate or junk
+ * names — these create phantom tables and false FK edges. Drop junk-named
+ * tables and, for duplicate names, keep the real one (most PK columns, then
+ * first seen).
+ */
+function dedupeTables(tables: ParsedTable[]): ParsedTable[] {
+  const JUNK_NAME = /clipboard|before_?id/i;
+  const pkCount = (t: ParsedTable) => t.columns.filter((c) => c.pk).length;
+  const byName = new Map<string, ParsedTable>();
+  const order: string[] = [];
+  for (const t of tables) {
+    const name = t.name.trim();
+    if (!name || JUNK_NAME.test(name) || t.columns.length === 0) continue;
+    const cur = byName.get(name);
+    if (!cur) {
+      byName.set(name, t);
+      order.push(name);
+    } else if (pkCount(t) > pkCount(cur)) {
+      byName.set(name, t); // prefer the real, PK-bearing definition
+    }
+  }
+  return order.map((n) => byName.get(n)!);
 }
 
 /** Convert parsed tables → ErdDesign (grid layout, PKs, inferred FKs). */

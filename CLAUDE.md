@@ -117,7 +117,9 @@ uv run mypy etl_plugins
 
 ## 5. 현재 단계
 
-> **최신 마일스톤 (2026-06-05): 커넥터 spree 마감 — lock-in 테스트 + examples + 문서 (Phase AGO→AGS).** 신규 의존이 큰 커넥터(Pulsar/RabbitMQ)·테스트 어려운 최적화(DW COPY)만 남아 커넥터를 멈추고, 세션 산출물을 잠그고 사용자 진입점 보강:
+> **최신 마일스톤 (2026-06-05): RabbitMQ 커넥터 추가 — AMQP Streaming (Phase AGT, ADR-0086).** 사용자가 자율 윈도우를 15:00로 연장. "무거운 의존"이라 미뤘던 스트리밍 브로커도 extra-only+lazy+fake-client 패턴으로 깔끔히 추가 가능함을 인지하고 RabbitMQ 추가. 드라이버는 pika(thread-unsafe) 대신 **aio-pika(네이티브 async)** — Kafka 패턴 동형(connect flag-only, 채널 lazy, aclose). subscribe=durable queue iterator 소비, publish=PERSISTENT default-exchange, **commit=message.ack()**(at-least-once). 단위 9(fake aio-pika async iterator). 배선(extra/entry-point/registry/mypy override) + web(stream source/sink/연결폼) + docs. 코어 unit **1203 passed**(+9 rabbitmq), mypy/ruff clean, web tsc + dev 200. **Streaming 5종(Kafka/Kinesis/SQS/Redis/RabbitMQ)**, 세션 누적 커넥터 11종(AGE→AGN + AGT).
+>
+> **이전 마일스톤 (2026-06-05): 커넥터 spree 마감 — lock-in 테스트 + examples + 문서 (Phase AGO→AGS).** 세션 산출물을 잠그고 사용자 진입점 보강:
 > - **AGO**: cross-dialect 마이그레이션 매트릭스 lock-in(`test_migration_matrix.py`) — 7 대표 타입 × 10 SQL dialect = 70 셀 하드코딩 + 커버리지/totality 가드(72 unit). dialect 변경 교차 영향을 명시 diff로 포착 + living doc.
 > - **AGP/AGQ**: examples 2종 — `cross_cloud_dw_migration.yaml`(Snowflake→BigQuery 타입변환+upsert), `stream_queue_to_stream.yaml`(SQS→Redis Stream, after_sink_flush=at-least-once). 둘 다 etlx validate ✓ + 로드 회귀 가드(example 테스트 3→5). connections.example에 클라우드 DW/스트림 추가.
 > - **AGR/AGS**: `docs/guides/connectors.md` 카탈로그 7→전체 세트(RDBMS/DW·NoSQL·스트리밍 3표 + 마이그레이션 대상/능력 매트릭스) + 옵션 conventions에 auto_create/topic/group_id/iterator_type/wait_seconds.

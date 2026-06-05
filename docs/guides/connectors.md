@@ -51,6 +51,7 @@ SQL-capable migration targets form a 10×10 cross-DB matrix.
 | Kafka | `[kafka]` | `StreamSource`, `StreamSink` | aiokafka; offset commit |
 | Kinesis | `[kinesis]` | `StreamSource`, `StreamSink` | boto3; shard polling; commit no-op |
 | SQS | `[sqs]` | `StreamSource`, `StreamSink` | boto3; commit = message delete (ack) |
+| RabbitMQ | `[rabbitmq]` | `StreamSource`, `StreamSink` | aio-pika (AMQP); commit = ack |
 | HTTP / REST | — (httpx, core dep) | `BatchSource` | paginated GET |
 
 ## Picking + naming a connector

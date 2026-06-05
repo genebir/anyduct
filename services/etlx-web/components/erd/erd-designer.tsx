@@ -684,7 +684,16 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
       </div>
 
       <div className="flex min-h-0 flex-1">
-        <div className="min-w-0 flex-1 bg-bg">
+        <div className="relative min-w-0 flex-1 bg-bg">
+          {loaded && design.tables.length === 0 ? (
+            <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
+              <div className="rounded-lg border border-border-subtle bg-surface/90 px-5 py-4 text-center text-sm text-text-muted shadow-sm">
+                <DatabaseIcon size={22} className="mx-auto mb-2 text-text-muted" />
+                <p className="font-medium text-text">{t("erdDesign.emptyTitle")}</p>
+                <p className="mt-1">{t("erdDesign.emptyHint")}</p>
+              </div>
+            </div>
+          ) : null}
           <ReactFlowProvider>
             <ReactFlow
               onInit={(inst) => {

@@ -2416,4 +2416,24 @@ L1 출시 직후 사용자가 5개 회신:
 
 ---
 
+## ADR-0077: Snowflake 커넥터 추가 — 클라우드 DW 마이그레이션 대상 확장
+
+**Date**: 2026-06-05
+**Status**: Accepted (진행 중 — type_mapping 먼저, 커넥터/web/wiring 후속 슬라이스)
+**Context**: 야간 DLQ/dogfood 백로그 소진 후 사용자가 "신규 DW 커넥터" 축 선택. Snowflake는 가장 보편적인 클라우드 DW. AAQ(vertica/mssql, ADR-0073) 패턴을 그대로 따라 5×5 → 6×6 마이그레이션 매트릭스로 확장.
+
+**Decision**:
+1. **`core/type_mapping.py`에 `snowflake` dialect 추가** (이 슬라이스): INTEGER/BIGINT/SMALLINT(=NUMBER(38,0) 별칭), FLOAT(REAL/DOUBLE 단일 64-bit), **NUMBER**(DECIMAL canonical), VARCHAR(TEXT+VARCHAR 통합, 무길이=16MB), BOOLEAN, **TIMESTAMP_TZ**, DATE, **VARIANT**(JSON semi-structured), BINARY(BLOB). vendor 파싱 확장: number/string/variant/object/array/timestamp_ntz|tz|ltz. `render_canonical`의 DECIMAL precision 부착 조건에 `NUMBER` 추가(NUMBER(p,s) 라운드트립).
+2. **`snowflake.py` 커넥터** (후속): BatchSource/Sink + SchemaInspector(list_tables/list_columns) + ensure_table(auto_create + PRIMARY KEY) + execute_statement + read/write/merge upsert. driver(`snowflake-connector-python`) **lazy import**(extra 미설치 시 모듈 로드는 됨 — vertica/mssql 선례). `@ConnectorRegistry.register("snowflake")`.
+3. **web** (후속): operators.ts source/sink 2종, connector-schemas.ts 폼(account/user/password/warehouse/database/schema/role), migration-config.ts MIGRATION_SUPPORTED_TYPES에 snowflake → 6×6.
+4. **wiring** (후속): pyproject extras `[snowflake]` + entry-point, 서버 audit `_SQL_CONNECTION_TYPES`에 snowflake, ConnectorRegistry `_BUILTIN_MODULES` fallback(AAQ post-mortem), SPEC §6 지원 목록.
+
+**Consequences**:
+- ✅ type_mapping foundation 단독으로 완결·테스트 가능(드라이버 불요). 코어 unit +25 snowflake(911→936). 기존 fallback 테스트는 dialect="duckdb"로 교정(snowflake가 이제 실 dialect).
+- ✅ 기존 5 dialect 영향 0(NUMBER substring은 NUMERIC/DECIMAL과 비충돌). mypy/ruff clean. DB 마이그레이션 0.
+- ⚠️ **testcontainers 미포함** — Snowflake는 로컬 컨테이너가 없는 SaaS(계정 필요). vertica/mssql과 동일하게 커넥터 자체 contract test는 live 계정 게이트 → 단위는 type_mapping + (후속) 커넥터 순수 로직만.
+- ⚠️ Snowflake 식별자 대문자 폴딩(unquoted → UPPERCASE) — 커넥터 슬라이스에서 quoting 정책 결정 필요.
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

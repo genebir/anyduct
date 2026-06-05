@@ -150,6 +150,21 @@ _VENDOR_TO_CANONICAL: dict[str, CanonicalType] = {
     "bytea": CanonicalType.BLOB,
     "binary": CanonicalType.BLOB,
     "varbinary": CanonicalType.BLOB,
+    # ---- Phase AGE — Snowflake vendor types (ADR-0077) -----
+    # NUMBER is Snowflake's one numeric type (NUMBER(38,0) is its integer);
+    # DECIMAL preserves precision/scale across DBs.
+    "number": CanonicalType.DECIMAL,
+    # STRING / TEXT are aliases of VARCHAR(max) — length-unbounded → TEXT.
+    "string": CanonicalType.TEXT,
+    # Semi-structured types collapse to JSON (rendered VARIANT in Snowflake,
+    # JSON/JSONB elsewhere, TEXT on sqlite).
+    "variant": CanonicalType.JSON,
+    "object": CanonicalType.JSON,
+    "array": CanonicalType.JSON,
+    # Snowflake's three timestamp flavours all map to the tz-aware canonical.
+    "timestamp_ntz": CanonicalType.TIMESTAMP,
+    "timestamp_tz": CanonicalType.TIMESTAMP,
+    "timestamp_ltz": CanonicalType.TIMESTAMP,
 }
 
 
@@ -289,6 +304,29 @@ _DIALECT_DDL: dict[str, dict[CanonicalType, str]] = {
         CanonicalType.JSON: "NVARCHAR(MAX)",
         CanonicalType.BLOB: "VARBINARY(MAX)",
     },
+    # Snowflake (Phase AGE, ADR-0077) — cloud DW. Type vocabulary:
+    #   * INTEGER/BIGINT/SMALLINT are accepted aliases of NUMBER(38,0).
+    #   * Only one float type (FLOAT, 64-bit); REAL/DOUBLE are aliases.
+    #   * NUMBER is the canonical fixed-precision numeric.
+    #   * VARCHAR (no length = 16MB max) covers both TEXT and VARCHAR.
+    #   * VARIANT is the native semi-structured / JSON column type.
+    #   * TIMESTAMP_TZ is the tz-aware timestamp.
+    #   * BINARY for blobs.
+    "snowflake": {
+        CanonicalType.INTEGER: "INTEGER",
+        CanonicalType.BIGINT: "BIGINT",
+        CanonicalType.SMALLINT: "SMALLINT",
+        CanonicalType.REAL: "FLOAT",
+        CanonicalType.DOUBLE: "FLOAT",
+        CanonicalType.DECIMAL: "NUMBER",
+        CanonicalType.TEXT: "VARCHAR",
+        CanonicalType.VARCHAR: "VARCHAR",
+        CanonicalType.BOOLEAN: "BOOLEAN",
+        CanonicalType.TIMESTAMP: "TIMESTAMP_TZ",
+        CanonicalType.DATE: "DATE",
+        CanonicalType.JSON: "VARIANT",
+        CanonicalType.BLOB: "BINARY",
+    },
 }
 
 
@@ -314,7 +352,7 @@ def render_canonical(spec: TypeSpec, dialect: str) -> str:
     if (
         spec.canonical is CanonicalType.DECIMAL
         and spec.precision
-        and any(name in base_upper for name in ("NUMERIC", "DECIMAL"))
+        and any(name in base_upper for name in ("NUMERIC", "DECIMAL", "NUMBER"))
     ):
         if spec.scale is not None:
             return f"{base}({spec.precision},{spec.scale})"

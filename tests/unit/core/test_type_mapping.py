@@ -120,8 +120,9 @@ def test_render_decimal_keeps_precision_and_scale() -> None:
 
 def test_render_unknown_dialect_falls_back_to_sqlite() -> None:
     """A typo in a connector's dialect tag shouldn't crash — sqlite
-    affinity is permissive enough to accept anything."""
-    assert render_canonical(TypeSpec(CanonicalType.BIGINT), dialect="snowflake") == "INTEGER"
+    affinity is permissive enough to accept anything. (``snowflake`` is a
+    real dialect now since Phase AGE, so use a still-unknown tag here.)"""
+    assert render_canonical(TypeSpec(CanonicalType.BIGINT), dialect="duckdb") == "INTEGER"
 
 
 # ---------- one-call translate ----------
@@ -253,3 +254,63 @@ def test_nvarchar_length_round_trips() -> None:
 )
 def test_translate_cross_db_vertica_mssql(raw: str, dialect: str, expected: str) -> None:
     assert translate(raw, target_dialect=dialect) == expected
+
+
+# ---------- Phase AGE: Snowflake (ADR-0077) ----------
+
+
+@pytest.mark.parametrize(
+    "canonical, expected",
+    [
+        (CanonicalType.INTEGER, "INTEGER"),
+        (CanonicalType.BIGINT, "BIGINT"),
+        (CanonicalType.SMALLINT, "SMALLINT"),
+        (CanonicalType.REAL, "FLOAT"),
+        (CanonicalType.DOUBLE, "FLOAT"),
+        (CanonicalType.DECIMAL, "NUMBER"),
+        (CanonicalType.TEXT, "VARCHAR"),
+        (CanonicalType.VARCHAR, "VARCHAR"),
+        (CanonicalType.BOOLEAN, "BOOLEAN"),
+        (CanonicalType.TIMESTAMP, "TIMESTAMP_TZ"),
+        (CanonicalType.DATE, "DATE"),
+        (CanonicalType.JSON, "VARIANT"),
+        (CanonicalType.BLOB, "BINARY"),
+    ],
+)
+def test_render_canonical_snowflake(canonical: CanonicalType, expected: str) -> None:
+    assert render_canonical(TypeSpec(canonical), dialect="snowflake") == expected
+
+
+def test_render_varchar_keeps_length_snowflake() -> None:
+    spec = TypeSpec(CanonicalType.VARCHAR, length=64)
+    assert render_canonical(spec, dialect="snowflake") == "VARCHAR(64)"
+
+
+def test_render_decimal_keeps_precision_scale_snowflake() -> None:
+    spec = TypeSpec(CanonicalType.DECIMAL, precision=10, scale=2)
+    assert render_canonical(spec, dialect="snowflake") == "NUMBER(10,2)"
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("NUMBER", CanonicalType.DECIMAL),
+        ("NUMBER(38,0)", CanonicalType.DECIMAL),
+        ("STRING", CanonicalType.TEXT),
+        ("VARIANT", CanonicalType.JSON),
+        ("OBJECT", CanonicalType.JSON),
+        ("ARRAY", CanonicalType.JSON),
+        ("TIMESTAMP_NTZ", CanonicalType.TIMESTAMP),
+        ("TIMESTAMP_TZ", CanonicalType.TIMESTAMP),
+        ("TIMESTAMP_LTZ", CanonicalType.TIMESTAMP),
+    ],
+)
+def test_normalize_snowflake_vendor_types(raw: str, expected: CanonicalType) -> None:
+    assert normalize_db_type(raw).canonical == expected
+
+
+def test_number_precision_round_trips_to_snowflake() -> None:
+    """NUMBER(12,4) from a Snowflake source renders back as NUMBER(12,4)."""
+    spec = normalize_db_type("NUMBER(12,4)")
+    assert render_canonical(spec, dialect="snowflake") == "NUMBER(12,4)"
+    assert render_canonical(spec, dialect="postgres") == "NUMERIC(12,4)"

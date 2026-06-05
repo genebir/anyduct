@@ -249,6 +249,12 @@ ignore_missing_imports = true
 module = ["redshift_connector", "redshift_connector.*"]
 ignore_missing_imports = true
 
+# clickhouse-connect — installed via [clickhouse] extra only (ADR-0080).
+# Lazy-imported in etl_plugins.connectors.rdbms.clickhouse; not a dev dep.
+[[tool.mypy.overrides]]
+module = ["clickhouse_connect", "clickhouse_connect.*"]
+ignore_missing_imports = true
+
 # prometheus_client — pulled in transitively via opentelemetry-exporter-prometheus
 # (Step 6.2). Lazy-imported in configure_otel so core install is unaffected.
 [[tool.mypy.overrides]]

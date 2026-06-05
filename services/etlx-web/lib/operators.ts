@@ -341,6 +341,22 @@ const SOURCES: OperatorSpec[] = [
     ],
   },
   {
+    // Phase AGG (2026-06-05, ADR-0079) — Amazon Redshift.
+    id: "source:redshift",
+    kind: "source",
+    connectorType: "redshift",
+    label: "Redshift",
+    description: "Read rows from an Amazon Redshift table via a SQL query.",
+    icon: DatabaseIcon,
+    accent: "#E8482B",
+    fields: [
+      { key: "connection", label: "Connection", kind: "connection", required: true },
+      { key: "query", label: "Read", kind: "sourceQuery" },
+      { key: "chunk_size", label: "Chunk size", kind: "number", defaultValue: 10000 },
+      CURSOR_COLUMN_FIELD,
+    ],
+  },
+  {
     id: "source:mongodb",
     kind: "source",
     connectorType: "mongodb",
@@ -1135,6 +1151,61 @@ const SINKS: OperatorSpec[] = [
         label: "Create table if missing",
         kind: "boolean",
         help: "Cross-DB types translate automatically — JSON → JSON, TIMESTAMPTZ → TIMESTAMP, DECIMAL → NUMERIC, TEXT → STRING.",
+      },
+      {
+        key: "auto_create_if_exists",
+        label: "If table exists",
+        kind: "select",
+        showWhen: { field: "auto_create_table", equals: true },
+        options: [
+          { label: "skip — use existing table as-is", value: "skip" },
+          { label: "drop — DROP and recreate (snapshot rebuild)", value: "drop" },
+          { label: "error — refuse to clobber", value: "error" },
+        ],
+        help: "‘drop’ is the right choice for nightly snapshot rebuilds.",
+      },
+    ],
+  },
+  {
+    // Phase AGG (2026-06-05, ADR-0079) — Amazon Redshift sink.
+    id: "sink:redshift",
+    kind: "sink",
+    connectorType: "redshift",
+    label: "Redshift",
+    description: "Write records into an Amazon Redshift table.",
+    icon: DatabaseIcon,
+    accent: "#E8482B",
+    fields: [
+      { key: "connection", label: "Connection", kind: "connection", required: true },
+      { key: "table", label: "Table", kind: "table", placeholder: "schema.table" },
+      {
+        key: "mode",
+        label: "Mode",
+        kind: "select",
+        defaultValue: "append",
+        options: [
+          { label: "append", value: "append" },
+          { label: "overwrite", value: "overwrite" },
+          { label: "upsert", value: "upsert" },
+        ],
+      },
+      {
+        key: "key_columns",
+        label: "Key columns",
+        kind: "columns",
+        help: "Required for upsert mode (MERGE join keys; promoted to PRIMARY KEY when auto-created). Upsert needs the Redshift 2023+ engine.",
+      },
+      {
+        key: "pre_sql",
+        label: "Pre-write SQL (atomic)",
+        kind: "sql",
+        placeholder: "DELETE FROM public.orders WHERE batch_date = '2026-05-21'",
+      },
+      {
+        key: "auto_create_table",
+        label: "Create table if missing",
+        kind: "boolean",
+        help: "Cross-DB types translate automatically — JSON → SUPER, TEXT → VARCHAR(65535), TIMESTAMPTZ → TIMESTAMPTZ, BLOB → VARBYTE.",
       },
       {
         key: "auto_create_if_exists",

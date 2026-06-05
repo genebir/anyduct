@@ -34,6 +34,7 @@ export const MIGRATION_SUPPORTED_TYPES = new Set([
   "mssql",
   "snowflake",
   "bigquery",
+  "redshift",
 ]);
 
 /** Phase AAS (2026-06-01) — what *unit* the migration replicates.

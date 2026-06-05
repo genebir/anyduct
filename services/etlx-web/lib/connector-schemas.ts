@@ -353,6 +353,27 @@ const BIGQUERY: ConnectorSchema = {
   ],
 };
 
+// Phase AGG (2026-06-05, ADR-0079) — Amazon Redshift.
+const REDSHIFT: ConnectorSchema = {
+  type: "redshift",
+  label: "Redshift",
+  description:
+    "redshift_connector-backed batch source + sink for Amazon Redshift (postgres-derived DW).",
+  fields: [
+    { key: "host", label: "Host", type: "string", required: true, help: "Cluster endpoint, e.g. my-cluster.abc123.us-east-1.redshift.amazonaws.com." },
+    { key: "port", label: "Port", type: "number", defaultValue: 5439 },
+    { key: "database", label: "Database", type: "string", required: true },
+    { key: "user", label: "User", type: "string", required: true },
+    {
+      key: "password",
+      label: "Password",
+      type: "password",
+      isSecret: true,
+      help: "Stored in the secret backend; never written to the metadata DB.",
+    },
+  ],
+};
+
 export const CONNECTOR_SCHEMAS: ConnectorSchema[] = [
   POSTGRES,
   MYSQL,
@@ -361,6 +382,7 @@ export const CONNECTOR_SCHEMAS: ConnectorSchema[] = [
   MSSQL,
   SNOWFLAKE,
   BIGQUERY,
+  REDSHIFT,
   MONGODB,
   S3,
   KAFKA,

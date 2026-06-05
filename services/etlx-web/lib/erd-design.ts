@@ -67,6 +67,80 @@ export const ERD_TYPES = [
 
 export const EMPTY_DESIGN: ErdDesign = { tables: [], relations: [] };
 
+// Vendor (DB) type → ERD vocabulary, for "import from connection". Keeps the
+// designer's type dropdown meaningful instead of every column reading as the
+// dropdown's first option. Base name (sans args) is looked up; length/precision
+// are preserved for VARCHAR/NUMERIC.
+const VENDOR_TYPE_MAP: Record<string, string> = {
+  bigint: "BIGINT",
+  int8: "BIGINT",
+  bigserial: "BIGINT",
+  integer: "INTEGER",
+  int: "INTEGER",
+  int4: "INTEGER",
+  serial: "INTEGER",
+  mediumint: "INTEGER",
+  smallint: "SMALLINT",
+  int2: "SMALLINT",
+  tinyint: "SMALLINT",
+  boolean: "BOOLEAN",
+  bool: "BOOLEAN",
+  bit: "BOOLEAN",
+  real: "REAL",
+  float4: "REAL",
+  "double precision": "DOUBLE PRECISION",
+  float8: "DOUBLE PRECISION",
+  double: "DOUBLE PRECISION",
+  float: "DOUBLE PRECISION",
+  float64: "DOUBLE PRECISION",
+  text: "TEXT",
+  longtext: "TEXT",
+  mediumtext: "TEXT",
+  clob: "TEXT",
+  "long varchar": "TEXT",
+  date: "DATE",
+  json: "JSON",
+  jsonb: "JSON",
+  variant: "JSON",
+  super: "JSON",
+  object: "JSON",
+  bytea: "BLOB",
+  blob: "BLOB",
+  binary: "BLOB",
+  varbinary: "BLOB",
+  bytes: "BLOB",
+  varbyte: "BLOB",
+};
+
+/** Map a connector's column type string to the ERD type vocabulary.
+ *  Unknown types are returned unchanged (the dropdown tolerates them). */
+export function normalizeImportType(raw: string): string {
+  if (!raw || !raw.trim()) return "TEXT";
+  const s = raw.trim();
+  const lower = s.toLowerCase();
+  const base = lower.replace(/\(.*\)$/, "").trim();
+
+  if (
+    base.includes("varchar") ||
+    base.includes("char") ||
+    base === "character varying" ||
+    base === "string" ||
+    base === "nvarchar" ||
+    base === "fixedstring"
+  ) {
+    const m = lower.match(/\((\d+)\)/);
+    return m ? `VARCHAR(${m[1]})` : "VARCHAR(255)";
+  }
+  if (base.includes("timestamp") || base === "datetime" || base === "datetime2" || base === "datetime64") {
+    return "TIMESTAMP";
+  }
+  if (base.includes("numeric") || base.includes("decimal") || base.includes("number")) {
+    const m = lower.match(/\((\d+)\s*,\s*(\d+)\)/);
+    return m ? `NUMERIC(${m[1]},${m[2]})` : "NUMERIC(10,2)";
+  }
+  return VENDOR_TYPE_MAP[base] ?? s;
+}
+
 let _seq = 0;
 /** Stable-ish id (crypto when available, else a counter). */
 export function newId(prefix = "t"): string {
@@ -164,7 +238,7 @@ export function rawTablesToDesign(raw: ImportTable[], offsetX = 0, offsetY = 0):
     y: offsetY + Math.floor(i / perRow) * 220,
     columns: t.columns.map((c) => ({
       name: c.name,
-      type: c.type || "TEXT",
+      type: normalizeImportType(c.type),
       pk: c.name.toLowerCase() === "id",
     })),
   }));

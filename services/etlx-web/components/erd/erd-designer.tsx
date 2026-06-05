@@ -24,7 +24,16 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import Link from "next/link";
-import { ArrowLeftIcon, CopyIcon, DatabaseIcon, KeyIcon, PlusIcon, TrashIcon, XIcon } from "lucide-react";
+import {
+  ArrowLeftIcon,
+  CopyIcon,
+  DatabaseIcon,
+  KeyIcon,
+  LinkIcon,
+  PlusIcon,
+  TrashIcon,
+  XIcon,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -57,7 +66,7 @@ type Translate = (key: keyof Messages, vars?: Record<string, string | number>) =
 
 const DIALECTS = ["postgres", "mysql", "sqlite", "snowflake", "bigquery"];
 
-function nodeLabel(tb: DesignTable): React.ReactNode {
+function nodeLabel(tb: DesignTable, fkCols: Set<string>): React.ReactNode {
   return (
     <div className="w-full text-left">
       <div className="truncate rounded-t-[7px] border-b border-border-subtle bg-overlay px-2.5 py-1.5 font-mono text-[11px] font-semibold text-text">
@@ -67,11 +76,21 @@ function nodeLabel(tb: DesignTable): React.ReactNode {
         {tb.columns.map((c) => (
           <div key={c.name} className="flex items-center gap-1.5 border-b border-border-subtle/40 px-2.5 py-1 last:border-0">
             {c.pk ? (
-              <KeyIcon size={10} className="shrink-0 text-warning" />
+              <KeyIcon size={10} className="shrink-0 text-warning">
+                <title>PK</title>
+              </KeyIcon>
+            ) : fkCols.has(c.name) ? (
+              <LinkIcon size={10} className="shrink-0 text-accent">
+                <title>FK</title>
+              </LinkIcon>
             ) : (
               <span className="inline-block w-[10px] shrink-0" />
             )}
-            <span className="flex-1 truncate font-mono text-[11px] text-text">{c.name}</span>
+            <span
+              className={`flex-1 truncate font-mono text-[11px] ${fkCols.has(c.name) && !c.pk ? "text-accent" : "text-text"}`}
+            >
+              {c.name}
+            </span>
             <span className="shrink-0 font-mono text-[10px] text-text-muted">{c.type}</span>
           </div>
         ))}
@@ -84,12 +103,14 @@ function TablePanel({
   table,
   t,
   onChange,
+  onRenameColumn,
   onDelete,
   onClose,
 }: {
   table: DesignTable;
   t: Translate;
   onChange: (patch: Partial<DesignTable>) => void;
+  onRenameColumn: (index: number, newName: string) => void;
   onDelete: () => void;
   onClose: () => void;
 }) {
@@ -126,7 +147,7 @@ function TablePanel({
           <div key={i} className="flex items-center gap-1">
             <Input
               value={c.name}
-              onChange={(e) => setColumn(i, { name: e.target.value })}
+              onChange={(e) => onRenameColumn(i, e.target.value)}
               className="h-7 flex-1 text-xs"
             />
             <select
@@ -134,6 +155,11 @@ function TablePanel({
               onChange={(e) => setColumn(i, { type: e.target.value })}
               className="h-7 rounded-md border border-border-subtle bg-bg px-1 text-[11px] text-text"
             >
+              {/* Tolerate an imported/custom type not in the preset list so
+                  it displays as-is instead of snapping to the first option. */}
+              {(ERD_TYPES as readonly string[]).includes(c.type) ? null : (
+                <option value={c.type}>{c.type}</option>
+              )}
               {ERD_TYPES.map((ty) => (
                 <option key={ty} value={ty}>
                   {ty}
@@ -286,12 +312,18 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
     };
   }, [ws?.id, docId, design, docName, loaded]);
 
-  const nodes = useMemo<Node[]>(
-    () =>
-      design.tables.map((tb) => ({
+  const nodes = useMemo<Node[]>(() => {
+    // FK columns per table: any column that's the source of a relation.
+    const fkByTable = new Map<string, Set<string>>();
+    for (const r of design.relations) {
+      const set = fkByTable.get(r.from) ?? new Set<string>();
+      set.add(r.fromColumn);
+      fkByTable.set(r.from, set);
+    }
+    return design.tables.map((tb) => ({
         id: tb.id,
         position: { x: tb.x, y: tb.y },
-        data: { label: nodeLabel(tb) },
+        data: { label: nodeLabel(tb, fkByTable.get(tb.id) ?? new Set()) },
         selected: tb.id === selectedId,
         sourcePosition: Position.Right,
         targetPosition: Position.Left,
@@ -306,9 +338,8 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
           background: "rgb(var(--bg-elevated))",
           color: "rgb(var(--text))",
         },
-      })),
-    [design, selectedId],
-  );
+      }));
+  }, [design, selectedId]);
 
   const edges = useMemo<Edge[]>(
     () =>
@@ -362,6 +393,26 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
 
   const updateTable = (id: string, patch: Partial<DesignTable>) =>
     setDesign((d) => ({ ...d, tables: d.tables.map((tb) => (tb.id === id ? { ...tb, ...patch } : tb)) }));
+
+  // Rename a column AND keep any FK relation that references it in sync, so
+  // the edge label (which shows the FK column name) follows the rename.
+  const renameColumn = (tableId: string, index: number, newName: string) =>
+    setDesign((d) => {
+      const tbl = d.tables.find((t) => t.id === tableId);
+      const oldName = tbl?.columns[index]?.name;
+      const tables = d.tables.map((t) =>
+        t.id === tableId
+          ? { ...t, columns: t.columns.map((c, j) => (j === index ? { ...c, name: newName } : c)) }
+          : t,
+      );
+      const relations =
+        oldName == null
+          ? d.relations
+          : d.relations.map((r) =>
+              r.from === tableId && r.fromColumn === oldName ? { ...r, fromColumn: newName } : r,
+            );
+      return { tables, relations };
+    });
 
   const deleteTable = (id: string) =>
     setDesign((d) => ({
@@ -517,6 +568,7 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
             table={selected}
             t={t}
             onChange={(patch) => updateTable(selected.id, patch)}
+            onRenameColumn={(i, newName) => renameColumn(selected.id, i, newName)}
             onDelete={() => {
               deleteTable(selected.id);
               setSelectedId(null);

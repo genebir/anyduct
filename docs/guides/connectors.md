@@ -131,6 +131,12 @@ Across the built-ins, these option names are reserved:
 | `format` | S3 / Kafka | `parquet` / `csv` / `jsonl` / `json` / `avro` |
 | `records_field` | HTTP source | key in the JSON response object holding the array |
 | `page_param` | HTTP source | query param name for page-number pagination |
+| `auto_create_table` | migration sinks | inspect source schema + `CREATE TABLE` on first run |
+| `auto_create_if_exists` | migration sinks | `skip` / `drop` / `error` when the table already exists |
+| `topic` | stream source/sink | Kafka/Redis topic, Kinesis stream, SQS queue (name or URL) |
+| `group_id` | stream sources | consumer group (Kafka / Redis Streams) |
+| `iterator_type` | Kinesis source | `TRIM_HORIZON` (oldest) / `LATEST` |
+| `wait_seconds` | SQS source | long-poll wait per `receive_message` |
 
 See the [API reference](../reference/connectors.md) for the exact
 signatures.

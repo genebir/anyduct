@@ -31,6 +31,7 @@ from etlx_server.routers import assets as assets_router
 from etlx_server.routers import audit as audit_router
 from etlx_server.routers import auth as auth_router
 from etlx_server.routers import connections as connections_router
+from etlx_server.routers import erd as erd_router
 from etlx_server.routers import health as health_router
 from etlx_server.routers import memberships as memberships_router
 from etlx_server.routers import meta as meta_router
@@ -194,6 +195,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(assets_router.router)
     app.include_router(variables_router.router)
     app.include_router(sensors_router.router)
+    app.include_router(erd_router.router)
     return app
 
 

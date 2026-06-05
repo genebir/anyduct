@@ -144,6 +144,42 @@ class WorkspaceVariableSetRequest(BaseModel):
     description: str | None = Field(default=None, max_length=2000)
 
 
+class ErdDiagramSummary(BaseModel):
+    """List item for ``GET /workspaces/{id}/erd-diagrams`` (Phase AHD)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    name: str
+    table_count: int = 0
+    updated_at: datetime
+
+
+class ErdDiagramDetail(BaseModel):
+    """Full diagram incl. the designer model (``GET .../erd-diagrams/{id}``)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    name: str
+    design_json: dict[str, Any]
+    updated_at: datetime
+
+
+class ErdDiagramCreateRequest(BaseModel):
+    """Body of ``POST /workspaces/{id}/erd-diagrams``."""
+
+    name: str = Field(min_length=1, max_length=255)
+    design_json: dict[str, Any] = Field(default_factory=dict)
+
+
+class ErdDiagramUpdateRequest(BaseModel):
+    """Body of ``PATCH .../erd-diagrams/{id}`` — name and/or design."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    design_json: dict[str, Any] | None = None
+
+
 class ConnectionCreateRequest(BaseModel):
     """Body of ``POST /workspaces/{id}/connections``.
 

@@ -2670,4 +2670,24 @@ L1 출시 직후 사용자가 5개 회신:
 
 ---
 
+## ADR-0090: ERD 서버 백킹 — 1급 워크스페이스 리소스로 승격
+
+**Date**: 2026-06-05
+**Status**: Accepted
+**Context**: "$5천 고객" 관점 평가에서 최대 불만 = **ERD만 브라우저 localStorage에 저장**(연결/파이프라인/스케줄은 다 서버 저장·공유). 캐시 삭제 시 소실, 팀/기기 간 공유 불가. ADR-0089가 클라이언트 전용으로 출발한 것을 "파이프라인처럼" 서버 관리 리소스로 승격.
+
+**Decision**:
+1. **메타DB `erd_diagrams`** (Alembic 0011) — workspace_id(FK CASCADE) + name + design_json(JSONB, opaque 디자이너 모델) + created_by_user_id + timestamps. 서버는 design_json을 해석하지 않고 verbatim 저장.
+2. **`ErdDiagramRepository`** (no-commit-inside, 라우터가 audit과 함께 커밋) + **REST** `/workspaces/{ws}/erd-diagrams` CRUD(GET list Viewer+ / POST·PATCH·DELETE Editor+, get/{id} Viewer+). 매 mutation audit(erd.create/update/delete). 워크스페이스 격리(타 ws는 404).
+3. **schemas**: ErdDiagramSummary(table_count는 design_json.tables 길이 파생) / Detail(+design_json) / Create / Update(PATCH 부분).
+4. **주의**: Detail이 updated_at을 포함 → commit 후 lazy refresh가 greenlet 밖에서 터짐(MissingGreenlet). create/update에서 `await session.refresh(row)` 후 직렬화로 해결(변수 라우터는 timestamp 미반환이라 무사고였음).
+5. **web**: erd-store를 localStorage → REST(erdApi) 전환, 목록/디자이너 async load/save.
+
+**Consequences**:
+- ✅ ERD가 파이프라인/연결과 동급 서버 리소스(영속·공유·감사). 통합 it 2(CRUD 라운드트립+audit / 워크스페이스 격리) green. mypy/ruff clean. DB 마이그레이션 1.
+- ✅ 패턴은 variables/pipelines 그대로 따름(일관성).
+- ⚠️ design_json 스키마 검증은 서버가 안 함(opaque) — 잘못된 모델도 저장됨(web이 책임). 버전 이력은 없음(pipeline_versions와 달리 in-place update) — 필요 시 후속.
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

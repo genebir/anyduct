@@ -520,6 +520,21 @@ const SOURCES: OperatorSpec[] = [
     ],
   },
   {
+    // Phase AGT (2026-06-05, ADR-0086) — RabbitMQ queue source.
+    id: "source:rabbitmq",
+    kind: "source",
+    connectorType: "rabbitmq",
+    label: "RabbitMQ queue",
+    description: "Stream-source messages from a RabbitMQ queue (ack on commit).",
+    icon: RadioTowerIcon,
+    accent: "#EC4899",
+    streaming: true,
+    fields: [
+      { key: "connection", label: "Connection", kind: "connection", required: true },
+      { key: "topic", label: "Queue", kind: "string", placeholder: "etl-jobs" },
+    ],
+  },
+  {
     // Phase AGN (2026-06-05, ADR-0085) — Redis Streams source.
     id: "source:redis",
     kind: "source",
@@ -1538,6 +1553,21 @@ const SINKS: OperatorSpec[] = [
           { label: "avro", value: "avro" },
         ],
       },
+    ],
+  },
+  {
+    // Phase AGT (2026-06-05, ADR-0086) — RabbitMQ queue sink.
+    id: "sink:rabbitmq",
+    kind: "sink",
+    connectorType: "rabbitmq",
+    label: "RabbitMQ queue",
+    description: "Stream-sink messages to a RabbitMQ queue (persistent publish).",
+    icon: RadioTowerIcon,
+    accent: "#4ADE80",
+    streaming: true,
+    fields: [
+      { key: "connection", label: "Connection", kind: "connection", required: true },
+      { key: "topic", label: "Queue", kind: "string", placeholder: "etl-jobs" },
     ],
   },
   {

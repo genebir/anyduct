@@ -239,6 +239,26 @@ const KINESIS: ConnectorSchema = {
   ],
 };
 
+// Phase AGT (2026-06-05, ADR-0086) — RabbitMQ.
+const RABBITMQ: ConnectorSchema = {
+  type: "rabbitmq",
+  label: "RabbitMQ",
+  description: "aio-pika-backed stream source + sink for RabbitMQ (AMQP) queues.",
+  fields: [
+    { key: "host", label: "Host", type: "string", required: true, defaultValue: "localhost" },
+    { key: "port", label: "Port", type: "number", defaultValue: 5672 },
+    { key: "virtual_host", label: "Virtual host", type: "string", defaultValue: "/" },
+    { key: "username", label: "User", type: "string", defaultValue: "guest" },
+    {
+      key: "password",
+      label: "Password",
+      type: "password",
+      isSecret: true,
+      help: "Stored in the secret backend; never written to the metadata DB.",
+    },
+  ],
+};
+
 // Phase AGN (2026-06-05, ADR-0085) — Redis Streams.
 const REDIS: ConnectorSchema = {
   type: "redis",
@@ -513,6 +533,7 @@ export const CONNECTOR_SCHEMAS: ConnectorSchema[] = [
   DYNAMODB,
   CASSANDRA,
   REDIS,
+  RABBITMQ,
   S3,
   KAFKA,
   KINESIS,

@@ -63,7 +63,8 @@ function nextFireHint(
 ): { absolute: string; relative: string } | null {
   if (!isActive || !cron) return null;
   try {
-    const it = CronExpressionParser.parse(cron.trim());
+    // Server fires cron in UTC (croniter) — match it here.
+    const it = CronExpressionParser.parse(cron.trim(), { tz: "UTC" });
     const next = it.next().toDate();
     const ms = next.getTime() - Date.now();
     return {

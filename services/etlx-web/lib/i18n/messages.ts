@@ -1260,6 +1260,8 @@ export const en = {
   "cron.monthly": "Monthly",
   "cron.placeholderStream": "(leave blank for stream)",
   "cron.nextFirings": "Next firings (your timezone)",
+  "cron.utcHint": "cron is UTC",
+  "cron.utcHintTitle": "Cron fields are interpreted in UTC on the server; times shown here are converted to your local timezone.",
   "cron.emptyStream":
     "Empty cron: stream pipelines run continuously, the scheduler ignores this row.",
   "cron.required": "Cron expression is required for batch schedules.",
@@ -2542,6 +2544,8 @@ export const ko: Messages = {
   "cron.monthly": "매월",
   "cron.placeholderStream": "(스트림은 비워 두세요)",
   "cron.nextFirings": "다음 발화 시각 (현지 시간대)",
+  "cron.utcHint": "cron은 UTC 기준",
+  "cron.utcHintTitle": "cron 필드는 서버에서 UTC로 해석되며, 여기 표시되는 시각은 현지 시간대로 변환된 값입니다.",
   "cron.emptyStream":
     "빈 크론: 스트림 파이프라인은 연속 실행되며 스케줄러는 이 행을 무시합니다.",
   "cron.required": "배치 스케줄에는 크론 표현식이 필요합니다.",

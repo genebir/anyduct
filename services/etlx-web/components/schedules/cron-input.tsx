@@ -89,8 +89,13 @@ export function CronInput({
       </p>
       {upcoming.length > 0 ? (
         <div className="rounded-md border border-border-subtle bg-elevated/40 p-2">
-          <div className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">
-            {t("cron.nextFirings")}
+          <div className="flex items-center justify-between">
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">
+              {t("cron.nextFirings")}
+            </div>
+            <div className="text-[10px] text-text-muted" title={t("cron.utcHintTitle")}>
+              {t("cron.utcHint")}
+            </div>
           </div>
           <ul className="mt-1 space-y-0.5 font-mono text-[11px] text-text-secondary">
             {upcoming.map((d, i) => (
@@ -109,7 +114,9 @@ export function CronInput({
 function nextFirings(expr: string, n: number): Date[] {
   const out: Date[] = [];
   try {
-    const it = CronExpressionParser.parse(expr.trim(), { currentDate: new Date() });
+    // Server fires cron in UTC (croniter) — parse in UTC so the preview
+    // matches the actual firing time, then render in the viewer's locale.
+    const it = CronExpressionParser.parse(expr.trim(), { currentDate: new Date(), tz: "UTC" });
     for (let i = 0; i < n; i++) out.push(it.next().toDate());
   } catch {
     // Mid-edit invalid input — silently return what we have.

@@ -291,7 +291,8 @@ export default function WorkspaceHomePage() {
     for (const s of schedules) {
       if (!s.is_active || !s.cron_expr) continue;
       try {
-        const next = CronExpressionParser.parse(s.cron_expr).next().toDate();
+        // Server fires cron in UTC (croniter) — match it here.
+        const next = CronExpressionParser.parse(s.cron_expr, { tz: "UTC" }).next().toDate();
         const ms = next.getTime() - Date.now();
         if (ms < 0) continue;
         if (soonestMs === null || ms < soonestMs) soonestMs = ms;

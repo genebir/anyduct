@@ -135,6 +135,32 @@ export default function AuditPage() {
     };
   }, [ws, resourceType, resourceId, actionFilter, mineOnly, currentUser, offset, t]);
 
+  // Phase AHV — export the loaded audit rows to CSV for compliance reports.
+  function exportCsv() {
+    if (!rows || rows.length === 0) return;
+    const cols = ["time", "action", "resource_type", "resource_id", "actor", "ip", "user_agent"];
+    const esc = (v: unknown) => {
+      const s = v == null ? "" : String(v);
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const lines = [cols.join(",")];
+    for (const r of rows) {
+      lines.push(
+        [r.created_at, r.action, r.resource_type, r.resource_id, r.actor_user_id, r.ip, r.user_agent]
+          .map(esc)
+          .join(","),
+      );
+    }
+    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `audit-${ws?.slug ?? "log"}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success(t("audit.csvExported", { n: rows.length }));
+  }
+
   return (
     <>
       <Header
@@ -143,6 +169,16 @@ export default function AuditPage() {
           ws
             ? t("common.workspaceSubtitle", { name: ws.name })
             : t("common.loadingWorkspace")
+        }
+        actions={
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={exportCsv}
+            disabled={!rows || rows.length === 0}
+          >
+            {t("audit.exportCsv")}
+          </Button>
         }
       />
       <main className="mx-auto w-full max-w-6xl flex-1 space-y-6 overflow-y-auto px-6 py-8">

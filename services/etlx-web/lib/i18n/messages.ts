@@ -478,6 +478,8 @@ export const en = {
 
   // audit log
   "audit.filters": "Filters",
+  "audit.exportCsv": "Export CSV",
+  "audit.csvExported": "Exported {n} rows to CSV",
   "audit.filtersDesc":
     "Server returns rows newest-first; resource type narrows by the row's affected resource.",
   "audit.resourceType": "Resource type",
@@ -1777,6 +1779,8 @@ export const ko: Messages = {
   "overview.nothingFailing": "현재 실패한 항목이 없습니다.",
 
   "audit.filters": "필터",
+  "audit.exportCsv": "CSV 내보내기",
+  "audit.csvExported": "{n}건을 CSV로 내보냈습니다",
   "audit.filtersDesc":
     "서버는 최신순으로 행을 반환하며, 리소스 유형으로 해당 행의 영향 리소스를 좁힙니다.",
   "audit.resourceType": "리소스 유형",

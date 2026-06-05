@@ -45,6 +45,7 @@ _BUILTIN_MODULES: dict[str, str] = {
     "redshift": "etl_plugins.connectors.rdbms.redshift",
     "clickhouse": "etl_plugins.connectors.rdbms.clickhouse",
     "mongodb": "etl_plugins.connectors.nosql.mongodb",
+    "dynamodb": "etl_plugins.connectors.nosql.dynamodb",
     "s3": "etl_plugins.connectors.object_storage.s3",
     "kafka": "etl_plugins.connectors.stream.kafka",
     "http": "etl_plugins.connectors.http.connector",

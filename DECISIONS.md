@@ -2493,4 +2493,25 @@ L1 출시 직후 사용자가 5개 회신:
 
 ---
 
+## ADR-0081: DynamoDB 커넥터 추가 — NoSQL 확장 + 첫 testcontainers 검증 커넥터(세션)
+
+**Date**: 2026-06-05
+**Status**: Accepted
+**Context**: DW 로드맵(AGE~AGH) 완주 후 다음 축. object-storage DLQ를 먼저 검토했으나 per-record 라우팅 + fan-out 재읽기와 얽혀(S3 PUT 덮어쓰기로 인한 silent loss) 코어 핫패스 버퍼링/중복제거가 필요 — 잘 테스트된 DLQ 경로에 회귀 위험이 커 "깨끗한 슬라이스"가 아니라고 판단. 대신 DynamoDB 커넥터 선택: **localstack + boto3가 이미 dev-deps**라 DW 4종(fake-cursor only)과 달리 **실제 testcontainers 왕복 검증** 가능 + NoSQL 확장(현재 MongoDB뿐) + 신규 무거운 의존 0.
+
+**Decision**:
+1. **`dynamodb.py`** — `boto3` resource 기반 BatchSource/Sink(SchemaInspector/Writer 없음 — DynamoDB는 schemaless, 마이그레이션 대상 아님). read=`Table.scan`(페이지네이션), write=`Table.batch_writer`(25개 자동 배치+재시도). lazy import.
+2. **타입 변환** — boto3 DynamoDB resource는 `float`을 거부하고 `Decimal`을 요구 → write 시 `float→Decimal`(str 경유로 0.1 정밀도 보존), read 시 `Decimal→int/float`. `_to_dynamo`/`_from_dynamo`가 dict/list 재귀.
+3. **mode** — `put_item`은 PK로 교체(=upsert by key)라 append/upsert 둘 다 put. **overwrite는 거부**(DynamoDB는 cheap truncate 없음 — 명확한 WriteError).
+4. **배선** — pyproject [dynamodb] extra(boto3 재사용) + entry-point, registry builtin. SQL 아니므로 서버 `_SQL_CONNECTION_TYPES`/DLQ readable에는 **미추가**(S3/Kafka/Mongo와 동일).
+5. **web** — operators source/sink(append/upsert만), connector-schemas 폼(region/table/endpoint_url/credentials).
+
+**Consequences**:
+- ✅ **세션 첫 실제 testcontainers 통합 테스트 커넥터** — LocalStack DynamoDB로 write(batch_writer)→scan 왕복 + float↔Decimal 라운드트립 + put 교체(upsert) 4건 실증. 단위 9건(변환/검증/registry, 드라이버 불요).
+- ✅ NoSQL 2종(MongoDB + DynamoDB). mypy/ruff clean. 코어 production 무영향(신규 모듈+목록).
+- ⚠️ schemaless라 cross-DB 마이그레이션(SchemaWriter) 대상 아님 — 빌더 source/sink로만 노출(S3/Kafka 동일).
+- ⚠️ scan은 전체 테이블 풀스캔(대용량은 비용/시간) — Query/필터 기반 incremental은 후속.
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

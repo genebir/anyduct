@@ -50,6 +50,7 @@ _BUILTIN_MODULES: dict[str, str] = {
     "s3": "etl_plugins.connectors.object_storage.s3",
     "kafka": "etl_plugins.connectors.stream.kafka",
     "kinesis": "etl_plugins.connectors.stream.kinesis",
+    "sqs": "etl_plugins.connectors.stream.sqs",
     "http": "etl_plugins.connectors.http.connector",
 }
 

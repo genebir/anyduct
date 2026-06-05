@@ -2553,4 +2553,24 @@ L1 출시 직후 사용자가 5개 회신:
 
 ---
 
+## ADR-0084: SQS 커넥터 추가 — 큐 기반 Streaming, 의미 있는 commit(ack)
+
+**Date**: 2026-06-05
+**Status**: Accepted
+**Context**: Kinesis(AGL) 후 Streaming 추가. SQS도 boto3+localstack(dev-deps)라 실검증 가능 + 신규 의존 0. **Kinesis의 commit이 no-op이었던 것과 달리 SQS는 commit=메시지 delete(ack)** — StreamSource.commit 컨트랙트(after_sink_flush 시 호출)를 의미 있게 시연. 큐 기반 ETL(작업 적재/소비)은 흔한 패턴.
+
+**Decision**:
+1. **`sqs.py`** — StreamSource/Sink, boto3 동기를 `asyncio.to_thread`로 래핑(Kinesis 패턴). topic=큐 이름(get_queue_url로 URL 해석, 캐시) 또는 전체 URL.
+2. **subscribe** — `receive_message` 롱폴(WaitTimeSeconds) 루프, JSON 디코드 yield. receipt handle을 `_pending`에 보관.
+3. **commit** — `delete_message_batch`(10개씩)로 보관된 handle 삭제 = SQS ack. 삭제 안 하면 visibility timeout 후 재전달(at-least-once). **Kinesis no-op과 대비되는 진짜 checkpoint.**
+4. **publish** — `send_message`(JSON body). flush no-op.
+5. **배선** — pyproject [sqs] extra(boto3 재사용) + entry-point + registry. 스트림이라 SQL/migration 미추가. web stream source/sink + 연결 폼.
+
+**Consequences**:
+- ✅ **LocalStack 실제 통합 it 2** — publish→subscribe→commit 후 재수신 empty(삭제 ack 검증)까지. 단위 9(fake-client: URL 해석/캐시/passthrough, receive→yield→commit-delete, driver-missing).
+- ✅ Streaming 3종(Kafka/Kinesis/SQS). boto3-계열 실검증 커넥터 3종(DynamoDB/Kinesis/SQS). mypy/ruff clean. 코어 production 무영향.
+- ⚠️ FIFO 큐(MessageGroupId/Dedup) 미지원(표준 큐만) — 후속. visibility timeout/DLQ redrive는 SQS 측 설정에 위임.
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

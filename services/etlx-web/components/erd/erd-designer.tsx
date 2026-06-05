@@ -12,6 +12,7 @@ import {
   Background,
   BackgroundVariant,
   Controls,
+  MiniMap,
   Position,
   ReactFlow,
   ReactFlowProvider,
@@ -432,6 +433,16 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
     setTimeout(() => rfRef.current?.fitView({ padding: 0.2, duration: 300 }), 60);
   };
 
+  const onJumpToTable = (name: string) => {
+    const tb = design.tables.find(
+      (t) => t.name === name || t.name.toLowerCase() === name.toLowerCase(),
+    );
+    if (!tb) return;
+    setSelectedId(tb.id);
+    setSelectedEdgeId(null);
+    rfRef.current?.setCenter(tb.x + 110, tb.y + 70, { zoom: 1.1, duration: 400 });
+  };
+
   const damxRef = useRef<HTMLInputElement>(null);
   const onDamxFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -519,6 +530,23 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
           </button>
         )}
         <span className="mx-1 h-5 w-px bg-border-subtle" />
+        {design.tables.length > 8 ? (
+          <>
+            <input
+              list="erd-table-search"
+              placeholder={t("erdDesign.searchTable")}
+              className="h-8 w-44 rounded-md border border-border-subtle bg-bg px-2 text-xs text-text"
+              onChange={(e) => {
+                if (design.tables.some((t) => t.name === e.target.value)) onJumpToTable(e.target.value);
+              }}
+            />
+            <datalist id="erd-table-search">
+              {design.tables.map((t) => (
+                <option key={t.id} value={t.name} />
+              ))}
+            </datalist>
+          </>
+        ) : null}
         <Button size="sm" variant="secondary" onClick={onAddTable}>
           <PlusIcon size={14} />
           {t("erdDesign.addTable")}
@@ -628,6 +656,14 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
                 color="rgb(var(--border-subtle) / 0.7)"
               />
               <Controls showInteractive={false} className="!rounded-md !border !border-border-subtle !bg-elevated" />
+              <MiniMap
+                pannable
+                zoomable
+                className="!rounded-md !border !border-border-subtle !bg-elevated"
+                maskColor="rgb(var(--bg) / 0.6)"
+                nodeColor="rgb(var(--accent) / 0.45)"
+                nodeStrokeColor="rgb(var(--border-subtle))"
+              />
             </ReactFlow>
           </ReactFlowProvider>
         </div>

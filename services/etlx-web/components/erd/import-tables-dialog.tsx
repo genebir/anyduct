@@ -93,7 +93,10 @@ export function ImportTablesDialog({
   const allSelected = filtered.length > 0 && filtered.every((tb) => selected.has(tb));
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[rgb(10_18_40_/_0.6)] p-4 backdrop-blur-md"
+      onClick={onClose}
+    >
       <div
         className="flex max-h-[80vh] w-full max-w-md flex-col gap-3 rounded-lg border border-border-subtle bg-surface p-4"
         onClick={(e) => e.stopPropagation()}

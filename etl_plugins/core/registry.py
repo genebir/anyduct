@@ -47,6 +47,7 @@ _BUILTIN_MODULES: dict[str, str] = {
     "mongodb": "etl_plugins.connectors.nosql.mongodb",
     "dynamodb": "etl_plugins.connectors.nosql.dynamodb",
     "cassandra": "etl_plugins.connectors.nosql.cassandra",
+    "redis": "etl_plugins.connectors.nosql.redis",
     "s3": "etl_plugins.connectors.object_storage.s3",
     "kafka": "etl_plugins.connectors.stream.kafka",
     "kinesis": "etl_plugins.connectors.stream.kinesis",

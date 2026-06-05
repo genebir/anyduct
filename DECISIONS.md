@@ -2573,4 +2573,23 @@ L1 출시 직후 사용자가 5개 회신:
 
 ---
 
+## ADR-0085: Redis Streams 커넥터 추가 — StreamSource/Sink, XACK commit
+
+**Date**: 2026-06-05
+**Status**: Accepted
+**Context**: AWS-localstack 계열(DynamoDB/Kinesis/SQS) 소진 후 Redis 추가. Redis는 localstack 미지원이라 실통합검증 불가 → DW 패턴(redis-py를 [redis] extra로만, fake-client 단위, live 게이트). **Redis Streams**(XADD/XREADGROUP/XACK)가 key-value보다 StreamSource/Sink에 자연스럽고 SQS처럼 **commit=XACK** ack 의미를 가짐.
+
+**Decision**:
+1. **`redis.py`** — StreamSource/Sink, redis-py 동기를 `asyncio.to_thread`로 래핑. nosql/ 디렉토리지만 스트림 컨트랙트(Redis Streams).
+2. **subscribe** — consumer group 자동 생성(XGROUP CREATE + MKSTREAM, BUSYGROUP 관용), XREADGROUP(`>`)로 신규 entry 폴링, `data` 필드 JSON 디코드 yield. message id를 (stream,group)별 보관.
+3. **commit** — XACK으로 보관 id ack(SQS delete와 동형 — 미ack 시 PEL 잔존/재처리). publish=XADD(`{"data": json}`). flush no-op.
+4. **배선** — pyproject [redis] extra(redis>=5.0) + entry-point + registry + mypy override. 스트림이라 SQL/migration 미추가. web stream source/sink(group_id) + 연결 폼.
+
+**Consequences**:
+- ✅ 단위 8(fake-client: XADD/XREADGROUP→yield→XACK, BUSYGROUP 관용, driver-missing). Streaming 4종(Kafka/Kinesis/SQS/Redis), ack 의미 commit 3종(SQS/Redis/Kafka).
+- ⚠️ **testcontainers 미포함** — localstack 비대상 + redis-py를 dev-dep에 안 넣음(DW 패턴). live Redis 게이트. (DynamoDB/Kinesis/SQS의 실검증과 대비.)
+- ⚠️ Redis Streams 전용(pub/sub·key-value 미사용). consumer group PEL claim(XCLAIM)·trim(MAXLEN)은 후속.
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

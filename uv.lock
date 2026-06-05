@@ -1517,6 +1517,9 @@ postgres = [
 prefect = [
     { name = "prefect" },
 ]
+redis = [
+    { name = "redis" },
+]
 redshift = [
     { name = "redshift-connector" },
 ]
@@ -1597,6 +1600,7 @@ requires-dist = [
     { name = "pymysql", marker = "extra == 'mysql'", specifier = ">=1.1" },
     { name = "python-dotenv", specifier = ">=1.0" },
     { name = "pyyaml", specifier = ">=6.0" },
+    { name = "redis", marker = "extra == 'redis'", specifier = ">=5.0" },
     { name = "redshift-connector", marker = "extra == 'redshift'", specifier = ">=2.0" },
     { name = "snowflake-connector-python", marker = "extra == 'snowflake'", specifier = ">=3.0" },
     { name = "sqlglot", specifier = ">=25.0" },
@@ -1605,7 +1609,7 @@ requires-dist = [
     { name = "typer", specifier = ">=0.12" },
     { name = "vertica-python", marker = "extra == 'vertica'", specifier = ">=1.4" },
 ]
-provides-extras = ["airflow", "aws-sm", "bigquery", "cassandra", "clickhouse", "dagster", "dynamodb", "gcp-sm", "kafka", "kinesis", "mongodb", "mssql", "mysql", "observability", "postgres", "prefect", "redshift", "s3", "snowflake", "sqs", "vault", "vertica"]
+provides-extras = ["airflow", "aws-sm", "bigquery", "cassandra", "clickhouse", "dagster", "dynamodb", "gcp-sm", "kafka", "kinesis", "mongodb", "mssql", "mysql", "observability", "postgres", "prefect", "redis", "redshift", "s3", "snowflake", "sqs", "vault", "vertica"]
 
 [package.metadata.requires-dev]
 dev = [

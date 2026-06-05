@@ -1010,6 +1010,7 @@ class RunExecutor:
             "bigquery",
             "redshift",
             "clickhouse",
+            "cassandra",
         }
         connection_type_by_name: dict[str, str] = {}
         try:

@@ -66,6 +66,7 @@ _SQL_READABLE_TYPES = {
     "bigquery",
     "redshift",
     "clickhouse",
+    "cassandra",
 }
 
 

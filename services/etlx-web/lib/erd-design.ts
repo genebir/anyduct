@@ -122,6 +122,69 @@ export function connect(design: ErdDesign, fromId: string, toId: string): ErdDes
   return { tables, relations };
 }
 
+/** Last dotted segment, lower-cased. */
+function unqualified(name: string): string {
+  const seg = name.includes(".") ? name.slice(name.lastIndexOf(".") + 1) : name;
+  return seg.toLowerCase();
+}
+
+export interface ImportTable {
+  table: string;
+  columns: { name: string; type: string }[];
+}
+
+/**
+ * Convert introspected connection tables into a design (grid layout, ``id``
+ * as PK heuristic, FK relations inferred from ``<x>_id`` naming — same
+ * convention as the schema viewer). Used by "Import from connection".
+ */
+export function rawTablesToDesign(raw: ImportTable[], offsetX = 0, offsetY = 0): ErdDesign {
+  const perRow = Math.max(1, Math.ceil(Math.sqrt(raw.length)));
+  const tables: DesignTable[] = raw.map((t, i) => ({
+    id: newId("tbl"),
+    name: t.table,
+    x: offsetX + (i % perRow) * 280,
+    y: offsetY + Math.floor(i / perRow) * 220,
+    columns: t.columns.map((c) => ({
+      name: c.name,
+      type: c.type || "TEXT",
+      pk: c.name.toLowerCase() === "id",
+    })),
+  }));
+  // Map unqualified table name → id for FK inference.
+  const byName = new Map(tables.map((t) => [unqualified(t.name), t.id]));
+  const relations: DesignRelation[] = [];
+  for (const t of tables) {
+    for (const c of t.columns) {
+      const lc = c.name.toLowerCase();
+      if (lc === "id" || !lc.endsWith("_id")) continue;
+      const base = lc.slice(0, -3);
+      const targetId = [base, `${base}s`, `${base}es`].map((b) => byName.get(b)).find(Boolean);
+      if (targetId && targetId !== t.id) {
+        relations.push({ id: newId("rel"), from: t.id, fromColumn: c.name, to: targetId });
+      }
+    }
+  }
+  return { tables, relations };
+}
+
+/** Merge an imported design into an existing one, skipping tables whose
+ *  name already exists (case-insensitive). */
+export function mergeDesign(base: ErdDesign, incoming: ErdDesign): ErdDesign {
+  const existing = new Set(base.tables.map((t) => unqualified(t.name)));
+  const addTables = incoming.tables.filter((t) => !existing.has(unqualified(t.name)));
+  const addedIds = new Set(addTables.map((t) => t.id));
+  // Keep relations whose endpoints are both present after the merge.
+  const keepIds = new Set([...base.tables.map((t) => t.id), ...addedIds]);
+  const addRelations = incoming.relations.filter(
+    (r) => addedIds.has(r.from) && keepIds.has(r.to),
+  );
+  return {
+    tables: [...base.tables, ...addTables],
+    relations: [...base.relations, ...addRelations],
+  };
+}
+
 function quoteIdent(ident: string, dialect: string): string {
   return dialect === "mysql" ? `\`${ident}\`` : `"${ident}"`;
 }

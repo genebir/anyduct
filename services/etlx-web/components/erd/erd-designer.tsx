@@ -23,7 +23,7 @@ import {
   type NodeMouseHandler,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { CopyIcon, KeyIcon, PlusIcon, TrashIcon, XIcon } from "lucide-react";
+import { CopyIcon, DatabaseIcon, KeyIcon, PlusIcon, TrashIcon, XIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,6 +32,8 @@ import {
   connect,
   EMPTY_DESIGN,
   ERD_TYPES,
+  mergeDesign,
+  newId,
   type DesignColumn,
   type DesignTable,
   type ErdDesign,
@@ -39,7 +41,13 @@ import {
 } from "@/lib/erd-design";
 import { useLocale } from "@/components/providers/locale-provider";
 import { ERD_EDGE_TYPES } from "@/components/erd/crowsfoot-edge";
+import { ImportTablesDialog } from "@/components/erd/import-tables-dialog";
+import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import type { Messages } from "@/lib/i18n/messages";
+
+type Menu =
+  | { x: number; y: number; kind: "pane" }
+  | { x: number; y: number; kind: "node"; nodeId: string };
 
 type Translate = (key: keyof Messages, vars?: Record<string, string | number>) => string;
 
@@ -158,11 +166,14 @@ function TablePanel({
 
 export function ErdDesigner({ slug }: { slug: string }) {
   const { t } = useLocale();
+  const ws = useWorkspaceFromSlug(slug);
   const [design, setDesign] = useState<ErdDesign>(EMPTY_DESIGN);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [dialect, setDialect] = useState("postgres");
   const [sql, setSql] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const [menu, setMenu] = useState<Menu | null>(null);
 
   useEffect(() => {
     try {
@@ -256,6 +267,32 @@ export function ErdDesigner({ slug }: { slug: string }) {
       return addTable(d, `table_${n + 1}`, 60 + (n % 4) * 280, 60 + Math.floor(n / 4) * 220);
     });
 
+  const duplicateTable = (id: string) =>
+    setDesign((d) => {
+      const src = d.tables.find((tb) => tb.id === id);
+      if (!src) return d;
+      const copy: DesignTable = {
+        ...src,
+        id: newId("tbl"),
+        name: `${src.name}_copy`,
+        x: src.x + 40,
+        y: src.y + 40,
+        columns: src.columns.map((c) => ({ ...c })),
+      };
+      return { ...d, tables: [...d.tables, copy] };
+    });
+
+  const onPaneContextMenu = useCallback((e: React.MouseEvent | MouseEvent) => {
+    e.preventDefault();
+    setMenu({ x: e.clientX, y: e.clientY, kind: "pane" });
+  }, []);
+
+  const onNodeContextMenu = useCallback((e: React.MouseEvent, node: Node) => {
+    e.preventDefault();
+    setSelectedId(node.id);
+    setMenu({ x: e.clientX, y: e.clientY, kind: "node", nodeId: node.id });
+  }, []);
+
   const selected = design.tables.find((tb) => tb.id === selectedId) ?? null;
 
   return (
@@ -265,6 +302,10 @@ export function ErdDesigner({ slug }: { slug: string }) {
         <Button size="sm" variant="secondary" onClick={onAddTable}>
           <PlusIcon size={14} />
           {t("erdDesign.addTable")}
+        </Button>
+        <Button size="sm" variant="secondary" onClick={() => setShowImport(true)} disabled={!ws?.id}>
+          <DatabaseIcon size={14} />
+          {t("erdDesign.import")}
         </Button>
         <span className="text-xs text-text-muted">{t("erdDesign.connectHint")}</span>
         <div className="ml-auto flex items-center gap-2">
@@ -314,7 +355,12 @@ export function ErdDesigner({ slug }: { slug: string }) {
               onConnect={onConnect}
               onNodeDragStop={onNodeDragStop}
               onNodeClick={onNodeClick}
-              onPaneClick={() => setSelectedId(null)}
+              onPaneClick={() => {
+                setSelectedId(null);
+                setMenu(null);
+              }}
+              onPaneContextMenu={onPaneContextMenu}
+              onNodeContextMenu={onNodeContextMenu}
               fitView
               proOptions={{ hideAttribution: true }}
             >
@@ -368,6 +414,67 @@ export function ErdDesigner({ slug }: { slug: string }) {
             </Button>
           </div>
         </div>
+      ) : null}
+
+      {showImport && ws?.id ? (
+        <ImportTablesDialog
+          workspaceId={ws.id}
+          onClose={() => setShowImport(false)}
+          onImport={(incoming) => setDesign((d) => mergeDesign(d, incoming))}
+        />
+      ) : null}
+
+      {menu ? (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setMenu(null)} />
+          <div
+            className="fixed z-50 min-w-36 rounded-md border border-border-subtle bg-elevated py-1 text-sm shadow-lg"
+            style={{ left: menu.x, top: menu.y }}
+          >
+            {menu.kind === "pane" ? (
+              <button
+                className="block w-full px-3 py-1.5 text-left text-text hover:bg-overlay"
+                onClick={() => {
+                  onAddTable();
+                  setMenu(null);
+                }}
+              >
+                {t("erdDesign.addTable")}
+              </button>
+            ) : (
+              <>
+                <button
+                  className="block w-full px-3 py-1.5 text-left text-text hover:bg-overlay"
+                  onClick={() => {
+                    setSelectedId(menu.nodeId);
+                    setMenu(null);
+                  }}
+                >
+                  {t("erdDesign.editTable")}
+                </button>
+                <button
+                  className="block w-full px-3 py-1.5 text-left text-text hover:bg-overlay"
+                  onClick={() => {
+                    duplicateTable(menu.nodeId);
+                    setMenu(null);
+                  }}
+                >
+                  {t("erdDesign.duplicateTable")}
+                </button>
+                <button
+                  className="block w-full px-3 py-1.5 text-left text-error hover:bg-overlay"
+                  onClick={() => {
+                    deleteTable(menu.nodeId);
+                    if (selectedId === menu.nodeId) setSelectedId(null);
+                    setMenu(null);
+                  }}
+                >
+                  {t("erdDesign.deleteTable")}
+                </button>
+              </>
+            )}
+          </div>
+        </>
       ) : null}
     </div>
   );

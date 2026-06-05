@@ -5,6 +5,7 @@ import {
   Background,
   BackgroundVariant,
   Controls,
+  MiniMap,
   Position,
   ReactFlow,
   ReactFlowProvider,
@@ -110,8 +111,29 @@ export function SchemaErdGraph({ tables }: { tables: RawTable[] }) {
           edgesFocusable={false}
           proOptions={{ hideAttribution: true }}
         >
-          <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="rgb(var(--border-subtle) / 0.6)" />
+          <Background
+            id="erdv-grid-minor"
+            variant={BackgroundVariant.Lines}
+            gap={20}
+            lineWidth={1}
+            color="rgb(var(--border-subtle) / 0.35)"
+          />
+          <Background
+            id="erdv-grid-major"
+            variant={BackgroundVariant.Lines}
+            gap={100}
+            lineWidth={1.2}
+            color="rgb(var(--border-subtle) / 0.7)"
+          />
           <Controls showInteractive={false} className="!rounded-md !border !border-border-subtle !bg-elevated" />
+          <MiniMap
+            pannable
+            zoomable
+            className="!rounded-md !border !border-border-subtle !bg-elevated"
+            maskColor="rgb(var(--bg) / 0.6)"
+            nodeColor="rgb(var(--accent) / 0.45)"
+            nodeStrokeColor="rgb(var(--border-subtle))"
+          />
         </ReactFlow>
       </div>
     </ReactFlowProvider>

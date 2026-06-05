@@ -40,6 +40,7 @@ _BUILTIN_MODULES: dict[str, str] = {
     "sqlite": "etl_plugins.connectors.rdbms.sqlite",
     "vertica": "etl_plugins.connectors.rdbms.vertica",
     "mssql": "etl_plugins.connectors.rdbms.mssql",
+    "snowflake": "etl_plugins.connectors.rdbms.snowflake",
     "mongodb": "etl_plugins.connectors.nosql.mongodb",
     "s3": "etl_plugins.connectors.object_storage.s3",
     "kafka": "etl_plugins.connectors.stream.kafka",

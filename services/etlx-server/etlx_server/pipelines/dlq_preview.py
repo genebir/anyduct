@@ -56,7 +56,7 @@ _TOP_DIALECTS = {"mssql"}
 # error cryptically or misbehave — so we gate on a known-SQL allow-list
 # and report such sinks as ``sink_not_readable`` (the UI says "query the
 # sink directly"). Reading an object-store DLQ is a separate slice.
-_SQL_READABLE_TYPES = {"sqlite", "postgres", "mysql", "vertica", "mssql"}
+_SQL_READABLE_TYPES = {"sqlite", "postgres", "mysql", "vertica", "mssql", "snowflake"}
 
 
 @dataclass(frozen=True)

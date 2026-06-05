@@ -41,7 +41,7 @@ export function DataTable<Row extends { id: string }>({
                 key={col.key}
                 scope="col"
                 className={cn(
-                  "border-b border-border-subtle px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-text-secondary",
+                  "whitespace-nowrap border-b border-border-subtle px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-text-secondary",
                   col.className,
                 )}
               >

@@ -307,14 +307,20 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
     };
   }, [ws?.id, docId]);
 
-  // Debounced server autosave on change.
+  // Debounced server autosave on change, with a status indicator so users
+  // trust the (invisible) server persistence.
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
   useEffect(() => {
     if (!loaded || !ws?.id) return;
     const wsId = ws.id;
     if (saveTimer.current) clearTimeout(saveTimer.current);
+    setSaveState("saving");
     saveTimer.current = setTimeout(() => {
-      void erdApi.update(wsId, docId, { name: docName, design_json: design }).catch(() => {});
+      erdApi
+        .update(wsId, docId, { name: docName, design_json: design })
+        .then(() => setSaveState("saved"))
+        .catch(() => setSaveState("idle"));
     }, 700);
     return () => {
       if (saveTimer.current) clearTimeout(saveTimer.current);
@@ -596,6 +602,11 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
             {docName || "Untitled"}
           </button>
         )}
+        {saveState !== "idle" ? (
+          <span className="text-[11px] text-text-muted">
+            {saveState === "saving" ? t("erdDoc.saving") : t("erdDoc.saved")}
+          </span>
+        ) : null}
         <span className="mx-1 h-5 w-px bg-border-subtle" />
         {design.tables.length > 8 ? (
           <>

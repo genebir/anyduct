@@ -132,6 +132,8 @@ export const en = {
   "erdDoc.new": "New",
   "erdDoc.delete": "Delete",
   "erdDoc.backToList": "Back to ERD list",
+  "erdDoc.saving": "Saving…",
+  "erdDoc.saved": "Saved",
   // ERD list page (Phase AHC)
   "erdList.new": "New diagram",
   "erdList.emptyTitle": "No ERDs yet",
@@ -1451,6 +1453,8 @@ export const ko: Messages = {
   "erdDoc.new": "새로 만들기",
   "erdDoc.delete": "삭제",
   "erdDoc.backToList": "ERD 목록으로",
+  "erdDoc.saving": "저장 중…",
+  "erdDoc.saved": "저장됨",
   // ERD list page (Phase AHC)
   "erdList.new": "새 다이어그램",
   "erdList.emptyTitle": "아직 ERD가 없습니다",

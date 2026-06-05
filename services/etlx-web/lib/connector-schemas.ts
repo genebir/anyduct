@@ -239,6 +239,25 @@ const KINESIS: ConnectorSchema = {
   ],
 };
 
+// Phase AGN (2026-06-05, ADR-0085) — Redis Streams.
+const REDIS: ConnectorSchema = {
+  type: "redis",
+  label: "Redis",
+  description: "redis-py-backed stream source + sink over Redis Streams (XADD / XREADGROUP).",
+  fields: [
+    { key: "host", label: "Host", type: "string", required: true, defaultValue: "localhost" },
+    { key: "port", label: "Port", type: "number", defaultValue: 6379 },
+    { key: "db", label: "DB", type: "number", defaultValue: 0 },
+    {
+      key: "password",
+      label: "Password",
+      type: "password",
+      isSecret: true,
+      help: "Stored in the secret backend; never written to the metadata DB.",
+    },
+  ],
+};
+
 // Phase AGM (2026-06-05, ADR-0084) — SQS queue.
 const SQS: ConnectorSchema = {
   type: "sqs",
@@ -493,6 +512,7 @@ export const CONNECTOR_SCHEMAS: ConnectorSchema[] = [
   MONGODB,
   DYNAMODB,
   CASSANDRA,
+  REDIS,
   S3,
   KAFKA,
   KINESIS,

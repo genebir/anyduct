@@ -520,6 +520,22 @@ const SOURCES: OperatorSpec[] = [
     ],
   },
   {
+    // Phase AGN (2026-06-05, ADR-0085) — Redis Streams source.
+    id: "source:redis",
+    kind: "source",
+    connectorType: "redis",
+    label: "Redis stream",
+    description: "Stream-source entries from a Redis Stream via a consumer group (XACK on commit).",
+    icon: RadioTowerIcon,
+    accent: "#EC4899",
+    streaming: true,
+    fields: [
+      { key: "connection", label: "Connection", kind: "connection", required: true },
+      { key: "topic", label: "Stream key", kind: "string", placeholder: "events" },
+      { key: "group_id", label: "Consumer group", kind: "string", placeholder: "etl" },
+    ],
+  },
+  {
     // Phase AGM (2026-06-05, ADR-0084) — SQS queue source.
     id: "source:sqs",
     kind: "source",
@@ -1522,6 +1538,21 @@ const SINKS: OperatorSpec[] = [
           { label: "avro", value: "avro" },
         ],
       },
+    ],
+  },
+  {
+    // Phase AGN (2026-06-05, ADR-0085) — Redis Streams sink.
+    id: "sink:redis",
+    kind: "sink",
+    connectorType: "redis",
+    label: "Redis stream",
+    description: "Stream-sink entries to a Redis Stream (XADD).",
+    icon: RadioTowerIcon,
+    accent: "#4ADE80",
+    streaming: true,
+    fields: [
+      { key: "connection", label: "Connection", kind: "connection", required: true },
+      { key: "topic", label: "Stream key", kind: "string", placeholder: "events" },
     ],
   },
   {

@@ -239,6 +239,38 @@ const KINESIS: ConnectorSchema = {
   ],
 };
 
+// Phase AGU (2026-06-05, ADR-0087) — NATS JetStream.
+const NATS: ConnectorSchema = {
+  type: "nats",
+  label: "NATS",
+  description: "nats-py-backed stream source + sink over NATS JetStream.",
+  fields: [
+    {
+      key: "servers",
+      label: "Servers",
+      type: "string",
+      required: true,
+      defaultValue: "nats://localhost:4222",
+      help: "Comma-separated NATS server URLs.",
+    },
+    { key: "user", label: "User", type: "string" },
+    {
+      key: "password",
+      label: "Password",
+      type: "password",
+      isSecret: true,
+      help: "Stored in the secret backend; never written to the metadata DB.",
+    },
+    {
+      key: "token",
+      label: "Token",
+      type: "password",
+      isSecret: true,
+      help: "Alternative to user/password auth. Stored in the secret backend.",
+    },
+  ],
+};
+
 // Phase AGT (2026-06-05, ADR-0086) — RabbitMQ.
 const RABBITMQ: ConnectorSchema = {
   type: "rabbitmq",
@@ -534,6 +566,7 @@ export const CONNECTOR_SCHEMAS: ConnectorSchema[] = [
   CASSANDRA,
   REDIS,
   RABBITMQ,
+  NATS,
   S3,
   KAFKA,
   KINESIS,

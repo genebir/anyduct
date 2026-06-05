@@ -520,6 +520,22 @@ const SOURCES: OperatorSpec[] = [
     ],
   },
   {
+    // Phase AGU (2026-06-05, ADR-0087) — NATS JetStream source.
+    id: "source:nats",
+    kind: "source",
+    connectorType: "nats",
+    label: "NATS JetStream",
+    description: "Stream-source messages from a NATS JetStream subject (durable pull, ack on commit).",
+    icon: RadioTowerIcon,
+    accent: "#EC4899",
+    streaming: true,
+    fields: [
+      { key: "connection", label: "Connection", kind: "connection", required: true },
+      { key: "topic", label: "Subject", kind: "string", placeholder: "events.orders" },
+      { key: "group_id", label: "Durable consumer", kind: "string", placeholder: "etl" },
+    ],
+  },
+  {
     // Phase AGT (2026-06-05, ADR-0086) — RabbitMQ queue source.
     id: "source:rabbitmq",
     kind: "source",
@@ -1553,6 +1569,21 @@ const SINKS: OperatorSpec[] = [
           { label: "avro", value: "avro" },
         ],
       },
+    ],
+  },
+  {
+    // Phase AGU (2026-06-05, ADR-0087) — NATS JetStream sink.
+    id: "sink:nats",
+    kind: "sink",
+    connectorType: "nats",
+    label: "NATS JetStream",
+    description: "Stream-sink messages to a NATS JetStream subject.",
+    icon: RadioTowerIcon,
+    accent: "#4ADE80",
+    streaming: true,
+    fields: [
+      { key: "connection", label: "Connection", kind: "connection", required: true },
+      { key: "topic", label: "Subject", kind: "string", placeholder: "events.orders" },
     ],
   },
   {

@@ -1008,6 +1008,7 @@ class RunExecutor:
             "mssql",
             "snowflake",
             "bigquery",
+            "redshift",
         }
         connection_type_by_name: dict[str, str] = {}
         try:

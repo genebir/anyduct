@@ -373,6 +373,26 @@ const SOURCES: OperatorSpec[] = [
     ],
   },
   {
+    // Phase AGJ (2026-06-05, ADR-0081) — DynamoDB (NoSQL).
+    id: "source:dynamodb",
+    kind: "source",
+    connectorType: "dynamodb",
+    label: "DynamoDB",
+    description: "Scan items from a DynamoDB table.",
+    icon: DatabaseIcon,
+    accent: "#4053D6",
+    fields: [
+      { key: "connection", label: "Connection", kind: "connection", required: true },
+      {
+        key: "query",
+        label: "Table",
+        kind: "string",
+        placeholder: "events",
+        help: "DynamoDB table name to scan (defaults to the connection's table).",
+      },
+    ],
+  },
+  {
     id: "source:mongodb",
     kind: "source",
     connectorType: "mongodb",
@@ -1291,6 +1311,33 @@ const SINKS: OperatorSpec[] = [
           { label: "error — refuse to clobber", value: "error" },
         ],
         help: "‘drop’ is the right choice for nightly snapshot rebuilds.",
+      },
+    ],
+  },
+  {
+    // Phase AGJ (2026-06-05, ADR-0081) — DynamoDB sink (NoSQL).
+    // No overwrite: DynamoDB has no cheap truncate. put_item replaces by
+    // primary key, so append and upsert behave identically.
+    id: "sink:dynamodb",
+    kind: "sink",
+    connectorType: "dynamodb",
+    label: "DynamoDB",
+    description: "Write items into a DynamoDB table (put_item, replaces by key).",
+    icon: DatabaseIcon,
+    accent: "#4053D6",
+    fields: [
+      { key: "connection", label: "Connection", kind: "connection", required: true },
+      { key: "table", label: "Table", kind: "string", placeholder: "events" },
+      {
+        key: "mode",
+        label: "Mode",
+        kind: "select",
+        defaultValue: "append",
+        options: [
+          { label: "append (put)", value: "append" },
+          { label: "upsert (put, replace by key)", value: "upsert" },
+        ],
+        help: "DynamoDB put_item replaces by primary key — append and upsert are equivalent.",
       },
     ],
   },

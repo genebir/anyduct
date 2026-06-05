@@ -173,6 +173,26 @@ const S3: ConnectorSchema = {
   ],
 };
 
+// Phase AGJ (2026-06-05, ADR-0081) — DynamoDB (NoSQL).
+const DYNAMODB: ConnectorSchema = {
+  type: "dynamodb",
+  label: "DynamoDB",
+  description: "boto3-backed batch source + sink for Amazon DynamoDB (serverless NoSQL).",
+  fields: [
+    { key: "region", label: "Region", type: "string", defaultValue: "us-east-1" },
+    { key: "table", label: "Default table", type: "string", help: "Optional default table when a source/sink doesn't set one." },
+    {
+      key: "endpoint_url",
+      label: "Endpoint URL",
+      type: "string",
+      placeholder: "leave blank for AWS; http://localhost:4566 for LocalStack",
+      help: "Leave blank for AWS DynamoDB; set for LocalStack / local testing.",
+    },
+    { key: "aws_access_key_id", label: "Access key", type: "password", isSecret: true },
+    { key: "aws_secret_access_key", label: "Secret key", type: "password", isSecret: true },
+  ],
+};
+
 const HTTP: ConnectorSchema = {
   type: "http",
   label: "HTTP / REST",
@@ -406,6 +426,7 @@ export const CONNECTOR_SCHEMAS: ConnectorSchema[] = [
   REDSHIFT,
   CLICKHOUSE,
   MONGODB,
+  DYNAMODB,
   S3,
   KAFKA,
   HTTP,

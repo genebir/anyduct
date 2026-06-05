@@ -12,6 +12,8 @@
  *   the auth provider listens for that and routes to `/login`.
  */
 
+import type { ErdDesign } from "@/lib/erd-design";
+
 const DEFAULT_BASE = "http://localhost:8000";
 const TOKEN_KEY = "etlx.token";
 const REFRESH_KEY = "etlx.refresh";
@@ -781,4 +783,43 @@ export const assetsApi = {
     api<AssetColumnLineageResponse>(
       `/workspaces/${workspaceId}/assets/${assetId}/column-lineage`,
     ),
+};
+
+// --- ERD diagrams (Phase AHD, ADR-0090) — server-backed ERD store ---
+
+export interface ErdDiagramSummary {
+  id: string;
+  name: string;
+  table_count: number;
+  updated_at: string;
+}
+
+export interface ErdDiagramDetail {
+  id: string;
+  name: string;
+  design_json: ErdDesign;
+  updated_at: string;
+}
+
+export const erdApi = {
+  list: (workspaceId: string) =>
+    api<ErdDiagramSummary[]>(`/workspaces/${workspaceId}/erd-diagrams`),
+  get: (workspaceId: string, id: string) =>
+    api<ErdDiagramDetail>(`/workspaces/${workspaceId}/erd-diagrams/${id}`),
+  create: (workspaceId: string, body: { name: string; design_json: ErdDesign }) =>
+    api<ErdDiagramDetail>(`/workspaces/${workspaceId}/erd-diagrams`, {
+      method: "POST",
+      json: body,
+    }),
+  update: (
+    workspaceId: string,
+    id: string,
+    body: { name?: string; design_json?: ErdDesign },
+  ) =>
+    api<ErdDiagramDetail>(`/workspaces/${workspaceId}/erd-diagrams/${id}`, {
+      method: "PATCH",
+      json: body,
+    }),
+  delete: (workspaceId: string, id: string) =>
+    api<void>(`/workspaces/${workspaceId}/erd-diagrams/${id}`, { method: "DELETE" }),
 };

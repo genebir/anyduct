@@ -7,7 +7,7 @@
  * (server-backed saved diagrams are a follow-up).
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Background,
   BackgroundVariant,
@@ -45,7 +45,7 @@ import {
 import { useLocale } from "@/components/providers/locale-provider";
 import { ERD_EDGE_TYPES } from "@/components/erd/crowsfoot-edge";
 import { ImportTablesDialog } from "@/components/erd/import-tables-dialog";
-import { listDocs, loadDesign, renameDoc, saveDoc } from "@/lib/erd-store";
+import { erdApi } from "@/lib/api";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import type { Messages } from "@/lib/i18n/messages";
 
@@ -247,21 +247,44 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
   const [docName, setDocName] = useState("");
   const [renaming, setRenaming] = useState(false);
 
-  // Load the requested diagram by id (the list page picks which one).
+  // Load the requested diagram from the server (ADR-0090).
   useEffect(() => {
-    const meta = listDocs(slug).find((d) => d.id === docId);
-    setDocName(meta?.name ?? "Untitled");
-    setDesign(loadDesign(slug, docId));
-    setSelectedId(null);
-    setSelectedEdgeId(null);
-    setLoaded(true);
-  }, [slug, docId]);
+    if (!ws?.id) return;
+    let cancelled = false;
+    setLoaded(false);
+    erdApi
+      .get(ws.id, docId)
+      .then((d) => {
+        if (cancelled) return;
+        setDocName(d.name);
+        setDesign(d.design_json ?? EMPTY_DESIGN);
+        setSelectedId(null);
+        setSelectedEdgeId(null);
+        setLoaded(true);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setDesign(EMPTY_DESIGN);
+        setLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [ws?.id, docId]);
 
-  // Auto-save on change (upserts the list entry too).
+  // Debounced server autosave on change.
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    if (!loaded) return;
-    saveDoc(slug, docId, docName, design);
-  }, [slug, docId, design, docName, loaded]);
+    if (!loaded || !ws?.id) return;
+    const wsId = ws.id;
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      void erdApi.update(wsId, docId, { name: docName, design_json: design }).catch(() => {});
+    }, 700);
+    return () => {
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+    };
+  }, [ws?.id, docId, design, docName, loaded]);
 
   const nodes = useMemo<Node[]>(
     () =>
@@ -396,7 +419,7 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
             value={docName}
             onChange={(e) => setDocName(e.target.value)}
             onBlur={() => {
-              renameDoc(slug, docId, docName || "Untitled");
+              if (!docName.trim()) setDocName("Untitled");
               setRenaming(false);
             }}
             onKeyDown={(e) => {

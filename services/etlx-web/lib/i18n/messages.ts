@@ -123,6 +123,7 @@ export const en = {
   "erdList.emptyDesc": "Create a diagram to model tables and relationships, or import a connection's schema.",
   "erdList.tableCount": "{n} tables",
   "erdList.deleteAria": "Delete {name}",
+  "erdList.createError": "Could not create the diagram.",
   // ERD edge / relationship editor (Phase AHC)
   "erdEdge.title": "Relationship",
   "erdEdge.cardinality": "Cardinality",
@@ -1417,6 +1418,7 @@ export const ko: Messages = {
   "erdList.emptyDesc": "테이블과 관계를 모델링할 다이어그램을 만들거나, 커넥션 스키마를 가져오세요.",
   "erdList.tableCount": "테이블 {n}개",
   "erdList.deleteAria": "{name} 삭제",
+  "erdList.createError": "다이어그램을 만들지 못했습니다.",
   // ERD edge / relationship editor (Phase AHC)
   "erdEdge.title": "관계",
   "erdEdge.cardinality": "카디널리티",

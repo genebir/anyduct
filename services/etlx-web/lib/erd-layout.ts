@@ -18,12 +18,14 @@
 import dagre from "@dagrejs/dagre";
 import type { ErdDesign, DesignTable } from "@/lib/erd-design";
 
-const NODE_WIDTH = 220;
-const HEADER_H = 30;
-const ROW_H = 21;
-const PAD_H = 8;
-const CLUSTER_GAP_X = 60;
-const CLUSTER_GAP_Y = 60;
+// Generous size estimates (slightly larger than the rendered node) so dagre
+// never packs boxes close enough to overlap.
+const NODE_WIDTH = 240;
+const HEADER_H = 40;
+const ROW_H = 25;
+const PAD_H = 16;
+const CLUSTER_GAP_X = 90;
+const CLUSTER_GAP_Y = 90;
 
 export type LayoutDirection = "LR" | "TB";
 
@@ -87,7 +89,7 @@ function layoutCluster(
   }
   const ids = new Set(comp.map((t) => t.id));
   const g = new dagre.graphlib.Graph();
-  g.setGraph({ rankdir: dir, ranksep: 80, nodesep: 30, marginx: 0, marginy: 0 });
+  g.setGraph({ rankdir: dir, ranksep: 110, nodesep: 50, marginx: 0, marginy: 0 });
   g.setDefaultEdgeLabel(() => ({}));
   for (const t of comp) g.setNode(t.id, { width: NODE_WIDTH, height: nodeHeight(t.columns.length) });
   for (const r of design.relations) {

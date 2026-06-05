@@ -20,7 +20,6 @@
  */
 
 import {
-  type Cardinality,
   type DesignRelation,
   type DesignTable,
   type ErdDesign,
@@ -72,10 +71,17 @@ interface ParsedColumn {
   type: string;
   guid: string | null;
   pk: boolean;
+  table: string | null;
 }
 interface ParsedTable {
   name: string;
   columns: ParsedColumn[];
+}
+
+interface RawRelation {
+  fromTable: string;
+  fromColumn: string;
+  toTable: string;
 }
 
 // Constraint / index pseudo-entity names (e.g. ``<table>_PK``) — DA# emits
@@ -118,6 +124,7 @@ export function parseDamx(buf: ArrayBuffer): ErdDesign {
         type: normalizeImportType(S[i + 1] + (length ? `(${length})` : "")),
         guid: doubledGuid,
         pk: false,
+        table: null,
       };
       cols.push(col);
       if (doubledGuid) colByGuid.set(doubledGuid, col);
@@ -145,8 +152,8 @@ export function parseDamx(buf: ArrayBuffer): ErdDesign {
       const guidCount = win.filter((w) => GUID_RE.test(w)).length;
       const hasColumnAhead = S.slice(i + 1, i + 7).some((w) => SQL_TYPES.has(w));
       if (guidCount >= 2 && !hasColumnAhead) {
-        const tbl: ParsedTable = { name: s, columns: cols };
-        tables.push(tbl);
+        for (const c of cols) c.table = s;
+        tables.push({ name: s, columns: cols });
         cols = [];
         i += 1;
         continue;
@@ -155,9 +162,71 @@ export function parseDamx(buf: ArrayBuffer): ErdDesign {
 
     i += 1;
   }
-  if (cols.length > 0) tables.push({ name: cols[0]?.name ?? "table", columns: cols });
+  if (cols.length > 0) {
+    const name = cols[0]?.name ?? "table";
+    for (const c of cols) c.table = name;
+    tables.push({ name, columns: cols });
+  }
 
-  return toDesign(dedupeTables(tables));
+  const deduped = dedupeTables(tables);
+  const rels = extractKeyGroupRelations(S, colByGuid, deduped);
+  return toDesign(deduped, rels);
+}
+
+/**
+ * Parse the **real** FK relationships from DA#'s key-inheritance groups
+ * (Phase AHL). In the relationship section DA stores runs of consecutive
+ * attribute GUIDs that share one key domain, e.g.
+ * ``[부서.DEPT_NO(PK), 사용자별부서.DEPT_NO, 사용자별부서변경이력.DEPT_NO]``.
+ * The parent is the member that is its table's sole primary key; every other
+ * member is a FK child pointing at it. This is exact (no name guessing) —
+ * only columns DA actually linked appear in a group.
+ */
+function extractKeyGroupRelations(
+  S: string[],
+  colByGuid: Map<string, ParsedColumn>,
+  tables: ParsedTable[],
+): RawRelation[] {
+  const valid = new Set(tables.map((t) => t.name));
+  const pkByTable = new Map<string, Set<string>>();
+  for (const t of tables) {
+    pkByTable.set(t.name, new Set(t.columns.filter((c) => c.pk).map((c) => c.name)));
+  }
+  const isSolePk = (table: string | null, col: string) =>
+    table != null && pkByTable.get(table)?.size === 1 && pkByTable.get(table)?.has(col);
+  const base = (name: string) => (name.startsWith("UP_") ? name.slice(3) : name);
+
+  const out: RawRelation[] = [];
+  const seen = new Set<string>();
+  const N = S.length;
+  let k = 0;
+  while (k < N) {
+    if (!colByGuid.has(S[k])) {
+      k += 1;
+      continue;
+    }
+    // Maximal run of consecutive attribute GUIDs = one key group.
+    const run: ParsedColumn[] = [];
+    while (k < N && colByGuid.has(S[k])) {
+      run.push(colByGuid.get(S[k])!);
+      k += 1;
+    }
+    if (run.length < 2) continue;
+    // All members must share one key domain (same base column name).
+    const bases = new Set(run.map((c) => base(c.name)));
+    if (bases.size !== 1) continue;
+    const parent = run.find((c) => isSolePk(c.table, c.name) && c.table && valid.has(c.table));
+    if (!parent || !parent.table) continue;
+    for (const c of run) {
+      if (c === parent || !c.table || !valid.has(c.table)) continue;
+      if (c.table === parent.table && c.name === parent.name) continue;
+      const key = `${c.table}.${c.name}->${parent.table}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ fromTable: c.table, fromColumn: c.name, toTable: parent.table });
+    }
+  }
+  return out;
 }
 
 /**
@@ -186,39 +255,41 @@ function dedupeTables(tables: ParsedTable[]): ParsedTable[] {
   return order.map((n) => byName.get(n)!);
 }
 
-/** Convert parsed tables → ErdDesign (grid layout, PKs, inferred FKs). */
-function toDesign(parsed: ParsedTable[]): ErdDesign {
-  // Reuse the shared importer for layout + <x>_id FK inference, then overlay
-  // the PKs recovered from the .damx PK markers.
+/** Convert parsed tables + real key-group relations → ErdDesign. */
+function toDesign(parsed: ParsedTable[], rawRels: RawRelation[]): ErdDesign {
   const base = rawTablesToDesign(
     parsed.map((t) => ({ table: t.name, columns: t.columns.map((c) => ({ name: c.name, type: c.type })) })),
   );
-  const pkByTableCol = new Map<string, Set<string>>();
-  parsed.forEach((t, idx) => {
-    const pkset = new Set(t.columns.filter((c) => c.pk).map((c) => c.name));
-    if (pkset.size > 0) pkByTableCol.set(base.tables[idx]?.id ?? `#${idx}`, pkset);
-  });
-  const tables: DesignTable[] = base.tables.map((t) => {
-    const pkset = pkByTableCol.get(t.id);
-    if (!pkset) return t;
+  // Overlay the recovered PKs onto the design tables.
+  const tables: DesignTable[] = base.tables.map((t, idx) => {
+    const pkset = new Set(parsed[idx]?.columns.filter((c) => c.pk).map((c) => c.name) ?? []);
+    if (pkset.size === 0) return t;
     return { ...t, columns: t.columns.map((c) => ({ ...c, pk: pkset.has(c.name) || c.pk })) };
   });
 
-  // FK edges: primary-key-name match (uses the recovered PKs — the main
-  // signal for these models) plus the shared <x>_id inference, deduped.
-  const pkRels = inferRelationsByPk(tables);
-  const seen = new Set(pkRels.map((r) => `${r.from}.${r.fromColumn}->${r.to}`));
-  const relations: DesignRelation[] = [...pkRels];
-  for (const r of base.relations) {
-    const key = `${r.from}.${r.fromColumn}->${r.to}`;
+  const idByName = new Map(tables.map((t) => [t.name, t.id]));
+  const seen = new Set<string>();
+  const relations: DesignRelation[] = [];
+  // Primary signal: the real FK relationships parsed from the .damx key groups.
+  for (const r of rawRels) {
+    const from = idByName.get(r.fromTable);
+    const to = idByName.get(r.toTable);
+    if (!from || !to) continue;
+    const key = `${from}.${r.fromColumn}->${to}`;
     if (seen.has(key)) continue;
     seen.add(key);
     relations.push({
-      ...r,
-      id: r.id || newId("rel"),
-      sourceCard: (r.sourceCard ?? "many") as Cardinality,
-      targetCard: (r.targetCard ?? "one") as Cardinality,
+      id: newId("rel"),
+      from,
+      fromColumn: r.fromColumn,
+      to,
+      sourceCard: "many",
+      targetCard: "one",
     });
+  }
+  // Fallback only if the file had no parseable key groups (older DA# exports).
+  if (relations.length === 0) {
+    relations.push(...inferRelationsByPk(tables));
   }
   return { tables, relations };
 }

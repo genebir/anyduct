@@ -177,7 +177,7 @@ function TablePanel({
             </select>
             <button
               onClick={() => setColumn(i, { pk: !c.pk })}
-              aria-label="primary key"
+              aria-label={t("erdDesign.pk")}
               title={t("erdDesign.pk")}
               className={c.pk ? "text-warning" : "text-text-muted hover:text-text"}
             >

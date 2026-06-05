@@ -825,7 +825,7 @@ function DryRunPanel({
         </div>
         <button
           type="button"
-          aria-label="dismiss"
+          aria-label={t("common.dismiss")}
           onClick={onDismiss}
           className="text-text-muted hover:text-text"
         >

@@ -15,13 +15,17 @@ import {
 import "@xyflow/react/dist/style.css";
 import { KeyIcon } from "lucide-react";
 import { buildErdModel, type ErdColumn, type RawTable } from "@/lib/erd";
+import { useLocale } from "@/components/providers/locale-provider";
+import type { Messages } from "@/lib/i18n/messages";
+
+type Translate = (key: keyof Messages, vars?: Record<string, string | number>) => string;
 import { ERD_EDGE_TYPES } from "@/components/erd/crowsfoot-edge";
 
 const NODE_W = 240;
 const COL_GAP = 320;
 const ROW_GAP = 260;
 
-function tableNode(table: string, columns: ErdColumn[]): React.ReactNode {
+function tableNode(table: string, columns: ErdColumn[], t: Translate): React.ReactNode {
   return (
     <div className="w-full text-left">
       <div className="truncate rounded-t-[7px] border-b border-border-subtle bg-overlay px-2.5 py-1.5 font-mono text-[11px] font-semibold text-text" title={table}>
@@ -29,7 +33,7 @@ function tableNode(table: string, columns: ErdColumn[]): React.ReactNode {
       </div>
       <div className="max-h-[200px] overflow-auto">
         {columns.length === 0 ? (
-          <div className="px-2.5 py-1.5 text-[10px] italic text-text-muted">(no columns)</div>
+          <div className="px-2.5 py-1.5 text-[10px] italic text-text-muted">{t("erd.noColumns")}</div>
         ) : (
           columns.map((c) => (
             <div
@@ -37,7 +41,7 @@ function tableNode(table: string, columns: ErdColumn[]): React.ReactNode {
               className="flex items-center gap-1.5 border-b border-border-subtle/40 px-2.5 py-1 last:border-0"
             >
               {c.isKey ? (
-                <KeyIcon size={10} className="shrink-0 text-warning" aria-label="key" />
+                <KeyIcon size={10} className="shrink-0 text-warning" aria-label={t("erd.pkAria")} />
               ) : (
                 <span className="inline-block w-[10px] shrink-0" />
               )}
@@ -66,13 +70,14 @@ function tableNode(table: string, columns: ErdColumn[]): React.ReactNode {
  * @xyflow/react. Nodes are draggable so the operator can rearrange.
  */
 export function SchemaErdGraph({ tables }: { tables: RawTable[] }) {
+  const { t } = useLocale();
   const { nodes, edges } = useMemo(() => {
     const model = buildErdModel(tables);
     const perRow = Math.max(1, Math.ceil(Math.sqrt(model.entities.length)));
     const nodes: Node[] = model.entities.map((e, i) => ({
       id: e.table,
       position: { x: (i % perRow) * COL_GAP, y: Math.floor(i / perRow) * ROW_GAP },
-      data: { label: tableNode(e.table, e.columns) },
+      data: { label: tableNode(e.table, e.columns, t) },
       style: {
         width: NODE_W,
         padding: 0,
@@ -96,7 +101,7 @@ export function SchemaErdGraph({ tables }: { tables: RawTable[] }) {
       labelStyle: { fontSize: 10, fill: "rgb(var(--text-muted))" },
     }));
     return { nodes, edges };
-  }, [tables]);
+  }, [tables, t]);
 
   return (
     <ReactFlowProvider>

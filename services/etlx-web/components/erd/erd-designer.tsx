@@ -535,6 +535,21 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
       return { ...d, tables: [...d.tables, copy] };
     });
 
+  const onCopyTableSql = async (id: string) => {
+    const tb = design.tables.find((t) => t.id === id);
+    if (!tb) return;
+    const sql = toSql(
+      { tables: [tb], relations: design.relations.filter((r) => r.from === id && r.to === id) },
+      dialect,
+    );
+    try {
+      await navigator.clipboard.writeText(sql);
+      toast.success(t("erdDesign.tableSqlCopied", { name: tb.name }));
+    } catch {
+      toast.error(t("erdDesign.exportImageError"));
+    }
+  };
+
   const onPaneContextMenu = useCallback((e: React.MouseEvent | MouseEvent) => {
     e.preventDefault();
     setMenu({ x: e.clientX, y: e.clientY, kind: "pane" });
@@ -856,6 +871,15 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
                   }}
                 >
                   {t("erdDesign.duplicateTable")}
+                </button>
+                <button
+                  className="block w-full px-3 py-1.5 text-left text-text hover:bg-overlay"
+                  onClick={() => {
+                    void onCopyTableSql(menu.nodeId);
+                    setMenu(null);
+                  }}
+                >
+                  {t("erdDesign.copyTableSql")}
                 </button>
                 <button
                   className="block w-full px-3 py-1.5 text-left text-error hover:bg-overlay"

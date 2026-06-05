@@ -374,6 +374,27 @@ const REDSHIFT: ConnectorSchema = {
   ],
 };
 
+// Phase AGH (2026-06-05, ADR-0080) — ClickHouse OLAP.
+const CLICKHOUSE: ConnectorSchema = {
+  type: "clickhouse",
+  label: "ClickHouse",
+  description:
+    "clickhouse-connect-backed batch source + sink for the ClickHouse column-oriented OLAP database.",
+  fields: [
+    { key: "host", label: "Host", type: "string", required: true, defaultValue: "localhost" },
+    { key: "port", label: "Port", type: "number", defaultValue: 8123, help: "HTTP interface port (8123); 8443 for HTTPS." },
+    { key: "database", label: "Database", type: "string", defaultValue: "default" },
+    { key: "user", label: "User", type: "string", defaultValue: "default" },
+    {
+      key: "password",
+      label: "Password",
+      type: "password",
+      isSecret: true,
+      help: "Stored in the secret backend; never written to the metadata DB.",
+    },
+  ],
+};
+
 export const CONNECTOR_SCHEMAS: ConnectorSchema[] = [
   POSTGRES,
   MYSQL,
@@ -383,6 +404,7 @@ export const CONNECTOR_SCHEMAS: ConnectorSchema[] = [
   SNOWFLAKE,
   BIGQUERY,
   REDSHIFT,
+  CLICKHOUSE,
   MONGODB,
   S3,
   KAFKA,

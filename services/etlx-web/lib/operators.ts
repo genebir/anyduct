@@ -357,6 +357,22 @@ const SOURCES: OperatorSpec[] = [
     ],
   },
   {
+    // Phase AGH (2026-06-05, ADR-0080) — ClickHouse OLAP.
+    id: "source:clickhouse",
+    kind: "source",
+    connectorType: "clickhouse",
+    label: "ClickHouse",
+    description: "Read rows from a ClickHouse table via a SQL query.",
+    icon: DatabaseIcon,
+    accent: "#FFCC01",
+    fields: [
+      { key: "connection", label: "Connection", kind: "connection", required: true },
+      { key: "query", label: "Read", kind: "sourceQuery" },
+      { key: "chunk_size", label: "Chunk size", kind: "number", defaultValue: 10000 },
+      CURSOR_COLUMN_FIELD,
+    ],
+  },
+  {
     id: "source:mongodb",
     kind: "source",
     connectorType: "mongodb",
@@ -1206,6 +1222,63 @@ const SINKS: OperatorSpec[] = [
         label: "Create table if missing",
         kind: "boolean",
         help: "Cross-DB types translate automatically — JSON → SUPER, TEXT → VARCHAR(65535), TIMESTAMPTZ → TIMESTAMPTZ, BLOB → VARBYTE.",
+      },
+      {
+        key: "auto_create_if_exists",
+        label: "If table exists",
+        kind: "select",
+        showWhen: { field: "auto_create_table", equals: true },
+        options: [
+          { label: "skip — use existing table as-is", value: "skip" },
+          { label: "drop — DROP and recreate (snapshot rebuild)", value: "drop" },
+          { label: "error — refuse to clobber", value: "error" },
+        ],
+        help: "‘drop’ is the right choice for nightly snapshot rebuilds.",
+      },
+    ],
+  },
+  {
+    // Phase AGH (2026-06-05, ADR-0080) — ClickHouse OLAP sink.
+    // No upsert: ClickHouse is append-optimized (no row-level UPSERT), so
+    // the mode options stop at append/overwrite.
+    id: "sink:clickhouse",
+    kind: "sink",
+    connectorType: "clickhouse",
+    label: "ClickHouse",
+    description: "Write records into a ClickHouse MergeTree table.",
+    icon: DatabaseIcon,
+    accent: "#FFCC01",
+    fields: [
+      { key: "connection", label: "Connection", kind: "connection", required: true },
+      { key: "table", label: "Table", kind: "table", placeholder: "database.table" },
+      {
+        key: "mode",
+        label: "Mode",
+        kind: "select",
+        defaultValue: "append",
+        options: [
+          { label: "append", value: "append" },
+          { label: "overwrite (TRUNCATE + insert)", value: "overwrite" },
+        ],
+        help: "ClickHouse has no row-level upsert — use append (optionally a ReplacingMergeTree table).",
+      },
+      {
+        key: "key_columns",
+        label: "Order-by columns",
+        kind: "columns",
+        help: "When the table is auto-created, these become the MergeTree ORDER BY (sorting key).",
+      },
+      {
+        key: "pre_sql",
+        label: "Pre-write SQL (atomic)",
+        kind: "sql",
+        placeholder: "ALTER TABLE db.events DELETE WHERE day = '2026-05-21'",
+      },
+      {
+        key: "auto_create_table",
+        label: "Create table if missing",
+        kind: "boolean",
+        help: "Creates a MergeTree table. Cross-DB types translate automatically — JSON/TEXT/BLOB → String, TIMESTAMPTZ → DateTime64(3), BIGINT → Int64.",
       },
       {
         key: "auto_create_if_exists",

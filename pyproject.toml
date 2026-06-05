@@ -233,6 +233,12 @@ ignore_missing_imports = true
 module = ["snowflake", "snowflake.*"]
 ignore_missing_imports = true
 
+# google-cloud-bigquery — installed via [bigquery] extra only (ADR-0078).
+# Lazy-imported in etl_plugins.connectors.rdbms.bigquery; not a dev dep.
+[[tool.mypy.overrides]]
+module = ["google.cloud", "google.cloud.*", "google.oauth2", "google.oauth2.*"]
+ignore_missing_imports = true
+
 # prometheus_client — pulled in transitively via opentelemetry-exporter-prometheus
 # (Step 6.2). Lazy-imported in configure_otel so core install is unaffected.
 [[tool.mypy.overrides]]

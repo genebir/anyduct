@@ -193,6 +193,33 @@ const DYNAMODB: ConnectorSchema = {
   ],
 };
 
+// Phase AGK (2026-06-05, ADR-0082) — Cassandra (CQL wide-column).
+const CASSANDRA: ConnectorSchema = {
+  type: "cassandra",
+  label: "Cassandra",
+  description: "cassandra-driver-backed batch source + sink for Apache Cassandra (CQL).",
+  fields: [
+    {
+      key: "contact_points",
+      label: "Contact points",
+      type: "string",
+      required: true,
+      defaultValue: "localhost",
+      help: "Comma-separated host list, e.g. node1,node2,node3.",
+    },
+    { key: "port", label: "Port", type: "number", defaultValue: 9042 },
+    { key: "keyspace", label: "Keyspace", type: "string", help: "Default keyspace for unqualified table names." },
+    { key: "username", label: "User", type: "string" },
+    {
+      key: "password",
+      label: "Password",
+      type: "password",
+      isSecret: true,
+      help: "Stored in the secret backend; never written to the metadata DB.",
+    },
+  ],
+};
+
 const HTTP: ConnectorSchema = {
   type: "http",
   label: "HTTP / REST",
@@ -427,6 +454,7 @@ export const CONNECTOR_SCHEMAS: ConnectorSchema[] = [
   CLICKHOUSE,
   MONGODB,
   DYNAMODB,
+  CASSANDRA,
   S3,
   KAFKA,
   HTTP,

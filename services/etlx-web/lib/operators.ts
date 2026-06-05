@@ -373,6 +373,22 @@ const SOURCES: OperatorSpec[] = [
     ],
   },
   {
+    // Phase AGK (2026-06-05, ADR-0082) — Cassandra (CQL wide-column).
+    id: "source:cassandra",
+    kind: "source",
+    connectorType: "cassandra",
+    label: "Cassandra",
+    description: "Read rows from a Cassandra table via a CQL query.",
+    icon: DatabaseIcon,
+    accent: "#1287B1",
+    fields: [
+      { key: "connection", label: "Connection", kind: "connection", required: true },
+      { key: "query", label: "Read", kind: "sourceQuery" },
+      { key: "chunk_size", label: "Chunk size", kind: "number", defaultValue: 10000 },
+      CURSOR_COLUMN_FIELD,
+    ],
+  },
+  {
     // Phase AGJ (2026-06-05, ADR-0081) — DynamoDB (NoSQL).
     id: "source:dynamodb",
     kind: "source",
@@ -1299,6 +1315,56 @@ const SINKS: OperatorSpec[] = [
         label: "Create table if missing",
         kind: "boolean",
         help: "Creates a MergeTree table. Cross-DB types translate automatically — JSON/TEXT/BLOB → String, TIMESTAMPTZ → DateTime64(3), BIGINT → Int64.",
+      },
+      {
+        key: "auto_create_if_exists",
+        label: "If table exists",
+        kind: "select",
+        showWhen: { field: "auto_create_table", equals: true },
+        options: [
+          { label: "skip — use existing table as-is", value: "skip" },
+          { label: "drop — DROP and recreate (snapshot rebuild)", value: "drop" },
+          { label: "error — refuse to clobber", value: "error" },
+        ],
+        help: "‘drop’ is the right choice for nightly snapshot rebuilds.",
+      },
+    ],
+  },
+  {
+    // Phase AGK (2026-06-05, ADR-0082) — Cassandra sink (CQL).
+    id: "sink:cassandra",
+    kind: "sink",
+    connectorType: "cassandra",
+    label: "Cassandra",
+    description: "Write rows into a Cassandra table (INSERT replaces by primary key).",
+    icon: DatabaseIcon,
+    accent: "#1287B1",
+    fields: [
+      { key: "connection", label: "Connection", kind: "connection", required: true },
+      { key: "table", label: "Table", kind: "table", placeholder: "keyspace.table" },
+      {
+        key: "mode",
+        label: "Mode",
+        kind: "select",
+        defaultValue: "append",
+        options: [
+          { label: "append (insert)", value: "append" },
+          { label: "upsert (insert, replace by key)", value: "upsert" },
+          { label: "overwrite (TRUNCATE + insert)", value: "overwrite" },
+        ],
+        help: "Cassandra INSERT replaces by primary key — append and upsert are equivalent.",
+      },
+      {
+        key: "key_columns",
+        label: "Primary key columns",
+        kind: "columns",
+        help: "Used as the PRIMARY KEY when the table is auto-created (required — Cassandra needs one).",
+      },
+      {
+        key: "auto_create_table",
+        label: "Create table if missing",
+        kind: "boolean",
+        help: "Creates a CQL table. Cross-DB types translate automatically — JSON/TEXT → text, TIMESTAMPTZ → timestamp, BLOB → blob.",
       },
       {
         key: "auto_create_if_exists",

@@ -117,7 +117,9 @@ uv run mypy etl_plugins
 
 ## 5. 현재 단계
 
-> **최신 마일스톤 (2026-06-05): Snowflake 커넥터 추가 — 첫 클라우드 DW (Phase AGE, ADR-0077).** 야간 DLQ/dogfood 백로그 소진 후 사용자가 "신규 DW 커넥터" 축 선택. AAQ(vertica/mssql) 패턴으로 5 슬라이스:
+> **최신 마일스톤 (2026-06-05): BigQuery 커넥터 추가 — 두 번째 클라우드 DW (Phase AGF, ADR-0078).** Snowflake(AGE) 직후 같은 축. BigQuery는 RDBMS와 달라 적응: DBAPI(`google.cloud.bigquery.dbapi`) cursor 패턴, 백틱 quoting, dataset-scoped INFORMATION_SCHEMA, 서비스계정/ADC 인증, PK NOT ENFORCED, append은 multi-row INSERT 한 배치=한 job(DML 쿼터 고려 — load job은 후속). 5 슬라이스: type_mapping bigquery dialect(INT64/FLOAT64/NUMERIC/STRING/BOOL/TIMESTAMP/JSON/BYTES, +26 unit) → 커넥터 `bigquery.py`(fake-cursor 단위 11) → 배선(extra/entry-point/registry/audit/dlq) → web(source/sink/연결폼/**7×7=49 마이그레이션 페어**) → docs. 코어 unit **982 passed**(+37 bigquery: type 26 + smoke 11), mypy/ruff clean, web tsc + dev 200. **남은 DW**: Redshift/ClickHouse. testcontainers 미포함(BigQuery 에뮬레이터 제한 — live 프로젝트 게이트).
+>
+> **이전 마일스톤 (2026-06-05): Snowflake 커넥터 추가 — 첫 클라우드 DW (Phase AGE, ADR-0077).** 야간 DLQ/dogfood 백로그 소진 후 사용자가 "신규 DW 커넥터" 축 선택. AAQ(vertica/mssql) 패턴으로 5 슬라이스:
 > - **type_mapping**: snowflake dialect(NUMBER/FLOAT/VARCHAR/TIMESTAMP_TZ/VARIANT/BINARY) + vendor 파싱(number/string/variant/object/array/timestamp_ntz|tz|ltz) + render_canonical DECIMAL precision에 NUMBER 추가. 코어 unit +25.
 > - **커넥터** `snowflake.py`: BatchSource/Sink + SchemaInspector(information_schema) + ensure_table(auto_create+PK) + execute_statement + read/write/MERGE upsert. driver lazy import. fake-cursor 단위 9건(생성 SQL 검증 — live 계정 불요, testcontainers 미포함은 SaaS 게이트).
 > - **배선**: pyproject [snowflake] extra+entry-point, registry _BUILTIN_MODULES, 서버 _SQL_CONNECTION_TYPES + DLQ _SQL_READABLE_TYPES(LIMIT 지원).

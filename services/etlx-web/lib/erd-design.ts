@@ -347,11 +347,41 @@ function quoteIdent(ident: string, dialect: string): string {
  * identifier quoting (the column types are emitted verbatim — the user
  * picked SQL types). FKs come from the relations.
  */
+/**
+ * Order tables so each is created after the tables it references via FK
+ * (parents before children) — inline FOREIGN KEY refs otherwise
+ * forward-reference a not-yet-created table and fail in postgres/mysql.
+ * DFS post-order; cycles are broken best-effort (back-edges skipped).
+ */
+function topoSortTables(design: ErdDesign): DesignTable[] {
+  const byId = new Map(design.tables.map((t) => [t.id, t]));
+  const refs = new Map<string, Set<string>>();
+  for (const t of design.tables) refs.set(t.id, new Set());
+  for (const r of design.relations) {
+    if (r.from === r.to) continue; // self-ref is fine inline
+    if (byId.has(r.from) && byId.has(r.to)) refs.get(r.from)!.add(r.to);
+  }
+  const result: DesignTable[] = [];
+  const done = new Set<string>();
+  const visiting = new Set<string>();
+  const visit = (id: string) => {
+    if (done.has(id) || visiting.has(id)) return;
+    visiting.add(id);
+    for (const dep of refs.get(id) ?? []) visit(dep);
+    visiting.delete(id);
+    done.add(id);
+    const t = byId.get(id);
+    if (t) result.push(t);
+  };
+  for (const t of design.tables) visit(t.id);
+  return result;
+}
+
 export function toSql(design: ErdDesign, dialect: string): string {
   const q = (s: string) => quoteIdent(s, dialect);
   const byId = new Map(design.tables.map((t) => [t.id, t]));
   const out: string[] = [];
-  for (const t of design.tables) {
+  for (const t of topoSortTables(design)) {
     const lines: string[] = [];
     for (const c of t.columns) {
       lines.push(`  ${q(c.name)} ${c.type}`);

@@ -73,7 +73,7 @@ import { ERD_EDGE_TYPES } from "@/components/erd/crowsfoot-edge";
 import { ImportTablesDialog } from "@/components/erd/import-tables-dialog";
 import { ImportDdlDialog } from "@/components/erd/import-ddl-dialog";
 import { parseDamx } from "@/lib/damx";
-import { autoLayout } from "@/lib/erd-layout";
+import { autoLayout, removeOverlaps } from "@/lib/erd-layout";
 import { validateErd } from "@/lib/erd-validate";
 import {
   columnDictionaryCsv,
@@ -989,7 +989,10 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
       // If DA# diagram positions were reliably recovered, keep them; otherwise
       // fall back to auto-layout.
       const positioned = (incoming as ErdDesign & { __damxPositioned?: boolean }).__damxPositioned;
-      setDesign((d) => (positioned ? mergeDesign(d, incoming) : autoLayout(mergeDesign(d, incoming))));
+      // Positioned import: keep DA# layout but separate any overlapping boxes.
+      setDesign((d) =>
+        positioned ? removeOverlaps(mergeDesign(d, incoming)) : autoLayout(mergeDesign(d, incoming)),
+      );
       setTimeout(() => rfRef.current?.fitView({ padding: 0.2, duration: 300 }), 60);
       toast.success(t("erdDesign.damxImported", { n: incoming.tables.length }));
     } catch {
@@ -1196,6 +1199,18 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
           >
             <LayoutGridIcon size={14} />
             {t("erdDesign.autoLayout")}
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              setDesign((d) => removeOverlaps(d));
+              setTimeout(() => rfRef.current?.fitView({ padding: 0.2, duration: 300 }), 60);
+            }}
+            disabled={design.tables.length === 0}
+            title={t("erdDesign.declutterHint")}
+          >
+            {t("erdDesign.declutter")}
           </Button>
           <select
             value={layoutDir}

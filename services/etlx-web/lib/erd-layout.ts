@@ -33,6 +33,56 @@ function nodeHeight(columnCount: number): number {
   return HEADER_H + Math.max(1, columnCount) * ROW_H + PAD_H;
 }
 
+/**
+ * Remove node overlaps with MINIMAL displacement (Phase AJP), preserving the
+ * original arrangement as much as possible. Used after a .damx import so tables
+ * keep their DA# positions but no two boxes (or their edges) collide. Iterative
+ * pairwise separation along the axis of least penetration, leaving a gap.
+ */
+export function removeOverlaps(design: ErdDesign, gap = 28): ErdDesign {
+  const nodes = design.tables.map((t) => ({
+    id: t.id,
+    x: t.x,
+    y: t.y,
+    w: NODE_WIDTH,
+    h: nodeHeight(t.columns.length),
+  }));
+  for (let iter = 0; iter < 80; iter++) {
+    let moved = false;
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        const a = nodes[i];
+        const b = nodes[j];
+        const dx = a.x + a.w / 2 - (b.x + b.w / 2);
+        const dy = a.y + a.h / 2 - (b.y + b.h / 2);
+        const ovx = (a.w + b.w) / 2 + gap - Math.abs(dx);
+        const ovy = (a.h + b.h) / 2 + gap - Math.abs(dy);
+        if (ovx > 0 && ovy > 0) {
+          moved = true;
+          if (ovx < ovy) {
+            const push = (ovx / 2) * (dx >= 0 ? 1 : -1);
+            a.x += push;
+            b.x -= push;
+          } else {
+            const push = (ovy / 2) * (dy >= 0 ? 1 : -1);
+            a.y += push;
+            b.y -= push;
+          }
+        }
+      }
+    }
+    if (!moved) break;
+  }
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  return {
+    ...design,
+    tables: design.tables.map((t) => {
+      const n = byId.get(t.id)!;
+      return { ...t, x: Math.round(n.x), y: Math.round(n.y) };
+    }),
+  };
+}
+
 /** Undirected connected components over the relationship graph. */
 function connectedComponents(design: ErdDesign): DesignTable[][] {
   const idToTable = new Map(design.tables.map((t) => [t.id, t]));

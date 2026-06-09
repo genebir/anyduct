@@ -29,7 +29,9 @@ import {
 import "@xyflow/react/dist/style.css";
 import Link from "next/link";
 import {
+  AlertTriangleIcon,
   ArrowLeftIcon,
+  CheckCircle2Icon,
   ChevronDownIcon,
   ChevronRightIcon,
   CopyIcon,
@@ -64,6 +66,7 @@ import { ERD_EDGE_TYPES } from "@/components/erd/crowsfoot-edge";
 import { ImportTablesDialog } from "@/components/erd/import-tables-dialog";
 import { parseDamx } from "@/lib/damx";
 import { autoLayout } from "@/lib/erd-layout";
+import { validateErd } from "@/lib/erd-validate";
 import {
   columnDictionaryCsv,
   constraintSpecCsv,
@@ -517,6 +520,10 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
       relations: d.relations.filter((r) => r.from !== id && r.to !== id),
     }));
 
+  const [showValidation, setShowValidation] = useState(false);
+  const issues = useMemo(() => validateErd(design), [design]);
+  const warnCount = issues.filter((i) => i.severity === "warning").length;
+
   const rfRef = useRef<ReactFlowInstance<Node, Edge> | null>(null);
   const [layoutDir, setLayoutDir] = useState<"TB" | "LR">("TB");
   const onAutoLayout = (dir: "TB" | "LR" = layoutDir) => {
@@ -769,6 +776,16 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
           </select>
           <Button
             size="sm"
+            variant={warnCount > 0 ? "secondary" : "ghost"}
+            onClick={() => setShowValidation((v) => !v)}
+            disabled={design.tables.length === 0}
+            className={warnCount > 0 ? "!text-warning" : undefined}
+          >
+            <AlertTriangleIcon size={14} />
+            {warnCount > 0 ? t("erdValidate.buttonCount", { n: warnCount }) : t("erdValidate.button")}
+          </Button>
+          <Button
+            size="sm"
             variant="secondary"
             onClick={() => onAutoLayout()}
             disabled={design.tables.length === 0}
@@ -846,6 +863,49 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
                 <p className="font-medium text-text">{t("erdDesign.emptyTitle")}</p>
                 <p className="mt-1">{t("erdDesign.emptyHint")}</p>
               </div>
+            </div>
+          ) : null}
+          {showValidation ? (
+            <div className="absolute right-3 top-3 z-20 flex max-h-[70%] w-72 flex-col rounded-lg border border-border-subtle bg-surface shadow-lg">
+              <div className="flex items-center justify-between border-b border-border-subtle px-3 py-2">
+                <span className="text-xs font-semibold text-text">{t("erdValidate.title")}</span>
+                <button
+                  onClick={() => setShowValidation(false)}
+                  aria-label={t("common.close")}
+                  className="text-text-muted hover:text-text"
+                >
+                  <XIcon size={14} />
+                </button>
+              </div>
+              {issues.length === 0 ? (
+                <div className="flex items-center gap-2 px-3 py-4 text-sm text-text-secondary">
+                  <CheckCircle2Icon size={16} className="text-success" />
+                  {t("erdValidate.clean")}
+                </div>
+              ) : (
+                <ul className="overflow-y-auto py-1">
+                  {issues.map((iss, n) => (
+                    <li key={n}>
+                      <button
+                        onClick={() => onJumpToTable(iss.tableName)}
+                        className="flex w-full items-start gap-2 px-3 py-1.5 text-left text-xs hover:bg-overlay"
+                      >
+                        <AlertTriangleIcon
+                          size={13}
+                          className={`mt-0.5 shrink-0 ${iss.severity === "warning" ? "text-warning" : "text-text-muted"}`}
+                        />
+                        <span className="min-w-0">
+                          <span className="font-mono text-text">{iss.tableName}</span>
+                          <span className="text-text-secondary">
+                            {" — "}
+                            {t(`erdValidate.${iss.kind}` as keyof Messages, { col: iss.column ?? "" })}
+                          </span>
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           ) : null}
           <ReactFlowProvider>

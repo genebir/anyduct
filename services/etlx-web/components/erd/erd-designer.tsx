@@ -162,12 +162,15 @@ function displayName(physical: string, logical: string | undefined, mode: NameMo
   return `${physical} · ${log}`;
 }
 
-function nodeLabel(tb: DesignTable, fkCols: Set<string>, mode: NameMode): React.ReactNode {
+function nodeLabel(tb: DesignTable, fkCols: Set<string>, mode: NameMode, scale: number): React.ReactNode {
+  const nameSize = Math.round(11 * scale);
+  const typeSize = Math.round(10 * scale);
+  const icon = Math.round(10 * scale);
   return (
     <div className="w-full overflow-hidden text-left">
       <div className="flex items-center gap-1.5 rounded-t-[7px] border-b-2 border-accent/40 bg-accent/10 px-2.5 py-1.5">
-        <Table2Icon size={11} className="shrink-0 text-accent" />
-        <span className="truncate font-mono text-[11px] font-semibold text-text">
+        <Table2Icon size={Math.round(11 * scale)} className="shrink-0 text-accent" />
+        <span className="truncate font-mono font-semibold text-text" style={{ fontSize: nameSize }}>
           {displayName(tb.name, tb.logical, mode)}
         </span>
       </div>
@@ -182,25 +185,28 @@ function nodeLabel(tb: DesignTable, fkCols: Set<string>, mode: NameMode): React.
               }`}
             >
               {c.pk ? (
-                <KeyIcon size={10} className="shrink-0 text-warning">
+                <KeyIcon size={icon} className="shrink-0 text-warning">
                   <title>PK</title>
                 </KeyIcon>
               ) : isFk ? (
-                <LinkIcon size={10} className="shrink-0 text-accent">
+                <LinkIcon size={icon} className="shrink-0 text-accent">
                   <title>FK</title>
                 </LinkIcon>
               ) : (
-                <span className="inline-block w-[10px] shrink-0" />
+                <span className="inline-block shrink-0" style={{ width: icon }} />
               )}
               <span
-                className={`flex-1 truncate font-mono text-[11px] ${
+                className={`flex-1 truncate font-mono ${
                   c.pk ? "font-semibold text-text" : isFk ? "text-accent" : "text-text"
                 }`}
+                style={{ fontSize: nameSize }}
               >
                 {displayName(c.name, c.logical, mode)}
                 {c.notNull && !c.pk ? <span className="text-error" title="NOT NULL"> *</span> : null}
               </span>
-              <span className="shrink-0 font-mono text-[10px] text-text-muted">{c.type}</span>
+              <span className="shrink-0 font-mono text-text-muted" style={{ fontSize: typeSize }}>
+                {c.type}
+              </span>
             </div>
           );
         })}
@@ -572,14 +578,15 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
       set.add(r.fromColumn);
       fkByTable.set(r.from, set);
     }
+    const scale = design.fontScale ?? 1;
     return design.tables.map((tb) => ({
       id: tb.id,
       position: { x: tb.x, y: tb.y },
-      data: { label: nodeLabel(tb, fkByTable.get(tb.id) ?? new Set(), nameMode) },
+      data: { label: nodeLabel(tb, fkByTable.get(tb.id) ?? new Set(), nameMode, scale) },
       sourcePosition: Position.Right,
       targetPosition: Position.Left,
       style: {
-        width: 240,
+        width: Math.round(240 * scale),
         padding: 0,
         borderRadius: 8,
         background: "rgb(var(--bg-elevated))",
@@ -1133,6 +1140,19 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
             <option value="physical">{t("erdDesign.namePhysical")}</option>
             <option value="logical">{t("erdDesign.nameLogical")}</option>
             <option value="both">{t("erdDesign.nameBoth")}</option>
+          </select>
+          <select
+            value={String(design.fontScale ?? 1)}
+            onChange={(e) => setDesign((d) => ({ ...d, fontScale: Number(e.target.value) }))}
+            disabled={design.tables.length === 0}
+            className="h-8 rounded-md border border-border-subtle bg-bg px-1 text-xs text-text"
+            aria-label={t("erdDesign.fontSize")}
+            title={t("erdDesign.fontSize")}
+          >
+            <option value="0.85">A-</option>
+            <option value="1">A</option>
+            <option value="1.2">A+</option>
+            <option value="1.4">A++</option>
           </select>
           <select
             value=""

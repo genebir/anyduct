@@ -77,6 +77,8 @@ export interface ErdDesign {
   tables: DesignTable[];
   relations: DesignRelation[];
   shapes?: ErdShape[];
+  /** Diagram-wide font scale (1 = 100%). Persisted; adjustable in the toolbar. */
+  fontScale?: number;
 }
 
 /** Canonical-ish SQL types offered in the column type dropdown. */

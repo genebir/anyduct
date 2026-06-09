@@ -142,9 +142,10 @@ function parseCanvasBounds(b: Uint8Array): Map<string, { x: number; y: number; w
   }
   // canvas-item GUID -> bounds (first occurrence matching the rect pattern)
   const boundsByCi = new Map<string, { x: number; y: number; w: number; h: number }>();
+  const ciValues = new Set(entToCi.values());
   for (const f of F) {
     if (!guidRe.test(f.s) || boundsByCi.has(f.s)) continue;
-    if (![...entToCi.values()].includes(f.s)) continue;
+    if (!ciValues.has(f.s)) continue;
     const v = [0, 1, 2, 3, 4, 5, 6].map((k) => i32(f.end + 4 * k));
     if (v[0] === 0 && v[3] === 0 && v[4] === 0 && v[5] > 50 && v[5] < 4000 && v[6] > 50 && v[6] < 6000 && v[1] >= 0 && v[1] < 60000 && v[2] >= 0 && v[2] < 60000) {
       boundsByCi.set(f.s, { x: v[1], y: v[2], w: v[5], h: v[6] });

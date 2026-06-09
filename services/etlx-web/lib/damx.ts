@@ -66,6 +66,106 @@ function frameStrings(buf: ArrayBuffer): string[] {
   return out;
 }
 
+interface Frame {
+  off: number;
+  end: number;
+  s: string;
+}
+/** Same framing as ``frameStrings`` but keeps byte offsets (for geometry). */
+function framesWithOffsets(b: Uint8Array): Frame[] {
+  // Strict (fatal) decode so framing is byte-identical to the reference
+  // geometry parser: a frame that doesn't decode cleanly is rejected and we
+  // advance one byte (exactly Python's .decode that raises on invalid bytes).
+  const dec = new TextDecoder("utf-16le", { fatal: true });
+  const out: Frame[] = [];
+  let i = 0;
+  const n = b.length;
+  while (i < n - 4) {
+    if (b[i] === 0xff && b[i + 1] === 0xfe && b[i + 2] === 0xff) {
+      const len = b[i + 3];
+      const start = i + 4;
+      const end = start + len * 2;
+      if (len > 0 && end <= n) {
+        let s: string | null = null;
+        try {
+          s = dec.decode(b.subarray(start, end));
+        } catch {
+          s = null;
+        }
+        if (s) {
+          out.push({ off: i, end, s });
+          i = end;
+          continue;
+        }
+      }
+    }
+    i += 1;
+  }
+  return out;
+}
+
+/**
+ * Recover each table's diagram position from DA#'s canvas section (Phase AJG).
+ *
+ * Reverse-engineered + validated against a reference image (i.png): the
+ * diagram section (after ``DIAGRAM_VERSION``) lists, per table, the entity
+ * GUID followed by 16 bytes then the **canvas-item GUID**. At one occurrence
+ * of that canvas-item GUID the next int32s are the bounds rectangle
+ * ``[0, x, y, 0, 0, w, h]``. Returns entity-GUID → pixel bounds.
+ */
+function parseCanvasBounds(b: Uint8Array): Map<string, { x: number; y: number; w: number; h: number }> {
+  const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  const F = framesWithOffsets(b);
+  const diaFrame = F.find((f) => f.s === "DIAGRAM_VERSION");
+  const DIA = diaFrame ? diaFrame.off : 0;
+  const guidRe = GUID_RE;
+  const i32 = (off: number) => (off + 4 <= b.length ? dv.getInt32(off, true) : 0);
+  const frameAt = (off: number): string | null => {
+    if (off + 4 > b.length || b[off] !== 0xff || b[off + 1] !== 0xfe || b[off + 2] !== 0xff) return null;
+    const len = b[off + 3];
+    const end = off + 4 + len * 2;
+    if (end > b.length) return null;
+    return new TextDecoder("utf-16le", { fatal: false }).decode(b.subarray(off + 4, end));
+  };
+  // entity GUID -> canvas-item GUID (entity frame end + 16 bytes -> framed guid)
+  const entToCi = new Map<string, string>();
+  for (const f of F) {
+    if (f.off > DIA && guidRe.test(f.s) && !entToCi.has(f.s)) {
+      const ci = frameAt(f.end + 16);
+      if (ci && guidRe.test(ci)) entToCi.set(f.s, ci);
+    }
+  }
+  // canvas-item GUID -> bounds (first occurrence matching the rect pattern)
+  const boundsByCi = new Map<string, { x: number; y: number; w: number; h: number }>();
+  for (const f of F) {
+    if (!guidRe.test(f.s) || boundsByCi.has(f.s)) continue;
+    if (![...entToCi.values()].includes(f.s)) continue;
+    const v = [0, 1, 2, 3, 4, 5, 6].map((k) => i32(f.end + 4 * k));
+    if (v[0] === 0 && v[3] === 0 && v[4] === 0 && v[5] > 50 && v[5] < 4000 && v[6] > 50 && v[6] < 6000 && v[1] >= 0 && v[1] < 60000 && v[2] >= 0 && v[2] < 60000) {
+      boundsByCi.set(f.s, { x: v[1], y: v[2], w: v[5], h: v[6] });
+    }
+  }
+  // Entity GUID -> table name, built from the MODEL section the same way the
+  // diagram references it (name frame whose preceding token is an entity GUID
+  // that the diagram links to a canvas item). Keying by name avoids relying on
+  // the main parser's GUID map (which can disagree with the diagram's GUIDs).
+  const guidToName = new Map<string, string>();
+  for (let idx = 1; idx < F.length; idx++) {
+    const f = F[idx];
+    const prev = F[idx - 1].s;
+    if (f.off < DIA && entToCi.has(prev) && !guidRe.test(f.s) && /^[가-힣A-Za-z]/.test(f.s) && !guidToName.has(prev)) {
+      guidToName.set(prev, f.s);
+    }
+  }
+  const out = new Map<string, { x: number; y: number; w: number; h: number }>();
+  for (const [ent, ci] of entToCi) {
+    const nm = guidToName.get(ent);
+    const bd = boundsByCi.get(ci);
+    if (nm && bd && !out.has(nm)) out.set(nm, bd);
+  }
+  return out;
+}
+
 interface ParsedColumn {
   name: string;
   type: string;
@@ -198,7 +298,30 @@ export function parseDamx(buf: ArrayBuffer): ErdDesign {
 
   const deduped = dedupeTables(tables);
   const rels = extractRelationships(S, entGuidToName, colByGuid, deduped);
-  return toDesign(deduped, rels);
+  const design = toDesign(deduped, rels);
+
+  // Apply DA#'s real diagram positions (Phase AJG) so the imported ERD matches
+  // the original layout instead of a generated grid. Scale 0.6 ≈ our node size
+  // vs DA#'s, which keeps relative spacing without overlap.
+  const bounds = parseCanvasBounds(new Uint8Array(buf));
+  // Only trust the recovered positions when they're (almost) all distinct —
+  // a guard so we never ship an overlapping layout if geometry recovery is
+  // partial; the caller then falls back to auto-layout.
+  const matched = design.tables.filter((t) => bounds.has(t.name));
+  const distinct = new Set(matched.map((t) => `${bounds.get(t.name)!.x},${bounds.get(t.name)!.y}`));
+  const reliable = matched.length >= 2 && distinct.size >= matched.length - 1;
+  if (reliable) {
+    const SCALE = 0.6;
+    for (const t of design.tables) {
+      const bd = bounds.get(t.name);
+      if (bd) {
+        t.x = Math.round(bd.x * SCALE);
+        t.y = Math.round(bd.y * SCALE);
+      }
+    }
+  }
+  (design as ErdDesign & { __damxPositioned?: boolean }).__damxPositioned = reliable;
+  return design;
 }
 
 /**

@@ -910,7 +910,10 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
         toast.error(t("erdDesign.damxEmpty"));
         return;
       }
-      setDesign((d) => autoLayout(mergeDesign(d, incoming)));
+      // If DA# diagram positions were reliably recovered, keep them; otherwise
+      // fall back to auto-layout.
+      const positioned = (incoming as ErdDesign & { __damxPositioned?: boolean }).__damxPositioned;
+      setDesign((d) => (positioned ? mergeDesign(d, incoming) : autoLayout(mergeDesign(d, incoming))));
       setTimeout(() => rfRef.current?.fitView({ padding: 0.2, duration: 300 }), 60);
       toast.success(t("erdDesign.damxImported", { n: incoming.tables.length }));
     } catch {

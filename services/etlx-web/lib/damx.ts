@@ -274,7 +274,15 @@ function parseRelationships(b: Uint8Array, tables: ParsedTable[]): RawRelation[]
     const key = keyish[0] ?? shared[0];
     if (key) add(child, key, parent); // binary order: [parent][child]
   }
-  return out;
+  // Drop sibling-adjacency noise: if the chosen parent is ITSELF a FK-child via
+  // the same key (so it doesn't own that key), the link is only real when it's
+  // a history→base reference (child name contains the parent name).
+  const childKeys = new Set(out.map((r) => `${r.fromTable}|${r.fromColumn}`));
+  return out.filter((r) => {
+    if (r.fromTable === r.toTable) return true; // self-ref
+    if (!childKeys.has(`${r.toTable}|${r.fromColumn}`)) return true; // parent owns the key
+    return r.fromTable.includes(r.toTable); // ambiguous → keep only history→base
+  });
 }
 
 // Constraint / index pseudo-entity names (e.g. ``<table>_PK``) — DA# emits
@@ -376,8 +384,11 @@ export function parseDamx(buf: ArrayBuffer): ErdDesign {
     }
 
     // Table name: plain string after a column block, followed by a GUID run
-    // and NOT by a column (no TYPE in the look-ahead window).
-    if (cols.length > 0 && isEntityName(s)) {
+    // and NOT by a column (no TYPE in the look-ahead window). A name followed
+    // immediately by a ``K_*`` property key is a COLUMN's logical name (e.g.
+    // 세션아이디 → K_ATTR_DATA_OWNER), not a table — excluding it prevents a
+    // phantom table that would steal the real table's leading columns.
+    if (cols.length > 0 && isEntityName(s) && !(S[i + 1] ?? "").startsWith("K_")) {
       const win = S.slice(i + 1, i + 5);
       const guidCount = win.filter((w) => GUID_RE.test(w)).length;
       const hasColumnAhead = S.slice(i + 1, i + 7).some((w) => SQL_TYPES.has(w));

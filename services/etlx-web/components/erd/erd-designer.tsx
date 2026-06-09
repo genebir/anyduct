@@ -64,6 +64,7 @@ import {
 import { useLocale } from "@/components/providers/locale-provider";
 import { ERD_EDGE_TYPES } from "@/components/erd/crowsfoot-edge";
 import { ImportTablesDialog } from "@/components/erd/import-tables-dialog";
+import { ImportDdlDialog } from "@/components/erd/import-ddl-dialog";
 import { parseDamx } from "@/lib/damx";
 import { autoLayout } from "@/lib/erd-layout";
 import { validateErd } from "@/lib/erd-validate";
@@ -347,6 +348,7 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
   const [sql, setSql] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [showImport, setShowImport] = useState(false);
+  const [showDdl, setShowDdl] = useState(false);
   const [menu, setMenu] = useState<Menu | null>(null);
   const [docName, setDocName] = useState("");
   const [renaming, setRenaming] = useState(false);
@@ -761,6 +763,10 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
           className="hidden"
           onChange={(e) => void onDamxFile(e)}
         />
+        <Button size="sm" variant="secondary" onClick={() => setShowDdl(true)}>
+          <DatabaseIcon size={14} />
+          {t("erdDesign.importDdl")}
+        </Button>
         <span className="text-xs text-text-muted">{t("erdDesign.connectHint")}</span>
         <div className="ml-auto flex items-center gap-2">
           <select
@@ -1033,6 +1039,17 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
           onImport={(incoming) => setDesign((d) => mergeDesign(d, incoming))}
         />
       ) : null}
+
+      <ImportDdlDialog
+        open={showDdl}
+        onClose={() => setShowDdl(false)}
+        onImport={(incoming) => {
+          setDesign((d) => autoLayout(mergeDesign(d, incoming)));
+          setShowDdl(false);
+          setTimeout(() => rfRef.current?.fitView({ padding: 0.2, duration: 300 }), 60);
+          toast.success(t("erdDesign.damxImported", { n: incoming.tables.length }));
+        }}
+      />
 
       {menu ? (
         <>

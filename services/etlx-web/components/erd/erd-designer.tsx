@@ -89,11 +89,22 @@ type Translate = (key: keyof Messages, vars?: Record<string, string | number>) =
 
 const DIALECTS = ["postgres", "mysql", "sqlite", "snowflake", "bigquery"];
 
-function nodeLabel(tb: DesignTable, fkCols: Set<string>): React.ReactNode {
+type NameMode = "physical" | "logical" | "both";
+
+/** Render a name per the physical/logical/both display mode (logical falls
+ *  back to physical when absent, so logical mode is never blank). */
+function displayName(physical: string, logical: string | undefined, mode: NameMode): string {
+  const log = logical?.trim();
+  if (mode === "physical" || !log) return physical;
+  if (mode === "logical") return log;
+  return `${physical} · ${log}`;
+}
+
+function nodeLabel(tb: DesignTable, fkCols: Set<string>, mode: NameMode): React.ReactNode {
   return (
     <div className="w-full text-left">
       <div className="truncate rounded-t-[7px] border-b border-border-subtle bg-overlay px-2.5 py-1.5 font-mono text-[11px] font-semibold text-text">
-        {tb.name}
+        {displayName(tb.name, tb.logical, mode)}
       </div>
       <div>
         {tb.columns.map((c) => (
@@ -112,7 +123,7 @@ function nodeLabel(tb: DesignTable, fkCols: Set<string>): React.ReactNode {
             <span
               className={`flex-1 truncate font-mono text-[11px] ${fkCols.has(c.name) && !c.pk ? "text-accent" : "text-text"}`}
             >
-              {c.name}
+              {displayName(c.name, c.logical, mode)}
             </span>
             <span className="shrink-0 font-mono text-[10px] text-text-muted">{c.type}</span>
           </div>
@@ -345,6 +356,7 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
   const [design, setDesign] = useState<ErdDesign>(EMPTY_DESIGN);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+  const [nameMode, setNameMode] = useState<NameMode>("physical");
   const [dialect, setDialect] = useState("postgres");
   const [sql, setSql] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -410,7 +422,7 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
     return design.tables.map((tb) => ({
         id: tb.id,
         position: { x: tb.x, y: tb.y },
-        data: { label: nodeLabel(tb, fkByTable.get(tb.id) ?? new Set()) },
+        data: { label: nodeLabel(tb, fkByTable.get(tb.id) ?? new Set(), nameMode) },
         selected: tb.id === selectedId,
         sourcePosition: Position.Right,
         targetPosition: Position.Left,
@@ -426,7 +438,7 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
           color: "rgb(var(--text))",
         },
       }));
-  }, [design, selectedId]);
+  }, [design, selectedId, nameMode]);
 
   const edges = useMemo<Edge[]>(
     () =>
@@ -831,6 +843,18 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
           >
             <option value="TB">{t("erdDesign.layoutTB")}</option>
             <option value="LR">{t("erdDesign.layoutLR")}</option>
+          </select>
+          <select
+            value={nameMode}
+            onChange={(e) => setNameMode(e.target.value as NameMode)}
+            disabled={design.tables.length === 0}
+            className="h-8 rounded-md border border-border-subtle bg-bg px-1 text-xs text-text"
+            aria-label={t("erdDesign.nameMode")}
+            title={t("erdDesign.nameMode")}
+          >
+            <option value="physical">{t("erdDesign.namePhysical")}</option>
+            <option value="logical">{t("erdDesign.nameLogical")}</option>
+            <option value="both">{t("erdDesign.nameBoth")}</option>
           </select>
           <Button
             size="sm"

@@ -55,9 +55,28 @@ export interface DesignRelation {
   targetCard?: Cardinality;
 }
 
+/** A background annotation drawn behind the tables — a grouping box or a memo
+ *  (like DA#'s diagram shapes). Optional; backward-compatible. */
+export interface ErdShape {
+  id: string;
+  kind: "rect" | "text";
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  text?: string;
+  /** Theme color token key (see SHAPE_COLORS); defaults to "muted". */
+  color?: string;
+}
+
+/** Preset shape colors — token keys mapped to theme CSS vars (no arbitrary
+ *  hex, per the design system). */
+export const SHAPE_COLORS = ["muted", "accent", "success", "warning", "error"] as const;
+
 export interface ErdDesign {
   tables: DesignTable[];
   relations: DesignRelation[];
+  shapes?: ErdShape[];
 }
 
 /** Canonical-ish SQL types offered in the column type dropdown. */
@@ -300,6 +319,7 @@ export function mergeDesign(base: ErdDesign, incoming: ErdDesign): ErdDesign {
   return {
     tables: [...base.tables, ...addTables],
     relations: [...base.relations, ...addRelations],
+    shapes: base.shapes,
   };
 }
 

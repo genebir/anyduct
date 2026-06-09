@@ -24,6 +24,8 @@ import {
   type Edge,
   type Node,
   type NodeMouseHandler,
+  type NodeProps,
+  type NodeTypes,
   type ReactFlowInstance,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
@@ -54,11 +56,13 @@ import {
   ERD_TYPES,
   mergeDesign,
   newId,
+  SHAPE_COLORS,
   type Cardinality,
   type DesignColumn,
   type DesignRelation,
   type DesignTable,
   type ErdDesign,
+  type ErdShape,
   toSql,
 } from "@/lib/erd-design";
 import { useLocale } from "@/components/providers/locale-provider";
@@ -88,6 +92,45 @@ type Menu =
 type Translate = (key: keyof Messages, vars?: Record<string, string | number>) => string;
 
 const DIALECTS = ["postgres", "mysql", "sqlite", "snowflake", "bigquery"];
+
+const SHAPE_VAR: Record<string, string> = {
+  muted: "--text-muted",
+  accent: "--accent",
+  success: "--success",
+  warning: "--warning",
+  error: "--error",
+};
+
+/** Background annotation node (grouping box / memo), drawn behind tables. */
+function ShapeNode({ data, selected }: NodeProps) {
+  const shape = (data as { shape: ErdShape }).shape;
+  const v = SHAPE_VAR[shape.color ?? "muted"] ?? "--text-muted";
+  const ring = selected ? "outline outline-2 outline-offset-2 outline-accent" : "";
+  if (shape.kind === "text") {
+    return (
+      <div
+        className={`flex h-full w-full items-center whitespace-pre-wrap px-2 text-sm font-semibold ${ring}`}
+        style={{ color: `rgb(var(${v}))` }}
+      >
+        {shape.text || "메모"}
+      </div>
+    );
+  }
+  return (
+    <div
+      className={`h-full w-full rounded-lg border-2 ${ring}`}
+      style={{ borderColor: `rgb(var(${v}) / 0.5)`, background: `rgb(var(${v}) / 0.08)` }}
+    >
+      {shape.text ? (
+        <div className="px-2 py-1 text-xs font-semibold" style={{ color: `rgb(var(${v}))` }}>
+          {shape.text}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+const NODE_TYPES: NodeTypes = { shape: ShapeNode };
 
 type NameMode = "physical" | "logical" | "both";
 
@@ -364,12 +407,87 @@ function EdgePanel({
   );
 }
 
+function ShapePanel({
+  shape,
+  t,
+  onChange,
+  onDelete,
+  onClose,
+}: {
+  shape: ErdShape;
+  t: Translate;
+  onChange: (patch: Partial<ErdShape>) => void;
+  onDelete: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="flex w-72 shrink-0 flex-col gap-3 border-l border-border-subtle bg-surface p-3">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-semibold uppercase tracking-wide text-text-secondary">
+          {shape.kind === "rect" ? t("erdShape.rect") : t("erdShape.text")}
+        </span>
+        <button onClick={onClose} aria-label={t("common.close")} className="text-text-muted hover:text-text">
+          <XIcon size={14} />
+        </button>
+      </div>
+      <textarea
+        value={shape.text ?? ""}
+        onChange={(e) => onChange({ text: e.target.value })}
+        placeholder={t("erdShape.label")}
+        rows={shape.kind === "text" ? 2 : 3}
+        className="w-full resize-none rounded-md border border-border-subtle bg-bg p-2 text-sm text-text"
+      />
+      <div>
+        <span className="text-[11px] uppercase tracking-wide text-text-muted">{t("erdShape.color")}</span>
+        <div className="mt-1 flex gap-1.5">
+          {SHAPE_COLORS.map((c) => (
+            <button
+              key={c}
+              onClick={() => onChange({ color: c })}
+              aria-label={c}
+              className={`h-6 w-6 rounded-full border-2 ${(shape.color ?? "muted") === c ? "border-text" : "border-transparent"}`}
+              style={{ background: `rgb(var(${SHAPE_VAR[c]}) / 0.6)` }}
+            />
+          ))}
+        </div>
+      </div>
+      <div className="flex gap-2">
+        <label className="flex-1 text-[11px] text-text-muted">
+          {t("erdShape.width")}
+          <input
+            type="number"
+            value={shape.width}
+            min={40}
+            onChange={(e) => onChange({ width: Math.max(40, Number(e.target.value) || 0) })}
+            className="mt-0.5 h-8 w-full rounded-md border border-border-subtle bg-bg px-2 text-xs text-text"
+          />
+        </label>
+        <label className="flex-1 text-[11px] text-text-muted">
+          {t("erdShape.height")}
+          <input
+            type="number"
+            value={shape.height}
+            min={24}
+            onChange={(e) => onChange({ height: Math.max(24, Number(e.target.value) || 0) })}
+            className="mt-0.5 h-8 w-full rounded-md border border-border-subtle bg-bg px-2 text-xs text-text"
+          />
+        </label>
+      </div>
+      <Button size="sm" variant="ghost" onClick={onDelete} className="mt-2 self-start hover:text-error">
+        <TrashIcon size={13} />
+        {t("common.delete")}
+      </Button>
+    </div>
+  );
+}
+
 export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
   const { t } = useLocale();
   const ws = useWorkspaceFromSlug(slug);
   const [design, setDesign] = useState<ErdDesign>(EMPTY_DESIGN);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+  const [selectedShapeId, setSelectedShapeId] = useState<string | null>(null);
   const [nameMode, setNameMode] = useState<NameMode>("physical");
   const [dialect, setDialect] = useState("postgres");
   const [sql, setSql] = useState<string | null>(null);
@@ -451,10 +569,27 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
     }));
   }, [design, nameMode]);
 
-  // Cheap pass: apply selection highlight without recomputing labels.
-  const nodes = useMemo<Node[]>(
+  // Background shapes (grouping boxes / memos) rendered BEHIND tables.
+  const shapeNodes = useMemo<Node[]>(
     () =>
-      baseNodes.map((n) => ({
+      (design.shapes ?? []).map((s) => ({
+        id: s.id,
+        type: "shape",
+        position: { x: s.x, y: s.y },
+        data: { shape: s },
+        selected: s.id === selectedShapeId,
+        zIndex: -1,
+        style: s.kind === "rect" ? { width: s.width, height: s.height } : { width: s.width },
+      })),
+    [design.shapes, selectedShapeId],
+  );
+
+  // Cheap pass: apply selection highlight without recomputing labels. Shapes
+  // first in the array (+ zIndex -1) so tables always sit on top.
+  const nodes = useMemo<Node[]>(
+    () => [
+      ...shapeNodes,
+      ...baseNodes.map((n) => ({
         ...n,
         selected: n.id === selectedId,
         style: {
@@ -465,7 +600,8 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
               : "1px solid rgb(var(--border-subtle))",
         },
       })),
-    [baseNodes, selectedId],
+    ],
+    [baseNodes, shapeNodes, selectedId],
   );
 
   const edges = useMemo<Edge[]>(
@@ -496,27 +632,47 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
   }, []);
 
   const onNodeDragStop = useCallback((_e: unknown, node: Node) => {
-    setDesign((d) => ({
-      ...d,
-      tables: d.tables.map((tb) =>
-        tb.id === node.id ? { ...tb, x: node.position.x, y: node.position.y } : tb,
-      ),
-    }));
+    setDesign((d) => {
+      if (node.type === "shape") {
+        return {
+          ...d,
+          shapes: (d.shapes ?? []).map((s) =>
+            s.id === node.id ? { ...s, x: node.position.x, y: node.position.y } : s,
+          ),
+        };
+      }
+      return {
+        ...d,
+        tables: d.tables.map((tb) =>
+          tb.id === node.id ? { ...tb, x: node.position.x, y: node.position.y } : tb,
+        ),
+      };
+    });
   }, []);
 
   const onNodeClick: NodeMouseHandler = (_e, node) => {
+    if (node.type === "shape") {
+      setSelectedShapeId(node.id);
+      setSelectedId(null);
+      setSelectedEdgeId(null);
+      return;
+    }
     setSelectedId(node.id);
+    setSelectedShapeId(null);
     setSelectedEdgeId(null);
   };
 
-  // Delete/Backspace removes the selected table(s) or edge(s).
+  // Delete/Backspace removes the selected table(s), shape(s) or edge(s).
   const onNodesDelete = useCallback((deleted: Node[]) => {
     const ids = new Set(deleted.map((n) => n.id));
     setDesign((d) => ({
+      ...d,
       tables: d.tables.filter((t) => !ids.has(t.id)),
       relations: d.relations.filter((r) => !ids.has(r.from) && !ids.has(r.to)),
+      shapes: (d.shapes ?? []).filter((s) => !ids.has(s.id)),
     }));
     setSelectedId(null);
+    setSelectedShapeId(null);
   }, []);
 
   const onEdgesDelete = useCallback((deleted: Edge[]) => {
@@ -536,6 +692,30 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
 
   const updateTable = (id: string, patch: Partial<DesignTable>) =>
     setDesign((d) => ({ ...d, tables: d.tables.map((tb) => (tb.id === id ? { ...tb, ...patch } : tb)) }));
+
+  const addShape = (kind: "rect" | "text") => {
+    const id = newId("shape");
+    const center = rfRef.current?.screenToFlowPosition?.({
+      x: window.innerWidth / 2,
+      y: window.innerHeight / 2,
+    });
+    const shape: ErdShape =
+      kind === "rect"
+        ? { id, kind, x: center?.x ?? 80, y: center?.y ?? 80, width: 320, height: 220, color: "muted", text: "" }
+        : { id, kind, x: center?.x ?? 80, y: center?.y ?? 80, width: 180, height: 36, color: "muted", text: t("erdShape.memo") };
+    setDesign((d) => ({ ...d, shapes: [...(d.shapes ?? []), shape] }));
+    setSelectedShapeId(id);
+    setSelectedId(null);
+    setSelectedEdgeId(null);
+  };
+
+  const updateShape = (id: string, patch: Partial<ErdShape>) =>
+    setDesign((d) => ({ ...d, shapes: (d.shapes ?? []).map((s) => (s.id === id ? { ...s, ...patch } : s)) }));
+
+  const deleteShape = (id: string) => {
+    setDesign((d) => ({ ...d, shapes: (d.shapes ?? []).filter((s) => s.id !== id) }));
+    setSelectedShapeId(null);
+  };
 
   // Rename a column AND keep any FK relation that references it in sync, so
   // the edge label (which shows the FK column name) follows the rename.
@@ -750,6 +930,7 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
 
   const selected = design.tables.find((tb) => tb.id === selectedId) ?? null;
   const selectedEdge = design.relations.find((r) => r.id === selectedEdgeId) ?? null;
+  const selectedShape = (design.shapes ?? []).find((s) => s.id === selectedShapeId) ?? null;
   const tableName = (id: string) => design.tables.find((tb) => tb.id === id)?.name ?? "?";
 
   return (
@@ -818,6 +999,21 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
           <PlusIcon size={14} />
           {t("erdDesign.addTable")}
         </Button>
+        <select
+          value=""
+          onChange={(e) => {
+            const v = e.target.value;
+            e.target.value = "";
+            if (v === "rect" || v === "text") addShape(v);
+          }}
+          className="h-8 rounded-md border border-border-subtle bg-bg px-2 text-xs text-text"
+          aria-label={t("erdShape.add")}
+          title={t("erdShape.add")}
+        >
+          <option value="">{t("erdShape.add")}</option>
+          <option value="rect">{t("erdShape.rect")}</option>
+          <option value="text">{t("erdShape.text")}</option>
+        </select>
         <select
           value=""
           onChange={(e) => {
@@ -997,6 +1193,8 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
               nodes={rfNodes}
               edges={rfEdges}
               edgeTypes={ERD_EDGE_TYPES}
+              nodeTypes={NODE_TYPES}
+              elevateNodesOnSelect={false}
               onNodesChange={onNodesChange}
               onEdgesChange={onEdgesChange}
               onNodesDelete={onNodesDelete}
@@ -1008,10 +1206,12 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
               onEdgeClick={(_e, edge) => {
                 setSelectedEdgeId(edge.id);
                 setSelectedId(null);
+                setSelectedShapeId(null);
               }}
               onPaneClick={() => {
                 setSelectedId(null);
                 setSelectedEdgeId(null);
+                setSelectedShapeId(null);
                 setMenu(null);
               }}
               onPaneContextMenu={onPaneContextMenu}
@@ -1070,6 +1270,14 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
               setSelectedEdgeId(null);
             }}
             onClose={() => setSelectedEdgeId(null)}
+          />
+        ) : selectedShape ? (
+          <ShapePanel
+            shape={selectedShape}
+            t={t}
+            onChange={(patch) => updateShape(selectedShape.id, patch)}
+            onDelete={() => deleteShape(selectedShape.id)}
+            onClose={() => setSelectedShapeId(null)}
           />
         ) : null}
       </div>

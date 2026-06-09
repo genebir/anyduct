@@ -425,8 +425,10 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
     };
   }, [ws?.id, docId, design, docName, loaded]);
 
-  const nodes = useMemo<Node[]>(() => {
-    // FK columns per table: any column that's the source of a relation.
+  // Base nodes: the expensive part (per-column label JSX). Depends only on the
+  // design + name mode — NOT on selection — so clicking a node doesn't rebuild
+  // every table's label (matters for 300+ table imports).
+  const baseNodes = useMemo<Node[]>(() => {
     const fkByTable = new Map<string, Set<string>>();
     for (const r of design.relations) {
       const set = fkByTable.get(r.from) ?? new Set<string>();
@@ -434,25 +436,37 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
       fkByTable.set(r.from, set);
     }
     return design.tables.map((tb) => ({
-        id: tb.id,
-        position: { x: tb.x, y: tb.y },
-        data: { label: nodeLabel(tb, fkByTable.get(tb.id) ?? new Set(), nameMode) },
-        selected: tb.id === selectedId,
-        sourcePosition: Position.Right,
-        targetPosition: Position.Left,
+      id: tb.id,
+      position: { x: tb.x, y: tb.y },
+      data: { label: nodeLabel(tb, fkByTable.get(tb.id) ?? new Set(), nameMode) },
+      sourcePosition: Position.Right,
+      targetPosition: Position.Left,
+      style: {
+        width: 240,
+        padding: 0,
+        borderRadius: 8,
+        background: "rgb(var(--bg-elevated))",
+        color: "rgb(var(--text))",
+      },
+    }));
+  }, [design, nameMode]);
+
+  // Cheap pass: apply selection highlight without recomputing labels.
+  const nodes = useMemo<Node[]>(
+    () =>
+      baseNodes.map((n) => ({
+        ...n,
+        selected: n.id === selectedId,
         style: {
-          width: 240,
-          padding: 0,
-          borderRadius: 8,
+          ...n.style,
           border:
-            tb.id === selectedId
+            n.id === selectedId
               ? "2px solid rgb(var(--accent))"
               : "1px solid rgb(var(--border-subtle))",
-          background: "rgb(var(--bg-elevated))",
-          color: "rgb(var(--text))",
         },
-      }));
-  }, [design, selectedId, nameMode]);
+      })),
+    [baseNodes, selectedId],
+  );
 
   const edges = useMemo<Edge[]>(
     () =>

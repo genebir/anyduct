@@ -202,6 +202,34 @@ const REL_AUDIT = new Set([
 ]);
 
 /**
+ * Recover each table's PHYSICAL name (테이블명, e.g. TB_TSOBAS011) — Phase AJU.
+ * DA# draws the table label as ``[PHYSICAL][LOGICAL]`` in the diagram (e.g.
+ * ``TB_TSOBAS011`` then ``운행패턴역``). Returns logical(Korean) → physical.
+ * Models that use the Korean name for both yield an empty map.
+ */
+function parsePhysicalTableNames(b: Uint8Array, koreanNames: Set<string>): Map<string, string> {
+  const F = framesWithOffsets(b);
+  const diaFrame = F.find((f) => f.s === "DIAGRAM_VERSION");
+  const DIA = diaFrame ? diaFrame.off : 0;
+  const out = new Map<string, string>();
+  for (let i = 0; i < F.length - 1; i++) {
+    if (F[i].off <= DIA) continue; // diagram section only
+    const phys = F[i].s;
+    const logical = F[i + 1].s;
+    if (
+      koreanNames.has(logical) &&
+      !out.has(logical) &&
+      PHYS_RE.test(phys) &&
+      !phys.startsWith("K_") &&
+      !SQL_TYPES.has(phys)
+    ) {
+      out.set(logical, phys);
+    }
+  }
+  return out;
+}
+
+/**
  * Build a robust physical-name → logical-name map (Phase AJS) by scanning EVERY
  * column record in the stream, independent of the main parser's token
  * advancement. DA# keeps logical & physical model areas separately, so a column
@@ -517,7 +545,8 @@ export function parseDamx(buf: ArrayBuffer): ErdDesign {
     }
   }
   const rels = parseRelationships(new Uint8Array(buf), deduped);
-  const design = toDesign(deduped, rels);
+  const physByName = parsePhysicalTableNames(new Uint8Array(buf), new Set(deduped.map((t) => t.name)));
+  const design = toDesign(deduped, rels, physByName);
 
   // Apply DA#'s real diagram positions (Phase AJG) so the imported ERD matches
   // the original layout instead of a generated grid. Scale 0.6 ≈ our node size
@@ -526,13 +555,16 @@ export function parseDamx(buf: ArrayBuffer): ErdDesign {
   // Only trust the recovered positions when they're (almost) all distinct —
   // a guard so we never ship an overlapping layout if geometry recovery is
   // partial; the caller then falls back to auto-layout.
-  const matched = design.tables.filter((t) => bounds.has(t.name));
-  const distinct = new Set(matched.map((t) => `${bounds.get(t.name)!.x},${bounds.get(t.name)!.y}`));
+  // bounds are keyed by the Korean (logical) name; the table's display name may
+  // now be the physical 테이블명, so resolve via logical.
+  const boundsKey = (t: DesignTable) => bounds.get(t.logical ?? t.name);
+  const matched = design.tables.filter((t) => boundsKey(t));
+  const distinct = new Set(matched.map((t) => `${boundsKey(t)!.x},${boundsKey(t)!.y}`));
   const reliable = matched.length >= 2 && distinct.size >= matched.length - 1;
   if (reliable) {
     const SCALE = 0.6;
     for (const t of design.tables) {
-      const bd = bounds.get(t.name);
+      const bd = boundsKey(t);
       if (bd) {
         t.x = Math.round(bd.x * SCALE);
         t.y = Math.round(bd.y * SCALE);
@@ -571,7 +603,11 @@ function dedupeTables(tables: ParsedTable[]): ParsedTable[] {
 }
 
 /** Convert parsed tables + real key-group relations → ErdDesign. */
-function toDesign(parsed: ParsedTable[], rawRels: RawRelation[]): ErdDesign {
+function toDesign(
+  parsed: ParsedTable[],
+  rawRels: RawRelation[],
+  physByName: Map<string, string> = new Map(),
+): ErdDesign {
   const base = rawTablesToDesign(
     parsed.map((t) => ({ table: t.name, columns: t.columns.map((c) => ({ name: c.name, type: c.type })) })),
   );
@@ -592,12 +628,15 @@ function toDesign(parsed: ParsedTable[], rawRels: RawRelation[]): ErdDesign {
     const logicalByName = new Map(pcols.filter((c) => c.logical).map((c) => [c.name, c.logical!]));
     const commentByName = new Map(pcols.filter((c) => c.comment).map((c) => [c.name, c.comment!]));
     const nnByName = new Map(pcols.filter((c) => c.notNull).map((c) => [c.name, true]));
+    const korean = t.name; // DA# entity name = logical (논리명)
+    const physical = physByName.get(korean); // 테이블명 (e.g. TB_TSOBAS011)
     return {
       ...t,
-      // DA#'s entity name (the Korean name we display) IS the table's logical
-      // name; populate it so the docs' 논리명 column isn't empty. These models
-      // reuse it as the physical 테이블명 too (no separate English name).
-      logical: t.logical ?? t.name,
+      // Physical 테이블명 becomes the table name when present; the Korean entity
+      // name is the logical name. Models without a separate physical name keep
+      // the Korean for both.
+      name: physical ?? korean,
+      logical: korean,
       columns: t.columns.map((c) => ({
         ...c,
         pk: pkset.has(c.name) || c.pk,
@@ -608,7 +647,14 @@ function toDesign(parsed: ParsedTable[], rawRels: RawRelation[]): ErdDesign {
     };
   });
 
-  const idByName = new Map(tables.map((t) => [t.name, t.id]));
+  // Index by BOTH physical name and logical (Korean) name — rawRels and the
+  // PK-inference reference tables by their Korean name, but t.name may now be
+  // the physical 테이블명.
+  const idByName = new Map<string, string>();
+  for (const t of tables) {
+    idByName.set(t.name, t.id);
+    if (t.logical) idByName.set(t.logical, t.id);
+  }
   const seen = new Set<string>();
   const relations: DesignRelation[] = [];
   // Primary signal: the real FK relationships parsed from the .damx key groups.
@@ -635,7 +681,11 @@ function toDesign(parsed: ParsedTable[], rawRels: RawRelation[]): ErdDesign {
   // Infer missing PKs from relationships: a key referenced by a non-history
   // child is the parent's primary key (recovers dimension PKs the 'PK' marker
   // misses). Self-refs (UP_* col) and history→base links are skipped.
-  const nameToTable = new Map(tables.map((t) => [t.name, t]));
+  const nameToTable = new Map<string, DesignTable>();
+  for (const t of tables) {
+    nameToTable.set(t.name, t);
+    if (t.logical) nameToTable.set(t.logical, t);
+  }
   for (const r of rawRels) {
     if (r.fromTable === r.toTable || r.fromTable.includes(r.toTable)) continue;
     const col = nameToTable.get(r.toTable)?.columns.find((c) => c.name === r.fromColumn);

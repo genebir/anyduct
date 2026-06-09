@@ -126,6 +126,9 @@ export function parseDamx(buf: ArrayBuffer): ErdDesign {
         !SQL_TYPES.has(cand) &&
         !/^\d+$/.test(cand) &&
         !cand.includes("--") &&
+        // Exclude markers (PK/FK/...) and physical-style ALL-CAPS tokens —
+        // real logical names here are Korean/free text, not identifiers.
+        !PHYS_RE.test(cand) &&
         cand.length <= 80
           ? cand
           : null;
@@ -263,6 +266,8 @@ function extractRelationships(
     const parent = keyAttr.table === e1 ? e1 : keyAttr.table === e2 ? e2 : e1;
     const child = parent === e1 ? e2 : e1;
     if (valid.has(child) && valid.has(parent)) {
+      // The relationship key is the parent's primary key — flag it so
+      // dimension-table PKs that the 'PK' marker missed are still marked.
       if (child !== parent) {
         add(child, keyAttr.name, parent);
       } else {
@@ -306,18 +311,27 @@ function toDesign(parsed: ParsedTable[], rawRels: RawRelation[]): ErdDesign {
   const base = rawTablesToDesign(
     parsed.map((t) => ({ table: t.name, columns: t.columns.map((c) => ({ name: c.name, type: c.type })) })),
   );
+  // Global standard-term map: a physical column name → its logical name,
+  // learned from any table that has it. Standardized models reuse one term
+  // (USER_ID → 사용자아이디 everywhere), so this fills columns whose own
+  // record missed the logical (e.g. dimension PKs).
+  const stdLogical = new Map<string, string>();
+  for (const t of parsed) {
+    for (const c of t.columns) {
+      if (c.logical && !stdLogical.has(c.name)) stdLogical.set(c.name, c.logical);
+    }
+  }
   // Overlay the recovered PKs + logical names onto the design tables.
   const tables: DesignTable[] = base.tables.map((t, idx) => {
     const pcols = parsed[idx]?.columns ?? [];
     const pkset = new Set(pcols.filter((c) => c.pk).map((c) => c.name));
     const logicalByName = new Map(pcols.filter((c) => c.logical).map((c) => [c.name, c.logical!]));
-    if (pkset.size === 0 && logicalByName.size === 0) return t;
     return {
       ...t,
       columns: t.columns.map((c) => ({
         ...c,
         pk: pkset.has(c.name) || c.pk,
-        logical: logicalByName.get(c.name) ?? c.logical,
+        logical: logicalByName.get(c.name) ?? c.logical ?? stdLogical.get(c.name),
       })),
     };
   });

@@ -76,6 +76,7 @@ import {
   tableDefinitionCsv,
 } from "@/lib/erd-docs";
 import { toPng } from "html-to-image";
+import { strToU8, zipSync } from "fflate";
 import { erdApi } from "@/lib/api";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import type { Messages } from "@/lib/i18n/messages";
@@ -589,6 +590,27 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
       content = fullSpecMarkdown(design, docName || "ERD", today);
       filename = `${base}_데이터정의서.md`;
       mime = "text/markdown;charset=utf-8";
+    } else if (kind === "zip") {
+      // All deliverables in one bundle (handoff): 5 docs + DDL for the dialect.
+      const today = new Date().toLocaleDateString();
+      const files: Record<string, Uint8Array> = {
+        [`${base}_컬럼정의서.csv`]: strToU8(columnDictionaryCsv(design)),
+        [`${base}_테이블정의서.csv`]: strToU8(tableDefinitionCsv(design)),
+        [`${base}_매핑정의서.csv`]: strToU8(mappingSpecCsv(design)),
+        [`${base}_제약인덱스정의서.csv`]: strToU8(constraintSpecCsv(design)),
+        [`${base}_데이터정의서.md`]: strToU8(fullSpecMarkdown(design, docName || "ERD", today)),
+        [`${base}_${dialect}.sql`]: strToU8(toSql(design, dialect)),
+      };
+      const zipped = zipSync(files);
+      const blob = new Blob([zipped], { type: "application/zip" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${base}_정의서.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success(t("erdDocs.zipGenerated"));
+      return;
     } else {
       return;
     }
@@ -844,6 +866,7 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
             <option value="mapping">{t("erdDocs.mapping")}</option>
             <option value="constraints">{t("erdDocs.constraints")}</option>
             <option value="markdown">{t("erdDocs.markdown")}</option>
+            <option value="zip">{t("erdDocs.zip")}</option>
           </select>
           <Button
             size="sm"

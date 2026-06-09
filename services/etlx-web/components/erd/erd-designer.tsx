@@ -66,6 +66,7 @@ import { parseDamx } from "@/lib/damx";
 import { autoLayout } from "@/lib/erd-layout";
 import {
   columnDictionaryCsv,
+  constraintSpecCsv,
   fullSpecMarkdown,
   mappingSpecCsv,
   tableDefinitionCsv,
@@ -571,6 +572,9 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
     } else if (kind === "mapping") {
       content = mappingSpecCsv(design);
       filename = `${base}_매핑정의서.csv`;
+    } else if (kind === "constraints") {
+      content = constraintSpecCsv(design);
+      filename = `${base}_제약인덱스정의서.csv`;
     } else if (kind === "markdown") {
       const today = new Date().toLocaleDateString();
       content = fullSpecMarkdown(design, docName || "ERD", today);
@@ -815,6 +819,7 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
             <option value="columns">{t("erdDocs.columns")}</option>
             <option value="tables">{t("erdDocs.tables")}</option>
             <option value="mapping">{t("erdDocs.mapping")}</option>
+            <option value="constraints">{t("erdDocs.constraints")}</option>
             <option value="markdown">{t("erdDocs.markdown")}</option>
           </select>
           <Button

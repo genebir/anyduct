@@ -146,6 +146,41 @@ export function mappingSpecCsv(design: ErdDesign): string {
   return csv(headers, rows);
 }
 
+// --- 제약조건 / 인덱스 정의서 (Constraints & Indexes) -----------------------
+
+export function constraintSpecCsv(design: ErdDesign): string {
+  const byId = new Map(design.tables.map((t) => [t.id, t]));
+  const headers = [
+    "No", "테이블", "제약 유형", "제약/인덱스명", "컬럼", "참조 테이블", "참조 컬럼", "설명",
+  ];
+  const rows: unknown[][] = [];
+  let no = 0;
+  // PK constraints.
+  for (const t of design.tables) {
+    const pks = pkColumnsOf(t);
+    if (pks.length > 0) {
+      no += 1;
+      rows.push([no, t.name, "PK", `PK_${t.name}`, pks.join(", "), "", "", "기본키"]);
+    }
+  }
+  // FK constraints + a recommended index on each FK column (join performance).
+  for (const r of design.relations) {
+    const from = byId.get(r.from);
+    const to = byId.get(r.to);
+    if (!from || !to) continue;
+    no += 1;
+    rows.push([
+      no, from.name, "FK", `FK_${from.name}_${to.name}`, r.fromColumn, to.name, pkColumnOf(to), "외래키",
+    ]);
+    no += 1;
+    rows.push([
+      no, from.name, "INDEX(권장)", `IX_${from.name}_${r.fromColumn}`, r.fromColumn, "", "",
+      "FK 조인 성능용 권장 인덱스",
+    ]);
+  }
+  return csv(headers, rows);
+}
+
 // --- 전체 정의서 (Markdown) -------------------------------------------------
 
 export function fullSpecMarkdown(design: ErdDesign, diagramName: string, dateStr: string): string {

@@ -36,7 +36,6 @@ import {
   ChevronRightIcon,
   CopyIcon,
   DatabaseIcon,
-  ImageIcon,
   KeyIcon,
   LayoutGridIcon,
   LinkIcon,
@@ -581,6 +580,14 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
 
   const onGenerateDoc = (kind: string) => {
     if (design.tables.length === 0) return;
+    if (kind === "sql") {
+      setSql(toSql(design, dialect));
+      return;
+    }
+    if (kind === "image") {
+      void onExportPng();
+      return;
+    }
     const base = (docName || "erd").replace(/[/\\?%*:|"<>]/g, "_");
     let content = "";
     let filename = "";
@@ -782,14 +789,26 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
           <PlusIcon size={14} />
           {t("erdDesign.addTable")}
         </Button>
-        <Button size="sm" variant="secondary" onClick={() => setShowImport(true)} disabled={!ws?.id}>
-          <DatabaseIcon size={14} />
-          {t("erdDesign.import")}
-        </Button>
-        <Button size="sm" variant="secondary" onClick={() => damxRef.current?.click()}>
-          <DatabaseIcon size={14} />
-          {t("erdDesign.importDamx")}
-        </Button>
+        <select
+          value=""
+          onChange={(e) => {
+            const v = e.target.value;
+            e.target.value = "";
+            if (v === "connection") setShowImport(true);
+            else if (v === "damx") damxRef.current?.click();
+            else if (v === "ddl") setShowDdl(true);
+          }}
+          className="h-8 rounded-md border border-border-subtle bg-bg px-2 text-xs text-text"
+          aria-label={t("erdDesign.importMenu")}
+          title={t("erdDesign.connectHint")}
+        >
+          <option value="">{t("erdDesign.importMenu")}</option>
+          <option value="connection" disabled={!ws?.id}>
+            {t("erdDesign.import")}
+          </option>
+          <option value="damx">{t("erdDesign.importDamx")}</option>
+          <option value="ddl">{t("erdDesign.importDdl")}</option>
+        </select>
         <input
           ref={damxRef}
           type="file"
@@ -797,11 +816,6 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
           className="hidden"
           onChange={(e) => void onDamxFile(e)}
         />
-        <Button size="sm" variant="secondary" onClick={() => setShowDdl(true)}>
-          <DatabaseIcon size={14} />
-          {t("erdDesign.importDdl")}
-        </Button>
-        <span className="text-xs text-text-muted">{t("erdDesign.connectHint")}</span>
         <div className="ml-auto flex items-center gap-2">
           <select
             value={dialect}
@@ -856,23 +870,6 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
             <option value="logical">{t("erdDesign.nameLogical")}</option>
             <option value="both">{t("erdDesign.nameBoth")}</option>
           </select>
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={() => setSql(toSql(design, dialect))}
-            disabled={design.tables.length === 0}
-          >
-            {t("erdDesign.exportSql")}
-          </Button>
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={() => void onExportPng()}
-            disabled={design.tables.length === 0}
-          >
-            <ImageIcon size={14} />
-            {t("erdDesign.exportImage")}
-          </Button>
           <select
             value=""
             onChange={(e) => {
@@ -881,10 +878,12 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
             }}
             disabled={design.tables.length === 0}
             className="h-8 rounded-md border border-border-subtle bg-bg px-2 text-xs text-text"
-            aria-label={t("erdDocs.generate")}
-            title={t("erdDocs.generate")}
+            aria-label={t("erdDesign.exportMenu")}
+            title={t("erdDesign.exportMenu")}
           >
-            <option value="">{t("erdDocs.generate")}</option>
+            <option value="">{t("erdDesign.exportMenu")}</option>
+            <option value="sql">{t("erdDesign.exportSql")}</option>
+            <option value="image">{t("erdDesign.exportImage")}</option>
             <option value="columns">{t("erdDocs.columns")}</option>
             <option value="tables">{t("erdDocs.tables")}</option>
             <option value="mapping">{t("erdDocs.mapping")}</option>

@@ -91,6 +91,8 @@ export const en = {
   // ERD designer (Phase AGX)
   "erdDesign.addTable": "Add table",
   "erdDesign.import": "Import from connection",
+  "erdDesign.importMenu": "Import…",
+  "erdDesign.exportMenu": "Export…",
   "erdDesign.importDamx": "Import .damx (DA#)",
   "erdDesign.importDdl": "Import DDL",
   "erdDesign.autoLayout": "Auto layout",
@@ -1452,6 +1454,8 @@ export const ko: Messages = {
   // ERD designer (Phase AGX)
   "erdDesign.addTable": "테이블 추가",
   "erdDesign.import": "커넥션에서 가져오기",
+  "erdDesign.importMenu": "가져오기…",
+  "erdDesign.exportMenu": "내보내기…",
   "erdDesign.importDamx": ".damx 가져오기 (DA#)",
   "erdDesign.importDdl": "DDL 가져오기",
   "erdDesign.autoLayout": "자동 정렬",

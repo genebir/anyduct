@@ -527,5 +527,16 @@ function toDesign(parsed: ParsedTable[], rawRels: RawRelation[]): ErdDesign {
   if (relations.length === 0) {
     relations.push(...inferRelationsByPk(tables));
   }
+  // Infer missing PKs from relationships: a key referenced by a non-history
+  // child is the parent's primary key (recovers dimension PKs the 'PK' marker
+  // misses). Self-refs (UP_* col) and history→base links are skipped.
+  const nameToTable = new Map(tables.map((t) => [t.name, t]));
+  for (const r of rawRels) {
+    if (r.fromTable === r.toTable || r.fromTable.includes(r.toTable)) continue;
+    const col = nameToTable.get(r.toTable)?.columns.find((c) => c.name === r.fromColumn);
+    if (col) col.pk = true;
+  }
+  // Primary-key columns are implicitly NOT NULL.
+  for (const t of tables) for (const c of t.columns) if (c.pk) c.notNull = true;
   return { tables, relations };
 }

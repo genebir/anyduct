@@ -184,6 +184,7 @@ interface ParsedColumn {
   table: string | null;
   logical?: string;
   comment?: string;
+  notNull?: boolean;
 }
 interface ParsedTable {
   name: string;
@@ -201,6 +202,41 @@ const REL_AUDIT = new Set([
 ]);
 
 /**
+ * Recover the per-column **mandatory (NOT NULL)** flag (Phase AJQ). After a
+ * column's ``PHYSICAL TYPE [LENGTH]`` frames there are two empty frames then an
+ * int32: 1 = mandatory, 0 = nullable. Keyed by the column's doubled GUID.
+ */
+function parseMandatory(b: Uint8Array): Map<string, boolean> {
+  const F = framesWithOffsets(b);
+  const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  const out = new Map<string, boolean>();
+  for (let i = 0; i < F.length; i++) {
+    if (!PHYS_RE.test(F[i].s) || F[i].s.startsWith("K_")) continue;
+    if (i + 1 >= F.length || !SQL_TYPES.has(F[i + 1].s)) continue;
+    // doubled GUID before the column identifies it (matches colByGuid).
+    let guid: string | null = null;
+    for (let j = i - 1; j >= Math.max(0, i - 8); j--) {
+      if (GUID_RE.test(F[j].s) && j > 0 && F[j - 1].s === F[j].s) {
+        guid = F[j].s;
+        break;
+      }
+    }
+    if (!guid) continue;
+    let endFrame = F[i + 1]; // type
+    let hasLen = false;
+    if (i + 2 < F.length && /^\d+$/.test(F[i + 2].s)) {
+      endFrame = F[i + 2]; // length
+      hasLen = true;
+    }
+    // With a length there are 2 empty frames before the flag; without one there
+    // are 3 (the extra empty frame stands in for the missing length).
+    const off = endFrame.end + (hasLen ? 8 : 12);
+    if (off + 4 <= b.length) out.set(guid, dv.getInt32(off, true) === 1);
+  }
+  return out;
+}
+
+/**
  * Parse the REAL relationships from DA#'s diagram (Phase AJM). Validated against
  * a reference image (i.png): relationship records list two **entity GUIDs in
  * [parent][child] order**, so binary order gives direction. The FK column is the
@@ -213,9 +249,14 @@ function parseRelationships(b: Uint8Array, tables: ParsedTable[]): RawRelation[]
   const S = F.map((f) => f.s);
   const names = new Set(tables.map((t) => t.name));
   const colsByTable = new Map(tables.map((t) => [t.name, new Set(t.columns.map((c) => c.name))]));
+  // A self-reference exists only when the ``UP_<X>`` column's base X is the
+  // table's OWN primary key (e.g. 부서.UP_DEPT_NO → 부서). ``UP_<otherPK>``
+  // (e.g. 공통코드.UP_COM_CD_GROUP_ID, base = 공통코드그룹's PK) is NOT a
+  // self-ref — that was creating bogus self N:1 links.
   const upByTable = new Map<string, string>();
   for (const t of tables) {
-    const up = t.columns.find((c) => c.name.startsWith("UP_"));
+    const pks = new Set(t.columns.filter((c) => c.pk).map((c) => c.name));
+    const up = t.columns.find((c) => c.name.startsWith("UP_") && pks.has(c.name.slice(3)));
     if (up) upByTable.set(t.name, up.name);
   }
   const diaFrame = F.find((f) => f.s === "DIAGRAM_VERSION");
@@ -301,6 +342,7 @@ function isEntityName(s: string): boolean {
 /** Parse a ``.damx`` buffer into an ERD design (best-effort). */
 export function parseDamx(buf: ArrayBuffer): ErdDesign {
   const S = frameStrings(buf);
+  const mandatoryByGuid = parseMandatory(new Uint8Array(buf));
   const tables: ParsedTable[] = [];
   const colByGuid = new Map<string, ParsedColumn>();
   const entGuidToName = new Map<string, string>();
@@ -361,6 +403,7 @@ export function parseDamx(buf: ArrayBuffer): ErdDesign {
         table: null,
         logical: pendingLogical ?? undefined,
         comment: pendingComment ?? undefined,
+        notNull: doubledGuid ? mandatoryByGuid.get(doubledGuid) : undefined,
       };
       cols.push(col);
       if (doubledGuid) colByGuid.set(doubledGuid, col);
@@ -492,6 +535,7 @@ function toDesign(parsed: ParsedTable[], rawRels: RawRelation[]): ErdDesign {
     const pkset = new Set(pcols.filter((c) => c.pk).map((c) => c.name));
     const logicalByName = new Map(pcols.filter((c) => c.logical).map((c) => [c.name, c.logical!]));
     const commentByName = new Map(pcols.filter((c) => c.comment).map((c) => [c.name, c.comment!]));
+    const nnByName = new Map(pcols.filter((c) => c.notNull).map((c) => [c.name, true]));
     return {
       ...t,
       columns: t.columns.map((c) => ({
@@ -499,6 +543,7 @@ function toDesign(parsed: ParsedTable[], rawRels: RawRelation[]): ErdDesign {
         pk: pkset.has(c.name) || c.pk,
         logical: logicalByName.get(c.name) ?? c.logical ?? stdLogical.get(c.name),
         comment: commentByName.get(c.name) ?? c.comment,
+        notNull: nnByName.get(c.name) || c.notNull,
       })),
     };
   });

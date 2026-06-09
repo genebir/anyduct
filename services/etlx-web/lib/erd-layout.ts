@@ -89,7 +89,9 @@ function layoutCluster(
   }
   const ids = new Set(comp.map((t) => t.id));
   const g = new dagre.graphlib.Graph();
-  g.setGraph({ rankdir: dir, ranksep: 110, nodesep: 50, marginx: 0, marginy: 0 });
+  // Generous separation so crow's-foot edges have room and overlap less:
+  // ranksep between ranks, nodesep within a rank, edgesep between parallel edges.
+  g.setGraph({ rankdir: dir, ranksep: 150, nodesep: 70, edgesep: 30, marginx: 0, marginy: 0 });
   g.setDefaultEdgeLabel(() => ({}));
   for (const t of comp) g.setNode(t.id, { width: NODE_WIDTH, height: nodeHeight(t.columns.length) });
   for (const r of design.relations) {

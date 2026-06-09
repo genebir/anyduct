@@ -35,6 +35,12 @@ function csv(headers: string[], rows: unknown[][]): string {
   return BOM + [row(headers), ...rows.map(row)].join("\r\n");
 }
 
+/** Escape a value for a Markdown table cell (pipes break the table; newlines
+ *  split the row). */
+function mdCell(v: unknown): string {
+  return (v == null ? "" : String(v)).replace(/\|/g, "\\|").replace(/\r?\n/g, "<br>");
+}
+
 /** Split a SQL type into base + length + scale: VARCHAR(255) → {VARCHAR,255,""},
  *  NUMERIC(10,2) → {NUMERIC,10,2}, DATETIME → {DATETIME,"",""}. */
 function parseType(type: string): { base: string; length: string; scale: string } {
@@ -210,7 +216,7 @@ export function fullSpecMarkdown(design: ErdDesign, diagramName: string, dateStr
       const fk = fks.get(`${t.id}::${c.name}`);
       const nn = c.pk || c.notNull ? "✔" : "";
       lines.push(
-        `| ${i + 1} | ${c.name} | ${c.logical ?? ""} | ${c.type} | ${c.pk ? "✔" : ""} | ${nn} | ${fk ? `${fk.targetTable}.${fk.targetCol}` : ""} | ${c.defaultValue ?? ""} | ${(c.comment ?? "").replace(/\|/g, "\\|")} |`,
+        `| ${i + 1} | ${mdCell(c.name)} | ${mdCell(c.logical)} | ${mdCell(c.type)} | ${c.pk ? "✔" : ""} | ${nn} | ${fk ? mdCell(`${fk.targetTable}.${fk.targetCol}`) : ""} | ${mdCell(c.defaultValue)} | ${mdCell(c.comment)} |`,
       );
     });
     lines.push("");
@@ -226,7 +232,7 @@ export function fullSpecMarkdown(design: ErdDesign, diagramName: string, dateStr
     const to = byId.get(r.to);
     if (!from || !to) continue;
     const card = `${r.sourceCard ?? "many"}:${r.targetCard ?? "one"}`;
-    lines.push(`| ${from.name} | ${r.fromColumn} | → | ${to.name} | ${pkColumnOf(to)} | ${card} |`);
+    lines.push(`| ${mdCell(from.name)} | ${mdCell(r.fromColumn)} | → | ${mdCell(to.name)} | ${mdCell(pkColumnOf(to))} | ${card} |`);
   }
   lines.push("");
   return lines.join("\n");

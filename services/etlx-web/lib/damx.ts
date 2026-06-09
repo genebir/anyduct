@@ -255,8 +255,11 @@ function parseRelationships(b: Uint8Array, tables: ParsedTable[]): RawRelation[]
   // self-ref — that was creating bogus self N:1 links.
   const upByTable = new Map<string, string>();
   for (const t of tables) {
-    const pks = new Set(t.columns.filter((c) => c.pk).map((c) => c.name));
-    const up = t.columns.find((c) => c.name.startsWith("UP_") && pks.has(c.name.slice(3)));
+    const colNames = new Set(t.columns.map((c) => c.name));
+    // ``UP_<X>`` is a self-ref only when the base column X also exists in the
+    // table (e.g. 부서.UP_DEPT_NO ↔ DEPT_NO). Non-root tables are filtered out
+    // later via isChildOfOther.
+    const up = t.columns.find((c) => c.name.startsWith("UP_") && colNames.has(c.name.slice(3)));
     if (up) upByTable.set(t.name, up.name);
   }
   const diaFrame = F.find((f) => f.s === "DIAGRAM_VERSION");
@@ -319,8 +322,15 @@ function parseRelationships(b: Uint8Array, tables: ParsedTable[]): RawRelation[]
   // the same key (so it doesn't own that key), the link is only real when it's
   // a history→base reference (child name contains the parent name).
   const childKeys = new Set(out.map((r) => `${r.fromTable}|${r.fromColumn}`));
+  // Tables that are a child of a DIFFERENT table (have a real outgoing FK).
+  const isChildOfOther = new Set(out.filter((r) => r.fromTable !== r.toTable).map((r) => r.fromTable));
   return out.filter((r) => {
-    if (r.fromTable === r.toTable) return true; // self-ref
+    if (r.fromTable === r.toTable) {
+      // A UP_<ownPK> self-ref is real only for root/dimension tables (부서, 메뉴);
+      // a table that already references another (공통코드 → 공통코드그룹) does not
+      // also self-reference here.
+      return !isChildOfOther.has(r.fromTable);
+    }
     if (!childKeys.has(`${r.toTable}|${r.fromColumn}`)) return true; // parent owns the key
     return r.fromTable.includes(r.toTable); // ambiguous → keep only history→base
   });

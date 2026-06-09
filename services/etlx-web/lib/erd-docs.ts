@@ -21,7 +21,11 @@ import type { ErdDesign, DesignTable } from "@/lib/erd-design";
 const BOM = "﻿";
 
 function esc(v: unknown): string {
-  const s = v == null ? "" : String(v);
+  let s = v == null ? "" : String(v);
+  // Neutralize CSV formula injection (OWASP): a cell beginning with = + - @
+  // or a tab/CR is run as a formula by Excel/Sheets. Prefix with a single
+  // quote so spreadsheets treat it as text.
+  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
   return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 function row(cells: unknown[]): string {

@@ -359,7 +359,9 @@ export function inferRelationsByPk(tables: DesignTable[]): DesignRelation[] {
 }
 
 function quoteIdent(ident: string, dialect: string): string {
-  return dialect === "mysql" ? `\`${ident}\`` : `"${ident}"`;
+  // MySQL and BigQuery quote identifiers with backticks; the rest (postgres,
+  // sqlite, snowflake, …) use ANSI double quotes.
+  return dialect === "mysql" || dialect === "bigquery" ? `\`${ident}\`` : `"${ident}"`;
 }
 
 /**

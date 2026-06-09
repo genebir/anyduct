@@ -202,6 +202,44 @@ const REL_AUDIT = new Set([
 ]);
 
 /**
+ * Build a robust physical-name → logical-name map (Phase AJS) by scanning EVERY
+ * column record in the stream, independent of the main parser's token
+ * advancement. DA# keeps logical & physical model areas separately, so a column
+ * may be grouped from the physical area (no logical) while its logical name
+ * lives in the logical area — this global map recovers it (e.g. COM_CD_GROUP_ID
+ * → 공통코드그룹아이디). First non-empty logical per physical name wins.
+ */
+function parseLogicalByName(b: Uint8Array): Map<string, string> {
+  const F = framesWithOffsets(b);
+  const out = new Map<string, string>();
+  for (let i = 0; i < F.length; i++) {
+    if (!PHYS_RE.test(F[i].s) || F[i].s.startsWith("K_")) continue;
+    if (i + 1 >= F.length || !SQL_TYPES.has(F[i + 1].s)) continue;
+    if (out.has(F[i].s)) continue;
+    // Walk back to the doubled GUID; the frame right after it is the logical.
+    for (let j = i - 1; j >= Math.max(0, i - 8); j--) {
+      if (GUID_RE.test(F[j].s) && j + 1 < F.length && F[j + 1].s === F[j].s) {
+        const cand = F[j + 2]?.s;
+        if (
+          cand &&
+          !GUID_RE.test(cand) &&
+          !cand.startsWith("K_") &&
+          !SQL_TYPES.has(cand) &&
+          !/^\d+$/.test(cand) &&
+          !cand.includes("--") &&
+          !PHYS_RE.test(cand) &&
+          cand.length <= 80
+        ) {
+          out.set(F[i].s, cand);
+        }
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+/**
  * Recover the per-column **mandatory (NOT NULL)** flag (Phase AJQ). After a
  * column's ``PHYSICAL TYPE [LENGTH]`` frames there are two empty frames then an
  * int32: 1 = mandatory, 0 = nullable. Keyed by the column's doubled GUID.
@@ -470,6 +508,14 @@ export function parseDamx(buf: ArrayBuffer): ErdDesign {
   }
 
   const deduped = dedupeTables(tables);
+  // Fill any column logical names missed by the main loop (DA# logical/physical
+  // areas are separate) from a global raw scan — e.g. COM_CD_GROUP_ID.
+  const rawLogical = parseLogicalByName(new Uint8Array(buf));
+  for (const t of deduped) {
+    for (const c of t.columns) {
+      if (!c.logical && rawLogical.has(c.name)) c.logical = rawLogical.get(c.name);
+    }
+  }
   const rels = parseRelationships(new Uint8Array(buf), deduped);
   const design = toDesign(deduped, rels);
 

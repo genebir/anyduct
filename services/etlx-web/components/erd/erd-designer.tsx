@@ -33,7 +33,9 @@ import "@xyflow/react/dist/style.css";
 import Link from "next/link";
 import {
   AlertTriangleIcon,
+  ArrowDownIcon,
   ArrowLeftIcon,
+  ArrowUpIcon,
   CheckCircle2Icon,
   Table2Icon,
   ChevronDownIcon,
@@ -177,9 +179,20 @@ function nodeLabel(tb: DesignTable, fkCols: Set<string>, mode: NameMode, scale: 
       <div>
         {tb.columns.map((c) => {
           const isFk = fkCols.has(c.name) && !c.pk;
+          const tip = [
+            c.logical ? `${c.name} (${c.logical})` : c.name,
+            c.type,
+            c.pk ? "PK" : "",
+            c.notNull && !c.pk ? "NOT NULL" : "",
+            c.comment ? `\n${c.comment}` : "",
+          ]
+            .filter(Boolean)
+            .join(" · ")
+            .replace(" · \n", "\n");
           return (
             <div
               key={c.name}
+              title={tip}
               className={`flex items-center gap-1.5 border-b border-border-subtle/30 px-2.5 py-1 last:border-0 ${
                 c.pk ? "bg-warning/5" : ""
               }`}
@@ -233,6 +246,14 @@ function TablePanel({
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
   const setColumn = (i: number, patch: Partial<DesignColumn>) => {
     onChange({ columns: table.columns.map((c, j) => (j === i ? { ...c, ...patch } : c)) });
+  };
+  const moveColumn = (i: number, dir: -1 | 1) => {
+    const j = i + dir;
+    if (j < 0 || j >= table.columns.length) return;
+    const cols = [...table.columns];
+    [cols[i], cols[j]] = [cols[j], cols[i]];
+    onChange({ columns: cols });
+    setExpandedIdx(j);
   };
   const fieldLabel = (s: string) => (
     <span className="mb-0.5 block text-[10px] font-medium uppercase tracking-wide text-text-muted">{s}</span>
@@ -359,6 +380,26 @@ function TablePanel({
             </div>
             {expandedIdx === i ? (
               <div className="mt-2 flex flex-col gap-1.5 border-t border-border-subtle/50 pt-2">
+                <div className="flex items-center justify-end gap-1">
+                  <button
+                    onClick={() => moveColumn(i, -1)}
+                    disabled={i === 0}
+                    aria-label={t("erdDesign.moveUp")}
+                    title={t("erdDesign.moveUp")}
+                    className="rounded p-1 text-text-muted hover:bg-overlay hover:text-text disabled:opacity-30"
+                  >
+                    <ArrowUpIcon size={13} />
+                  </button>
+                  <button
+                    onClick={() => moveColumn(i, 1)}
+                    disabled={i === table.columns.length - 1}
+                    aria-label={t("erdDesign.moveDown")}
+                    title={t("erdDesign.moveDown")}
+                    className="rounded p-1 text-text-muted hover:bg-overlay hover:text-text disabled:opacity-30"
+                  >
+                    <ArrowDownIcon size={13} />
+                  </button>
+                </div>
                 <label>
                   {fieldLabel(t("erdDesign.colLogical"))}
                   <Input

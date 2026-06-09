@@ -406,7 +406,8 @@ export function toSql(design: ErdDesign, dialect: string): string {
   for (const t of topoSortTables(design)) {
     const lines: string[] = [];
     for (const c of t.columns) {
-      let line = `  ${q(c.name)} ${c.type}`;
+      // Fall back to TEXT for untyped columns so the DDL stays valid.
+      let line = `  ${q(c.name)} ${c.type?.trim() || "TEXT"}`;
       if (c.notNull) line += " NOT NULL";
       if (c.defaultValue != null && String(c.defaultValue).trim() !== "") {
         line += ` DEFAULT ${c.defaultValue}`;

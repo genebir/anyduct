@@ -13,6 +13,7 @@ import {
   BackgroundVariant,
   Controls,
   MiniMap,
+  NodeResizer,
   Position,
   ReactFlow,
   ReactFlowProvider,
@@ -103,30 +104,48 @@ const SHAPE_VAR: Record<string, string> = {
 
 /** Background annotation node (grouping box / memo), drawn behind tables. */
 function ShapeNode({ data, selected }: NodeProps) {
-  const shape = (data as { shape: ErdShape }).shape;
+  const { shape, onResize } = data as {
+    shape: ErdShape;
+    onResize?: (id: string, p: { x: number; y: number; width: number; height: number }) => void;
+  };
   const v = SHAPE_VAR[shape.color ?? "muted"] ?? "--text-muted";
   const ring = selected ? "outline outline-2 outline-offset-2 outline-accent" : "";
+  const resizer = selected ? (
+    <NodeResizer
+      minWidth={shape.kind === "text" ? 60 : 80}
+      minHeight={shape.kind === "text" ? 24 : 48}
+      onResizeEnd={(_e, p) => onResize?.(shape.id, p)}
+      lineClassName="!border-accent"
+      handleClassName="!h-2 !w-2 !rounded-sm !border-accent !bg-surface"
+    />
+  ) : null;
   if (shape.kind === "text") {
     return (
-      <div
-        className={`flex h-full w-full items-center whitespace-pre-wrap px-2 text-sm font-semibold ${ring}`}
-        style={{ color: `rgb(var(${v}))` }}
-      >
-        {shape.text || "메모"}
-      </div>
+      <>
+        {resizer}
+        <div
+          className={`flex h-full w-full items-center whitespace-pre-wrap px-2 text-sm font-semibold ${ring}`}
+          style={{ color: `rgb(var(${v}))` }}
+        >
+          {shape.text || "메모"}
+        </div>
+      </>
     );
   }
   return (
-    <div
-      className={`h-full w-full rounded-lg border-2 ${ring}`}
-      style={{ borderColor: `rgb(var(${v}) / 0.5)`, background: `rgb(var(${v}) / 0.08)` }}
-    >
-      {shape.text ? (
-        <div className="px-2 py-1 text-xs font-semibold" style={{ color: `rgb(var(${v}))` }}>
-          {shape.text}
-        </div>
-      ) : null}
-    </div>
+    <>
+      {resizer}
+      <div
+        className={`h-full w-full rounded-lg border-2 ${ring}`}
+        style={{ borderColor: `rgb(var(${v}) / 0.5)`, background: `rgb(var(${v}) / 0.08)` }}
+      >
+        {shape.text ? (
+          <div className="px-2 py-1 text-xs font-semibold" style={{ color: `rgb(var(${v}))` }}>
+            {shape.text}
+          </div>
+        ) : null}
+      </div>
+    </>
   );
 }
 
@@ -569,6 +588,17 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
     }));
   }, [design, nameMode]);
 
+  const handleShapeResize = useCallback(
+    (id: string, p: { x: number; y: number; width: number; height: number }) =>
+      setDesign((d) => ({
+        ...d,
+        shapes: (d.shapes ?? []).map((s) =>
+          s.id === id ? { ...s, x: p.x, y: p.y, width: Math.round(p.width), height: Math.round(p.height) } : s,
+        ),
+      })),
+    [],
+  );
+
   // Background shapes (grouping boxes / memos) rendered BEHIND tables.
   const shapeNodes = useMemo<Node[]>(
     () =>
@@ -576,12 +606,12 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
         id: s.id,
         type: "shape",
         position: { x: s.x, y: s.y },
-        data: { shape: s },
+        data: { shape: s, onResize: handleShapeResize },
         selected: s.id === selectedShapeId,
         zIndex: -1,
-        style: s.kind === "rect" ? { width: s.width, height: s.height } : { width: s.width },
+        style: { width: s.width, height: s.height },
       })),
-    [design.shapes, selectedShapeId],
+    [design.shapes, selectedShapeId, handleShapeResize],
   );
 
   // Cheap pass: apply selection highlight without recomputing labels. Shapes

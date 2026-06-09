@@ -120,12 +120,17 @@ function parseCanvasBounds(b: Uint8Array): Map<string, { x: number; y: number; w
   const DIA = diaFrame ? diaFrame.off : 0;
   const guidRe = GUID_RE;
   const i32 = (off: number) => (off + 4 <= b.length ? dv.getInt32(off, true) : 0);
+  const strict = new TextDecoder("utf-16le", { fatal: true });
   const frameAt = (off: number): string | null => {
     if (off + 4 > b.length || b[off] !== 0xff || b[off + 1] !== 0xfe || b[off + 2] !== 0xff) return null;
     const len = b[off + 3];
     const end = off + 4 + len * 2;
     if (end > b.length) return null;
-    return new TextDecoder("utf-16le", { fatal: false }).decode(b.subarray(off + 4, end));
+    try {
+      return strict.decode(b.subarray(off + 4, end));
+    } catch {
+      return null;
+    }
   };
   // entity GUID -> canvas-item GUID (entity frame end + 16 bytes -> framed guid)
   const entToCi = new Map<string, string>();
@@ -157,11 +162,15 @@ function parseCanvasBounds(b: Uint8Array): Map<string, { x: number; y: number; w
       guidToName.set(prev, f.s);
     }
   }
+  // A name can have several candidate entities (spurious mentions + the real
+  // table definition). The real table entity is the LAST one in model order.
+  const nameToEnt = new Map<string, string>();
+  for (const [g, nm] of guidToName) nameToEnt.set(nm, g);
   const out = new Map<string, { x: number; y: number; w: number; h: number }>();
-  for (const [ent, ci] of entToCi) {
-    const nm = guidToName.get(ent);
-    const bd = boundsByCi.get(ci);
-    if (nm && bd && !out.has(nm)) out.set(nm, bd);
+  for (const [nm, ent] of nameToEnt) {
+    const ci = entToCi.get(ent);
+    const bd = ci ? boundsByCi.get(ci) : undefined;
+    if (bd) out.set(nm, bd);
   }
   return out;
 }

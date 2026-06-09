@@ -32,6 +32,7 @@ import {
   AlertTriangleIcon,
   ArrowLeftIcon,
   CheckCircle2Icon,
+  Table2Icon,
   ChevronDownIcon,
   ChevronRightIcon,
   CopyIcon,
@@ -101,32 +102,46 @@ function displayName(physical: string, logical: string | undefined, mode: NameMo
 
 function nodeLabel(tb: DesignTable, fkCols: Set<string>, mode: NameMode): React.ReactNode {
   return (
-    <div className="w-full text-left">
-      <div className="truncate rounded-t-[7px] border-b border-border-subtle bg-overlay px-2.5 py-1.5 font-mono text-[11px] font-semibold text-text">
-        {displayName(tb.name, tb.logical, mode)}
+    <div className="w-full overflow-hidden text-left">
+      <div className="flex items-center gap-1.5 rounded-t-[7px] border-b-2 border-accent/40 bg-accent/10 px-2.5 py-1.5">
+        <Table2Icon size={11} className="shrink-0 text-accent" />
+        <span className="truncate font-mono text-[11px] font-semibold text-text">
+          {displayName(tb.name, tb.logical, mode)}
+        </span>
       </div>
       <div>
-        {tb.columns.map((c) => (
-          <div key={c.name} className="flex items-center gap-1.5 border-b border-border-subtle/40 px-2.5 py-1 last:border-0">
-            {c.pk ? (
-              <KeyIcon size={10} className="shrink-0 text-warning">
-                <title>PK</title>
-              </KeyIcon>
-            ) : fkCols.has(c.name) ? (
-              <LinkIcon size={10} className="shrink-0 text-accent">
-                <title>FK</title>
-              </LinkIcon>
-            ) : (
-              <span className="inline-block w-[10px] shrink-0" />
-            )}
-            <span
-              className={`flex-1 truncate font-mono text-[11px] ${fkCols.has(c.name) && !c.pk ? "text-accent" : "text-text"}`}
+        {tb.columns.map((c) => {
+          const isFk = fkCols.has(c.name) && !c.pk;
+          return (
+            <div
+              key={c.name}
+              className={`flex items-center gap-1.5 border-b border-border-subtle/30 px-2.5 py-1 last:border-0 ${
+                c.pk ? "bg-warning/5" : ""
+              }`}
             >
-              {displayName(c.name, c.logical, mode)}
-            </span>
-            <span className="shrink-0 font-mono text-[10px] text-text-muted">{c.type}</span>
-          </div>
-        ))}
+              {c.pk ? (
+                <KeyIcon size={10} className="shrink-0 text-warning">
+                  <title>PK</title>
+                </KeyIcon>
+              ) : isFk ? (
+                <LinkIcon size={10} className="shrink-0 text-accent">
+                  <title>FK</title>
+                </LinkIcon>
+              ) : (
+                <span className="inline-block w-[10px] shrink-0" />
+              )}
+              <span
+                className={`flex-1 truncate font-mono text-[11px] ${
+                  c.pk ? "font-semibold text-text" : isFk ? "text-accent" : "text-text"
+                }`}
+              >
+                {displayName(c.name, c.logical, mode)}
+                {c.notNull && !c.pk ? <span className="text-error" title="NOT NULL"> *</span> : null}
+              </span>
+              <span className="shrink-0 font-mono text-[10px] text-text-muted">{c.type}</span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -426,7 +441,7 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
         sourcePosition: Position.Right,
         targetPosition: Position.Left,
         style: {
-          width: 220,
+          width: 240,
           padding: 0,
           borderRadius: 8,
           border:

@@ -146,9 +146,17 @@ export function normalizeImportType(raw: string): string {
   if (base.includes("timestamp") || base === "datetime" || base === "datetime2" || base === "datetime64") {
     return "TIMESTAMP";
   }
+  if (base === "enum" || base === "set") {
+    // Non-portable vendor types → a portable string column.
+    return "VARCHAR(255)";
+  }
   if (base.includes("numeric") || base.includes("decimal") || base.includes("number")) {
-    const m = lower.match(/\((\d+)\s*,\s*(\d+)\)/);
-    return m ? `NUMERIC(${m[1]},${m[2]})` : "NUMERIC(10,2)";
+    const m2 = lower.match(/\((\d+)\s*,\s*(\d+)\)/);
+    if (m2) return `NUMERIC(${m2[1]},${m2[2]})`;
+    // Single-arg precision (e.g. Oracle NUMBER(2)) — keep it, don't invent a scale.
+    const m1 = lower.match(/\((\d+)\)/);
+    if (m1) return `NUMERIC(${m1[1]})`;
+    return "NUMERIC(10,2)";
   }
   return VENDOR_TYPE_MAP[base] ?? s;
 }

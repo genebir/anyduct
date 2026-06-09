@@ -368,44 +368,52 @@ function parseRelationships(b: Uint8Array, tables: ParsedTable[]): RawRelation[]
     seen.add(k);
     out.push({ fromTable: child, fromColumn: col, toTable: parent });
   };
+  // Collect ONE candidate per table-pair (first occurrence in stream order =
+  // [parent][child] direction), recording all shared keys for later re-selection.
+  const candByPair = new Map<string, { child: string; parent: string; key: string; shared: string[] }>();
   for (let i = 0; i < S.length - 1; i++) {
     const parent = g2n.get(S[i]);
     const child = g2n.get(S[i + 1]);
-    if (!parent || !child) continue;
-    if (parent === child) {
-      const up = upByTable.get(parent);
-      if (up) add(parent, up, parent);
-      continue;
-    }
+    if (!parent || !child || parent === child) continue;
+    const pairKey = [parent, child].sort().join("|");
+    if (candByPair.has(pairKey)) continue;
     const cp = colsByTable.get(parent);
     const cc = colsByTable.get(child);
     if (!cp || !cc) continue;
     const shared = [...cp].filter((x) => cc.has(x) && !REL_AUDIT.has(x) && !x.startsWith("UP_"));
     const keyish = shared.filter((x) => /(_ID|_NO|_CD)$/i.test(x));
-    // Prefer the shared column that is the PARENT's primary key (the real FK
-    // target) over just the first shared key — disambiguates e.g. VR_MSTR_ID
-    // (가상정보마스터's PK) from a stray shared MSTR_ID.
     const parentPk = pkByTable.get(parent);
     const sharedPk = parentPk ? shared.filter((x) => parentPk.has(x)) : [];
     const key = sharedPk[0] ?? keyish[0] ?? shared[0];
-    if (key) add(child, key, parent); // binary order: [parent][child]
+    if (key) candByPair.set(pairKey, { child, parent, key, shared });
   }
-  // Drop sibling-adjacency noise: if the chosen parent is ITSELF a FK-child via
-  // the same key (so it doesn't own that key), the link is only real when it's
-  // a history→base reference (child name contains the parent name).
-  const childKeys = new Set(out.map((r) => `${r.fromTable}|${r.fromColumn}`));
-  // Tables that are a child of a DIFFERENT table (have a real outgoing FK).
-  const isChildOfOther = new Set(out.filter((r) => r.fromTable !== r.toTable).map((r) => r.fromTable));
-  return out.filter((r) => {
-    if (r.fromTable === r.toTable) {
-      // A UP_<ownPK> self-ref is real only for root/dimension tables (부서, 메뉴);
-      // a table that already references another (공통코드 → 공통코드그룹) does not
-      // also self-reference here.
-      return !isChildOfOther.has(r.fromTable);
+  const cand = [...candByPair.values()];
+  // A table is "a child via key K" if it has an outgoing FK on K (from the
+  // deduped set). Used to detect sibling-adjacency noise.
+  const childByKey = new Set(cand.map((c) => `${c.child}|${c.key}`));
+  // History/change-log tables are named base+"…이력" (e.g. 사용자별부서변경이력);
+  // they legitimately reference their base via a shared key.
+  const isHistoryOf = (child: string, parent: string) => child.startsWith(parent) && /이력$/.test(child);
+  for (const c of cand) {
+    const ambiguous = childByKey.has(`${c.parent}|${c.key}`) && !isHistoryOf(c.child, c.parent);
+    if (!ambiguous) {
+      add(c.child, c.key, c.parent);
+      continue;
     }
-    if (!childKeys.has(`${r.toTable}|${r.fromColumn}`)) return true; // parent owns the key
-    return r.fromTable.includes(r.toTable); // ambiguous → keep only history→base
-  });
+    // Re-select a shared key the parent actually OWNS (doesn't use as its own
+    // FK) — recovers composite-key links (e.g. 가상궤도정보 → 가상역정보 via
+    // STN_INDEX_NO instead of the shared master VR_MSTR_ID). Drop only if none.
+    const alt =
+      c.shared.find((k) => k !== c.key && !childByKey.has(`${c.parent}|${k}`) && /(_ID|_NO|_CD)$/i.test(k)) ??
+      c.shared.find((k) => k !== c.key && !childByKey.has(`${c.parent}|${k}`));
+    if (alt) add(c.child, alt, c.parent);
+  }
+  // Self-references: ``UP_<ownPK>`` on a ROOT table (not a child of another).
+  const isChildOfOther = new Set(cand.map((c) => c.child));
+  for (const [name, up] of upByTable) {
+    if (!isChildOfOther.has(name)) add(name, up, name);
+  }
+  return out;
 }
 
 // Constraint / index pseudo-entity names (e.g. ``<table>_PK``) — DA# emits

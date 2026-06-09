@@ -62,6 +62,12 @@ import { ERD_EDGE_TYPES } from "@/components/erd/crowsfoot-edge";
 import { ImportTablesDialog } from "@/components/erd/import-tables-dialog";
 import { parseDamx } from "@/lib/damx";
 import { autoLayout } from "@/lib/erd-layout";
+import {
+  columnDictionaryCsv,
+  fullSpecMarkdown,
+  mappingSpecCsv,
+  tableDefinitionCsv,
+} from "@/lib/erd-docs";
 import { toPng } from "html-to-image";
 import { erdApi } from "@/lib/api";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
@@ -491,6 +497,39 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
     }
   };
 
+  const onGenerateDoc = (kind: string) => {
+    if (design.tables.length === 0) return;
+    const base = (docName || "erd").replace(/[/\\?%*:|"<>]/g, "_");
+    let content = "";
+    let filename = "";
+    let mime = "text/csv;charset=utf-8";
+    if (kind === "columns") {
+      content = columnDictionaryCsv(design);
+      filename = `${base}_컬럼정의서.csv`;
+    } else if (kind === "tables") {
+      content = tableDefinitionCsv(design);
+      filename = `${base}_테이블정의서.csv`;
+    } else if (kind === "mapping") {
+      content = mappingSpecCsv(design);
+      filename = `${base}_매핑정의서.csv`;
+    } else if (kind === "markdown") {
+      const today = new Date().toLocaleDateString();
+      content = fullSpecMarkdown(design, docName || "ERD", today);
+      filename = `${base}_데이터정의서.md`;
+      mime = "text/markdown;charset=utf-8";
+    } else {
+      return;
+    }
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success(t("erdDocs.generated", { name: filename }));
+  };
+
   const onJumpToTable = (name: string) => {
     const tb = design.tables.find(
       (t) => t.name === name || t.name.toLowerCase() === name.toLowerCase(),
@@ -702,6 +741,23 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
             <ImageIcon size={14} />
             {t("erdDesign.exportImage")}
           </Button>
+          <select
+            value=""
+            onChange={(e) => {
+              onGenerateDoc(e.target.value);
+              e.target.value = "";
+            }}
+            disabled={design.tables.length === 0}
+            className="h-8 rounded-md border border-border-subtle bg-bg px-2 text-xs text-text"
+            aria-label={t("erdDocs.generate")}
+            title={t("erdDocs.generate")}
+          >
+            <option value="">{t("erdDocs.generate")}</option>
+            <option value="columns">{t("erdDocs.columns")}</option>
+            <option value="tables">{t("erdDocs.tables")}</option>
+            <option value="mapping">{t("erdDocs.mapping")}</option>
+            <option value="markdown">{t("erdDocs.markdown")}</option>
+          </select>
           <Button
             size="sm"
             variant="ghost"

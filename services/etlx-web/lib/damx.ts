@@ -315,6 +315,7 @@ function parseRelationships(b: Uint8Array, tables: ParsedTable[]): RawRelation[]
   const S = F.map((f) => f.s);
   const names = new Set(tables.map((t) => t.name));
   const colsByTable = new Map(tables.map((t) => [t.name, new Set(t.columns.map((c) => c.name))]));
+  const pkByTable = new Map(tables.map((t) => [t.name, new Set(t.columns.filter((c) => c.pk).map((c) => c.name))]));
   // A self-reference exists only when the ``UP_<X>`` column's base X is the
   // table's OWN primary key (e.g. 부서.UP_DEPT_NO → 부서). ``UP_<otherPK>``
   // (e.g. 공통코드.UP_COM_CD_GROUP_ID, base = 공통코드그룹's PK) is NOT a
@@ -381,7 +382,12 @@ function parseRelationships(b: Uint8Array, tables: ParsedTable[]): RawRelation[]
     if (!cp || !cc) continue;
     const shared = [...cp].filter((x) => cc.has(x) && !REL_AUDIT.has(x) && !x.startsWith("UP_"));
     const keyish = shared.filter((x) => /(_ID|_NO|_CD)$/i.test(x));
-    const key = keyish[0] ?? shared[0];
+    // Prefer the shared column that is the PARENT's primary key (the real FK
+    // target) over just the first shared key — disambiguates e.g. VR_MSTR_ID
+    // (가상정보마스터's PK) from a stray shared MSTR_ID.
+    const parentPk = pkByTable.get(parent);
+    const sharedPk = parentPk ? shared.filter((x) => parentPk.has(x)) : [];
+    const key = sharedPk[0] ?? keyish[0] ?? shared[0];
     if (key) add(child, key, parent); // binary order: [parent][child]
   }
   // Drop sibling-adjacency noise: if the chosen parent is ITSELF a FK-child via

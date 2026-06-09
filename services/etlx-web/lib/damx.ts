@@ -182,6 +182,7 @@ interface ParsedColumn {
   pk: boolean;
   table: string | null;
   logical?: string;
+  comment?: string;
 }
 interface ParsedTable {
   name: string;
@@ -217,6 +218,7 @@ export function parseDamx(buf: ArrayBuffer): ErdDesign {
   let cols: ParsedColumn[] = [];
   let doubledGuid: string | null = null;
   let pendingLogical: string | null = null;
+  let pendingComment: string | null = null;
   const N = S.length;
   let i = 0;
 
@@ -241,6 +243,20 @@ export function parseDamx(buf: ArrayBuffer): ErdDesign {
         cand.length <= 80
           ? cand
           : null;
+      // The string after the logical name is the column description / standard
+      // term (e.g. "기관, 기업, … 식별 번호 -- [공공용어: …]"). Keep the clean
+      // part before the "-- [meta]" tail.
+      const cand2 = S[i + 3];
+      pendingComment =
+        cand2 &&
+        cand2 !== pendingLogical &&
+        !GUID_RE.test(cand2) &&
+        !cand2.startsWith("K_") &&
+        !SQL_TYPES.has(cand2) &&
+        !PHYS_RE.test(cand2) &&
+        !/^\d+$/.test(cand2)
+          ? cand2.split(" -- ")[0].trim() || null
+          : null;
     }
 
     // Column: PHYSICAL then a SQL TYPE, optional numeric length.
@@ -254,11 +270,13 @@ export function parseDamx(buf: ArrayBuffer): ErdDesign {
         pk: false,
         table: null,
         logical: pendingLogical ?? undefined,
+        comment: pendingComment ?? undefined,
       };
       cols.push(col);
       if (doubledGuid) colByGuid.set(doubledGuid, col);
       doubledGuid = null;
       pendingLogical = null;
+      pendingComment = null;
       i += length ? 3 : 2;
       continue;
     }
@@ -458,12 +476,14 @@ function toDesign(parsed: ParsedTable[], rawRels: RawRelation[]): ErdDesign {
     const pcols = parsed[idx]?.columns ?? [];
     const pkset = new Set(pcols.filter((c) => c.pk).map((c) => c.name));
     const logicalByName = new Map(pcols.filter((c) => c.logical).map((c) => [c.name, c.logical!]));
+    const commentByName = new Map(pcols.filter((c) => c.comment).map((c) => [c.name, c.comment!]));
     return {
       ...t,
       columns: t.columns.map((c) => ({
         ...c,
         pk: pkset.has(c.name) || c.pk,
         logical: logicalByName.get(c.name) ?? c.logical ?? stdLogical.get(c.name),
+        comment: commentByName.get(c.name) ?? c.comment,
       })),
     };
   });

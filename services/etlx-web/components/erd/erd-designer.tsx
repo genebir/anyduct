@@ -954,7 +954,16 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
 
   const onNodeContextMenu = useCallback((e: React.MouseEvent, node: Node) => {
     e.preventDefault();
+    // Shapes use their own panel — don't show the table context menu on them.
+    if (node.type === "shape") {
+      setSelectedShapeId(node.id);
+      setSelectedId(null);
+      setSelectedEdgeId(null);
+      setMenu(null);
+      return;
+    }
     setSelectedId(node.id);
+    setSelectedShapeId(null);
     setMenu({ x: e.clientX, y: e.clientY, kind: "node", nodeId: node.id });
   }, []);
 
@@ -1372,15 +1381,35 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
             style={{ left: menu.x, top: menu.y }}
           >
             {menu.kind === "pane" ? (
-              <button
-                className="block w-full px-3 py-1.5 text-left text-text hover:bg-overlay"
-                onClick={() => {
-                  onAddTable();
-                  setMenu(null);
-                }}
-              >
-                {t("erdDesign.addTable")}
-              </button>
+              <>
+                <button
+                  className="block w-full px-3 py-1.5 text-left text-text hover:bg-overlay"
+                  onClick={() => {
+                    onAddTable();
+                    setMenu(null);
+                  }}
+                >
+                  {t("erdDesign.addTable")}
+                </button>
+                <button
+                  className="block w-full px-3 py-1.5 text-left text-text hover:bg-overlay"
+                  onClick={() => {
+                    addShape("rect");
+                    setMenu(null);
+                  }}
+                >
+                  {t("erdShape.rect")}
+                </button>
+                <button
+                  className="block w-full px-3 py-1.5 text-left text-text hover:bg-overlay"
+                  onClick={() => {
+                    addShape("text");
+                    setMenu(null);
+                  }}
+                >
+                  {t("erdShape.text")}
+                </button>
+              </>
             ) : (
               <>
                 <button

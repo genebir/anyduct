@@ -594,6 +594,10 @@ function toDesign(parsed: ParsedTable[], rawRels: RawRelation[]): ErdDesign {
     const nnByName = new Map(pcols.filter((c) => c.notNull).map((c) => [c.name, true]));
     return {
       ...t,
+      // DA#'s entity name (the Korean name we display) IS the table's logical
+      // name; populate it so the docs' 논리명 column isn't empty. These models
+      // reuse it as the physical 테이블명 too (no separate English name).
+      logical: t.logical ?? t.name,
       columns: t.columns.map((c) => ({
         ...c,
         pk: pkset.has(c.name) || c.pk,

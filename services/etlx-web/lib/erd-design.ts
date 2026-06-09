@@ -404,7 +404,12 @@ export function toSql(design: ErdDesign, dialect: string): string {
   for (const t of topoSortTables(design)) {
     const lines: string[] = [];
     for (const c of t.columns) {
-      lines.push(`  ${q(c.name)} ${c.type}`);
+      let line = `  ${q(c.name)} ${c.type}`;
+      if (c.notNull) line += " NOT NULL";
+      if (c.defaultValue != null && String(c.defaultValue).trim() !== "") {
+        line += ` DEFAULT ${c.defaultValue}`;
+      }
+      lines.push(line);
     }
     const pks = t.columns.filter((c) => c.pk).map((c) => q(c.name));
     if (pks.length > 0) {

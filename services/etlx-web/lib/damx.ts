@@ -72,6 +72,7 @@ interface ParsedColumn {
   guid: string | null;
   pk: boolean;
   table: string | null;
+  logical?: string;
 }
 interface ParsedTable {
   name: string;
@@ -106,15 +107,28 @@ export function parseDamx(buf: ArrayBuffer): ErdDesign {
   const nameSeen = new Set<string>();
   let cols: ParsedColumn[] = [];
   let doubledGuid: string | null = null;
+  let pendingLogical: string | null = null;
   const N = S.length;
   let i = 0;
 
   while (i < N) {
     const s = S[i];
 
-    // Track the doubled GUID that precedes each column record.
+    // Track the doubled GUID that precedes each column record, and the
+    // logical name that follows it (e.g. "부서번호" before DEPT_NO).
     if (GUID_RE.test(s) && i + 1 < N && S[i + 1] === s) {
       doubledGuid = s;
+      const cand = S[i + 2];
+      pendingLogical =
+        cand &&
+        !GUID_RE.test(cand) &&
+        !cand.startsWith("K_") &&
+        !SQL_TYPES.has(cand) &&
+        !/^\d+$/.test(cand) &&
+        !cand.includes("--") &&
+        cand.length <= 80
+          ? cand
+          : null;
     }
 
     // Column: PHYSICAL then a SQL TYPE, optional numeric length.
@@ -127,10 +141,12 @@ export function parseDamx(buf: ArrayBuffer): ErdDesign {
         guid: doubledGuid,
         pk: false,
         table: null,
+        logical: pendingLogical ?? undefined,
       };
       cols.push(col);
       if (doubledGuid) colByGuid.set(doubledGuid, col);
       doubledGuid = null;
+      pendingLogical = null;
       i += length ? 3 : 2;
       continue;
     }
@@ -290,11 +306,20 @@ function toDesign(parsed: ParsedTable[], rawRels: RawRelation[]): ErdDesign {
   const base = rawTablesToDesign(
     parsed.map((t) => ({ table: t.name, columns: t.columns.map((c) => ({ name: c.name, type: c.type })) })),
   );
-  // Overlay the recovered PKs onto the design tables.
+  // Overlay the recovered PKs + logical names onto the design tables.
   const tables: DesignTable[] = base.tables.map((t, idx) => {
-    const pkset = new Set(parsed[idx]?.columns.filter((c) => c.pk).map((c) => c.name) ?? []);
-    if (pkset.size === 0) return t;
-    return { ...t, columns: t.columns.map((c) => ({ ...c, pk: pkset.has(c.name) || c.pk })) };
+    const pcols = parsed[idx]?.columns ?? [];
+    const pkset = new Set(pcols.filter((c) => c.pk).map((c) => c.name));
+    const logicalByName = new Map(pcols.filter((c) => c.logical).map((c) => [c.name, c.logical!]));
+    if (pkset.size === 0 && logicalByName.size === 0) return t;
+    return {
+      ...t,
+      columns: t.columns.map((c) => ({
+        ...c,
+        pk: pkset.has(c.name) || c.pk,
+        logical: logicalByName.get(c.name) ?? c.logical,
+      })),
+    };
   });
 
   const idByName = new Map(tables.map((t) => [t.name, t.id]));

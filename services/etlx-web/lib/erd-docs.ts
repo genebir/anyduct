@@ -79,10 +79,11 @@ export function columnDictionaryCsv(design: ErdDesign): string {
       no += 1;
       const { base, length, scale } = parseType(c.type);
       const fk = fks.get(`${t.id}::${c.name}`);
+      const notNull = c.pk || c.notNull ? "Y" : "";
       rows.push([
-        no, t.name, "", i + 1, c.name, "",
-        base, length, scale, c.pk ? "Y" : "", c.pk ? "Y" : "N", fk ? "Y" : "N",
-        fk?.targetTable ?? "", fk?.targetCol ?? "", "", "", "",
+        no, t.name, t.logical ?? "", i + 1, c.name, c.logical ?? "",
+        base, length, scale, notNull, c.pk ? "Y" : "N", fk ? "Y" : "N",
+        fk?.targetTable ?? "", fk?.targetCol ?? "", c.defaultValue ?? "", c.comment ?? "", "",
       ]);
     });
   }
@@ -116,8 +117,8 @@ export function tableDefinitionCsv(design: ErdDesign): string {
     "참조(FK→) 테이블", "피참조 테이블", "테이블 설명", "비고",
   ];
   const rows = design.tables.map((t, i) => [
-    i + 1, t.name, "", t.columns.length, pkColumnsOf(t).join(", "),
-    [...(refsTo.get(t.id) ?? [])].join(", "), [...(refBy.get(t.id) ?? [])].join(", "), "", "",
+    i + 1, t.name, t.logical ?? "", t.columns.length, pkColumnsOf(t).join(", "),
+    [...(refsTo.get(t.id) ?? [])].join(", "), [...(refBy.get(t.id) ?? [])].join(", "), t.comment ?? "", "",
   ]);
   return csv(headers, rows);
 }
@@ -135,8 +136,9 @@ export function mappingSpecCsv(design: ErdDesign): string {
   for (const t of design.tables) {
     for (const c of t.columns) {
       no += 1;
+      const notNull = c.pk || c.notNull ? "Y" : "";
       rows.push([
-        no, t.name, c.name, c.type, c.pk ? "Y" : "", c.pk ? "Y" : "",
+        no, t.name, c.name, c.type, notNull, c.pk ? "Y" : "",
         "", "", "", "", "", "", "", "", "", "",
       ]);
     }
@@ -158,16 +160,18 @@ export function fullSpecMarkdown(design: ErdDesign, diagramName: string, dateStr
   design.tables.forEach((t) => lines.push(`- [${t.name}](#${t.name.toLowerCase().replace(/\s+/g, "-")})`));
   lines.push("");
   for (const t of design.tables) {
-    lines.push(`## ${t.name}`);
+    lines.push(`## ${t.name}${t.logical ? ` (${t.logical})` : ""}`);
     lines.push("");
+    if (t.comment) lines.push(`${t.comment}`, "");
     lines.push(`- PK: ${pkColumnsOf(t).join(", ") || "—"}`);
     lines.push("");
-    lines.push("| # | 컬럼 | 타입 | PK | NOT NULL | FK → |");
-    lines.push("|---|------|------|----|----------|------|");
+    lines.push("| # | 컬럼 | 논리명 | 타입 | PK | NOT NULL | FK → | 기본값 | 설명 |");
+    lines.push("|---|------|--------|------|----|----------|------|--------|------|");
     t.columns.forEach((c, i) => {
       const fk = fks.get(`${t.id}::${c.name}`);
+      const nn = c.pk || c.notNull ? "✔" : "";
       lines.push(
-        `| ${i + 1} | ${c.name} | ${c.type} | ${c.pk ? "✔" : ""} | ${c.pk ? "✔" : ""} | ${fk ? `${fk.targetTable}.${fk.targetCol}` : ""} |`,
+        `| ${i + 1} | ${c.name} | ${c.logical ?? ""} | ${c.type} | ${c.pk ? "✔" : ""} | ${nn} | ${fk ? `${fk.targetTable}.${fk.targetCol}` : ""} | ${c.defaultValue ?? ""} | ${(c.comment ?? "").replace(/\|/g, "\\|")} |`,
       );
     });
     lines.push("");

@@ -16,6 +16,14 @@ export interface DesignColumn {
   name: string;
   type: string;
   pk: boolean;
+  /** Logical (business) name — e.g. "부서번호". Optional; feeds the docs. */
+  logical?: string;
+  /** NOT NULL constraint. PK columns are implicitly NOT NULL. */
+  notNull?: boolean;
+  /** DEFAULT value expression. */
+  defaultValue?: string;
+  /** Column description / comment. */
+  comment?: string;
 }
 
 export interface DesignTable {
@@ -24,6 +32,10 @@ export interface DesignTable {
   x: number;
   y: number;
   columns: DesignColumn[];
+  /** Logical (business) name of the table. Optional; feeds the docs. */
+  logical?: string;
+  /** Table description / comment. */
+  comment?: string;
 }
 
 /** Cardinality at one end of a relationship. */

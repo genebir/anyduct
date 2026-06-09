@@ -30,6 +30,8 @@ import "@xyflow/react/dist/style.css";
 import Link from "next/link";
 import {
   ArrowLeftIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
   CopyIcon,
   DatabaseIcon,
   ImageIcon,
@@ -129,11 +131,12 @@ function TablePanel({
   onDelete: () => void;
   onClose: () => void;
 }) {
+  const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
   const setColumn = (i: number, patch: Partial<DesignColumn>) => {
     onChange({ columns: table.columns.map((c, j) => (j === i ? { ...c, ...patch } : c)) });
   };
   return (
-    <div className="flex w-72 shrink-0 flex-col gap-3 border-l border-border-subtle bg-surface p-3">
+    <div className="flex w-72 shrink-0 flex-col gap-3 overflow-y-auto border-l border-border-subtle bg-surface p-3">
       <div className="flex items-center justify-between">
         <span className="text-xs font-semibold uppercase tracking-wide text-text-secondary">
           {t("erdDesign.table")}
@@ -142,7 +145,23 @@ function TablePanel({
           <XIcon size={14} />
         </button>
       </div>
-      <Input value={table.name} onChange={(e) => onChange({ name: e.target.value })} />
+      <Input
+        value={table.name}
+        onChange={(e) => onChange({ name: e.target.value })}
+        placeholder={t("erdDesign.tableName")}
+      />
+      <Input
+        value={table.logical ?? ""}
+        onChange={(e) => onChange({ logical: e.target.value })}
+        placeholder={t("erdDesign.tableLogical")}
+        className="text-sm"
+      />
+      <Input
+        value={table.comment ?? ""}
+        onChange={(e) => onChange({ comment: e.target.value })}
+        placeholder={t("erdDesign.tableComment")}
+        className="text-xs"
+      />
 
       <div className="flex items-center justify-between">
         <span className="text-[11px] uppercase tracking-wide text-text-muted">{t("erdDesign.columns")}</span>
@@ -159,43 +178,83 @@ function TablePanel({
 
       <div className="flex flex-col gap-1.5">
         {table.columns.map((c, i) => (
-          <div key={i} className="flex items-center gap-1">
-            <Input
-              value={c.name}
-              onChange={(e) => onRenameColumn(i, e.target.value)}
-              className="h-7 flex-1 text-xs"
-            />
-            <select
-              value={c.type}
-              onChange={(e) => setColumn(i, { type: e.target.value })}
-              className="h-7 rounded-md border border-border-subtle bg-bg px-1 text-[11px] text-text"
-            >
-              {/* Tolerate an imported/custom type not in the preset list so
-                  it displays as-is instead of snapping to the first option. */}
-              {(ERD_TYPES as readonly string[]).includes(c.type) ? null : (
-                <option value={c.type}>{c.type}</option>
-              )}
-              {ERD_TYPES.map((ty) => (
-                <option key={ty} value={ty}>
-                  {ty}
-                </option>
-              ))}
-            </select>
-            <button
-              onClick={() => setColumn(i, { pk: !c.pk })}
-              aria-label={t("erdDesign.pk")}
-              title={t("erdDesign.pk")}
-              className={c.pk ? "text-warning" : "text-text-muted hover:text-text"}
-            >
-              <KeyIcon size={13} />
-            </button>
-            <button
-              onClick={() => onChange({ columns: table.columns.filter((_, j) => j !== i) })}
-              aria-label={t("common.delete")}
-              className="text-text-muted hover:text-error"
-            >
-              <TrashIcon size={13} />
-            </button>
+          <div key={i} className="rounded-md border border-border-subtle/40 p-1">
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setExpandedIdx(expandedIdx === i ? null : i)}
+                aria-label={t("erdDesign.colDetails")}
+                title={t("erdDesign.colDetails")}
+                className="text-text-muted hover:text-text"
+              >
+                {expandedIdx === i ? <ChevronDownIcon size={13} /> : <ChevronRightIcon size={13} />}
+              </button>
+              <Input
+                value={c.name}
+                onChange={(e) => onRenameColumn(i, e.target.value)}
+                className="h-7 flex-1 text-xs"
+              />
+              <select
+                value={c.type}
+                onChange={(e) => setColumn(i, { type: e.target.value })}
+                className="h-7 rounded-md border border-border-subtle bg-bg px-1 text-[11px] text-text"
+              >
+                {(ERD_TYPES as readonly string[]).includes(c.type) ? null : (
+                  <option value={c.type}>{c.type}</option>
+                )}
+                {ERD_TYPES.map((ty) => (
+                  <option key={ty} value={ty}>
+                    {ty}
+                  </option>
+                ))}
+              </select>
+              <button
+                onClick={() => setColumn(i, { notNull: !(c.notNull ?? false) })}
+                aria-label={t("erdDesign.notNull")}
+                title={t("erdDesign.notNull")}
+                className={`px-0.5 text-[9px] font-bold ${
+                  c.pk || c.notNull ? "text-accent" : "text-text-muted hover:text-text"
+                }`}
+              >
+                NN
+              </button>
+              <button
+                onClick={() => setColumn(i, { pk: !c.pk })}
+                aria-label={t("erdDesign.pk")}
+                title={t("erdDesign.pk")}
+                className={c.pk ? "text-warning" : "text-text-muted hover:text-text"}
+              >
+                <KeyIcon size={13} />
+              </button>
+              <button
+                onClick={() => onChange({ columns: table.columns.filter((_, j) => j !== i) })}
+                aria-label={t("common.delete")}
+                className="text-text-muted hover:text-error"
+              >
+                <TrashIcon size={13} />
+              </button>
+            </div>
+            {expandedIdx === i ? (
+              <div className="mt-1 flex flex-col gap-1 pl-5">
+                <Input
+                  value={c.logical ?? ""}
+                  onChange={(e) => setColumn(i, { logical: e.target.value })}
+                  placeholder={t("erdDesign.colLogical")}
+                  className="h-7 text-xs"
+                />
+                <Input
+                  value={c.defaultValue ?? ""}
+                  onChange={(e) => setColumn(i, { defaultValue: e.target.value })}
+                  placeholder={t("erdDesign.colDefault")}
+                  className="h-7 text-xs"
+                />
+                <Input
+                  value={c.comment ?? ""}
+                  onChange={(e) => setColumn(i, { comment: e.target.value })}
+                  placeholder={t("erdDesign.colComment")}
+                  className="h-7 text-xs"
+                />
+              </div>
+            ) : null}
           </div>
         ))}
       </div>

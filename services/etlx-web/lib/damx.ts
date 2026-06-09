@@ -196,6 +196,87 @@ interface RawRelation {
   toTable: string;
 }
 
+const REL_AUDIT = new Set([
+  "RGTR_ID", "REG_DT", "MDFR_ID", "MDFCN_DT", "USE_YN", "RMRK_CN", "SORT_SEQ", "VER_NO",
+]);
+
+/**
+ * Parse the REAL relationships from DA#'s diagram (Phase AJM). Validated against
+ * a reference image (i.png): relationship records list two **entity GUIDs in
+ * [parent][child] order**, so binary order gives direction. The FK column is the
+ * non-audit key column shared between the two tables (the child's FK = parent's
+ * key). This replaces the old heuristic which mis-picked columns and missed
+ * many links.
+ */
+function parseRelationships(b: Uint8Array, tables: ParsedTable[]): RawRelation[] {
+  const F = framesWithOffsets(b);
+  const S = F.map((f) => f.s);
+  const names = new Set(tables.map((t) => t.name));
+  const colsByTable = new Map(tables.map((t) => [t.name, new Set(t.columns.map((c) => c.name))]));
+  const upByTable = new Map<string, string>();
+  for (const t of tables) {
+    const up = t.columns.find((c) => c.name.startsWith("UP_"));
+    if (up) upByTable.set(t.name, up.name);
+  }
+  const diaFrame = F.find((f) => f.s === "DIAGRAM_VERSION");
+  const DIA = diaFrame ? diaFrame.off : 0;
+  const strict = new TextDecoder("utf-16le", { fatal: true });
+  const frameAt = (off: number): string | null => {
+    if (off + 4 > b.length || b[off] !== 0xff || b[off + 1] !== 0xfe || b[off + 2] !== 0xff) return null;
+    const len = b[off + 3];
+    const end = off + 4 + len * 2;
+    if (end > b.length) return null;
+    try {
+      return strict.decode(b.subarray(off + 4, end));
+    } catch {
+      return null;
+    }
+  };
+  // Entity (table) GUIDs = diagram GUIDs whose +16 frame is a canvas-item GUID.
+  const entset = new Set<string>();
+  for (const f of F) {
+    if (f.off > DIA && GUID_RE.test(f.s) && !entset.has(f.s)) {
+      const ci = frameAt(f.end + 16);
+      if (ci && GUID_RE.test(ci)) entset.add(f.s);
+    }
+  }
+  // Entity GUID -> table name (last model occurrence; must be a real table).
+  const g2n = new Map<string, string>();
+  for (let i = 1; i < F.length; i++) {
+    const f = F[i];
+    const prev = F[i - 1].s;
+    if (f.off < DIA && entset.has(prev) && !GUID_RE.test(f.s) && /^[가-힣A-Za-z]/.test(f.s) && names.has(f.s)) {
+      g2n.set(prev, f.s);
+    }
+  }
+  const out: RawRelation[] = [];
+  const seen = new Set<string>();
+  const add = (child: string, col: string, parent: string) => {
+    const k = [child, parent].sort().join("|") + "|" + col;
+    if (seen.has(k)) return;
+    seen.add(k);
+    out.push({ fromTable: child, fromColumn: col, toTable: parent });
+  };
+  for (let i = 0; i < S.length - 1; i++) {
+    const parent = g2n.get(S[i]);
+    const child = g2n.get(S[i + 1]);
+    if (!parent || !child) continue;
+    if (parent === child) {
+      const up = upByTable.get(parent);
+      if (up) add(parent, up, parent);
+      continue;
+    }
+    const cp = colsByTable.get(parent);
+    const cc = colsByTable.get(child);
+    if (!cp || !cc) continue;
+    const shared = [...cp].filter((x) => cc.has(x) && !REL_AUDIT.has(x) && !x.startsWith("UP_"));
+    const keyish = shared.filter((x) => /(_ID|_NO|_CD)$/i.test(x));
+    const key = keyish[0] ?? shared[0];
+    if (key) add(child, key, parent); // binary order: [parent][child]
+  }
+  return out;
+}
+
 // Constraint / index pseudo-entity names (e.g. ``<table>_PK``) — DA# emits
 // these and they must not be mistaken for real tables.
 const CONSTRAINT_RE = /_(PK|FK|UK|UQ|IDX|IX|AK)\d*$/i;
@@ -325,7 +406,7 @@ export function parseDamx(buf: ArrayBuffer): ErdDesign {
   }
 
   const deduped = dedupeTables(tables);
-  const rels = extractRelationships(S, entGuidToName, colByGuid, deduped);
+  const rels = parseRelationships(new Uint8Array(buf), deduped);
   const design = toDesign(deduped, rels);
 
   // Apply DA#'s real diagram positions (Phase AJG) so the imported ERD matches
@@ -352,84 +433,6 @@ export function parseDamx(buf: ArrayBuffer): ErdDesign {
   return design;
 }
 
-/**
- * Parse the **real** FK relationships from DA#'s relationship section
- * (Phase AHM). Each relationship is stored as two consecutive entity GUIDs
- * — ``[parent][child]`` — followed by the parent's key attribute(s), e.g.
- * ``[E:부서][E:사용자별부서] · · (a:부서.DEPT_NO)``. The parent is the entity
- * whose key attribute follows; the FK is child → parent. This is the actual
- * link data DA# draws the diagram from (not name/domain guessing).
- *
- * Filtering: the key attribute is preferred to be the parent's primary key
- * (disambiguates direction + skips the junk self-pairs in later sections);
- * self-references are only kept when the child table has an ``UP_*`` column
- * (a real recursive FK like 상위부서번호).
- */
-function extractRelationships(
-  S: string[],
-  entGuidToName: Map<string, string>,
-  colByGuid: Map<string, ParsedColumn>,
-  tables: ParsedTable[],
-): RawRelation[] {
-  const valid = new Set(tables.map((t) => t.name));
-  const upColByTable = new Map<string, string>();
-  for (const t of tables) {
-    const up = t.columns.find((c) => c.name.startsWith("UP_"));
-    if (up) upColByTable.set(t.name, up.name);
-  }
-
-  const out: RawRelation[] = [];
-  const seen = new Set<string>();
-  const add = (fromTable: string, fromColumn: string, toTable: string) => {
-    const key = `${fromTable}.${fromColumn}->${toTable}`;
-    if (seen.has(key)) return;
-    seen.add(key);
-    out.push({ fromTable, fromColumn, toTable });
-  };
-
-  const N = S.length;
-  let k = 0;
-  while (k < N - 1) {
-    const e1 = entGuidToName.get(S[k]);
-    const e2 = entGuidToName.get(S[k + 1]);
-    if (!e1 || !e2) {
-      k += 1;
-      continue;
-    }
-    // Key attribute in the look-ahead window; prefer the one that is a PK.
-    let keyAttr: ParsedColumn | null = null;
-    let firstAttr: ParsedColumn | null = null;
-    for (let j = k + 2; j < Math.min(k + 8, N); j++) {
-      const a = colByGuid.get(S[j]);
-      if (a) {
-        if (!firstAttr) firstAttr = a;
-        if (a.pk) {
-          keyAttr = a;
-          break;
-        }
-      }
-    }
-    keyAttr = keyAttr ?? firstAttr;
-    if (!keyAttr) {
-      k += 1;
-      continue;
-    }
-    const parent = keyAttr.table === e1 ? e1 : keyAttr.table === e2 ? e2 : e1;
-    const child = parent === e1 ? e2 : e1;
-    if (valid.has(child) && valid.has(parent)) {
-      // The relationship key is the parent's primary key — flag it so
-      // dimension-table PKs that the 'PK' marker missed are still marked.
-      if (child !== parent) {
-        add(child, keyAttr.name, parent);
-      } else {
-        const up = upColByTable.get(child);
-        if (up) add(child, up, parent);
-      }
-    }
-    k += 2;
-  }
-  return out;
-}
 
 /**
  * DA# files have the real table definitions first, then later sections

@@ -76,6 +76,7 @@ import { ImportDdlDialog } from "@/components/erd/import-ddl-dialog";
 import { parseDamxWithAreas } from "@/lib/damx";
 import { autoLayout, layoutAreas, removeOverlaps } from "@/lib/erd-layout";
 import { validateErd } from "@/lib/erd-validate";
+import { exportErdExcel } from "@/lib/erd-excel";
 import {
   columnDictionaryCsv,
   constraintSpecCsv,
@@ -1119,6 +1120,24 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
       return;
     }
     const base = (docName || "erd").replace(/[/\\?%*:|"<>]/g, "_");
+    if (kind === "excel") {
+      // Styled multi-sheet workbook; ExcelJS loads lazily on first use.
+      void (async () => {
+        try {
+          const blob = await exportErdExcel(design, docName || "ERD");
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = `${base}_데이터정의서.xlsx`;
+          a.click();
+          URL.revokeObjectURL(url);
+          toast.success(t("erdDocs.excelGenerated"));
+        } catch {
+          toast.error(t("erdDocs.excelError"));
+        }
+      })();
+      return;
+    }
     let content = "";
     let filename = "";
     let mime = "text/csv;charset=utf-8";
@@ -1582,6 +1601,7 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
             <option value="mapping">{t("erdDocs.mapping")}</option>
             <option value="constraints">{t("erdDocs.constraints")}</option>
             <option value="markdown">{t("erdDocs.markdown")}</option>
+            <option value="excel">{t("erdDocs.excel")}</option>
             <option value="zip">{t("erdDocs.zip")}</option>
           </select>
           <Button

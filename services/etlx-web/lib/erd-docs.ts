@@ -75,7 +75,7 @@ function fkIndex(design: ErdDesign): Map<string, Fk> {
 
 // --- 컬럼 정의서 (Data Dictionary) ------------------------------------------
 
-export function columnDictionaryCsv(design: ErdDesign): string {
+export function columnDictionaryRows(design: ErdDesign): { headers: string[]; rows: unknown[][] } {
   const fks = fkIndex(design);
   const headers = [
     "No", "테이블 물리명", "테이블 논리명", "컬럼 순번", "컬럼 물리명", "컬럼 논리명",
@@ -97,12 +97,17 @@ export function columnDictionaryCsv(design: ErdDesign): string {
       ]);
     });
   }
+  return { headers, rows };
+}
+
+export function columnDictionaryCsv(design: ErdDesign): string {
+  const { headers, rows } = columnDictionaryRows(design);
   return csv(headers, rows);
 }
 
 // --- 테이블 정의서 (Table Definition) ---------------------------------------
 
-export function tableDefinitionCsv(design: ErdDesign): string {
+export function tableDefinitionRows(design: ErdDesign): { headers: string[]; rows: unknown[][] } {
   const byId = new Map(design.tables.map((t) => [t.id, t]));
   const refsTo = new Map<string, Set<string>>(); // tableId → names it references (FK→)
   const refBy = new Map<string, Set<string>>(); // tableId → names that reference it
@@ -130,12 +135,17 @@ export function tableDefinitionCsv(design: ErdDesign): string {
     i + 1, t.name, t.logical ?? "", t.columns.length, pkColumnsOf(t).join(", "),
     [...(refsTo.get(t.id) ?? [])].join(", "), [...(refBy.get(t.id) ?? [])].join(", "), t.comment ?? "", "",
   ]);
+  return { headers, rows };
+}
+
+export function tableDefinitionCsv(design: ErdDesign): string {
+  const { headers, rows } = tableDefinitionRows(design);
   return csv(headers, rows);
 }
 
 // --- 매핑 정의서 (Source → Target Mapping) ----------------------------------
 
-export function mappingSpecCsv(design: ErdDesign): string {
+export function mappingSpecRows(design: ErdDesign): { headers: string[]; rows: unknown[][] } {
   const headers = [
     "No", "대상 테이블", "대상 컬럼", "대상 데이터타입", "대상 NOT NULL", "PK",
     "매핑 유형", "변환 규칙", "원본 시스템", "원본 스키마", "원본 테이블",
@@ -153,12 +163,17 @@ export function mappingSpecCsv(design: ErdDesign): string {
       ]);
     }
   }
+  return { headers, rows };
+}
+
+export function mappingSpecCsv(design: ErdDesign): string {
+  const { headers, rows } = mappingSpecRows(design);
   return csv(headers, rows);
 }
 
 // --- 제약조건 / 인덱스 정의서 (Constraints & Indexes) -----------------------
 
-export function constraintSpecCsv(design: ErdDesign): string {
+export function constraintSpecRows(design: ErdDesign): { headers: string[]; rows: unknown[][] } {
   const byId = new Map(design.tables.map((t) => [t.id, t]));
   const headers = [
     "No", "테이블", "제약 유형", "제약/인덱스명", "컬럼", "참조 테이블", "참조 컬럼", "설명",
@@ -188,6 +203,11 @@ export function constraintSpecCsv(design: ErdDesign): string {
       "FK 조인 성능용 권장 인덱스",
     ]);
   }
+  return { headers, rows };
+}
+
+export function constraintSpecCsv(design: ErdDesign): string {
+  const { headers, rows } = constraintSpecRows(design);
   return csv(headers, rows);
 }
 

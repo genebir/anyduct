@@ -391,11 +391,34 @@ function parseRelationships(b: Uint8Array, tables: ParsedTable[]): RawRelation[]
   // A table is "a child via key K" if it has an outgoing FK on K (from the
   // deduped set). Used to detect sibling-adjacency noise.
   const childByKey = new Set(cand.map((c) => `${c.child}|${c.key}`));
+  // Consensus OWNER of a key = the table that is most often the parent (target)
+  // for that key. A table that owns the key by consensus is the real dimension
+  // for it, so a relationship pointing to it is genuine even if it also appears
+  // as a child via the same key elsewhere (e.g. 원시운행계획선정보 owns LNE_CD).
+  const targetCounts = new Map<string, Map<string, number>>();
+  for (const c of cand) {
+    let m = targetCounts.get(c.key);
+    if (!m) {
+      m = new Map();
+      targetCounts.set(c.key, m);
+    }
+    m.set(c.parent, (m.get(c.parent) ?? 0) + 1);
+  }
+  const ownerByKey = new Map<string, string>();
+  for (const [k, m] of targetCounts) {
+    let best: string | null = null;
+    let bc = -1;
+    for (const [tbl, ct] of m) if (ct > bc) ((bc = ct), (best = tbl));
+    if (best) ownerByKey.set(k, best);
+  }
   // History/change-log tables are named base+"…이력" (e.g. 사용자별부서변경이력);
   // they legitimately reference their base via a shared key.
   const isHistoryOf = (child: string, parent: string) => child.startsWith(parent) && /이력$/.test(child);
   for (const c of cand) {
-    const ambiguous = childByKey.has(`${c.parent}|${c.key}`) && !isHistoryOf(c.child, c.parent);
+    const ambiguous =
+      childByKey.has(`${c.parent}|${c.key}`) &&
+      ownerByKey.get(c.key) !== c.parent &&
+      !isHistoryOf(c.child, c.parent);
     if (!ambiguous) {
       add(c.child, c.key, c.parent);
       continue;

@@ -178,8 +178,9 @@ function TableNode({ data, selected }: NodeProps) {
   };
   return (
     <>
-      <Handle type="target" position={Position.Left} style={{ opacity: 0 }} />
-      <Handle type="source" position={Position.Right} style={{ opacity: 0 }} />
+      {/* Visible like the default node's dots — they're the drag-FK affordance. */}
+      <Handle type="target" position={Position.Left} />
+      <Handle type="source" position={Position.Right} />
       {selected ? (
         <>
           <NodeResizeControl

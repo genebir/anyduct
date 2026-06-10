@@ -218,3 +218,28 @@
     }
   }
 }
+
+/* ───────────────────────────────────────────────────────────────────────
+   React Flow zoom/fit controls — the library ships light-mode defaults
+   (white button, black icon) that look like blank white squares in dark
+   mode. Theme them with our tokens (ERD designer + pipeline builder).
+   ─────────────────────────────────────────────────────────────────────── */
+@layer components {
+  .react-flow__controls-button {
+    background-color: rgb(var(--bg-elevated));
+    border-bottom: 1px solid rgb(var(--border-subtle));
+    color: rgb(var(--text-primary));
+  }
+  .react-flow__controls-button:hover {
+    background-color: rgb(var(--bg-overlay));
+  }
+  .react-flow__controls-button svg {
+    fill: rgb(var(--text-secondary));
+  }
+  .react-flow__controls-button:hover svg {
+    fill: rgb(var(--text-primary));
+  }
+  .react-flow__controls-button:disabled svg {
+    fill: rgb(var(--text-disabled));
+  }
+}

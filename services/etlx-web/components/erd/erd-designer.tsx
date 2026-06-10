@@ -95,7 +95,9 @@ type Menu =
 
 type Translate = (key: keyof Messages, vars?: Record<string, string | number>) => string;
 
-const DIALECTS = ["postgres", "mysql", "sqlite", "snowflake", "bigquery"];
+// Vertica quotes identifiers with double quotes (postgres-style), so toSql
+// needs no dialect-specific branch for it.
+const DIALECTS = ["postgres", "mysql", "sqlite", "vertica", "snowflake", "bigquery"];
 
 const SHAPE_VAR: Record<string, string> = {
   muted: "--text-muted",

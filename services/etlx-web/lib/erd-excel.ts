@@ -2,7 +2,7 @@
  * ERD → styled Excel workbook (Phase AKN).
  *
  * One .xlsx with the full spec split across sheets — 개요(cover), 테이블
- * 정의서, 컬럼 정의서, 관계/제약, 매핑 정의서(S2T), 주제영역 — styled after
+ * 정의서, 컬럼 정의서, 관계/제약, 주제영역 — styled after
  * Apple's design language: near-black ink on white, a single restrained
  * accent, hairline rules instead of grids, generous row heights, frozen
  * semibold header rows with autofilter. ExcelJS is imported lazily so the
@@ -13,7 +13,6 @@ import type { ErdDesign } from "@/lib/erd-design";
 import {
   columnDictionaryRows,
   constraintSpecRows,
-  mappingSpecRows,
   tableDefinitionRows,
 } from "@/lib/erd-docs";
 
@@ -129,7 +128,7 @@ export async function exportErdExcel(design: ErdDesign, docName: string): Promis
     ["관계 수", design.relations.length],
   ];
   if (design.areas?.length) stats.push(["주제영역", design.areas.map((a) => a.name).join(", ")]);
-  stats.push(["시트 구성", "테이블 정의서 · 컬럼 정의서 · 관계·제약 · 매핑 정의서(S2T)" + (design.areas?.length ? " · 주제영역" : "")]);
+  stats.push(["시트 구성", "테이블 정의서 · 컬럼 정의서 · 관계·제약" + (design.areas?.length ? " · 주제영역" : "")]);
   stats.forEach(([k, v], i) => {
     const r = 6 + i;
     cover.getRow(r).height = 21;
@@ -156,8 +155,6 @@ export async function exportErdExcel(design: ErdDesign, docName: string): Promis
   ]);
   const cs = constraintSpecRows(design);
   addDataSheet(wb, "관계·제약", cs.headers, cs.rows);
-  const ms = mappingSpecRows(design);
-  addDataSheet(wb, "매핑 정의서(S2T)", ms.headers, ms.rows, [ms.headers.indexOf("PK") + 1]);
 
   // ── 주제영역 ─────────────────────────────────────────────────────────────
   if (design.areas?.length) {

@@ -81,7 +81,6 @@ import {
   columnDictionaryCsv,
   constraintSpecCsv,
   fullSpecMarkdown,
-  mappingSpecCsv,
   tableDefinitionCsv,
 } from "@/lib/erd-docs";
 import { toPng } from "html-to-image";
@@ -1147,9 +1146,6 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
     } else if (kind === "tables") {
       content = tableDefinitionCsv(design);
       filename = `${base}_테이블정의서.csv`;
-    } else if (kind === "mapping") {
-      content = mappingSpecCsv(design);
-      filename = `${base}_매핑정의서.csv`;
     } else if (kind === "constraints") {
       content = constraintSpecCsv(design);
       filename = `${base}_제약인덱스정의서.csv`;
@@ -1164,7 +1160,6 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
       const files: Record<string, Uint8Array> = {
         [`${base}_컬럼정의서.csv`]: strToU8(columnDictionaryCsv(design)),
         [`${base}_테이블정의서.csv`]: strToU8(tableDefinitionCsv(design)),
-        [`${base}_매핑정의서.csv`]: strToU8(mappingSpecCsv(design)),
         [`${base}_제약인덱스정의서.csv`]: strToU8(constraintSpecCsv(design)),
         [`${base}_데이터정의서.md`]: strToU8(fullSpecMarkdown(design, docName || "ERD", today)),
         [`${base}_${dialect}.sql`]: strToU8(toSql(design, dialect)),
@@ -1598,7 +1593,6 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
             <option value="image">{t("erdDesign.exportImage")}</option>
             <option value="columns">{t("erdDocs.columns")}</option>
             <option value="tables">{t("erdDocs.tables")}</option>
-            <option value="mapping">{t("erdDocs.mapping")}</option>
             <option value="constraints">{t("erdDocs.constraints")}</option>
             <option value="markdown">{t("erdDocs.markdown")}</option>
             <option value="excel">{t("erdDocs.excel")}</option>

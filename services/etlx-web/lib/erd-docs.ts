@@ -9,8 +9,6 @@
  *     columns to fill in.
  *   - **테이블 정의서 (Table Definition)** — per table: column count, PK,
  *     FK-referenced and referenced-by tables.
- *   - **매핑 정의서 (Source→Target Mapping)** — target side filled from the
- *     ERD, source/transform/load columns left blank — the S2T template.
  *   - **전체 정의서 (Markdown)** — a human-readable all-in-one for wiki/PR.
  *
  * CSVs are UTF-8 **with BOM + CRLF** so Excel opens Korean correctly.
@@ -140,34 +138,6 @@ export function tableDefinitionRows(design: ErdDesign): { headers: string[]; row
 
 export function tableDefinitionCsv(design: ErdDesign): string {
   const { headers, rows } = tableDefinitionRows(design);
-  return csv(headers, rows);
-}
-
-// --- 매핑 정의서 (Source → Target Mapping) ----------------------------------
-
-export function mappingSpecRows(design: ErdDesign): { headers: string[]; rows: unknown[][] } {
-  const headers = [
-    "No", "대상 테이블", "대상 컬럼", "대상 데이터타입", "대상 NOT NULL", "PK",
-    "매핑 유형", "변환 규칙", "원본 시스템", "원본 스키마", "원본 테이블",
-    "원본 컬럼", "원본 데이터타입", "적재 방식", "검증 규칙", "비고",
-  ];
-  const rows: unknown[][] = [];
-  let no = 0;
-  for (const t of design.tables) {
-    for (const c of t.columns) {
-      no += 1;
-      const notNull = c.pk || c.notNull ? "Y" : "";
-      rows.push([
-        no, t.name, c.name, c.type, notNull, c.pk ? "Y" : "",
-        "", "", "", "", "", "", "", "", "", "",
-      ]);
-    }
-  }
-  return { headers, rows };
-}
-
-export function mappingSpecCsv(design: ErdDesign): string {
-  const { headers, rows } = mappingSpecRows(design);
   return csv(headers, rows);
 }
 

@@ -19,6 +19,7 @@
  * unusual models — see ADR-0091.
  */
 
+import { fitWidth } from "@/lib/erd-layout";
 import {
   type DesignRelation,
   type DesignTable,
@@ -176,17 +177,6 @@ function parseCanvasBounds(b: Uint8Array): Map<string, { x: number; y: number; w
   return out;
 }
 
-
-/** Apply a DA# box size to a design table (Phase AKW). Width maps directly
- *  (same 0.6 scale as positions). Height is taken only when it's at least the
- *  content height under OUR row metrics — DA#'s rows are shorter, and a fixed
- *  height below content would clip columns; auto keeps every column visible. */
-function applyDamxSize(t: DesignTable, w: number, h: number, scale: number): void {
-  t.w = Math.min(640, Math.max(140, Math.round(w * scale)));
-  const contentH = 40 + Math.max(1, t.columns.length) * 25 + 16; // mirrors erd-layout
-  const hh = Math.round(h * scale);
-  if (hh >= contentH) t.h = Math.min(1400, hh);
-}
 
 interface ParsedColumn {
   name: string;
@@ -623,10 +613,15 @@ export function parseDamx(buf: ArrayBuffer): ErdDesign {
       if (bd) {
         t.x = Math.round(bd.x * SCALE);
         t.y = Math.round(bd.y * SCALE);
-        applyDamxSize(t, bd.w, bd.h, SCALE);
       }
     }
   }
+  // Node sizes: the stored rect's v5/v6 are NOT the rendered box size (cross-
+  // checked against a DA# print — 사용자정보's 24 rows vs 부서's 9 rows should be
+  // ~2.7× taller but v6 differs only 1.8×, and widths don't track the print
+  // either). DA# auto-fits entity boxes to their content, so the faithful
+  // "same look" is a content-fitted width under OUR font metrics (Phase AKW′).
+  for (const t of design.tables) t.w = fitWidth(t);
   (design as ErdDesign & { __damxPositioned?: boolean }).__damxPositioned = reliable;
   return design;
 }
@@ -912,8 +907,6 @@ export function parseDamxWithAreas(buf: ArrayBuffer): ErdDesign {
         positions[t.id] = { x: Math.round(bd.x * SCALE), y: Math.round(bd.y * SCALE) };
         placed += 1;
         distinct.add(`${bd.x},${bd.y}`);
-        // Node size from DA# (first pane that shows the table wins).
-        if (t.w === undefined) applyDamxSize(t, bd.w, bd.h, SCALE);
       }
     }
     if (tableIds.length === 0) continue;

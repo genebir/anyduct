@@ -51,7 +51,7 @@ function textW(s: string): number {
 
 /** Width that fits the table header and every column row (icon + name +
  *  gap + type + paddings, mirroring the node renderer's layout). */
-function fitWidth(t: DesignTable): number {
+export function fitWidth(t: DesignTable): number {
   let w = 40 + textW(t.name) + (t.logical && t.logical !== t.name ? 0 : 0);
   for (const c of t.columns) {
     w = Math.max(w, 16 + 6 + textW(c.name) + 14 + textW(c.type ?? "") * 0.91 + 30);

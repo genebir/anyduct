@@ -32,6 +32,9 @@ export interface DesignTable {
   x: number;
   y: number;
   columns: DesignColumn[];
+  /** Custom node width in px at fontScale 1 (default 240). User-resizable
+   *  via the right-edge grip (Phase AKT). */
+  w?: number;
   /** Logical (business) name of the table. Optional; feeds the docs. */
   logical?: string;
   /** Table description / comment. */

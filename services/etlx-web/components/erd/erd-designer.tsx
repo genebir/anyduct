@@ -13,6 +13,7 @@ import {
   BackgroundVariant,
   Controls,
   MiniMap,
+  NodeResizeControl,
   NodeResizer,
   Position,
   ReactFlow,
@@ -156,7 +157,41 @@ function ShapeNode({ data, selected }: NodeProps) {
   );
 }
 
-const NODE_TYPES: NodeTypes = { shape: ShapeNode };
+/** Table node: the label JSX plus a right-edge width grip when selected
+ *  (Phase AKT). Width persists on the design (DesignTable.w). */
+function TableNode({ data, selected }: NodeProps) {
+  const d = data as { label: React.ReactNode; onWidth?: (px: number) => void };
+  return (
+    <>
+      {selected && d.onWidth ? (
+        <NodeResizeControl
+          position="right"
+          minWidth={160}
+          maxWidth={640}
+          onResizeEnd={(_e, p) => d.onWidth?.(p.width)}
+          style={{ background: "transparent", border: "none" }}
+        >
+          <div
+            style={{
+              position: "absolute",
+              right: 2,
+              top: "50%",
+              transform: "translateY(-50%)",
+              width: 4,
+              height: 30,
+              borderRadius: 2,
+              background: "rgb(var(--accent) / 0.55)",
+              cursor: "ew-resize",
+            }}
+          />
+        </NodeResizeControl>
+      ) : null}
+      {d.label}
+    </>
+  );
+}
+
+const NODE_TYPES: NodeTypes = { shape: ShapeNode, table: TableNode };
 
 type NameMode = "physical" | "logical" | "both";
 
@@ -729,6 +764,14 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
     return target.tableIds.filter((tid) => !others.has(tid)).length;
   }, [design.areas, pendingAreaDelete]);
 
+  // Persist a user-resized node width (px at fontScale 1).
+  const setTableWidth = useCallback((id: string, pxAtScale1: number) => {
+    setDesign((d) => ({
+      ...d,
+      tables: d.tables.map((tb) => (tb.id === id ? { ...tb, w: Math.round(pxAtScale1) } : tb)),
+    }));
+  }, []);
+
   // Base nodes: the expensive part (per-column label JSX). Depends only on the
   // design + name mode — NOT on selection — so clicking a node doesn't rebuild
   // every table's label (matters for 300+ table imports).
@@ -744,19 +787,23 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
     const visible = memberIds ? design.tables.filter((t) => memberIds.has(t.id)) : design.tables;
     return visible.map((tb) => ({
       id: tb.id,
+      type: "table",
       position: activeArea?.positions?.[tb.id] ?? { x: tb.x, y: tb.y },
-      data: { label: nodeLabel(tb, fkByTable.get(tb.id) ?? new Set(), nameMode, scale) },
+      data: {
+        label: nodeLabel(tb, fkByTable.get(tb.id) ?? new Set(), nameMode, scale),
+        onWidth: (px: number) => setTableWidth(tb.id, px / scale),
+      },
       sourcePosition: Position.Right,
       targetPosition: Position.Left,
       style: {
-        width: Math.round(240 * scale),
+        width: Math.round((tb.w ?? 240) * scale),
         padding: 0,
         borderRadius: 8,
         background: "rgb(var(--bg-elevated))",
         color: "rgb(var(--text))",
       },
     }));
-  }, [design, nameMode, activeArea]);
+  }, [design, nameMode, activeArea, setTableWidth]);
 
   const handleShapeResize = useCallback(
     (id: string, p: { x: number; y: number; width: number; height: number }) =>

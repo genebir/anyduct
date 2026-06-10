@@ -121,6 +121,73 @@ function distributedAnchor(
   }
 }
 
+
+/**
+ * Obstacle-aware bend placement (Phase AKS). A smooth-step path bends at a
+ * center line; with the default midpoint that middle segment (and the runs
+ * leading to it) often slices straight through an unrelated table. Scan
+ * candidate center positions between the two anchors, count how many node
+ * boxes the 3-segment orthogonal path would cross, and keep the candidate
+ * with the fewest crossings (preferring the one closest to the middle).
+ */
+interface Rect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+const PAD = 6; // clearance around nodes
+
+function hCross(y: number, x1: number, x2: number, r: Rect): boolean {
+  const lo = Math.min(x1, x2);
+  const hi = Math.max(x1, x2);
+  return y >= r.y - PAD && y <= r.y + r.h + PAD && hi >= r.x - PAD && lo <= r.x + r.w + PAD;
+}
+function vCross(x: number, y1: number, y2: number, r: Rect): boolean {
+  const lo = Math.min(y1, y2);
+  const hi = Math.max(y1, y2);
+  return x >= r.x - PAD && x <= r.x + r.w + PAD && hi >= r.y - PAD && lo <= r.y + r.h + PAD;
+}
+
+function bestCenter(
+  sp: { x: number; y: number },
+  tp: { x: number; y: number },
+  horizontal: boolean, // true → vertical middle segment at centerX
+  rects: Rect[],
+): number | undefined {
+  const a = horizontal ? sp.x : sp.y;
+  const b = horizontal ? tp.x : tp.y;
+  if (Math.abs(b - a) < 24 || rects.length === 0) return undefined;
+  const crossings = (c: number): number => {
+    let n = 0;
+    for (const r of rects) {
+      if (horizontal) {
+        if (hCross(sp.y, sp.x, c, r)) n += 1;
+        if (vCross(c, sp.y, tp.y, r)) n += 1;
+        if (hCross(tp.y, c, tp.x, r)) n += 1;
+      } else {
+        if (vCross(sp.x, sp.y, c, r)) n += 1;
+        if (hCross(c, sp.x, tp.x, r)) n += 1;
+        if (vCross(tp.x, c, tp.y, r)) n += 1;
+      }
+    }
+    return n;
+  };
+  const mid = (a + b) / 2;
+  let best: number | undefined;
+  let bestScore = crossings(mid);
+  if (bestScore === 0) return undefined; // default is already clean
+  for (let i = 1; i <= 9; i++) {
+    const c = a + ((b - a) * i) / 10;
+    const s = crossings(c);
+    if (s < bestScore || (s === bestScore && best !== undefined && Math.abs(c - mid) < Math.abs(best - mid))) {
+      bestScore = s;
+      best = c;
+    }
+  }
+  return best;
+}
+
 /** Crow's foot (many): three prongs from an apex out along the normal back
  *  to the border, spread perpendicular to the normal. */
 function foot(x: number, y: number, pos: Position): string {
@@ -200,6 +267,29 @@ export function CrowsFootEdge({ id, source, target, label, style, data }: EdgePr
   const tp = { x: ta.x, y: ta.y };
   const sPos = sa.pos;
   const tPos = ta.pos;
+  // Move the bend off any table the default midpoint path would cut through.
+  const obstacles: Rect[] = [];
+  for (const [nid, n] of nodeLookup) {
+    if (nid === source || nid === target) continue;
+    if (n.type === "shape") continue; // background boxes may be crossed
+    obstacles.push({
+      x: n.internals.positionAbsolute.x,
+      y: n.internals.positionAbsolute.y,
+      w: n.measured.width ?? 220,
+      h: n.measured.height ?? 80,
+    });
+  }
+  const horizRoute =
+    (sPos === Position.Left || sPos === Position.Right) &&
+    (tPos === Position.Left || tPos === Position.Right);
+  const vertRoute =
+    (sPos === Position.Top || sPos === Position.Bottom) &&
+    (tPos === Position.Top || tPos === Position.Bottom);
+  const center = horizRoute
+    ? bestCenter(sp, tp, true, obstacles)
+    : vertRoute
+      ? bestCenter(sp, tp, false, obstacles)
+      : undefined;
   const [path, labelX, labelY] = getSmoothStepPath({
     sourceX: sp.x,
     sourceY: sp.y,
@@ -207,6 +297,8 @@ export function CrowsFootEdge({ id, source, target, label, style, data }: EdgePr
     targetX: tp.x,
     targetY: tp.y,
     targetPosition: tPos,
+    ...(horizRoute && center !== undefined ? { centerX: center } : {}),
+    ...(vertRoute && center !== undefined ? { centerY: center } : {}),
   });
 
   return (

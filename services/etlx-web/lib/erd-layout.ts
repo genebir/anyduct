@@ -34,9 +34,11 @@ import {
   bestCenter,
   borderIntersection,
   distributeAnchor,
+  hCross,
   pathCrossings,
   rectSide,
   straightSnap,
+  vCross,
   type Anchor,
   type GEdge,
   type GPoint,
@@ -154,8 +156,8 @@ interface Cluster {
 }
 
 const NODESEP = 56; // dagre separation within a rank
-const RANK_GAP_MIN = 130; // minimum gap between ranks
-const RANK_GAP_MAX = 400;
+const RANK_GAP_MIN = 110; // minimum gap between ranks (room for the markers + label)
+const RANK_GAP_MAX = 320;
 const CROSS_GAP = 44; // min cross-axis gap enforced by the alignment sweeps
 const CHANNEL_GAP = 16; // min distance between parallel middle segments
 const SWEEPS = 18;
@@ -461,7 +463,16 @@ function rescuePass(comp: { nodes: LNode[]; edges: GEdge[] }): void {
         const d = horizDeltaFor(targetEdge, n.id);
         if (d === null) break;
         if (Math.abs(d) <= ALIGN_EPS) {
-          ok = true;
+          // A straight line THROUGH another table is worse than a bend —
+          // only count this as a win when the segment is clean.
+          const otherId = targetEdge.source === n.id ? targetEdge.target : targetEdge.source;
+          const own = distributeAnchor(n.id, otherId, targetEdge.id, comp.edges, getRect);
+          const part = distributeAnchor(otherId, n.id, targetEdge.id, comp.edges, getRect);
+          const y = (own.y + part.y) / 2;
+          const obstacles = comp.nodes
+            .filter((o) => o.id !== n.id && o.id !== otherId)
+            .map((o) => o.r);
+          ok = segBoxCrossings({ x: own.x, y }, { x: part.x, y }, obstacles) === 0;
           break;
         }
         const y = n.r.y + d;
@@ -471,6 +482,199 @@ function rescuePass(comp: { nodes: LNode[]; edges: GEdge[] }): void {
       const after = affected.filter(isStraight).length;
       if (!ok || after <= before) n.r.y = oldY; // no net win — revert
     }
+  }
+}
+
+/** Boxes an axis-aligned segment passes through. */
+function segBoxCrossings(p1: GPoint, p2: GPoint, obstacles: readonly GRect[]): number {
+  let n = 0;
+  if (Math.abs(p1.y - p2.y) <= 1) {
+    for (const r of obstacles) if (hCross(p1.y, p1.x, p2.x, r)) n += 1;
+  } else if (Math.abs(p1.x - p2.x) <= 1) {
+    for (const r of obstacles) if (vCross(p1.x, p1.y, p2.y, r)) n += 1;
+  }
+  return n;
+}
+
+/** Table boxes the edge's predicted path cuts through (straight edges scored
+ *  on their single segment, bent ones on the renderer's 3-segment route). */
+function edgeCrossings(
+  e: GEdge,
+  edges: GEdge[],
+  getRect: (id: string) => GRect | undefined,
+  obstaclesOf: (e: GEdge) => readonly GRect[],
+): number {
+  const r = predictRoute(e, edges, getRect);
+  if (!r) return 0;
+  const obstacles = obstaclesOf(e);
+  if (r.straight) return segBoxCrossings(r.sp, r.tp, obstacles);
+  if ((!r.horiz && !r.vert) || r.sSide === r.tSide) return 0;
+  const horizontal = r.horiz;
+  const a = horizontal ? r.sp.x : r.sp.y;
+  const b = horizontal ? r.tp.x : r.tp.y;
+  const center = bestCenter(r.sp, r.tp, horizontal, obstacles) ?? (a + b) / 2;
+  return pathCrossings(r.sp, r.tp, horizontal, center, obstacles);
+}
+
+/** Ids of edges that currently render dead straight. */
+function straightSet(comp: { nodes: LNode[]; edges: GEdge[] }): Set<string> {
+  const rects = new Map(comp.nodes.map((n) => [n.id, n.r]));
+  const getRect = (id: string) => rects.get(id);
+  const out = new Set<string>();
+  for (const e of comp.edges) {
+    const r = predictRoute(e, comp.edges, getRect);
+    if (r?.straight) out.add(e.id);
+  }
+  return out;
+}
+
+/**
+ * Block compaction (whitespace removal). The alignment sweeps pull nodes to
+ * wherever their partners sit, leaving large vertical holes between unrelated
+ * groups. Nodes connected by *straight* edges form rigid blocks (translating
+ * a block keeps its internal alignments); blocks are then pushed upward as
+ * far as their x-overlapping predecessors allow — classic top-down compaction
+ * that can only shrink the diagram, never grow it.
+ */
+function blockCompact(comp: { nodes: LNode[]; edges: GEdge[] }): void {
+  if (comp.nodes.length <= 2) return;
+  const straight = straightSet(comp);
+  // Union blocks over straight edges.
+  const parent = new Map<string, string>();
+  const find = (x: string): string => {
+    let r = x;
+    while (parent.get(r) !== r) r = parent.get(r)!;
+    parent.set(x, r);
+    return r;
+  };
+  for (const n of comp.nodes) parent.set(n.id, n.id);
+  for (const e of comp.edges) {
+    if (!straight.has(e.id)) continue;
+    parent.set(find(e.source), find(e.target));
+  }
+  const blocks = new Map<string, LNode[]>();
+  for (const n of comp.nodes) {
+    const r = find(n.id);
+    (blocks.get(r) ?? blocks.set(r, []).get(r)!).push(n);
+  }
+  const boxes = [...blocks.values()].map((nodes) => ({
+    nodes,
+    minX: Math.min(...nodes.map((n) => n.r.x)),
+    maxX: Math.max(...nodes.map((n) => n.r.x + n.r.w)),
+    minY: Math.min(...nodes.map((n) => n.r.y)),
+    maxY: Math.max(...nodes.map((n) => n.r.y + n.r.h)),
+  }));
+  const top = Math.min(...boxes.map((b) => b.minY));
+  boxes.sort((a, b) => a.minY - b.minY);
+
+  // Crossing-aware acceptance: a tuck that pulls the block (or its edges)
+  // through other tables trades whitespace for line noise — score the edges
+  // whose geometry the move affects and keep the move only when table
+  // crossings don't increase (falling back to half/quarter shifts).
+  const rects = new Map(comp.nodes.map((n) => [n.id, n.r]));
+  const getRect = (id: string) => rects.get(id);
+  const incident = new Map<string, GEdge[]>();
+  for (const e of comp.edges) {
+    if (e.source === e.target) continue;
+    (incident.get(e.source) ?? incident.set(e.source, []).get(e.source)!).push(e);
+    (incident.get(e.target) ?? incident.set(e.target, []).get(e.target)!).push(e);
+  }
+  const allObstaclesOf = (e: GEdge): GRect[] =>
+    comp.nodes.filter((n) => n.id !== e.source && n.id !== e.target).map((n) => n.r);
+
+  const placed: typeof boxes = [];
+  for (const b of boxes) {
+    let floor = top;
+    for (const p of placed) {
+      if (p.maxX > b.minX - 4 && b.maxX > p.minX - 4) floor = Math.max(floor, p.maxY + CROSS_GAP);
+    }
+    const fullShift = floor - b.minY; // ≤ 0 by construction (pure upward move)
+    placed.push(b);
+    if (fullShift >= -1) continue;
+    // Edges whose path changes with this block: incident to its nodes or to
+    // their partners (anchor redistribution reaches one hop out).
+    const blockIds = new Set(b.nodes.map((n) => n.id));
+    const touched = new Map<string, GEdge>();
+    for (const n of b.nodes) {
+      for (const e of incident.get(n.id) ?? []) {
+        touched.set(e.id, e);
+        const partner = e.source === n.id ? e.target : e.source;
+        for (const pe of incident.get(partner) ?? []) touched.set(pe.id, pe);
+      }
+    }
+    const blockRects = b.nodes.map((n) => n.r);
+    const score = (): number => {
+      let s = 0;
+      for (const e of comp.edges) {
+        if (e.source === e.target) continue;
+        if (touched.has(e.id)) s += edgeCrossings(e, comp.edges, getRect, allObstaclesOf);
+        else if (!blockIds.has(e.source) && !blockIds.has(e.target))
+          s += edgeCrossings(e, comp.edges, getRect, () => blockRects);
+      }
+      return s;
+    };
+    const apply = (dy: number) => {
+      for (const n of b.nodes) n.r.y += dy;
+      b.minY += dy;
+      b.maxY += dy;
+    };
+    const before = score();
+    let applied = 0;
+    for (const frac of [1, 0.5, 0.25]) {
+      const dy = Math.round(fullShift * frac);
+      if (dy >= -1) break;
+      apply(dy - applied);
+      applied = dy;
+      if (score() <= before) break; // good tuck — keep it
+      if (frac === 0.25) {
+        apply(-applied); // even the smallest tuck adds crossings — revert
+        applied = 0;
+      }
+    }
+  }
+}
+
+/**
+ * Per-gap rank spacing (whitespace removal, part 2). dagre only takes ONE
+ * ranksep, so a single busy gap used to inflate every gap in the component.
+ * Instead each gap is sized for the bent edges that actually route a middle
+ * segment through it (straight edges need no width at all): base clearance
+ * for the cardinality markers + label, plus one channel per bent edge.
+ */
+function gapRetune(comp: { nodes: LNode[]; edges: GEdge[] }): void {
+  const ranks = ranksOf(comp.nodes);
+  if (ranks.length <= 1) return;
+  const rects = new Map(comp.nodes.map((n) => [n.id, n.r]));
+  const getRect = (id: string) => rects.get(id);
+  const rankIdx = new Map<string, number>();
+  ranks.forEach((rank, i) => rank.forEach((n) => rankIdx.set(n.id, i)));
+  const bent: number[] = new Array(ranks.length - 1).fill(0);
+  for (const e of comp.edges) {
+    const r = predictRoute(e, comp.edges, getRect);
+    if (!r || r.straight) continue;
+    const a = rankIdx.get(e.source) ?? 0;
+    const b = rankIdx.get(e.target) ?? 0;
+    if (a === b) continue;
+    const span = Math.abs(b - a);
+    // A skip-level edge puts its middle segment in only ONE of its gaps —
+    // reserve fractional width so long spans don't inflate every gap.
+    const share = span === 1 ? 1 : 1 / span;
+    for (let g = Math.min(a, b); g < Math.max(a, b); g++) bent[g] += share;
+  }
+  const bbox = (rank: LNode[]) => ({
+    left: Math.min(...rank.map((n) => n.r.x)),
+    right: Math.max(...rank.map((n) => n.r.x + n.r.w)),
+  });
+  let cursor = bbox(ranks[0]).right;
+  for (let i = 1; i < ranks.length; i++) {
+    const gap = Math.min(
+      RANK_GAP_MAX,
+      Math.max(RANK_GAP_MIN, 56 + Math.ceil(bent[i - 1]) * (CHANNEL_GAP + 2)),
+    );
+    const { left, right } = bbox(ranks[i]);
+    const shift = cursor + gap - left;
+    for (const n of ranks[i]) n.r.x += shift;
+    cursor = right + shift;
   }
 }
 
@@ -619,24 +823,18 @@ function layoutComponent(comp: { nodes: LNode[]; edges: GEdge[] }): Cluster {
     const needW = (Math.max(c.top, c.bottom) + 1) * EDGE_GAP;
     if (needW > n.r.w) n.r.w = needW;
   }
-  // Channel-aware rank gap: every edge crossing a gap puts a vertical middle
-  // segment in it; give the busiest gap room for all of them.
-  const ranks1 = ranksOf(comp.nodes);
-  const rankIdx = new Map<string, number>();
-  ranks1.forEach((rank, i) => rank.forEach((n) => rankIdx.set(n.id, i)));
-  const gapLoad: number[] = new Array(Math.max(0, ranks1.length - 1)).fill(0);
-  for (const e of comp.edges) {
-    const a = rankIdx.get(e.source) ?? 0;
-    const b = rankIdx.get(e.target) ?? 0;
-    for (let g = Math.min(a, b); g < Math.max(a, b); g++) gapLoad[g] += 1;
-  }
-  const busiest = gapLoad.length ? Math.max(...gapLoad) : 0;
-  const ranksep = Math.min(RANK_GAP_MAX, Math.max(RANK_GAP_MIN, 70 + busiest * (CHANNEL_GAP + 4)));
-
-  // Pass 2 with final sizes + channel-aware spacing, then alignment sweeps
-  // and the straightness rescue.
-  dagrePass(comp, ranksep);
+  // Pass 2 with final sizes, then alignment sweeps and straightness rescue.
+  // Rank gaps are retuned per-gap afterwards (gapRetune), so dagre runs with
+  // a uniform moderate ranksep here.
+  dagrePass(comp, RANK_GAP_MIN + 40);
   alignSweeps(comp);
+  rescuePass(comp);
+  // Whitespace removal: pull straight-edge blocks together vertically, then
+  // size each rank gap for the bent edges that actually route through it.
+  blockCompact(comp);
+  gapRetune(comp);
+  // Geometry changed → a few alignments may sit just past the snap tolerance
+  // again (anchor angles depend on the horizontal distance); re-rescue.
   rescuePass(comp);
 
   // Normalize to (0,0).
@@ -823,6 +1021,11 @@ export function analyzeRouting(design: ErdDesign): RoutingStats {
     if (!r) continue;
     if (r.straight) {
       straight += 1;
+      nodeCrossings += segBoxCrossings(
+        r.sp,
+        r.tp,
+        design.tables.filter((t) => t.id !== e.source && t.id !== e.target).map((t) => rects.get(t.id)!),
+      );
       continue;
     }
     if ((!r.horiz && !r.vert) || r.sSide === r.tSide) continue; // wrap-around smoothstep; not scored

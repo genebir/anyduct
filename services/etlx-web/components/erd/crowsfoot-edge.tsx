@@ -423,6 +423,7 @@ export function CrowsFootEdge({ id, source, target, label, style, data, selected
           ]).map(([end, p, node]) => (
             <div
               key={end}
+              className="nodrag nopan"
               style={{
                 position: "absolute",
                 transform: `translate(-50%, -50%) translate(${p.x}px, ${p.y}px)`,
@@ -475,6 +476,7 @@ export function CrowsFootEdge({ id, source, target, label, style, data, selected
       {selected && routable && onCenterRatio ? (
         <EdgeLabelRenderer>
           <div
+            className="nodrag nopan"
             style={{
               position: "absolute",
               transform: `translate(-50%, -50%) translate(${handleX}px, ${handleY}px)`,

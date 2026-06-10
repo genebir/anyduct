@@ -302,6 +302,10 @@ ignore_missing_imports = true
 # prometheus_client — pulled in transitively via opentelemetry-exporter-prometheus
 # (Step 6.2). Lazy-imported in configure_otel so core install is unaffected.
 [[tool.mypy.overrides]]
+module = ["vertica_python", "vertica_python.*", "pymssql", "pymssql.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
 module = ["duckdb", "duckdb.*", "pyarrow", "pyarrow.*"]
 ignore_missing_imports = true
 # pyarrow.csv re-exports from pyarrow._csv without __all__ — allow it.

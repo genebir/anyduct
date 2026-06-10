@@ -71,6 +71,11 @@ def _coerce_ssl(value: Any) -> Any:
 class VerticaConnector(BatchSource, BatchSink):
     """Vertica batch source + sink."""
 
+    # Same-connection pushdown (ADR-0093 P2c): this dialect supports
+    # ``INSERT INTO <table> <select>`` so source==sink pipelines can run
+    # entirely inside the database (no data movement).
+    supports_sql_pushdown = True
+
     def __init__(
         self,
         host: str = "localhost",
@@ -107,7 +112,7 @@ class VerticaConnector(BatchSource, BatchSink):
             return
         try:
             # Lazy import so the module loads without the driver.
-            import vertica_python  # type: ignore[import-untyped]
+            import vertica_python
         except ImportError as exc:  # pragma: no cover - import side effect
             raise ConnectError(
                 "vertica-python not installed. Install with: " "pip install 'etl-plugins[vertica]'"

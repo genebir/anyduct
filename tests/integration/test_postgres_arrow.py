@@ -194,3 +194,48 @@ class TestPipelineFastPath:
                 with conn.cursor() as cur:
                     cur.execute(f"DROP TABLE IF EXISTS {dst_table}")
                 conn.commit()
+
+
+class TestSqlPushdown:
+    """ADR-0093 P2c: source==sink connection collapses to INSERT…SELECT."""
+
+    def test_same_connection_pushdown(
+        self, apg: PostgresConnector, typed_table: str, pg_raw_kwargs: dict[str, Any]
+    ) -> None:
+        dst_table = f"etl_push_dst_{uuid4().hex[:8]}"
+        with psycopg.connect(**pg_raw_kwargs) as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"CREATE TABLE {dst_table} (id BIGINT, label TEXT)")
+            conn.commit()
+        try:
+            apg.write_arrow(
+                iter([_batch([{"id": i, "label": f"L{i}"} for i in range(100)])]),
+                table=typed_table,
+            )
+
+            # Same connection name on both ends → in-database INSERT…SELECT.
+            # Prove no rows moved through Python: poison read/write/Arrow.
+            def poison(*a: Any, **k: Any) -> Any:
+                raise AssertionError("moved rows")
+
+            for meth in ("read", "write", "read_arrow", "write_arrow"):
+                setattr(apg, meth, poison)
+            task = Task(
+                name="push",
+                source="db",
+                sink="db",
+                query=f"SELECT id, label FROM {typed_table}",
+                sink_table=dst_table,
+            )
+            result = Pipeline(name="push-p", tasks=[task]).run(connectors={"db": apg})
+            assert result.records_read == 100
+            assert result.records_written == 100
+            with psycopg.connect(**pg_raw_kwargs) as conn, conn.cursor() as cur:
+                cur.execute(f"SELECT COUNT(*) FROM {dst_table}")
+                row = cur.fetchone()
+                assert row is not None and row[0] == 100
+        finally:
+            with psycopg.connect(**pg_raw_kwargs) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(f"DROP TABLE IF EXISTS {dst_table}")
+                conn.commit()

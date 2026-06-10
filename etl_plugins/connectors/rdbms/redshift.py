@@ -59,6 +59,11 @@ def _qt(table: str) -> str:
 class RedshiftConnector(BatchSource, BatchSink):
     """Amazon Redshift batch source + sink."""
 
+    # Same-connection pushdown (ADR-0093 P2c): this dialect supports
+    # ``INSERT INTO <table> <select>`` so source==sink pipelines can run
+    # entirely inside the database (no data movement).
+    supports_sql_pushdown = True
+
     def __init__(
         self,
         host: str = "localhost",

@@ -60,6 +60,11 @@ def _q(ident: str) -> str:
 class BigQueryConnector(BatchSource, BatchSink):
     """BigQuery batch source + sink (GoogleSQL via the client DB-API)."""
 
+    # Same-connection pushdown (ADR-0093 P2c): this dialect supports
+    # ``INSERT INTO <table> <select>`` so source==sink pipelines can run
+    # entirely inside the database (no data movement).
+    supports_sql_pushdown = True
+
     def __init__(
         self,
         project: str = "",

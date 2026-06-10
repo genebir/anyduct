@@ -35,6 +35,11 @@ _SAFE_IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 class SQLiteConnector(BatchSource, BatchSink):
     """SQLite batch source + sink."""
 
+    # Same-connection pushdown (ADR-0093 P2c): this dialect supports
+    # ``INSERT INTO <table> <select>`` so source==sink pipelines can run
+    # entirely inside the database (no data movement).
+    supports_sql_pushdown = True
+
     def __init__(
         self,
         database: str = ":memory:",

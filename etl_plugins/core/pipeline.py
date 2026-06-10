@@ -8,6 +8,7 @@ Retry, DLQ routing, and auto-metrics emit are wired in Step 3.3.
 from __future__ import annotations
 
 import contextlib
+import re
 import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
@@ -88,6 +89,11 @@ DEFAULT_TRIGGER_RULE = "all_success"
 
 Hook = Callable[..., None]
 """Pipeline hook — receives positional args specific to the event."""
+
+#: Plain (optionally schema-qualified) table identifier — the pushdown
+#: inlines it into ``INSERT INTO``, so anything fancier falls back to the
+#: Record/Arrow paths rather than risk dialect-specific quoting.
+_PUSHDOWN_TABLE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$")
 
 
 @dataclass
@@ -1352,6 +1358,9 @@ class Pipeline:
         self._run_pre_sql(task, connectors)
 
         cursored_run = cursor_from is not None or cursor_to is not None
+        pushed = self._try_sql_pushdown(task, source, sinks, cursored=cursored_run)
+        if pushed is not None:
+            return pushed
         fast = self._try_arrow_fast_path(task, source, sinks, cursored=cursored_run)
         if fast is not None:
             return fast
@@ -1519,6 +1528,48 @@ class Pipeline:
                 **spec.options,
             )
         return records_read, written, new_cursor
+
+    def _try_sql_pushdown(
+        self,
+        task: Task,
+        source: BatchSource,
+        sinks: list[tuple[SinkSpec, BatchSink]],
+        *,
+        cursored: bool,
+    ) -> tuple[int, int, CursorValue] | None:
+        """Same-connection pushdown (ADR-0093 P2c): the cheapest data path
+        is no data path. When source and sink are the SAME connector
+        instance (one connection name on both ends), the whole task is one
+        ``INSERT INTO <table> <select>`` executed inside the database —
+        zero rows cross the wire or touch Python.
+
+        Eligibility keeps the single-statement atomicity story: no
+        transforms, no cursor window, exactly one ``append`` sink with no
+        ``when`` and no per-sink ``pre_sql`` (which the Record path runs
+        inside the write transaction — two statements here would weaken
+        ADR-0035). The dialect opts in via ``supports_sql_pushdown``
+        (CQL, for one, has no INSERT…SELECT). Returns ``None`` to fall
+        through to the Arrow/Record paths.
+        """
+        if task.transforms or cursored or len(sinks) != 1:
+            return None
+        spec, sink = sinks[0]
+        if spec.when is not None or spec.mode != "append" or spec.pre_sql:
+            return None
+        # mypy sees disjoint protocols; connectors routinely implement both.
+        if cast("object", source) is not cast("object", sink):
+            return None
+        if not getattr(source, "supports_sql_pushdown", False):
+            return None
+        if not isinstance(source, SqlExecutor):
+            return None
+        if not task.query or not spec.table or not _PUSHDOWN_TABLE_RE.match(spec.table):
+            return None
+
+        _module_logger.info("sql_pushdown", pipeline=self.name, task=task.name, table=spec.table)
+        n = source.execute_statement(f"INSERT INTO {spec.table} {task.query}")
+        rows = max(0, int(n))
+        return rows, rows, None
 
     def _try_arrow_fast_path(
         self,

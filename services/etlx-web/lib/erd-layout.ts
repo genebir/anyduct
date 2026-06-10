@@ -788,6 +788,146 @@ function assignChannels(comp: { nodes: LNode[]; edges: GEdge[] }): Map<string, n
   return ratios;
 }
 
+/**
+ * Serpentine wrap for ribbon clusters. ERD schemas are shallow (FK depth
+ * ~3-4) but wide, so a layered layout of a big cluster is a 1:10+ vertical
+ * ribbon — fit-view turns it into an unreadable worm with whitespace on both
+ * sides. Like wrapping text, cut the cross axis into bands and lay them side
+ * by side: cuts go through node-free corridors with the fewest straddling
+ * edges, so in-band geometry (alignments, channels) is untouched and only the
+ * few cut edges get long.
+ */
+const WRAP_GAP = 160; // alley between bands — straddling edges route here
+
+function wrapTallCluster(comp: { nodes: LNode[]; edges: GEdge[] }): void {
+  if (comp.nodes.length < 12) return;
+  const minX = Math.min(...comp.nodes.map((n) => n.r.x));
+  const maxX = Math.max(...comp.nodes.map((n) => n.r.x + n.r.w));
+  const minY = Math.min(...comp.nodes.map((n) => n.r.y));
+  const maxY = Math.max(...comp.nodes.map((n) => n.r.y + n.r.h));
+  const w = maxX - minX;
+  const h = maxY - minY;
+  if (h <= Math.max(4200, 2.6 * w)) return; // not ribbon-shaped
+
+  // Candidate cut positions: midpoints between consecutive node centers.
+  // Nodes are assigned to bands by their CENTER (never sliced), and bands are
+  // x-disjoint after re-basing, so a cut needs no node-free corridor — tall
+  // multi-rank clusters whose y-intervals overlap everywhere still wrap.
+  const byId = new Map(comp.nodes.map((n) => [n.id, n]));
+  const centers = [...new Set(comp.nodes.map((n) => Math.round(n.r.y + n.r.h / 2)))].sort((a, b) => a - b);
+  const corridors: number[] = [];
+  for (let i = 0; i + 1 < centers.length; i++) {
+    if (centers[i + 1] - centers[i] > 8) corridors.push((centers[i] + centers[i + 1]) / 2);
+  }
+  if (corridors.length === 0) return;
+
+  const straddles = (y: number): number => {
+    let n = 0;
+    for (const e of comp.edges) {
+      const s = byId.get(e.source);
+      const t = byId.get(e.target);
+      if (!s || !t) continue;
+      const sc = s.r.y + s.r.h / 2;
+      const tc = t.r.y + t.r.h / 2;
+      if ((sc < y && tc > y) || (tc < y && sc > y)) n += 1;
+    }
+    return n;
+  };
+
+  /** Cuts for a target band count under a straddle-vs-evenness trade. */
+  const pickCuts = (bands: number, straddleWeight: number): number[] => {
+    const cuts: number[] = [];
+    for (let k = 1; k < bands; k++) {
+      const target = minY + (h * k) / bands;
+      const window = h / (bands * 2);
+      let best: number | null = null;
+      let bestScore = Infinity;
+      for (const c of corridors) {
+        if (Math.abs(c - target) > window) continue;
+        if (cuts.length && c <= cuts[cuts.length - 1] + 1200) continue; // keep bands useful
+        const score = straddles(c) * straddleWeight + Math.abs(c - target);
+        if (score < bestScore) {
+          bestScore = score;
+          best = c;
+        }
+      }
+      if (best !== null) cuts.push(best);
+    }
+    return cuts;
+  };
+
+  /** Resulting bbox + straddle count of a cut-set, without mutating. */
+  const evaluate = (cuts: number[]): { area: number; W: number; H: number; cost: number } => {
+    const bMinX: number[] = new Array(cuts.length + 1).fill(Infinity);
+    const bMaxX: number[] = new Array(cuts.length + 1).fill(-Infinity);
+    const bH: number[] = new Array(cuts.length + 1).fill(0);
+    for (const n of comp.nodes) {
+      let b = 0;
+      while (b < cuts.length && n.r.y + n.r.h / 2 > cuts[b]) b += 1;
+      bMinX[b] = Math.min(bMinX[b], n.r.x);
+      bMaxX[b] = Math.max(bMaxX[b], n.r.x + n.r.w);
+      const top = b > 0 ? cuts[b - 1] : minY;
+      bH[b] = Math.max(bH[b], n.r.y + n.r.h - top);
+    }
+    let W = 0;
+    let H = 0;
+    for (let b = 0; b <= cuts.length; b++) {
+      if (!Number.isFinite(bMinX[b])) continue;
+      W += bMaxX[b] - bMinX[b] + (W > 0 ? WRAP_GAP : 0);
+      H = Math.max(H, bH[b]);
+    }
+    const area = W * H;
+    const aspect = W / Math.max(1, H);
+    const cross = cuts.reduce((s, c) => s + straddles(c), 0);
+    // Area + a strong penalty for worm-shaped results (a 1:10 ribbon is
+    // unreadable in fit-view no matter how dense) + a mild one per cut edge.
+    // Hub-fan clusters have NO low-straddle cut (every line crosses the fan),
+    // and there wrapping must still win — hence the small straddle factor.
+    const cost = area * (1 + 0.3 * Math.abs(Math.log2(Math.max(0.1, aspect / 1.25)))) * (1 + 0.006 * cross);
+    return { area, W, H, cost };
+  };
+
+  // Candidate band counts around the square-ish ideal; keep the best cut-set
+  // (including "don't wrap" as the baseline).
+  const ideal = Math.round(Math.sqrt((1.25 * h) / Math.max(1, w)));
+  let bestCuts: number[] | null = null;
+  let bestCost = w * h * (1 + 0.3 * Math.abs(Math.log2(Math.max(0.1, w / h / 1.25))));
+  for (const bands of new Set([2, 3, ideal - 1, ideal, ideal + 1].filter((b) => b >= 2 && b <= Math.floor(h / 2600)))) {
+    for (const weight of [400, 1200]) {
+      const cuts = pickCuts(bands, weight);
+      if (!cuts.length) continue;
+      const ev = evaluate(cuts);
+      if (ev.cost < bestCost) {
+        bestCost = ev.cost;
+        bestCuts = cuts;
+      }
+    }
+  }
+  if (!bestCuts) return;
+  const cuts = bestCuts;
+
+  // Re-base each band on its OWN x extent (a band holding only some ranks
+  // must not inherit the full cluster width — that just clones whitespace).
+  const bandNodes: LNode[][] = Array.from({ length: cuts.length + 1 }, () => []);
+  for (const n of comp.nodes) {
+    let b = 0;
+    while (b < cuts.length && n.r.y + n.r.h / 2 > cuts[b]) b += 1;
+    bandNodes[b].push(n);
+  }
+  let xCursor = 0;
+  for (let b = 0; b < bandNodes.length; b++) {
+    const members = bandNodes[b];
+    if (!members.length) continue;
+    const bMinX = Math.min(...members.map((n) => n.r.x));
+    const bMaxX = Math.max(...members.map((n) => n.r.x + n.r.w));
+    for (const n of members) {
+      n.r.x += xCursor - bMinX;
+      if (b > 0) n.r.y -= cuts[b - 1] - minY;
+    }
+    xCursor += bMaxX - bMinX + WRAP_GAP;
+  }
+}
+
 /** Lay out one connected component; returns its normalized bbox. */
 function layoutComponent(comp: { nodes: LNode[]; edges: GEdge[] }): Cluster {
   if (comp.nodes.length === 1) {
@@ -836,6 +976,12 @@ function layoutComponent(comp: { nodes: LNode[]; edges: GEdge[] }): Cluster {
   // Geometry changed → a few alignments may sit just past the snap tolerance
   // again (anchor angles depend on the horizontal distance); re-rescue.
   rescuePass(comp);
+  // Ribbon-shaped clusters wrap into side-by-side bands (readability +
+  // canvas aspect); compact each band's fresh vertical slack, then one more
+  // rescue for the edges the wrap re-sided.
+  wrapTallCluster(comp);
+  blockCompact(comp);
+  rescuePass(comp);
 
   // Normalize to (0,0).
   let minX = Infinity;
@@ -853,6 +999,92 @@ function layoutComponent(comp: { nodes: LNode[]; edges: GEdge[] }): Cluster {
     n.r.y -= minY;
   }
   return { ...comp, w: maxX - minX, h: maxY - minY };
+}
+
+/**
+ * Skyline rectangle packing of cluster bboxes: place each cluster (tallest
+ * first) at the lowest spot under a max width, trying several candidate
+ * widths and keeping the densest result (mild penalty for extreme aspect
+ * ratios vs ``targetAspect`` = W/H). Returns one offset per cluster, in
+ * input order.
+ */
+function packClusters(laid: Cluster[], targetAspect: number): { x: number; y: number }[] {
+  const items = laid.map((l, i) => ({ i, w: l.w + CLUSTER_GAP_X, h: l.h + CLUSTER_GAP_Y }));
+  const widest = Math.max(...items.map((r) => r.w));
+  const tallest = Math.max(...items.map((r) => r.h));
+  const totalArea = items.reduce((s, r) => s + r.w * r.h, 0);
+  const candidates = [
+    widest,
+    widest + totalArea / Math.max(1, tallest), // fill beside the tallest cluster
+    Math.sqrt(totalArea * targetAspect),
+    Math.sqrt(totalArea * targetAspect) * 1.35,
+  ].map((w) => Math.max(widest, w));
+
+  const order = [...items].sort((a, b) => b.h - a.h || b.w - a.w);
+  let best: { score: number; pos: { x: number; y: number }[] } | null = null;
+  for (const maxW of candidates) {
+    // Skyline: list of segments (x, w, y=top of whatever is below).
+    let sky = [{ x: 0, w: maxW, y: 0 }];
+    const pos: { x: number; y: number }[] = new Array(items.length);
+    let bbW = 0;
+    let bbH = 0;
+    for (const it of order) {
+      // Find the placement with the lowest resulting top edge (tie: leftmost).
+      let bx = 0;
+      let by = Infinity;
+      for (let s = 0; s < sky.length; s++) {
+        const x = sky[s].x;
+        if (x + it.w > maxW + 1) break;
+        let y = 0;
+        let span = 0;
+        for (let t = s; t < sky.length && span < it.w; t++) {
+          y = Math.max(y, sky[t].y);
+          span += sky[t].w;
+        }
+        if (span < it.w - 1) continue;
+        if (y < by - 0.5 || (Math.abs(y - by) <= 0.5 && x < bx)) {
+          by = y;
+          bx = x;
+        }
+      }
+      if (!Number.isFinite(by)) {
+        // Wider than maxW shouldn't happen (maxW ≥ widest), but stay safe.
+        by = Math.max(...sky.map((s) => s.y));
+        bx = 0;
+      }
+      pos[it.i] = { x: bx, y: by };
+      bbW = Math.max(bbW, bx + it.w);
+      bbH = Math.max(bbH, by + it.h);
+      // Update skyline with the new top segment.
+      const nx2 = bx + it.w;
+      const next: typeof sky = [];
+      for (const s of sky) {
+        const sx2 = s.x + s.w;
+        if (sx2 <= bx || s.x >= nx2) {
+          next.push(s);
+          continue;
+        }
+        if (s.x < bx) next.push({ x: s.x, w: bx - s.x, y: s.y });
+        if (sx2 > nx2) next.push({ x: nx2, w: sx2 - nx2, y: s.y });
+      }
+      next.push({ x: bx, w: it.w, y: by + it.h });
+      next.sort((a, b) => a.x - b.x);
+      // Merge equal-height neighbours to keep the list short.
+      sky = next.reduce<typeof sky>((acc, s) => {
+        const last = acc[acc.length - 1];
+        if (last && Math.abs(last.y - s.y) < 0.5 && Math.abs(last.x + last.w - s.x) < 0.5) {
+          last.w += s.w;
+        } else {
+          acc.push({ ...s });
+        }
+        return acc;
+      }, []);
+    }
+    const aspect = bbW / Math.max(1, bbH);
+    const score = bbW * bbH * (1 + 0.35 * Math.abs(Math.log2(aspect / targetAspect)));
+    if (!best || score < best.score) best = { score, pos };
+  }
+  return best!.pos;
 }
 
 /** Return a copy of ``design`` with tidied, non-overlapping positions and
@@ -887,37 +1119,19 @@ export function autoLayout(design: ErdDesign, dir: LayoutDirection = "TB"): ErdD
   const ratios = new Map<string, number>();
   for (const c of laid) for (const [id, v] of assignChannels(c)) ratios.set(id, v);
 
-  // Keep connected clusters first (largest area first), singletons last so the
-  // lone tables tuck neatly into a trailing grid instead of splitting clusters.
-  const order = laid
-    .map((l) => ({ l, single: l.nodes.length === 1, area: l.w * l.h }))
-    .sort((a, b) => {
-      if (a.single !== b.single) return a.single ? 1 : -1;
-      return b.area - a.area;
-    });
-
-  // Shelf-pack cluster bounding boxes into rows under a target width that keeps
-  // the whole diagram roughly square (and at least as wide as the widest cluster).
-  const totalArea = laid.reduce((s, l) => s + (l.w + CLUSTER_GAP_X) * (l.h + CLUSTER_GAP_Y), 0);
-  const widest = Math.max(...laid.map((l) => l.w));
-  const targetWidth = Math.max(widest, Math.sqrt(totalArea) * 1.3);
-
+  // Pack cluster bounding boxes with a skyline packer. The old row-based
+  // shelf packing collapsed when one cluster dominated (a 20k-px-tall main
+  // cluster made the single row that tall and every other cluster lined up
+  // along its top — >90% empty canvas). The skyline fills the space beside
+  // tall clusters top-to-bottom instead.
+  const offsets = packClusters(laid, transpose ? 0.8 : 1.4);
   const pos = new Map<string, { x: number; y: number }>();
-  let cursorX = 0;
-  let cursorY = 0;
-  let rowHeight = 0;
-  for (const { l } of order) {
-    if (cursorX > 0 && cursorX + l.w > targetWidth) {
-      cursorX = 0;
-      cursorY += rowHeight + CLUSTER_GAP_Y;
-      rowHeight = 0;
-    }
+  laid.forEach((l, i) => {
+    const o = offsets[i];
     for (const n of l.nodes) {
-      pos.set(n.id, { x: Math.round(cursorX + n.r.x), y: Math.round(cursorY + n.r.y) });
+      pos.set(n.id, { x: Math.round(o.x + n.r.x), y: Math.round(o.y + n.r.y) });
     }
-    cursorX += l.w + CLUSTER_GAP_X;
-    rowHeight = Math.max(rowHeight, l.h);
-  }
+  });
 
   const nodeById = new Map(nodes.map((n) => [n.id, n]));
   const tables = design.tables.map((t) => {

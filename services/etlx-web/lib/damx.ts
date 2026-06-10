@@ -818,9 +818,32 @@ export function parseDamxWithAreas(buf: ArrayBuffer): ErdDesign {
     }
   }
   if (headers.size < 2) return full;
-  // membership + per-pane canvas items per area
+  // membership + per-pane POSITIONS. The bounds rect lives at one of the
+  // canvas-item GUID's occurrences WITHIN the same pane segment (a ci string
+  // can appear many times; only the in-pane instance carries the rect) — so
+  // both the ci link and its rect are resolved segment-locally. Validated:
+  // 안전지원 8 tabs all fully positioned, multi-tab tables get per-tab coords.
+  const i32 = (off: number) => (off + 4 <= b.length ? dv.getInt32(off, true) : 0);
+  const rectAt = (end: number): { x: number; y: number } | null => {
+    const v = [0, 1, 2, 3, 4, 5, 6].map((k) => i32(end + 4 * k));
+    if (v[0] === 0 && v[3] === 0 && v[4] === 0 && v[5] > 50 && v[5] < 4000 && v[6] > 50 && v[6] < 6000 && v[1] >= 0 && v[1] < 60000 && v[2] >= 0 && v[2] < 60000) {
+      return { x: v[1], y: v[2] };
+    }
+    return null;
+  };
+  // GUID → frame indices in the diagram section (for in-segment rect search).
+  const idxByGuid = new Map<string, number[]>();
+  for (let i = diaIdx; i < F.length; i++) {
+    if (!GUID_RE.test(F[i].s)) continue;
+    let arr = idxByGuid.get(F[i].s);
+    if (!arr) {
+      arr = [];
+      idxByGuid.set(F[i].s, arr);
+    }
+    arr.push(i);
+  }
   const areaMembers = new Map<string, Set<string>>();
-  const areaEntCi = new Map<string, Map<string, string>>(); // area → Korean name → ci GUID
+  const areaPos = new Map<string, Map<string, { x: number; y: number }>>(); // area → Korean name → rect
   let cur: string | null = null;
   for (let mi = 0; mi < marks.length; mi++) {
     const named = headers.get(mi);
@@ -829,35 +852,31 @@ export function parseDamxWithAreas(buf: ArrayBuffer): ErdDesign {
     const lo = marks[mi];
     const hi = mi + 1 < marks.length ? marks[mi + 1] : F.length;
     let mem = areaMembers.get(cur);
-    let entci = areaEntCi.get(cur);
+    let pos = areaPos.get(cur);
     if (!mem) {
       mem = new Set();
       areaMembers.set(cur, mem);
-      entci = new Map();
-      areaEntCi.set(cur, entci);
+      pos = new Map();
+      areaPos.set(cur, pos);
     }
     for (let j = lo; j < hi; j++) {
       const s = F[j].s;
       if (!g2n.has(s)) continue;
       const ci = frameAt(F[j].end + 16);
-      if (ci && GUID_RE.test(ci)) {
-        const nm = canon(g2n.get(s)!);
-        mem.add(nm);
-        if (!entci!.has(nm)) entci!.set(nm, ci);
+      if (!ci || !GUID_RE.test(ci)) continue;
+      const nm = canon(g2n.get(s)!);
+      mem.add(nm);
+      if (!pos!.has(nm)) {
+        // rect = this ci's occurrence inside THIS segment that carries bounds
+        for (const k of idxByGuid.get(ci) ?? []) {
+          if (k < lo || k >= hi) continue;
+          const r = rectAt(F[k].end);
+          if (r) {
+            pos!.set(nm, r);
+            break;
+          }
+        }
       }
-    }
-  }
-  // bounds for every canvas item referenced by any area (rect signature:
-  // [0, x, y, 0, 0, w, h] — same as parseCanvasBounds)
-  const wantedCi = new Set<string>();
-  for (const m of areaEntCi.values()) for (const ci of m.values()) wantedCi.add(ci);
-  const i32 = (off: number) => (off + 4 <= b.length ? dv.getInt32(off, true) : 0);
-  const boundsByCi = new Map<string, { x: number; y: number }>();
-  for (const f of F) {
-    if (!GUID_RE.test(f.s) || !wantedCi.has(f.s) || boundsByCi.has(f.s)) continue;
-    const v = [0, 1, 2, 3, 4, 5, 6].map((k) => i32(f.end + 4 * k));
-    if (v[0] === 0 && v[3] === 0 && v[4] === 0 && v[5] > 50 && v[5] < 4000 && v[6] > 50 && v[6] < 6000 && v[1] >= 0 && v[1] < 60000 && v[2] >= 0 && v[2] < 60000) {
-      boundsByCi.set(f.s, { x: v[1], y: v[2] });
     }
   }
   // assemble subject-area TABS over the full design (membership + positions)
@@ -866,7 +885,7 @@ export function parseDamxWithAreas(buf: ArrayBuffer): ErdDesign {
   const areas: NonNullable<ErdDesign["areas"]> = [];
   const SCALE = 0.6;
   for (const [name, members] of areaMembers) {
-    const entci = areaEntCi.get(name)!;
+    const pos = areaPos.get(name)!;
     const tableIds: string[] = [];
     const positions: Record<string, { x: number; y: number }> = {};
     let placed = 0;
@@ -875,8 +894,7 @@ export function parseDamxWithAreas(buf: ArrayBuffer): ErdDesign {
       const t = byKorean.get(m);
       if (!t) continue;
       tableIds.push(t.id);
-      const ci = entci.get(m);
-      const bd = ci ? boundsByCi.get(ci) : undefined;
+      const bd = pos.get(m);
       if (bd) {
         positions[t.id] = { x: Math.round(bd.x * SCALE), y: Math.round(bd.y * SCALE) };
         placed += 1;

@@ -738,3 +738,161 @@ function toDesign(
   for (const t of tables) for (const c of t.columns) if (c.pk) c.notNull = true;
   return { tables, relations };
 }
+
+/* ── Subject areas (주제영역) ─────────────────────────────────────────────
+   DA# stores multiple diagram panes — one per subject area (plus often a
+   full-model pane). Each pane is delimited by a K_PANE_PRINT_DEV record; the
+   pane's NAME sits right before its first marker, and a pane's content spans
+   from its marker until the next named header (logical pane + physical pane).
+   Membership = entities with a canvas-item link inside the pane's frames.
+   Count-validated: 안전지원 8 areas / TMS 13 / CTC&ARS 10 / 단일파일 1. */
+
+export interface DamxAreaDesign {
+  name: string;
+  design: ErdDesign;
+  positioned: boolean;
+}
+
+/**
+ * Split a ``.damx`` into one ErdDesign per subject area (Phase AKF). Returns
+ * an empty array when the file has fewer than 2 named panes — the caller
+ * should then fall back to the single whole-model import.
+ */
+export function parseDamxAreas(buf: ArrayBuffer): DamxAreaDesign[] {
+  const full = parseDamx(buf);
+  const b = new Uint8Array(buf);
+  const F = framesWithOffsets(b);
+  const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  const diaIdx = F.findIndex((f) => f.s === "DIAGRAM_VERSION");
+  if (diaIdx < 0) return [];
+  const DIA = F[diaIdx].off;
+  const strict = new TextDecoder("utf-16le", { fatal: true });
+  const frameAt = (off: number): string | null => {
+    if (off + 4 > b.length || b[off] !== 0xff || b[off + 1] !== 0xfe || b[off + 2] !== 0xff) return null;
+    const len = b[off + 3];
+    const end = off + 4 + len * 2;
+    if (end > b.length) return null;
+    try {
+      return strict.decode(b.subarray(off + 4, end));
+    } catch {
+      return null;
+    }
+  };
+  // entity GUID → table name (model section; same recipe as parseRelationships)
+  const entHasCi = new Set<string>();
+  for (const f of F) {
+    if (f.off > DIA && GUID_RE.test(f.s) && !entHasCi.has(f.s)) {
+      const ci = frameAt(f.end + 16);
+      if (ci && GUID_RE.test(ci)) entHasCi.add(f.s);
+    }
+  }
+  const g2n = new Map<string, string>();
+  for (let i = 1; i < F.length; i++) {
+    const f = F[i];
+    const prev = F[i - 1].s;
+    if (f.off >= DIA || !entHasCi.has(prev) || GUID_RE.test(f.s)) continue;
+    if (!/^[가-힣A-Za-z]/.test(f.s) || f.s.includes("고딕") || f.s === "Segoe UI") continue;
+    g2n.set(prev, f.s);
+  }
+  const tn = new Set(g2n.values());
+  const rev = new Map<string, string>();
+  for (let i = 0; i < F.length - 1; i++) {
+    if (F[i].off > DIA && tn.has(F[i + 1].s) && PHYS_RE.test(F[i].s) && !F[i].s.startsWith("K_")) {
+      rev.set(F[i].s, F[i + 1].s);
+    }
+  }
+  const canon = (nm: string) => rev.get(nm) ?? nm;
+  // pane markers + header names (a name right before a marker, preceded by a
+  // GUID; paper sizes like A4 from the page-setup record are noise).
+  const marks: number[] = [];
+  for (let i = 0; i < F.length; i++) if (F[i].s === "K_PANE_PRINT_DEV") marks.push(i);
+  if (marks.length < 2) return [];
+  const headers = new Map<number, string>();
+  for (let mi = 0; mi < marks.length; mi++) {
+    const m = marks[mi];
+    const lo = mi > 0 ? marks[mi - 1] : diaIdx;
+    for (let j = m - 1; j > Math.max(lo, m - 12); j--) {
+      const s = F[j].s;
+      if (GUID_RE.test(s) || s.includes("고딕") || s === "Segoe UI" || s.includes("^")) continue;
+      if (!/^[가-힣A-Za-z0-9]/.test(s) || /^[AB]\d+$/.test(s) || s.length > 60) continue;
+      if (j > 0 && GUID_RE.test(F[j - 1].s)) {
+        headers.set(mi, s);
+        break;
+      }
+    }
+  }
+  if (headers.size < 2) return [];
+  // membership + per-pane canvas items per area
+  const areaMembers = new Map<string, Set<string>>();
+  const areaEntCi = new Map<string, Map<string, string>>(); // area → Korean name → ci GUID
+  let cur: string | null = null;
+  for (let mi = 0; mi < marks.length; mi++) {
+    const named = headers.get(mi);
+    if (named) cur = named;
+    if (!cur) continue;
+    const lo = marks[mi];
+    const hi = mi + 1 < marks.length ? marks[mi + 1] : F.length;
+    let mem = areaMembers.get(cur);
+    let entci = areaEntCi.get(cur);
+    if (!mem) {
+      mem = new Set();
+      areaMembers.set(cur, mem);
+      entci = new Map();
+      areaEntCi.set(cur, entci);
+    }
+    for (let j = lo; j < hi; j++) {
+      const s = F[j].s;
+      if (!g2n.has(s)) continue;
+      const ci = frameAt(F[j].end + 16);
+      if (ci && GUID_RE.test(ci)) {
+        const nm = canon(g2n.get(s)!);
+        mem.add(nm);
+        if (!entci!.has(nm)) entci!.set(nm, ci);
+      }
+    }
+  }
+  // bounds for every canvas item referenced by any area (rect signature:
+  // [0, x, y, 0, 0, w, h] — same as parseCanvasBounds)
+  const wantedCi = new Set<string>();
+  for (const m of areaEntCi.values()) for (const ci of m.values()) wantedCi.add(ci);
+  const i32 = (off: number) => (off + 4 <= b.length ? dv.getInt32(off, true) : 0);
+  const boundsByCi = new Map<string, { x: number; y: number }>();
+  for (const f of F) {
+    if (!GUID_RE.test(f.s) || !wantedCi.has(f.s) || boundsByCi.has(f.s)) continue;
+    const v = [0, 1, 2, 3, 4, 5, 6].map((k) => i32(f.end + 4 * k));
+    if (v[0] === 0 && v[3] === 0 && v[4] === 0 && v[5] > 50 && v[5] < 4000 && v[6] > 50 && v[6] < 6000 && v[1] >= 0 && v[1] < 60000 && v[2] >= 0 && v[2] < 60000) {
+      boundsByCi.set(f.s, { x: v[1], y: v[2] });
+    }
+  }
+  // assemble per-area designs from the full design
+  const byKorean = new Map<string, DesignTable>();
+  for (const t of full.tables) byKorean.set(t.logical ?? t.name, t);
+  const out: DamxAreaDesign[] = [];
+  const SCALE = 0.6;
+  for (const [name, members] of areaMembers) {
+    const entci = areaEntCi.get(name)!;
+    const tables: DesignTable[] = [];
+    for (const m of members) {
+      const t = byKorean.get(m);
+      if (!t) continue;
+      const ci = entci.get(m);
+      const bd = ci ? boundsByCi.get(ci) : undefined;
+      tables.push({
+        ...t,
+        columns: t.columns.map((c) => ({ ...c })),
+        ...(bd ? { x: Math.round(bd.x * SCALE), y: Math.round(bd.y * SCALE) } : {}),
+      });
+    }
+    if (tables.length === 0) continue;
+    const ids = new Set(tables.map((t) => t.id));
+    const relations = full.relations.filter((r) => ids.has(r.from) && ids.has(r.to)).map((r) => ({ ...r }));
+    const placed = tables.filter((t) => {
+      const ci = entci.get(t.logical ?? t.name);
+      return ci ? boundsByCi.has(ci) : false;
+    });
+    const distinct = new Set(placed.map((t) => `${t.x},${t.y}`));
+    const positioned = placed.length >= 2 && distinct.size >= placed.length - 1;
+    out.push({ name, design: { tables, relations, fontScale: full.fontScale }, positioned });
+  }
+  return out.length >= 2 ? out : [];
+}

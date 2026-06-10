@@ -6,10 +6,10 @@
  * a new one. Persisted via the REST API (ADR-0090), shared across users.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { BoxesIcon, PencilIcon, PlusIcon, Trash2Icon } from "lucide-react";
+import { BoxesIcon, PencilIcon, PlusIcon, Trash2Icon, UploadIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Header } from "@/components/shell/header";
 import { Card } from "@/components/ui/card";
@@ -17,7 +17,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ApiError, erdApi, type ErdDiagramSummary } from "@/lib/api";
-import { EMPTY_DESIGN } from "@/lib/erd-design";
+import { EMPTY_DESIGN, type ErdDesign } from "@/lib/erd-design";
+import { parseDamx, parseDamxAreas } from "@/lib/damx";
+import { autoLayout, removeOverlaps } from "@/lib/erd-layout";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import { useLocale } from "@/components/providers/locale-provider";
 import { absoluteTime, relativeTime } from "@/lib/format-time";
@@ -50,6 +52,49 @@ export default function ErdListPage() {
   useEffect(() => {
     if (ws?.id) void refresh(ws.id);
   }, [ws?.id, refresh]);
+
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  const [importing, setImporting] = useState(false);
+
+  // Import a .damx as DA# organizes it: one diagram per subject area (주제영역),
+  // each with that pane's own table positions. Files without multiple named
+  // panes fall back to a single whole-model diagram.
+  const onDamxFile = async (file: File) => {
+    if (!ws?.id || importing) return;
+    setImporting(true);
+    try {
+      const buf = await file.arrayBuffer();
+      const areas = parseDamxAreas(buf);
+      if (areas.length === 0) {
+        const design = parseDamx(buf);
+        if (design.tables.length === 0) {
+          toast.error(t("erdList.importEmpty"));
+          return;
+        }
+        const positioned = (design as ErdDesign & { __damxPositioned?: boolean }).__damxPositioned;
+        const created = await erdApi.create(ws.id, {
+          name: file.name.replace(/\.damx$/i, ""),
+          design_json: positioned ? removeOverlaps(design) : autoLayout(design),
+        });
+        toast.success(t("erdList.importedSingle"));
+        router.push(`/w/${slug}/erd/${created.id}`);
+        return;
+      }
+      for (const a of areas) {
+        await erdApi.create(ws.id, {
+          name: a.name,
+          design_json: a.positioned ? removeOverlaps(a.design) : autoLayout(a.design),
+        });
+      }
+      toast.success(t("erdList.importedAreas", { n: areas.length }));
+      await refresh(ws.id);
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : t("erdList.importError"));
+    } finally {
+      setImporting(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  };
 
   const onNew = async () => {
     if (!ws?.id || creating) return;
@@ -98,10 +143,32 @@ export default function ErdListPage() {
         title={t("nav.erd")}
         subtitle={ws ? t("common.workspaceSubtitle", { name: ws.name }) : t("common.loadingWorkspace")}
         actions={
-          <Button size="sm" variant="secondary" onClick={() => void onNew()} disabled={creating || !ws?.id}>
-            <PlusIcon size={14} />
-            {t("erdList.new")}
-          </Button>
+          <div className="flex items-center gap-2">
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".damx"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) void onDamxFile(f);
+              }}
+            />
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => fileRef.current?.click()}
+              disabled={importing || !ws?.id}
+              title={t("erdList.importHint")}
+            >
+              <UploadIcon size={14} />
+              {importing ? t("erdList.importing") : t("erdList.import")}
+            </Button>
+            <Button size="sm" variant="secondary" onClick={() => void onNew()} disabled={creating || !ws?.id}>
+              <PlusIcon size={14} />
+              {t("erdList.new")}
+            </Button>
+          </div>
         }
       />
       <div className="p-4">

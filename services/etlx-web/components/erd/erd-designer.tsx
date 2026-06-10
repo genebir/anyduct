@@ -50,6 +50,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import {
   addTable,
@@ -787,6 +788,35 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
     setSelectedShapeId(null);
   }, []);
 
+  // Confirm before ANY canvas deletion (tables, shapes, relationship edges) —
+  // the designer autosaves, so an accidental Delete keypress would be
+  // destructive with no undo.
+  const [pendingNodeDelete, setPendingNodeDelete] = useState<{ nodes: string[]; edges: string[] } | null>(null);
+  const onBeforeDelete = useCallback(
+    ({ nodes: delNodes, edges: delEdges }: { nodes: Node[]; edges: Edge[] }) => {
+      if (delNodes.length === 0 && delEdges.length === 0) return Promise.resolve(true);
+      setPendingNodeDelete({ nodes: delNodes.map((n) => n.id), edges: delEdges.map((e) => e.id) });
+      return Promise.resolve(false);
+    },
+    [],
+  );
+  const confirmNodeDelete = () => {
+    const pending = pendingNodeDelete;
+    setPendingNodeDelete(null);
+    if (!pending) return;
+    const ids = new Set(pending.nodes);
+    const edgeIds = new Set(pending.edges);
+    setDesign((d) => ({
+      ...d,
+      tables: d.tables.filter((t) => !ids.has(t.id)),
+      relations: d.relations.filter((r) => !ids.has(r.from) && !ids.has(r.to) && !edgeIds.has(r.id)),
+      shapes: (d.shapes ?? []).filter((s) => !ids.has(s.id)),
+    }));
+    setSelectedId(null);
+    setSelectedShapeId(null);
+    setSelectedEdgeId(null);
+  };
+
   const onEdgesDelete = useCallback((deleted: Edge[]) => {
     const ids = new Set(deleted.map((e) => e.id));
     setDesign((d) => ({ ...d, relations: d.relations.filter((r) => !ids.has(r.id)) }));
@@ -799,8 +829,6 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
       relations: d.relations.map((r) => (r.id === id ? { ...r, ...patch } : r)),
     }));
 
-  const deleteRelation = (id: string) =>
-    setDesign((d) => ({ ...d, relations: d.relations.filter((r) => r.id !== id) }));
 
   const updateTable = (id: string, patch: Partial<DesignTable>) =>
     setDesign((d) => ({ ...d, tables: d.tables.map((tb) => (tb.id === id ? { ...tb, ...patch } : tb)) }));
@@ -848,12 +876,6 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
             );
       return { tables, relations };
     });
-
-  const deleteTable = (id: string) =>
-    setDesign((d) => ({
-      tables: d.tables.filter((tb) => tb.id !== id),
-      relations: d.relations.filter((r) => r.from !== id && r.to !== id),
-    }));
 
   const [showValidation, setShowValidation] = useState(false);
   const issues = useMemo(() => validateErd(design), [design]);
@@ -1366,6 +1388,7 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
               onNodesChange={onNodesChange}
               onEdgesChange={onEdgesChange}
               onNodesDelete={onNodesDelete}
+              onBeforeDelete={onBeforeDelete}
               onEdgesDelete={onEdgesDelete}
               deleteKeyCode={["Delete", "Backspace"]}
               onConnect={onConnect}
@@ -1421,7 +1444,7 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
             onChange={(patch) => updateTable(selected.id, patch)}
             onRenameColumn={(i, newName) => renameColumn(selected.id, i, newName)}
             onDelete={() => {
-              deleteTable(selected.id);
+              setPendingNodeDelete({ nodes: [selected.id], edges: [] });
               setSelectedId(null);
             }}
             onClose={() => setSelectedId(null)}
@@ -1434,7 +1457,7 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
             t={t}
             onChange={(patch) => updateRelation(selectedEdge.id, patch)}
             onDelete={() => {
-              deleteRelation(selectedEdge.id);
+              setPendingNodeDelete({ nodes: [], edges: [selectedEdge.id] });
               setSelectedEdgeId(null);
             }}
             onClose={() => setSelectedEdgeId(null)}
@@ -1483,6 +1506,15 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
         </div>
       ) : null}
 
+      <ConfirmDialog
+        open={pendingNodeDelete !== null}
+        title={t("erdDesign.confirmDeleteTitle", { n: (pendingNodeDelete?.nodes.length ?? 0) + (pendingNodeDelete?.edges.length ?? 0) })}
+        description={t("erdDesign.confirmDeleteDesc")}
+        confirmLabel={t("erdDesign.deleteTable")}
+        destructive
+        onConfirm={confirmNodeDelete}
+        onCancel={() => setPendingNodeDelete(null)}
+      />
       {showImport && ws?.id ? (
         <ImportTablesDialog
           workspaceId={ws.id}
@@ -1571,7 +1603,7 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
                 <button
                   className="block w-full px-3 py-1.5 text-left text-error hover:bg-overlay"
                   onClick={() => {
-                    deleteTable(menu.nodeId);
+                    setPendingNodeDelete({ nodes: [menu.nodeId], edges: [] });
                     if (selectedId === menu.nodeId) setSelectedId(null);
                     setMenu(null);
                   }}

@@ -83,6 +83,7 @@ export default function MigrationDetailPage() {
   const [outsideMigrationShape, setOutsideMigrationShape] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmClearSchedule, setConfirmClearSchedule] = useState(false);
   const [deleting, setDeleting] = useState(false);
   // Recent runs panel (Phase AAN4) — close the loop so the user
   // sees the migration in motion without leaving the page.
@@ -475,7 +476,7 @@ export default function MigrationDetailPage() {
               saving={savingSchedule}
               onSave={() => void onSaveSchedule()}
               onToggle={() => void onToggleSchedule()}
-              onClear={() => void onClearSchedule()}
+              onClear={() => setConfirmClearSchedule(true)}
               t={t}
             />
             <RecentRunsCard
@@ -498,6 +499,19 @@ export default function MigrationDetailPage() {
         loading={deleting}
         onConfirm={() => void onDelete()}
         onCancel={() => setConfirmDelete(false)}
+      />
+      <ConfirmDialog
+        open={confirmClearSchedule}
+        title={t("migrations.clearScheduleTitle")}
+        description={t("migrations.clearScheduleDesc")}
+        confirmLabel={t("migrations.scheduleClear")}
+        destructive
+        loading={savingSchedule}
+        onConfirm={() => {
+          setConfirmClearSchedule(false);
+          void onClearSchedule();
+        }}
+        onCancel={() => setConfirmClearSchedule(false)}
       />
     </>
   );

@@ -169,6 +169,8 @@ export const en = {
   "erdDesign.editTable": "Edit table",
   "erdDesign.duplicateTable": "Duplicate table",
   "erdDesign.deleteTable": "Delete table",
+  "erdDesign.confirmDeleteTitle": "Delete {n} item(s)?",
+  "erdDesign.confirmDeleteDesc": "Selected tables are removed with their columns and relationships. The diagram autosaves, so this cannot be undone.",
   "erdDesign.sqlTitle": "CREATE TABLE — {dialect}",
   "erdDesign.copy": "Copy",
   "erdDesign.copied": "SQL copied to clipboard",
@@ -191,6 +193,8 @@ export const en = {
   // ERD list page (Phase AHC)
   "erdList.new": "New diagram",
   "erdList.import": "Import .damx",
+  "erdList.deleteTitle": "Delete \"{name}\"?",
+  "erdList.deleteDesc": "This diagram ({n} tables) will be permanently deleted for everyone in the workspace.",
   "erdList.importing": "Importing…",
   "erdList.importHint": "Create one diagram per DA# subject area",
   "erdList.importedSingle": "Diagram imported",
@@ -368,6 +372,8 @@ export const en = {
   "migrations.schedulePause": "Pause",
   "migrations.scheduleResume": "Resume",
   "migrations.scheduleClear": "Clear",
+  "migrations.clearScheduleTitle": "Remove this schedule?",
+  "migrations.clearScheduleDesc": "The pipeline will no longer run automatically until you set a new schedule.",
   "migrations.scheduleHint":
     "Standard 5-field cron. The scheduler queues a run each time the cron fires (subject to current connector and pipeline state).",
   "migrations.scheduleCronRequired": "Enter a cron expression first.",
@@ -1556,6 +1562,8 @@ export const ko: Messages = {
   "erdDesign.editTable": "테이블 편집",
   "erdDesign.duplicateTable": "테이블 복제",
   "erdDesign.deleteTable": "테이블 삭제",
+  "erdDesign.confirmDeleteTitle": "{n}개 항목을 삭제할까요?",
+  "erdDesign.confirmDeleteDesc": "선택한 테이블이 컬럼·관계와 함께 삭제됩니다. 다이어그램은 자동 저장되므로 되돌릴 수 없습니다.",
   "erdDesign.sqlTitle": "CREATE TABLE — {dialect}",
   "erdDesign.copy": "복사",
   "erdDesign.copied": "SQL을 클립보드에 복사했습니다",
@@ -1578,6 +1586,8 @@ export const ko: Messages = {
   // ERD list page (Phase AHC)
   "erdList.new": "새 다이어그램",
   "erdList.import": ".damx 가져오기",
+  "erdList.deleteTitle": "\"{name}\" 다이어그램을 삭제할까요?",
+  "erdList.deleteDesc": "이 다이어그램(테이블 {n}개)이 워크스페이스 전체에서 영구 삭제됩니다.",
   "erdList.importing": "가져오는 중…",
   "erdList.importHint": "DA# 주제영역별로 다이어그램을 생성합니다",
   "erdList.importedSingle": "다이어그램을 가져왔습니다",
@@ -1751,6 +1761,8 @@ export const ko: Messages = {
   "migrations.schedulePause": "일시정지",
   "migrations.scheduleResume": "재개",
   "migrations.scheduleClear": "삭제",
+  "migrations.clearScheduleTitle": "스케줄을 삭제할까요?",
+  "migrations.clearScheduleDesc": "새 스케줄을 설정하기 전까지 파이프라인이 자동 실행되지 않습니다.",
   "migrations.scheduleHint":
     "표준 5필드 cron. 스케줄러가 firing마다 run을 큐에 추가합니다(현재 connector / pipeline 상태에 따라).",
   "migrations.scheduleCronRequired": "cron 표현식을 먼저 입력하세요.",

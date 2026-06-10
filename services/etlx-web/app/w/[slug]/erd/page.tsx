@@ -12,6 +12,7 @@ import Link from "next/link";
 import { BoxesIcon, PencilIcon, PlusIcon, Trash2Icon, UploadIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Header } from "@/components/shell/header";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -111,10 +112,14 @@ export default function ErdListPage() {
     }
   };
 
-  const onDelete = async (id: string) => {
-    if (!ws?.id) return;
+  // Deleting a diagram is irreversible (server-backed, no trash) — confirm.
+  const [pendingDelete, setPendingDelete] = useState<ErdDiagramSummary | null>(null);
+  const onDelete = async () => {
+    if (!ws?.id || !pendingDelete) return;
+    const target = pendingDelete;
+    setPendingDelete(null);
     try {
-      await erdApi.delete(ws.id, id);
+      await erdApi.delete(ws.id, target.id);
       await refresh(ws.id);
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : t("common.error"));
@@ -236,7 +241,7 @@ export default function ErdListPage() {
                         variant="ghost"
                         aria-label={t("erdList.deleteAria", { name: d.name })}
                         className="hover:text-error"
-                        onClick={() => void onDelete(d.id)}
+                        onClick={() => setPendingDelete(d)}
                       >
                         <Trash2Icon size={14} />
                       </Button>
@@ -248,6 +253,15 @@ export default function ErdListPage() {
           </>
         )}
       </div>
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        title={t("erdList.deleteTitle", { name: pendingDelete?.name ?? "" })}
+        description={t("erdList.deleteDesc", { n: pendingDelete?.table_count ?? 0 })}
+        confirmLabel={t("common.delete")}
+        destructive
+        onConfirm={() => void onDelete()}
+        onCancel={() => setPendingDelete(null)}
+      />
     </div>
   );
 }

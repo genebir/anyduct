@@ -9,6 +9,12 @@
 
 ## [Unreleased]
 
+### Added
+- **`sql` 데이터셋 변환 — DuckDB in-process (Phase P1a, 2026-06-10, ADR-0093)**: 파이프라인 데이터 플레인 개편 1탄. in-flight 레코드 전체를 DuckDB 릴레이션(`input`)으로 등록하고 임의 SQL(JOIN/GROUP BY/윈도우/QUALIFY) 실행 — 행 단위 변환이 표현 못 하던 데이터셋 연산이 1급, 변환 언어가 "아는 SQL"로.
+  - 코어: `DatasetTransformFn` + `is_dataset_transform` + `_run_task` 스테이지 합성(행 구간 DLQ 시맨틱 보존), 그래프 transform 노드 지원, stream 모드 명시 거부(무한 스트림엔 전체 데이터셋 없음).
+  - `[duckdb]` extra(duckdb+pyarrow, lazy import), DuckDB Decimal 결과 int/float 평탄화, lint opaque 등록.
+  - 12 신규 unit → 코어 1201 green. 실측 GROUP BY 500k행 0.5s(99만 rows/s). 후속: 웹 빌더 노출(P1b) → Arrow 벡터 플레인(Phase 2) → 클러스터링 가이드(Phase 3).
+
 ### Changed
 - **ERD 자동정렬 전면 재작성 — 가시성 최적화 (Phase ALB, 2026-06-10, ADR-0092)**: 레이아웃이 렌더러의 선 기하(접점 분배/직선 스냅/장애물 회피)를 픽셀-정확히 예측하며 노드 크기·접점·선 경로·배치를 함께 최적화.
   - 신규 `lib/erd-edge-geometry.ts`(렌더러·레이아웃 공유 순수 기하) + 노드 lineHeight 고정으로 auto 높이 공식화(fontScale 반영).

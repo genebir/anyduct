@@ -39,7 +39,7 @@ from etl_plugins.runtime.column_lineage import (
 #: These are the targets of the ``column_mapping_recommended`` rule —
 #: declaring a ``column_mapping`` on one of these unlocks accurate per-
 #: column lineage in the catalog (ADR-0047).
-_OPAQUE_TRANSFORM_TYPES = frozenset({"python", "custom_python", "sql_exec"})
+_OPAQUE_TRANSFORM_TYPES = frozenset({"python", "custom_python", "sql_exec", "sql"})
 
 #: Transform types that run arbitrary code *per record* and can therefore
 #: raise on a single bad row. Without a ``dlq:`` such a raise fails the

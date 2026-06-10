@@ -19,18 +19,20 @@ External packages can add their own via :func:`register_transform`.
 
 from __future__ import annotations
 
+import decimal
 import importlib
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from datetime import datetime
 from typing import Any
 
 from etl_plugins.config.models import TransformConfig
 from etl_plugins.core.exceptions import AssertionFailedError, ConfigError, TransformError
-from etl_plugins.core.pipeline import TransformFn
+from etl_plugins.core.pipeline import AnyTransformFn, DatasetTransformFn, TransformFn
 from etl_plugins.core.record import Record
 
-# A transform builder takes a TransformConfig and returns a TransformFn.
-BuiltinTransform = Callable[[TransformConfig], TransformFn]
+# A transform builder takes a TransformConfig and returns a transform —
+# row-level (TransformFn) or dataset-level (DatasetTransformFn, ADR-0093).
+BuiltinTransform = Callable[[TransformConfig], AnyTransformFn]
 
 _REGISTRY: dict[str, BuiltinTransform] = {}
 
@@ -47,7 +49,7 @@ def register_transform(name: str) -> Callable[[BuiltinTransform], BuiltinTransfo
     return deco
 
 
-def build_transform(config: TransformConfig) -> TransformFn:
+def build_transform(config: TransformConfig) -> AnyTransformFn:
     """Resolve a transform builder by ``config.type`` and apply it to ``config``."""
     builder = _REGISTRY.get(config.type)
     if builder is None:
@@ -406,6 +408,96 @@ def _build_assert(config: TransformConfig) -> TransformFn:
         raise AssertionFailedError(f"{msg}\n  record: {snippet}")
 
     return _assert
+
+
+# ---------- sql (dataset-level, DuckDB; ADR-0093) -------------------------
+
+_SQL_DEFAULT_VIEW = "input"
+
+
+def _plain_value(v: Any) -> Any:
+    """Normalize DuckDB/Arrow result scalars to plain Python.
+
+    SUM/AVG over integers come back as ``decimal.Decimal`` (DuckDB HUGEINT/
+    DECIMAL) which drivers like sqlite3 can't bind — flatten to int/float so
+    downstream sinks see the same primitive types row transforms produce.
+    """
+    if isinstance(v, decimal.Decimal):
+        return int(v) if v == v.to_integral_value() else float(v)
+    return v
+
+
+@register_transform("sql")
+def _build_sql(config: TransformConfig) -> DatasetTransformFn:
+    """Run arbitrary SQL over the in-flight dataset (DuckDB, in-process).
+
+    The whole record stream is materialized as a DuckDB relation named
+    ``input`` (override with ``view``), the ``query`` runs against it with
+    full SQL freedom — joins (against other CTEs / values), GROUP BY,
+    window functions, ORDER BY, QUALIFY, … — and the result rows continue
+    down the pipeline. Vectorized execution: orders of magnitude faster
+    than per-row Python for set operations.
+
+    Config::
+
+        transform:
+          type: sql
+          query: |
+            SELECT region, SUM(amount) AS total
+            FROM input GROUP BY region
+          view: input        # optional table name for the incoming rows
+
+    Notes:
+      * **Batch mode only** — an unbounded stream has no complete dataset
+        (the pipeline rejects it with a clear error).
+      * The result is a NEW dataset: record ``metadata`` does not survive
+        (an aggregate row has no single source record).
+      * Empty input ⇒ empty output (the query is skipped — there is no
+        schema to register a zero-row relation with).
+      * Requires the ``duckdb`` extra: ``pip install etl-plugins[duckdb]``.
+    """
+    query = _config_field(config, "query")
+    if not isinstance(query, str) or not query.strip():
+        raise ConfigError("sql: 'query' must be a non-empty string")
+    view = _config_field(config, "view", required=False) or _SQL_DEFAULT_VIEW
+    if not isinstance(view, str) or not view.replace("_", "").isalnum():
+        raise ConfigError(f"sql: 'view' must be a simple identifier, got {view!r}")
+
+    def _sql(records: Iterator[Record]) -> Iterator[Record]:
+        try:
+            import duckdb
+            import pyarrow as pa
+        except ImportError as exc:  # pragma: no cover - exercised only without extras
+            raise ConfigError(
+                "transform 'sql' requires the [duckdb] extra: uv add 'etl-plugins[duckdb]'"
+            ) from exc
+
+        rows = [r.data for r in records]
+        if not rows:
+            return
+        con = duckdb.connect()
+        try:
+            try:
+                table = pa.Table.from_pylist(rows)
+            except (pa.ArrowInvalid, pa.ArrowTypeError) as exc:
+                raise TransformError(f"sql: cannot infer Arrow schema from records: {exc}") from exc
+            con.register(view, table)
+            try:
+                result = con.execute(query)
+                # duckdb ≥1.4 renamed fetch_record_batch → to_arrow_reader.
+                to_reader = getattr(result, "to_arrow_reader", None) or result.fetch_record_batch
+                reader = to_reader()
+            except duckdb.Error as exc:
+                raise TransformError(f"sql: query failed: {exc}") from exc
+            for batch in reader:
+                for data in batch.to_pylist():
+                    yield Record(data={k: _plain_value(v) for k, v in data.items()})
+        finally:
+            con.close()
+
+    # Marker consumed by Pipeline._run_task / execute_graph_node staging.
+    _sql.dataset_transform = True  # type: ignore[attr-defined]
+    return _sql
 
 
 __all__ = [

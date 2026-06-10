@@ -12,7 +12,7 @@ import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from types import CodeType
-from typing import Any
+from typing import Any, cast
 
 import structlog
 
@@ -58,6 +58,22 @@ _module_logger = structlog.get_logger(__name__)
 
 TransformFn = Callable[[Record], Record | None]
 """Transform: takes a Record, returns the (possibly modified) Record, or None to drop it."""
+
+DatasetTransformFn = Callable[[Iterator[Record]], Iterator[Record]]
+"""Dataset-level transform (ADR-0093): consumes the WHOLE record stream and
+yields a new one — joins/aggregations/windows that row-level ``TransformFn``
+cannot express. Built by ``runtime.transforms`` (e.g. the DuckDB ``sql``
+transform) and marked with ``fn.dataset_transform = True``. Batch mode only:
+an unbounded stream has no "whole dataset"."""
+
+AnyTransformFn = TransformFn | DatasetTransformFn
+"""Either transform flavour; tell them apart with :func:`is_dataset_transform`."""
+
+
+def is_dataset_transform(fn: AnyTransformFn) -> bool:
+    """True when ``fn`` is a dataset-level transform (stream-in → stream-out)."""
+    return getattr(fn, "dataset_transform", False) is True
+
 
 # Task-orchestration DAG task states (ADR-0028).
 TASK_SUCCESS = "success"
@@ -142,8 +158,8 @@ class GraphNode:
     source_options: dict[str, Any] = field(default_factory=dict)
     # sql_exec — the SQL the node runs at execution time.
     sql_statement: str | None = None
-    # transform
-    transform_fn: TransformFn | None = None
+    # transform — row-level or dataset-level (ADR-0093)
+    transform_fn: AnyTransformFn | None = None
     # sink
     sink: SinkSpec | None = None
     # join (fan-in, ADR-0041) — merge ≥2 inputs on ``join_on`` keys
@@ -191,7 +207,7 @@ class Task:
     # with ``cursor_from`` / ``cursor_to`` routes through ``source.read_since``;
     # the field must exist on every emitted record's ``data``.
     cursor_column: str | None = None
-    transforms: list[TransformFn] = field(default_factory=list)
+    transforms: list[AnyTransformFn] = field(default_factory=list)
     # Original TransformConfig dumps for introspection-only callers (e.g.
     # ``_auto_create_sink_tables`` projecting columns through declarative
     # transforms). ``transforms`` holds the compiled callables; we keep
@@ -267,7 +283,7 @@ class Task:
             cursor_column=cursor_column,
         )
 
-    def transform(self, fn: TransformFn) -> Task:
+    def transform(self, fn: AnyTransformFn) -> Task:
         self.transforms.append(fn)
         return self
 
@@ -583,9 +599,14 @@ def execute_graph_node(
     if node.kind == "transform":
         if len(inputs) != 1:
             raise TaskError(f"transform node {node.id!r} takes exactly one input")
+        # Dataset-level transform (ADR-0093): hand it the whole input stream.
+        if node.transform_fn is not None and is_dataset_transform(node.transform_fn):
+            dataset_fn = cast("DatasetTransformFn", node.transform_fn)
+            return NodeResult(output=list(dataset_fn(iter(inputs[0]))))
+        row_fn = cast("TransformFn | None", node.transform_fn)
         out_recs: list[Record] = []
         for rec in inputs[0]:
-            result = node.transform_fn(rec) if node.transform_fn is not None else rec
+            result = row_fn(rec) if row_fn is not None else rec
             if result is not None:
                 out_recs.append(result)
         return NodeResult(output=out_recs)
@@ -1348,10 +1369,7 @@ class Pipeline:
             else:
                 yield from source.read(query=task.query, **task.source_options)
 
-        def _read_and_transform(
-            count: bool = True,
-            accept: Callable[[Record], bool] | None = None,
-        ) -> Iterator[Record]:
+        def _cursor_stream(count: bool) -> Iterator[Record]:
             nonlocal records_read, new_cursor
             for raw in _source_iter():
                 # Inclusive upper bound — skip rows beyond cursor_to. We still
@@ -1373,9 +1391,30 @@ class Pipeline:
                         new_cursor = cv
                 if count:
                     records_read += 1
+                yield raw
+
+        # ADR-0093: transforms compose as STAGES — runs of row-level fns
+        # (applied per record, DLQ-routable) separated by dataset-level fns
+        # (which wrap the whole stream: joins/aggregations/windows, e.g. the
+        # DuckDB ``sql`` transform). A pipeline without dataset transforms is
+        # exactly one row stage — the historical behaviour, unchanged.
+        stages: list[list[TransformFn] | DatasetTransformFn] = []
+        for tfn in task.transforms:
+            if is_dataset_transform(tfn):
+                stages.append(cast("DatasetTransformFn", tfn))
+            else:
+                row_tfn = cast("TransformFn", tfn)
+                last = stages[-1] if stages else None
+                if isinstance(last, list):
+                    last.append(row_tfn)
+                else:
+                    stages.append([row_tfn])
+
+        def _apply_row_stage(stream: Iterator[Record], fns: list[TransformFn]) -> Iterator[Record]:
+            for raw in stream:
                 record: Record | None = raw
                 try:
-                    for fn in task.transforms:
+                    for fn in fns:
                         if record is None:
                             break
                         record = fn(record)
@@ -1388,12 +1427,24 @@ class Pipeline:
                         continue
                     raise TransformError(f"transform {fn!r} failed on record {raw!r}") from exc
                 if record is not None:
-                    # Conditional routing (ADR-0027): a per-sink ``accept``
-                    # decides whether this transformed record belongs to the
-                    # sink currently being written.
-                    if accept is not None and not accept(record):
-                        continue
                     yield record
+
+        def _read_and_transform(
+            count: bool = True,
+            accept: Callable[[Record], bool] | None = None,
+        ) -> Iterator[Record]:
+            stream = _cursor_stream(count)
+            for stage in stages:
+                stream = (
+                    _apply_row_stage(stream, stage) if isinstance(stage, list) else stage(stream)
+                )
+            for record in stream:
+                # Conditional routing (ADR-0027): a per-sink ``accept``
+                # decides whether this transformed record belongs to the
+                # sink currently being written.
+                if accept is not None and not accept(record):
+                    continue
+                yield record
 
         # Conditional routing setup (ADR-0027). Compile each sink's ``when``
         # predicate once; a record routes to the FIRST conditional sink whose
@@ -1597,6 +1648,15 @@ class Pipeline:
             raise TaskError(f"Stream fan-out to multiple sinks is not supported: {task!r}")
         sink_spec = sink_specs[0]
 
+        # Dataset-level transforms need the WHOLE dataset; an unbounded
+        # stream never has one (ADR-0093).
+        if any(is_dataset_transform(fn) for fn in task.transforms):
+            raise TaskError(
+                "dataset-level transforms (e.g. 'sql') require batch mode — "
+                "an unbounded stream has no complete dataset to query"
+            )
+        row_transforms = cast("list[TransformFn]", task.transforms)
+
         source = connectors.get(task.source)
         sink = connectors.get(sink_spec.name)
         if source is None:
@@ -1650,7 +1710,7 @@ class Pipeline:
                 records_read += 1
                 record: Record | None = raw
                 try:
-                    for fn in task.transforms:
+                    for fn in row_transforms:
                         if record is None:
                             break
                         record = fn(record)

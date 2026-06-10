@@ -53,6 +53,8 @@ dynamodb = ["boto3>=1.34"]
 cassandra = ["cassandra-driver>=3.29"]
 redis = ["redis>=5.0"]
 s3 = ["boto3>=1.34", "pyarrow>=16.0"]
+# ADR-0093 — dataset-level SQL transform (DuckDB in-process engine).
+duckdb = ["duckdb>=1.0", "pyarrow>=16.0"]
 kafka = ["aiokafka>=0.11"]
 kinesis = ["boto3>=1.34"]
 sqs = ["boto3>=1.34"]
@@ -144,6 +146,7 @@ dev = [
     "boto3>=1.34",
     "pyarrow>=16.0",
     "aiokafka>=0.11",
+    "duckdb>=1.0",            # ADR-0093 — sql dataset transform unit tests
     # Phase AAQ (2026-05-29) — Vertica + MSSQL drivers. Kept in the
     # dev group so ``uv sync`` (no extras) installs them automatically
     # for local dev / contract tests. End users still opt in via the
@@ -298,6 +301,10 @@ ignore_missing_imports = true
 
 # prometheus_client — pulled in transitively via opentelemetry-exporter-prometheus
 # (Step 6.2). Lazy-imported in configure_otel so core install is unaffected.
+[[tool.mypy.overrides]]
+module = ["duckdb", "duckdb.*", "pyarrow", "pyarrow.*"]
+ignore_missing_imports = true
+
 [[tool.mypy.overrides]]
 module = ["prometheus_client", "prometheus_client.*"]
 ignore_missing_imports = true

@@ -2755,4 +2755,39 @@ L1 출시 직후 사용자가 5개 회신:
 
 ---
 
+## ADR-0093: 파이프라인 데이터 플레인 개편 — SQL-first 변환(DuckDB) → Arrow 벡터 플레인 → 클러스터링
+
+**Date**: 2026-06-10
+**Status**: Accepted (Phase 1 구현 시작)
+**Context**: 사용자 평가 요청 — *"성능·편의성 괜찮나? 러닝커브 크고 성능 기대 어렵고 로직 자유도도 별로"*. 코드·벤치마크로 검증한 결과 셋 다 타당:
+- **성능**: 데이터 플레인이 행 단위 Pydantic `Record` + per-row 변환 체인 + per-row `when` eval. 실측(200k행 sqlite→sqlite): raw Python 대비 3.3×(변환 0)~6.3×(변환 2개) 느림(147k~280k rows/s). 그래프 실행은 노드 출력 전체를 메모리 list로 보관. fan-out은 소스 재읽기.
+- **자유도**: 변환이 전부 행 단위 — 서로 다른 소스 간 JOIN/집계/윈도우가 1급으로 불가(소스 SQL은 같은 커넥션 한정, sql_exec는 타깃 DB 후처리 우회). 기존 graph join/aggregate 노드는 Python hash-join/수동 집계로 표현력·성능 모두 제한.
+- **러닝커브**: 17+종 연산자·자체 vocabulary. 업계 수렴점은 "변환 언어 = SQL"(dbt)인데 SQL IDE(Monaco)까지 깔아두고 변환 언어는 자체 명세.
+- **빅데이터/클러스터링 요구**(사용자): 워커 클러스터링과의 관계 정리 필요.
+
+**Decision** — 운영 플레인(워커/스케줄러/센서/카탈로그/DLQ/audit)은 유지, 데이터 플레인만 단계 개편:
+
+**Phase 1 (이번 구현): `sql` 데이터셋 변환 — DuckDB in-process.**
+- 새 변환 타입 `{type: sql, query: ..., view: input}`: in-flight 레코드 전체를 DuckDB 릴레이션 `input`으로 등록하고 임의 SQL(JOIN/GROUP BY/윈도우/QUALIFY/ORDER BY) 실행, 결과가 파이프라인을 계속 흐름. 자유도(임의 SQL) + 러닝커브(아는 언어) + 성능(벡터화) 동시 해소.
+- 코어 타입 신설: `DatasetTransformFn = (Iterator[Record]) -> Iterator[Record]` + `is_dataset_transform()` 마커. `Task.transforms`가 행/데이터셋 변환 혼합 가능 — `_run_task`가 **스테이지 합성**(행 구간은 기존 per-row+DLQ 시맨틱 그대로, 데이터셋 구간은 스트림 래핑)으로 실행. 그래프 transform 노드도 동일 지원.
+- **batch 전용**: 무한 스트림엔 "전체 데이터셋"이 없음 — stream 모드는 명확한 TaskError. 빈 입력 ⇒ 빈 출력(스키마 미지). 결과는 새 데이터셋이라 Record.metadata 미보존. DuckDB Decimal 결과는 int/float 평탄화(sqlite 등 바인딩 호환). lint `_OPAQUE_TRANSFORM_TYPES`에 "sql" 추가(column_mapping 권고).
+- 배선: `[duckdb]` extra(duckdb+pyarrow, lazy import), dev-deps 포함, mypy override.
+- 실측: GROUP BY 500k행 0.5s(**99만 rows/s** — 행 단위 Python 집계 대비 수십×). 단, 출력행이 많은 쿼리는 87k rows/s — **병목이 출력측 Record 재조립**임을 확인 = Phase 2의 직접 근거.
+
+**Phase 2 (다음): Arrow RecordBatch 벡터 플레인.** 커넥터 옵셔널 `read_batches()/write_batches()`(pyarrow), 미지원 커넥터는 Record↔Batch 어댑터로 호환. sql 변환은 Arrow를 그대로 통과(재조립 0). 그래프 실행의 메모리 list도 Arrow로. postgres COPY 등 bulk fast-path, same-connection은 `INSERT INTO…SELECT` 푸시다운.
+
+**Phase 3 (클러스터링) — 사용자 질문 "별개 문제인가?"에 대한 답: 80% 별개, 20% 지금 훅.**
+- **run 단위 scale-out은 이미 설계됨**: runs 테이블 = 큐, `FOR UPDATE SKIP LOCKED` claim(ADR-0021) — 워커 replica를 늘리면 run들이 분산됨. 남은 일: stream-worker 멀티 replica 락, 배포 스토리(compose/k8s), 모니터링. 데이터 플레인과 독립.
+- **단일 run scale-out(빅데이터 본론)**: Spark식 shuffle 분산이 아니라 **파티션 분할 실행** — 한 run을 키/커서 범위로 N개 sub-run으로 쪼개 같은 워커 플릿이 나눠 처리(embarrassingly parallel). 기존 `read_since`/cursor가 사실상 그 기반. ETL 워크로드 대부분(추출-변환-적재)은 이걸로 충분하고, 집계가 끼는 파이프라인만 경계 주의.
+- **지금 박는 훅(20%)**: Phase 2의 배치 read 인터페이스에 파티션 술어(범위) 개념 포함, 데이터 포맷=Arrow(분산 엔진들의 공용 인터체인지 — 진짜 TB+ shuffle이 필요해지면 DuckDB→Ray/Ballista/Spark 핸드오프가 가능, 막다른 길 아님).
+
+**거부된 대안**: (a) Spark 백엔드 재도입 — ADR-0040에서 제거한 복잡도 회귀, 수십 GB~수 TB 구간은 단일 노드 벡터 엔진이 더 빠르고 운영 단순. (b) 전면 재작성 — 운영 플레인·커넥터 12종·계약 테스트는 검증된 자산.
+
+**Consequences**:
+- ✅ "서로 다른 DB 두 개에서 읽어 SQL로 조인/집계 후 적재"가 1급(그래프 fan-in + sql 변환). 코어 unit 1201 passed(+12, 어댑터 extras 3 skip), mypy/ruff clean, 기존 변환·DLQ·cursor 시맨틱 무변경(스테이지 1개=기존 동작).
+- ⚠️ sql 변환은 입력 전체를 메모리에 버퍼(Arrow 변환 전 Python list) — Phase 2에서 스트리밍 ingest/spill로 개선. 대용량은 아직 주의.
+- ⚠️ web 빌더 노출(변환 카탈로그/SQL IDE 연결)은 별도 슬라이스.
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

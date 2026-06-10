@@ -559,6 +559,15 @@
   - [x] **V2c 웹 지역 변수 UI** ✅ (2026-05-21) — 빌더 PipelineSettingsPanel(노드 미선택 시)에 `VariablesEditor`(name/value add·remove, value JSON 파싱). `PipelineConfigJson.variables` + serialize/serializeGraph meta emit + 빌더 load/save/deps 배선. i18n en/ko. 웹 tsc 통과. → **변수 feature track(V1/V2a/V2b/V2c) 완료**, 전역+지역 모두 UI에서 설정 가능.
   - 미해결: 리니지 파생 경로(`_lineage_for`/`_trigger_asset_consumers`)는 아직 변수 미해석 — 변수가 테이블명에 쓰여 asset 키에 영향 시 follow-up 필요.
 
+#### 파이프라인 데이터 플레인 개편 — SQL-first + 벡터화 + 클러스터링 (ADR-0093, 2026-06-10~) ← 작업 중
+> 사용자 평가 합의: 행 단위 Record 플레인은 성능(raw 대비 3~6× 느림)·자유도(데이터셋 연산 불가)·러닝커브(자체 vocabulary) 모두 한계. 운영 플레인은 유지하고 데이터 플레인만 단계 개편. 빅데이터/클러스터링은 run-level(기존 SKIP LOCKED 큐로 80% 준비됨) + 파티션 분할 실행(Phase 2 read 인터페이스에 훅).
+- **Phase 1 — SQL-first 변환 (DuckDB)**:
+  - [x] **P1a 코어 `sql` 데이터셋 변환** ✅ (2026-06-10) — `DatasetTransformFn` 타입 + `is_dataset_transform` 마커 + `_run_task` 스테이지 합성(행 구간 per-row DLQ 시맨틱 보존 / 데이터셋 구간 스트림 래핑) + 그래프 transform 노드 지원 + stream 모드 명시 거부. `{type: sql, query, view}`: in-flight 레코드를 DuckDB 릴레이션으로 등록, 임의 SQL(JOIN/GROUP BY/윈도우/QUALIFY) 실행. `[duckdb]` extra(lazy import), Decimal 평탄화, lint opaque 등록. 12 신규 unit(집계/윈도우/스테이지 혼합/그래프/스트림 거부) → 코어 1201 green, mypy/ruff clean. 실측: GROUP BY 500k행 99만 rows/s.
+  - [ ] **P1b 웹 빌더 노출** — sql 변환 operator(SQL IDE 재사용) + 그래프 fan-in과 결합한 "다중 소스 JOIN" 템플릿. ← 다음
+  - [ ] **P1c 멀티-소스 JOIN e2e** — 서로 다른 DB 2개 → graph fan-in → sql 변환 JOIN → 적재 testcontainers 검증.
+- **Phase 2 — Arrow 벡터 데이터 플레인**: 커넥터 옵셔널 `read_batches()/write_batches()`(파티션 술어 훅 포함 — 클러스터링 대비) + Record↔Batch 어댑터 + sql 변환 Arrow 직통(출력 재조립 제거 — 현 병목 87k rows/s) + postgres COPY/same-connection 푸시다운 fast-path.
+- **Phase 3 — 클러스터링**: 워커 멀티 replica 가동 가이드(+stream-worker 락) / 파티션 분할 실행(run→N sub-run, 키/커서 범위) / 배포(compose/k8s) 문서.
+
 ### 10.5 Schedule + Run 모니터링 (← 작업 중, 2026-05-18 Schedule CRUD + Run 상세까지 완료)
 - [x] Run 목록 (Data Table, StatusBadge, 5s polling) — `/w/[slug]/runs`. Row 클릭 시 상세 페이지로 이동.
 - [x] Schedule 목록 — `/w/[slug]/schedules` (across pipelines flattened, cron/mode 표시).

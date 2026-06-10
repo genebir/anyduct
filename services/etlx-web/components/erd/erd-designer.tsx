@@ -18,7 +18,6 @@ import {
   ReactFlow,
   ReactFlowProvider,
   getNodesBounds,
-  getViewportForBounds,
   useEdgesState,
   useNodesState,
   type Connection,
@@ -874,21 +873,35 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
     if (design.tables.length === 0) return;
     const el = document.querySelector<HTMLElement>(".react-flow__viewport");
     if (!el) return;
-    const pad = 80;
+    // Fit the image tightly to the node bounding box (no wasted whitespace) and
+    // render crisp. `scale` enlarges small/medium ERDs for sharp text but is
+    // clamped so even a 300-table diagram stays under the browser canvas limit.
+    const pad = 48;
     const bounds = getNodesBounds(rfNodes);
-    const imgW = Math.min(Math.max(bounds.width + pad * 2, 600), 5000);
-    const imgH = Math.min(Math.max(bounds.height + pad * 2, 400), 5000);
-    const vp = getViewportForBounds(bounds, imgW, imgH, 0.2, 2, pad);
+    const MAX = 12000; // max output dimension (px) — safe canvas size
+    const fit = Math.min(
+      (MAX - pad * 2) / Math.max(bounds.width, 1),
+      (MAX - pad * 2) / Math.max(bounds.height, 1),
+    );
+    const scale = Math.max(0.2, Math.min(2, fit));
+    const imgW = Math.ceil(bounds.width * scale + pad * 2);
+    const imgH = Math.ceil(bounds.height * scale + pad * 2);
+    const tx = pad - bounds.x * scale;
+    const ty = pad - bounds.y * scale;
     const bg = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim();
     try {
       const url = await toPng(el, {
         backgroundColor: bg ? `rgb(${bg})` : "#ffffff",
         width: imgW,
         height: imgH,
+        // Extra DPI only when we didn't already enlarge (keeps small ERDs sharp
+        // without blowing past the canvas limit on big ones).
+        pixelRatio: scale >= 1.5 ? 1 : 2,
         style: {
           width: `${imgW}px`,
           height: `${imgH}px`,
-          transform: `translate(${vp.x}px, ${vp.y}px) scale(${vp.zoom})`,
+          transformOrigin: "0 0",
+          transform: `translate(${tx}px, ${ty}px) scale(${scale})`,
         },
       });
       const a = document.createElement("a");

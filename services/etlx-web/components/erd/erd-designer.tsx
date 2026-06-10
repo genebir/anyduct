@@ -888,7 +888,9 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
     const imgH = Math.ceil(bounds.height * scale + pad * 2);
     const tx = pad - bounds.x * scale;
     const ty = pad - bounds.y * scale;
-    const bg = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim();
+    // Match the canvas background (`bg-bg` = --bg-base, an "r g b" triple) so the
+    // export looks right in dark mode instead of a jarring white.
+    const bg = getComputedStyle(document.documentElement).getPropertyValue("--bg-base").trim();
     try {
       const url = await toPng(el, {
         backgroundColor: bg ? `rgb(${bg})` : "#ffffff",

@@ -62,6 +62,10 @@ export interface DesignRelation {
   /** Manual bend position along the route axis (0..1), dragged by the user
    *  (Phase AKZ). Absent = automatic obstacle-aware routing. */
   centerRatio?: number;
+  /** Manual attachment point on the source/target node border (Phase ALA):
+   *  a side + ratio along it. Absent = automatic distributed anchor. */
+  sourceAnchor?: { side: "left" | "right" | "top" | "bottom"; t: number };
+  targetAnchor?: { side: "left" | "right" | "top" | "bottom"; t: number };
 }
 
 /** A background annotation drawn behind the tables — a grouping box or a memo

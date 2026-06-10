@@ -124,6 +124,48 @@ function distributedAnchor(
 }
 
 
+
+/** Manual endpoint anchor (Phase ALA): a side of the node + ratio along it. */
+export interface AnchorSpec {
+  side: "left" | "right" | "top" | "bottom";
+  t: number;
+}
+
+function anchorPoint(node: InternalNode, spec: AnchorSpec): { x: number; y: number; pos: Position } {
+  const nx = node.internals.positionAbsolute.x;
+  const ny = node.internals.positionAbsolute.y;
+  const w = node.measured.width ?? 220;
+  const h = node.measured.height ?? 80;
+  switch (spec.side) {
+    case "left":
+      return { x: nx, y: ny + h * spec.t, pos: Position.Left };
+    case "right":
+      return { x: nx + w, y: ny + h * spec.t, pos: Position.Right };
+    case "top":
+      return { x: nx + w * spec.t, y: ny, pos: Position.Top };
+    default:
+      return { x: nx + w * spec.t, y: ny + h, pos: Position.Bottom };
+  }
+}
+
+/** Project a flow-space pointer position onto the node border → AnchorSpec. */
+function specFor(node: InternalNode, p: { x: number; y: number }): AnchorSpec {
+  const nx = node.internals.positionAbsolute.x;
+  const ny = node.internals.positionAbsolute.y;
+  const w = node.measured.width ?? 220;
+  const h = node.measured.height ?? 80;
+  const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+  const dl = Math.abs(p.x - nx);
+  const dr = Math.abs(p.x - (nx + w));
+  const dt = Math.abs(p.y - ny);
+  const db = Math.abs(p.y - (ny + h));
+  const m = Math.min(dl, dr, dt, db);
+  if (m === dl) return { side: "left", t: clamp((p.y - ny) / h, 0.05, 0.95) };
+  if (m === dr) return { side: "right", t: clamp((p.y - ny) / h, 0.05, 0.95) };
+  if (m === dt) return { side: "top", t: clamp((p.x - nx) / w, 0.05, 0.95) };
+  return { side: "bottom", t: clamp((p.x - nx) / w, 0.05, 0.95) };
+}
+
 /**
  * Obstacle-aware bend placement (Phase AKS). A smooth-step path bends at a
  * center line; with the default midpoint that middle segment (and the runs
@@ -225,11 +267,15 @@ export function CrowsFootEdge({ id, source, target, label, style, data, selected
   const targetNode = useInternalNode(target);
   const edges = useStore((s) => s.edges);
   const nodeLookup = useStore((s) => s.nodeLookup);
-  const zoom = useStore((s) => s.transform[2]);
+  const transform = useStore((s) => s.transform);
+  const domNode = useStore((s) => s.domNode);
+  const zoom = transform[2];
   // Manual bend dragging (Phase AKZ): live ratio while dragging, committed to
   // the design (relation.centerRatio) on pointer-up via data.onCenterRatio.
   const [dragRatio, setDragRatio] = useState<number | null>(null);
   const dragStart = useRef<{ ratio: number; px: number } | null>(null);
+  // Manual endpoint anchors (Phase ALA): live spec while dragging an end handle.
+  const [dragAnchor, setDragAnchor] = useState<{ end: "source" | "target"; spec: AnchorSpec } | null>(null);
   const { t } = useLocale();
   if (!sourceNode || !targetNode) return null;
 
@@ -269,8 +315,10 @@ export function CrowsFootEdge({ id, source, target, label, style, data, selected
     );
   }
 
-  const sa = distributedAnchor(sourceNode, targetNode, id, edges, nodeLookup);
-  const ta = distributedAnchor(targetNode, sourceNode, id, edges, nodeLookup);
+  const manualS = dragAnchor?.end === "source" ? dragAnchor.spec : (data?.sourceAnchor as AnchorSpec | undefined);
+  const manualT = dragAnchor?.end === "target" ? dragAnchor.spec : (data?.targetAnchor as AnchorSpec | undefined);
+  const sa = manualS ? anchorPoint(sourceNode, manualS) : distributedAnchor(sourceNode, targetNode, id, edges, nodeLookup);
+  const ta = manualT ? anchorPoint(targetNode, manualT) : distributedAnchor(targetNode, sourceNode, id, edges, nodeLookup);
   const sp = { x: sa.x, y: sa.y };
   const tp = { x: ta.x, y: ta.y };
   const sPos = sa.pos;
@@ -297,7 +345,8 @@ export function CrowsFootEdge({ id, source, target, label, style, data, selected
   // straight line — most of the "중구난방" feel comes from tiny S-bends.
   const SNAP = 14;
   let straight = false;
-  if (horizRoute && Math.abs(sp.y - tp.y) <= SNAP) {
+  const anyManualAnchor = !!manualS || !!manualT;
+  if (!anyManualAnchor && horizRoute && Math.abs(sp.y - tp.y) <= SNAP) {
     const lo = Math.max(
       sourceNode.internals.positionAbsolute.y + 10,
       targetNode.internals.positionAbsolute.y + 10,
@@ -312,7 +361,7 @@ export function CrowsFootEdge({ id, source, target, label, style, data, selected
       tp.y = y;
       straight = true;
     }
-  } else if (vertRoute && Math.abs(sp.x - tp.x) <= SNAP) {
+  } else if (!anyManualAnchor && vertRoute && Math.abs(sp.x - tp.x) <= SNAP) {
     const lo = Math.max(
       sourceNode.internals.positionAbsolute.x + 10,
       targetNode.internals.positionAbsolute.x + 10,
@@ -366,6 +415,63 @@ export function CrowsFootEdge({ id, source, target, label, style, data, selected
   return (
     <>
       <BaseEdge id={id} path={path} style={style} />
+      {selected && (data?.onAnchor as unknown) ? (
+        <EdgeLabelRenderer>
+          {([
+            ["source", sp, sourceNode] as const,
+            ["target", tp, targetNode] as const,
+          ]).map(([end, p, node]) => (
+            <div
+              key={end}
+              style={{
+                position: "absolute",
+                transform: `translate(-50%, -50%) translate(${p.x}px, ${p.y}px)`,
+                pointerEvents: "all",
+                cursor: "move",
+                width: 11,
+                height: 11,
+                borderRadius: 3,
+                background: "rgb(var(--bg-elevated))",
+                border: "2px solid rgb(var(--accent))",
+                boxShadow: "0 1px 3px rgb(0 0 0 / 0.3)",
+              }}
+              title={t("erdDesign.edgeAnchorHint")}
+              onPointerDown={(e) => {
+                e.stopPropagation();
+                (e.target as Element).setPointerCapture(e.pointerId);
+                setDragAnchor({ end, spec: specFor(node, p) });
+              }}
+              onPointerMove={(e) => {
+                if (!dragAnchor || dragAnchor.end !== end || !domNode) return;
+                const r = domNode.getBoundingClientRect();
+                const fp = {
+                  x: (e.clientX - r.left - transform[0]) / zoom,
+                  y: (e.clientY - r.top - transform[1]) / zoom,
+                };
+                setDragAnchor({ end, spec: specFor(node, fp) });
+              }}
+              onPointerUp={() => {
+                if (dragAnchor && dragAnchor.end === end) {
+                  (data!.onAnchor as (eid: string, which: string, spec: AnchorSpec | undefined) => void)(
+                    id,
+                    end,
+                    dragAnchor.spec,
+                  );
+                }
+                setDragAnchor(null);
+              }}
+              onDoubleClick={(e) => {
+                e.stopPropagation();
+                (data!.onAnchor as (eid: string, which: string, spec: AnchorSpec | undefined) => void)(
+                  id,
+                  end,
+                  undefined,
+                );
+              }}
+            />
+          ))}
+        </EdgeLabelRenderer>
+      ) : null}
       {selected && routable && onCenterRatio ? (
         <EdgeLabelRenderer>
           <div

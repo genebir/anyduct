@@ -792,6 +792,19 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
     return target.tableIds.filter((tid) => !others.has(tid)).length;
   }, [design.areas, pendingAreaDelete]);
 
+  // Persist a manually-dragged endpoint anchor (Phase ALA); undefined = auto.
+  const setEdgeAnchor = useCallback(
+    (edgeId: string, end: string, spec: { side: "left" | "right" | "top" | "bottom"; t: number } | undefined) => {
+      setDesign((d) => ({
+        ...d,
+        relations: d.relations.map((r) =>
+          r.id === edgeId ? { ...r, [end === "source" ? "sourceAnchor" : "targetAnchor"]: spec } : r,
+        ),
+      }));
+    },
+    [],
+  );
+
   // Persist a manually-dragged edge bend (Phase AKZ); undefined = back to auto.
   const setEdgeCenterRatio = useCallback((edgeId: string, ratio: number | undefined) => {
     setDesign((d) => ({
@@ -919,6 +932,9 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
           targetCard: r.targetCard ?? "one",
           centerRatio: r.centerRatio,
           onCenterRatio: setEdgeCenterRatio,
+          sourceAnchor: r.sourceAnchor,
+          targetAnchor: r.targetAnchor,
+          onAnchor: setEdgeAnchor,
         },
         style: {
           stroke: "rgb(var(--accent))",
@@ -926,7 +942,7 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
         },
         labelStyle: { fontSize: 10, fill: "rgb(var(--text-muted))" },
       }));
-  }, [design, selectedEdgeId, activeArea, setEdgeCenterRatio]);
+  }, [design, selectedEdgeId, activeArea, setEdgeCenterRatio, setEdgeAnchor]);
 
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState(nodes);
   const [rfEdges, setRfEdges, onEdgesChange] = useEdgesState(edges);
@@ -1170,7 +1186,11 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
     // Fresh layout = fresh routing: drop manual bends so lines re-optimise.
     setDesign((d) => ({
       ...d,
-      relations: d.relations.map((r) => (r.centerRatio !== undefined ? { ...r, centerRatio: undefined } : r)),
+      relations: d.relations.map((r) =>
+        r.centerRatio !== undefined || r.sourceAnchor || r.targetAnchor
+          ? { ...r, centerRatio: undefined, sourceAnchor: undefined, targetAnchor: undefined }
+          : r,
+      ),
     }));
     applyLayout((d) => autoLayout(d, dir));
   };

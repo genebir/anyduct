@@ -71,6 +71,7 @@ import {
 import { useLocale } from "@/components/providers/locale-provider";
 import { ERD_EDGE_TYPES } from "@/components/erd/crowsfoot-edge";
 import { ImportTablesDialog } from "@/components/erd/import-tables-dialog";
+import { VerifyDbDialog } from "@/components/erd/verify-db-dialog";
 import { ImportDdlDialog } from "@/components/erd/import-ddl-dialog";
 import { parseDamxWithAreas } from "@/lib/damx";
 import { autoLayout, layoutAreas, removeOverlaps } from "@/lib/erd-layout";
@@ -1011,6 +1012,7 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
     });
 
   const [showValidation, setShowValidation] = useState(false);
+  const [showDbVerify, setShowDbVerify] = useState(false);
   const issues = useMemo(() => validateErd(design), [design]);
   const warnCount = issues.filter((i) => i.severity === "warning").length;
 
@@ -1161,14 +1163,38 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
     toast.success(t("erdDocs.generated", { name: filename }));
   };
 
-  const onJumpToTable = (name: string) => {
-    const tb = design.tables.find(
-      (t) => t.name === name || t.name.toLowerCase() === name.toLowerCase(),
-    );
-    if (!tb) return;
+  // Search (Phase AKK): substring match (%str% semantics) over physical AND
+  // logical names, with a styled autocomplete dropdown. Jumping is tab-aware —
+  // it switches to a tab containing the table and uses that tab's position.
+  const [searchQ, setSearchQ] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchIdx, setSearchIdx] = useState(0);
+  const searchMatches = useMemo(() => {
+    const q = searchQ.replace(/%/g, "").trim().toLowerCase();
+    if (!q) return [];
+    const areaOf = (id: string) => (design.areas ?? []).find((a) => a.tableIds.includes(id));
+    return design.tables
+      .filter(
+        (tb) => tb.name.toLowerCase().includes(q) || (tb.logical ?? "").toLowerCase().includes(q),
+      )
+      .slice(0, 12)
+      .map((tb) => ({ tb, area: areaOf(tb.id) }));
+  }, [searchQ, design.tables, design.areas]);
+
+  const jumpToTable = (tb: DesignTable) => {
+    setSearchOpen(false);
+    setSearchQ("");
     setSelectedId(tb.id);
     setSelectedEdgeId(null);
-    rfRef.current?.setCenter(tb.x + 110, tb.y + 70, { zoom: 1.1, duration: 400 });
+    // Tab-aware: stay if the active tab shows it; otherwise switch to the
+    // first tab containing it (or plain canvas when there are no tabs).
+    let area = activeArea && activeArea.tableIds.includes(tb.id) ? activeArea : null;
+    if (!area && (design.areas ?? []).length > 0) {
+      area = (design.areas ?? []).find((a) => a.tableIds.includes(tb.id)) ?? null;
+      if (area) setActiveAreaId(area.id);
+    }
+    const pos = area?.positions?.[tb.id] ?? { x: tb.x, y: tb.y };
+    setTimeout(() => rfRef.current?.setCenter(pos.x + 110, pos.y + 70, { zoom: 1.1, duration: 400 }), 80);
   };
 
   const damxRef = useRef<HTMLInputElement>(null);
@@ -1331,21 +1357,69 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
         ) : null}
         <span className="mx-1 h-5 w-px bg-border-subtle" />
         {design.tables.length > 8 ? (
-          <>
+          <div className="relative">
             <input
-              list="erd-table-search"
+              value={searchQ}
               placeholder={t("erdDesign.searchTable")}
-              className="h-8 w-44 rounded-md border border-border-subtle bg-bg px-2 text-xs text-text"
+              className="h-8 w-52 rounded-md border border-border-subtle bg-bg px-2 text-xs text-text focus-visible:border-accent focus-visible:outline-none"
               onChange={(e) => {
-                if (design.tables.some((t) => t.name === e.target.value)) onJumpToTable(e.target.value);
+                setSearchQ(e.target.value);
+                setSearchOpen(true);
+                setSearchIdx(0);
+              }}
+              onFocus={() => setSearchOpen(true)}
+              onBlur={() => setTimeout(() => setSearchOpen(false), 120)}
+              onKeyDown={(e) => {
+                if (e.key === "ArrowDown") {
+                  e.preventDefault();
+                  setSearchIdx((i) => Math.min(i + 1, searchMatches.length - 1));
+                } else if (e.key === "ArrowUp") {
+                  e.preventDefault();
+                  setSearchIdx((i) => Math.max(i - 1, 0));
+                } else if (e.key === "Enter") {
+                  const m = searchMatches[searchIdx];
+                  if (m) jumpToTable(m.tb);
+                } else if (e.key === "Escape") {
+                  setSearchOpen(false);
+                }
               }}
             />
-            <datalist id="erd-table-search">
-              {design.tables.map((t) => (
-                <option key={t.id} value={t.name} />
-              ))}
-            </datalist>
-          </>
+            {searchOpen && searchQ.trim() ? (
+              <div className="absolute left-0 top-9 z-30 max-h-72 w-72 overflow-y-auto rounded-md border border-border-subtle bg-elevated shadow-lg">
+                {searchMatches.length === 0 ? (
+                  <div className="px-3 py-2 text-xs text-text-muted">{t("common.noResults")}</div>
+                ) : (
+                  searchMatches.map((m, i) => (
+                    <button
+                      key={m.tb.id}
+                      type="button"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        jumpToTable(m.tb);
+                      }}
+                      onMouseEnter={() => setSearchIdx(i)}
+                      className={`flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left ${
+                        i === searchIdx ? "bg-overlay" : ""
+                      }`}
+                    >
+                      <Table2Icon size={12} className="shrink-0 text-accent" />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate font-mono text-xs text-text">{m.tb.name}</span>
+                        {m.tb.logical && m.tb.logical !== m.tb.name ? (
+                          <span className="block truncate text-[11px] text-text-muted">{m.tb.logical}</span>
+                        ) : null}
+                      </span>
+                      {m.area ? (
+                        <span className="shrink-0 rounded bg-accent/10 px-1.5 py-0.5 text-[10px] text-accent">
+                          {m.area.name}
+                        </span>
+                      ) : null}
+                    </button>
+                  ))
+                )}
+              </div>
+            ) : null}
+          </div>
         ) : null}
         <Button size="sm" variant="secondary" onClick={onAddTable}>
           <PlusIcon size={14} />
@@ -1414,6 +1488,16 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
           >
             <AlertTriangleIcon size={14} />
             {warnCount > 0 ? t("erdValidate.buttonCount", { n: warnCount }) : t("erdValidate.button")}
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => setShowDbVerify(true)}
+            disabled={design.tables.length === 0 || !ws?.id}
+            title={t("erdVerify.hint")}
+          >
+            <DatabaseIcon size={14} />
+            {t("erdVerify.button")}
           </Button>
           <Button
             size="sm"
@@ -1599,7 +1683,10 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
                   {issues.map((iss, n) => (
                     <li key={n}>
                       <button
-                        onClick={() => onJumpToTable(iss.tableName)}
+                        onClick={() => {
+                          const tb = design.tables.find((x) => x.name === iss.tableName);
+                          if (tb) jumpToTable(tb);
+                        }}
                         className="flex w-full items-start gap-2 px-3 py-1.5 text-left text-xs hover:bg-overlay"
                       >
                         <AlertTriangleIcon
@@ -1777,6 +1864,9 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
         onConfirm={confirmAreaDelete}
         onCancel={() => setPendingAreaDelete(null)}
       />
+      {showDbVerify && ws?.id ? (
+        <VerifyDbDialog workspaceId={ws.id} design={design} onClose={() => setShowDbVerify(false)} />
+      ) : null}
       {showImport && ws?.id ? (
         <ImportTablesDialog
           workspaceId={ws.id}

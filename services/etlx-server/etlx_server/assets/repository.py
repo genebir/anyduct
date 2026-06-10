@@ -24,6 +24,7 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy import delete, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from etl_plugins.core.asset import AssetKey, AssetLineage
@@ -48,42 +49,40 @@ class AssetRepository:
 
     async def _upsert_asset(self, workspace_id: UUID, key: AssetKey, kind: str | None) -> Asset:
         rendered = str(key)
+        # Race-safe get-or-create. Multi-replica workers (ADR-0021 queue)
+        # can finish runs touching the same asset concurrently; a plain
+        # select-then-insert double-inserts and trips ``uq_asset_ws_key``
+        # (caught by the multi-worker e2e). ``ON CONFLICT DO NOTHING``
+        # makes the insert atomic; the follow-up select sees either our
+        # row or the winner's.
+        await self._session.execute(
+            pg_insert(Asset)
+            .values(workspace_id=workspace_id, asset_key=rendered, kind=kind)
+            .on_conflict_do_nothing(constraint="uq_asset_ws_key")
+        )
         existing = (
             await self._session.execute(
                 select(Asset).where(Asset.workspace_id == workspace_id, Asset.asset_key == rendered)
             )
-        ).scalar_one_or_none()
-        if existing is not None:
-            # Backfill kind if we learned it later; never clobber a known kind.
-            if kind and not existing.kind:
-                existing.kind = kind
-            return existing
-        asset = Asset(workspace_id=workspace_id, asset_key=rendered, kind=kind)
-        self._session.add(asset)
-        await self._session.flush()
-        return asset
+        ).scalar_one()
+        # Backfill kind if we learned it later; never clobber a known kind.
+        if kind and not existing.kind:
+            existing.kind = kind
+        return existing
 
     async def _upsert_edge(self, workspace_id: UUID, upstream: Asset, downstream: Asset) -> None:
         if upstream.id == downstream.id:
             return
-        existing = (
-            await self._session.execute(
-                select(AssetEdge).where(
-                    AssetEdge.upstream_asset_id == upstream.id,
-                    AssetEdge.downstream_asset_id == downstream.id,
-                )
-            )
-        ).scalar_one_or_none()
-        if existing is not None:
-            return
-        self._session.add(
-            AssetEdge(
+        # Same race-safety story as ``_upsert_asset`` (``uq_asset_edge``).
+        await self._session.execute(
+            pg_insert(AssetEdge)
+            .values(
                 workspace_id=workspace_id,
                 upstream_asset_id=upstream.id,
                 downstream_asset_id=downstream.id,
             )
+            .on_conflict_do_nothing(constraint="uq_asset_edge")
         )
-        await self._session.flush()
 
     async def persist_run_lineage(
         self,

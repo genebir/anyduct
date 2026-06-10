@@ -566,7 +566,9 @@
   - [ ] **P1b 웹 빌더 노출** — sql 변환 operator(SQL IDE 재사용) + 그래프 fan-in과 결합한 "다중 소스 JOIN" 템플릿. ← 다음
   - [ ] **P1c 멀티-소스 JOIN e2e** — 서로 다른 DB 2개 → graph fan-in → sql 변환 JOIN → 적재 testcontainers 검증.
 - **Phase 2 — Arrow 벡터 데이터 플레인**: 커넥터 옵셔널 `read_batches()/write_batches()`(파티션 술어 훅 포함 — 클러스터링 대비) + Record↔Batch 어댑터 + sql 변환 Arrow 직통(출력 재조립 제거 — 현 병목 87k rows/s) + postgres COPY/same-connection 푸시다운 fast-path.
-- **Phase 3 — 클러스터링**: 워커 멀티 replica 가동 가이드(+stream-worker 락) / 파티션 분할 실행(run→N sub-run, 키/커서 범위) / 배포(compose/k8s) 문서.
+- **Phase 3 — 클러스터링**:
+  - [x] **P3a 멀티-replica 경합 실증 + asset upsert 레이스 수정** ✅ (2026-06-10) — worker_lifecycle이 deferred했던 "real concurrency test"를 구현: 자체 커밋 세션(replica당 별도 커넥션)으로 ① 3 replica 동시 claim 12 run 무중복·완전 분배 + worker_id 스탬프, ② 실제 RunWorker 2대가 같은 PG 큐에서 6 run 전부 SUCCEEDED(양쪽 모두 claim 승리). **e2e가 실버그 발견**: 두 replica가 같은 파이프라인 run을 동시에 끝내면 카탈로그 `_upsert_asset/_upsert_edge`(select-then-insert)가 `uq_asset_ws_key/uq_asset_edge` 충돌로 run 실패 → PG `INSERT … ON CONFLICT DO NOTHING`+재select로 원자화. 서버 it +2, 카탈로그/워커 회귀 53 green.
+  - [ ] 파티션 분할 실행(run→N sub-run, 키/커서 범위) / 배포(compose/k8s) 가이드 / stream-worker 멀티 replica 운영 문서.
 
 ### 10.5 Schedule + Run 모니터링 (← 작업 중, 2026-05-18 Schedule CRUD + Run 상세까지 완료)
 - [x] Run 목록 (Data Table, StatusBadge, 5s polling) — `/w/[slug]/runs`. Row 클릭 시 상세 페이지로 이동.

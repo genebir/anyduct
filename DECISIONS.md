@@ -2777,7 +2777,7 @@ L1 출시 직후 사용자가 5개 회신:
 **Phase 2 (다음): Arrow RecordBatch 벡터 플레인.** 커넥터 옵셔널 `read_batches()/write_batches()`(pyarrow), 미지원 커넥터는 Record↔Batch 어댑터로 호환. sql 변환은 Arrow를 그대로 통과(재조립 0). 그래프 실행의 메모리 list도 Arrow로. postgres COPY 등 bulk fast-path, same-connection은 `INSERT INTO…SELECT` 푸시다운.
 
 **Phase 3 (클러스터링) — 사용자 질문 "별개 문제인가?"에 대한 답: 80% 별개, 20% 지금 훅.**
-- **run 단위 scale-out은 이미 설계됨**: runs 테이블 = 큐, `FOR UPDATE SKIP LOCKED` claim(ADR-0021) — 워커 replica를 늘리면 run들이 분산됨. 남은 일: stream-worker 멀티 replica 락, 배포 스토리(compose/k8s), 모니터링. 데이터 플레인과 독립.
+- **run 단위 scale-out은 이미 설계됨**: runs 테이블 = 큐, `FOR UPDATE SKIP LOCKED` claim(ADR-0021) — 워커 replica를 늘리면 run들이 분산됨. stream-worker도 K2b에서 schedule-row 락 + RUNNING 중복 체크로 멀티 replica 안전. 남은 일: 배포 스토리(compose/k8s), 모니터링. 데이터 플레인과 독립. **P3a(같은 날) 실증 완료**: 멀티-replica 경합 e2e 2종(3-replica claim 무중복 분배 / RunWorker 2대 공동 드레인) — e2e가 카탈로그 asset/edge upsert의 select-then-insert 레이스(동시 run 완료 시 `uq_asset_ws_key` 충돌로 run 실패)를 발견, `INSERT … ON CONFLICT DO NOTHING`으로 원자화.
 - **단일 run scale-out(빅데이터 본론)**: Spark식 shuffle 분산이 아니라 **파티션 분할 실행** — 한 run을 키/커서 범위로 N개 sub-run으로 쪼개 같은 워커 플릿이 나눠 처리(embarrassingly parallel). 기존 `read_since`/cursor가 사실상 그 기반. ETL 워크로드 대부분(추출-변환-적재)은 이걸로 충분하고, 집계가 끼는 파이프라인만 경계 주의.
 - **지금 박는 훅(20%)**: Phase 2의 배치 read 인터페이스에 파티션 술어(범위) 개념 포함, 데이터 포맷=Arrow(분산 엔진들의 공용 인터체인지 — 진짜 TB+ shuffle이 필요해지면 DuckDB→Ray/Ballista/Spark 핸드오프가 가능, 막다른 길 아님).
 

@@ -1130,8 +1130,15 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
         const laid = fn(sub);
         const positions: Record<string, { x: number; y: number }> = {};
         for (const t of laid.tables) positions[t.id] = { x: t.x, y: t.y };
+        // Node sizes are a table property (not per-tab) — apply any size the
+        // layout chose (AKV visibility sizing) globally.
+        const sizeBy = new Map(laid.tables.map((tb) => [tb.id, { w: tb.w, h: tb.h }]));
         return {
           ...d,
+          tables: d.tables.map((tb) => {
+            const s = sizeBy.get(tb.id);
+            return s ? { ...tb, w: s.w, h: s.h } : tb;
+          }),
           areas: (d.areas ?? []).map((a) => (a.id === activeAreaId ? { ...a, positions } : a)),
         };
       });

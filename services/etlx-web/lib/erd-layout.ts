@@ -33,6 +33,55 @@ function nodeHeight(columnCount: number): number {
   return HEADER_H + Math.max(1, columnCount) * ROW_H + PAD_H;
 }
 
+/* ── Visibility-driven node sizing (Phase AKV) ──────────────────────────────
+   Auto-layout also picks node sizes: width fits the longest column line so
+   names/types don't truncate, and relationship hubs get extra height so the
+   distributed edge anchors (AKR) sit a readable distance apart. */
+
+const MIN_W = 200;
+const MAX_W = 440;
+const EDGE_GAP = 30; // minimum px between edge anchors on a node side
+
+/** Rough rendered text width: mono ~6.7px/char at 11px, Hangul ~11.5px. */
+function textW(s: string): number {
+  let w = 0;
+  for (const ch of s) w += /[가-힣]/.test(ch) ? 11.5 : 6.7;
+  return w;
+}
+
+/** Width that fits the table header and every column row (icon + name +
+ *  gap + type + paddings, mirroring the node renderer's layout). */
+function fitWidth(t: DesignTable): number {
+  let w = 40 + textW(t.name) + (t.logical && t.logical !== t.name ? 0 : 0);
+  for (const c of t.columns) {
+    w = Math.max(w, 16 + 6 + textW(c.name) + 14 + textW(c.type ?? "") * 0.91 + 30);
+  }
+  return Math.round(Math.min(Math.max(w, MIN_W), MAX_W));
+}
+
+/**
+ * Return tables with auto-chosen sizes: ``w`` = content-fitted width; ``h`` is
+ * raised above the content height only for hub tables whose edge count needs
+ * the room (left/right anchors get ≥ EDGE_GAP spacing), and cleared back to
+ * auto otherwise so the node keeps growing with new columns.
+ */
+export function autoSizeTables(design: ErdDesign): DesignTable[] {
+  const degree = new Map<string, number>();
+  for (const r of design.relations) {
+    if (r.from === r.to) continue;
+    degree.set(r.from, (degree.get(r.from) ?? 0) + 1);
+    degree.set(r.to, (degree.get(r.to) ?? 0) + 1);
+  }
+  return design.tables.map((t) => {
+    const contentH = nodeHeight(t.columns.length);
+    // In LR/TB layouts edges split roughly evenly between two opposite sides.
+    const perSide = Math.ceil((degree.get(t.id) ?? 0) / 2);
+    const needH = HEADER_H + perSide * EDGE_GAP + PAD_H;
+    const h = needH > contentH ? needH : undefined;
+    return { ...t, w: fitWidth(t), ...(h ? { h } : { h: undefined }) };
+  });
+}
+
 /**
  * Remove node overlaps with MINIMAL displacement (Phase AJP), preserving the
  * original arrangement as much as possible. Used after a .damx import so tables
@@ -134,8 +183,9 @@ function layoutCluster(
 ): { placed: Placed[]; w: number; h: number } {
   if (comp.length === 1) {
     const c = comp[0];
-    const h = nodeHeight(c.columns.length);
-    return { placed: [{ id: c.id, x: 0, y: 0, w: NODE_WIDTH, h }], w: NODE_WIDTH, h };
+    const w = c.w ?? NODE_WIDTH;
+    const h = c.h ?? nodeHeight(c.columns.length);
+    return { placed: [{ id: c.id, x: 0, y: 0, w, h }], w, h };
   }
   const ids = new Set(comp.map((t) => t.id));
   const g = new dagre.graphlib.Graph();
@@ -143,7 +193,8 @@ function layoutCluster(
   // ranksep between ranks, nodesep within a rank, edgesep between parallel edges.
   g.setGraph({ rankdir: dir, ranksep: 150, nodesep: 70, edgesep: 30, marginx: 0, marginy: 0 });
   g.setDefaultEdgeLabel(() => ({}));
-  for (const t of comp) g.setNode(t.id, { width: NODE_WIDTH, height: nodeHeight(t.columns.length) });
+  for (const t of comp)
+    g.setNode(t.id, { width: t.w ?? NODE_WIDTH, height: t.h ?? nodeHeight(t.columns.length) });
   for (const r of design.relations) {
     if (r.from === r.to) continue;
     if (ids.has(r.from) && ids.has(r.to)) g.setEdge(r.from, r.to);
@@ -176,8 +227,11 @@ function layoutCluster(
 export function autoLayout(design: ErdDesign, dir: LayoutDirection = "TB"): ErdDesign {
   if (design.tables.length === 0) return design;
 
-  const comps = connectedComponents(design);
-  const laid = comps.map((c) => layoutCluster(c, design, dir));
+  // Size nodes for visibility first (fitted width, hub height), then place
+  // the sized boxes — dagre spacing stays accurate for the real footprint.
+  const sized: ErdDesign = { ...design, tables: autoSizeTables(design) };
+  const comps = connectedComponents(sized);
+  const laid = comps.map((c) => layoutCluster(c, sized, dir));
 
   // Keep connected clusters first (largest area first), singletons last so the
   // lone tables tuck neatly into a trailing grid instead of splitting clusters.
@@ -211,7 +265,7 @@ export function autoLayout(design: ErdDesign, dir: LayoutDirection = "TB"): ErdD
     rowHeight = Math.max(rowHeight, l.h);
   }
 
-  const tables = design.tables.map((t) => {
+  const tables = sized.tables.map((t) => {
     const p = pos.get(t.id);
     return p ? { ...t, x: p.x, y: p.y } : t;
   });

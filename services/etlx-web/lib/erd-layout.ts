@@ -217,3 +217,32 @@ export function autoLayout(design: ErdDesign, dir: LayoutDirection = "TB"): ErdD
   });
   return { ...design, tables };
 }
+
+/**
+ * Fill per-tab positions for subject areas (Phase AKH). Areas that came with
+ * reliable DA# positions get an overlap-separation pass; areas without get a
+ * fresh auto-layout of just that tab's tables. Global table x/y is untouched.
+ */
+export function layoutAreas(design: ErdDesign): ErdDesign {
+  if (!design.areas?.length) return design;
+  const byId = new Map(design.tables.map((t) => [t.id, t]));
+  const areas = design.areas.map((a) => {
+    const members = a.tableIds.map((id) => byId.get(id)).filter((t): t is DesignTable => !!t);
+    if (members.length === 0) return a;
+    const ids = new Set(a.tableIds);
+    const sub: ErdDesign = {
+      tables: members.map((t) => ({
+        ...t,
+        x: a.positions?.[t.id]?.x ?? t.x,
+        y: a.positions?.[t.id]?.y ?? t.y,
+      })),
+      relations: design.relations.filter((r) => ids.has(r.from) && ids.has(r.to)),
+    };
+    const hasPositions = !!a.positions && Object.keys(a.positions).length >= Math.min(2, members.length);
+    const laid = hasPositions ? removeOverlaps(sub) : autoLayout(sub);
+    const positions: Record<string, { x: number; y: number }> = {};
+    for (const t of laid.tables) positions[t.id] = { x: t.x, y: t.y };
+    return { ...a, positions };
+  });
+  return { ...design, areas };
+}

@@ -73,12 +73,27 @@ export interface ErdShape {
  *  hex, per the design system). */
 export const SHAPE_COLORS = ["muted", "accent", "success", "warning", "error"] as const;
 
+/**
+ * Subject area (주제영역) — a named tab inside ONE diagram showing a subset of
+ * the tables, like DA#'s diagram panes. Tables/relations stay global to the
+ * design; an area only holds membership + per-area positions (the same table
+ * can sit at different spots on different tabs).
+ */
+export interface ErdArea {
+  id: string;
+  name: string;
+  tableIds: string[];
+  positions?: Record<string, { x: number; y: number }>;
+}
+
 export interface ErdDesign {
   tables: DesignTable[];
   relations: DesignRelation[];
   shapes?: ErdShape[];
   /** Diagram-wide font scale (1 = 100%). Persisted; adjustable in the toolbar. */
   fontScale?: number;
+  /** Subject-area tabs (주제영역). Absent/empty = single-canvas diagram. */
+  areas?: ErdArea[];
 }
 
 /** Canonical-ish SQL types offered in the column type dropdown. */

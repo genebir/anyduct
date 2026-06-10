@@ -747,24 +747,20 @@ function toDesign(
    Membership = entities with a canvas-item link inside the pane's frames.
    Count-validated: 안전지원 8 areas / TMS 13 / CTC&ARS 10 / 단일파일 1. */
 
-export interface DamxAreaDesign {
-  name: string;
-  design: ErdDesign;
-  positioned: boolean;
-}
-
 /**
- * Split a ``.damx`` into one ErdDesign per subject area (Phase AKF). Returns
- * an empty array when the file has fewer than 2 named panes — the caller
- * should then fall back to the single whole-model import.
+ * Parse a ``.damx`` into ONE ErdDesign whose subject areas become TABS
+ * (``design.areas``) — Phase AKH, replacing the one-diagram-per-area split
+ * (AKF) per user feedback. Tables/relations are global; each area records its
+ * member table ids + that pane's DA# positions. Files with fewer than 2 named
+ * panes return the plain whole-model design (no tabs).
  */
-export function parseDamxAreas(buf: ArrayBuffer): DamxAreaDesign[] {
+export function parseDamxWithAreas(buf: ArrayBuffer): ErdDesign {
   const full = parseDamx(buf);
   const b = new Uint8Array(buf);
   const F = framesWithOffsets(b);
   const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
   const diaIdx = F.findIndex((f) => f.s === "DIAGRAM_VERSION");
-  if (diaIdx < 0) return [];
+  if (diaIdx < 0) return full;
   const DIA = F[diaIdx].off;
   const strict = new TextDecoder("utf-16le", { fatal: true });
   const frameAt = (off: number): string | null => {
@@ -806,7 +802,7 @@ export function parseDamxAreas(buf: ArrayBuffer): DamxAreaDesign[] {
   // GUID; paper sizes like A4 from the page-setup record are noise).
   const marks: number[] = [];
   for (let i = 0; i < F.length; i++) if (F[i].s === "K_PANE_PRINT_DEV") marks.push(i);
-  if (marks.length < 2) return [];
+  if (marks.length < 2) return full;
   const headers = new Map<number, string>();
   for (let mi = 0; mi < marks.length; mi++) {
     const m = marks[mi];
@@ -821,7 +817,7 @@ export function parseDamxAreas(buf: ArrayBuffer): DamxAreaDesign[] {
       }
     }
   }
-  if (headers.size < 2) return [];
+  if (headers.size < 2) return full;
   // membership + per-pane canvas items per area
   const areaMembers = new Map<string, Set<string>>();
   const areaEntCi = new Map<string, Map<string, string>>(); // area → Korean name → ci GUID
@@ -864,35 +860,35 @@ export function parseDamxAreas(buf: ArrayBuffer): DamxAreaDesign[] {
       boundsByCi.set(f.s, { x: v[1], y: v[2] });
     }
   }
-  // assemble per-area designs from the full design
+  // assemble subject-area TABS over the full design (membership + positions)
   const byKorean = new Map<string, DesignTable>();
   for (const t of full.tables) byKorean.set(t.logical ?? t.name, t);
-  const out: DamxAreaDesign[] = [];
+  const areas: NonNullable<ErdDesign["areas"]> = [];
   const SCALE = 0.6;
   for (const [name, members] of areaMembers) {
     const entci = areaEntCi.get(name)!;
-    const tables: DesignTable[] = [];
+    const tableIds: string[] = [];
+    const positions: Record<string, { x: number; y: number }> = {};
+    let placed = 0;
+    const distinct = new Set<string>();
     for (const m of members) {
       const t = byKorean.get(m);
       if (!t) continue;
+      tableIds.push(t.id);
       const ci = entci.get(m);
       const bd = ci ? boundsByCi.get(ci) : undefined;
-      tables.push({
-        ...t,
-        columns: t.columns.map((c) => ({ ...c })),
-        ...(bd ? { x: Math.round(bd.x * SCALE), y: Math.round(bd.y * SCALE) } : {}),
-      });
+      if (bd) {
+        positions[t.id] = { x: Math.round(bd.x * SCALE), y: Math.round(bd.y * SCALE) };
+        placed += 1;
+        distinct.add(`${bd.x},${bd.y}`);
+      }
     }
-    if (tables.length === 0) continue;
-    const ids = new Set(tables.map((t) => t.id));
-    const relations = full.relations.filter((r) => ids.has(r.from) && ids.has(r.to)).map((r) => ({ ...r }));
-    const placed = tables.filter((t) => {
-      const ci = entci.get(t.logical ?? t.name);
-      return ci ? boundsByCi.has(ci) : false;
-    });
-    const distinct = new Set(placed.map((t) => `${t.x},${t.y}`));
-    const positioned = placed.length >= 2 && distinct.size >= placed.length - 1;
-    out.push({ name, design: { tables, relations, fontScale: full.fontScale }, positioned });
+    if (tableIds.length === 0) continue;
+    // Only keep DA# positions when they're reliable; otherwise leave the area
+    // unpositioned so the import handler can auto-layout that tab.
+    const reliable = placed >= 2 && distinct.size >= placed - 1 && placed >= tableIds.length * 0.6;
+    areas.push({ id: newId("area"), name, tableIds, ...(reliable ? { positions } : {}) });
   }
-  return out.length >= 2 ? out : [];
+  if (areas.length < 2) return full;
+  return { ...full, areas };
 }

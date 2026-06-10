@@ -72,8 +72,8 @@ import { useLocale } from "@/components/providers/locale-provider";
 import { ERD_EDGE_TYPES } from "@/components/erd/crowsfoot-edge";
 import { ImportTablesDialog } from "@/components/erd/import-tables-dialog";
 import { ImportDdlDialog } from "@/components/erd/import-ddl-dialog";
-import { parseDamx } from "@/lib/damx";
-import { autoLayout, removeOverlaps } from "@/lib/erd-layout";
+import { parseDamxWithAreas } from "@/lib/damx";
+import { autoLayout, layoutAreas, removeOverlaps } from "@/lib/erd-layout";
 import { validateErd } from "@/lib/erd-validate";
 import {
   columnDictionaryCsv,
@@ -644,6 +644,45 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
     };
   }, [ws?.id, docId, design, docName, loaded]);
 
+  // Subject-area tabs (주제영역, Phase AKH): null = the whole model ("전체").
+  // An active area filters the canvas to its member tables and uses the
+  // area's own positions, like DA#'s diagram panes.
+  const [activeAreaId, setActiveAreaId] = useState<string | null>(null);
+  const activeArea = useMemo(
+    () => (activeAreaId ? (design.areas ?? []).find((a) => a.id === activeAreaId) ?? null : null),
+    [design.areas, activeAreaId],
+  );
+  const [renamingAreaId, setRenamingAreaId] = useState<string | null>(null);
+  const [areaRenameVal, setAreaRenameVal] = useState("");
+  const [pendingAreaDelete, setPendingAreaDelete] = useState<string | null>(null);
+  const onAddArea = () => {
+    const id = newId("area");
+    setDesign((d) => ({
+      ...d,
+      areas: [
+        ...(d.areas ?? []),
+        { id, name: t("erdDesign.areaDefaultName", { n: (d.areas?.length ?? 0) + 1 }), tableIds: [] },
+      ],
+    }));
+    setActiveAreaId(id);
+  };
+  const commitAreaRename = (id: string) => {
+    const name = areaRenameVal.trim();
+    setRenamingAreaId(null);
+    if (!name) return;
+    setDesign((d) => ({
+      ...d,
+      areas: (d.areas ?? []).map((a) => (a.id === id ? { ...a, name } : a)),
+    }));
+  };
+  const confirmAreaDelete = () => {
+    const id = pendingAreaDelete;
+    setPendingAreaDelete(null);
+    if (!id) return;
+    setDesign((d) => ({ ...d, areas: (d.areas ?? []).filter((a) => a.id !== id) }));
+    if (activeAreaId === id) setActiveAreaId(null);
+  };
+
   // Base nodes: the expensive part (per-column label JSX). Depends only on the
   // design + name mode — NOT on selection — so clicking a node doesn't rebuild
   // every table's label (matters for 300+ table imports).
@@ -655,9 +694,11 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
       fkByTable.set(r.from, set);
     }
     const scale = design.fontScale ?? 1;
-    return design.tables.map((tb) => ({
+    const memberIds = activeArea ? new Set(activeArea.tableIds) : null;
+    const visible = memberIds ? design.tables.filter((t) => memberIds.has(t.id)) : design.tables;
+    return visible.map((tb) => ({
       id: tb.id,
-      position: { x: tb.x, y: tb.y },
+      position: activeArea?.positions?.[tb.id] ?? { x: tb.x, y: tb.y },
       data: { label: nodeLabel(tb, fkByTable.get(tb.id) ?? new Set(), nameMode, scale) },
       sourcePosition: Position.Right,
       targetPosition: Position.Left,
@@ -669,7 +710,7 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
         color: "rgb(var(--text))",
       },
     }));
-  }, [design, nameMode]);
+  }, [design, nameMode, activeArea]);
 
   const handleShapeResize = useCallback(
     (id: string, p: { x: number; y: number; width: number; height: number }) =>
@@ -717,9 +758,12 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
     [baseNodes, shapeNodes, selectedId],
   );
 
-  const edges = useMemo<Edge[]>(
-    () =>
-      design.relations.map((r) => ({
+  const edges = useMemo<Edge[]>(() => {
+    const memberIds = activeArea ? new Set(activeArea.tableIds) : null;
+    const rels = memberIds
+      ? design.relations.filter((r) => memberIds.has(r.from) && memberIds.has(r.to))
+      : design.relations;
+    return rels.map((r) => ({
         id: r.id,
         source: r.from,
         target: r.to,
@@ -731,9 +775,8 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
           strokeWidth: r.id === selectedEdgeId ? 2.5 : 1.5,
         },
         labelStyle: { fontSize: 10, fill: "rgb(var(--text-muted))" },
-      })),
-    [design, selectedEdgeId],
-  );
+      }));
+  }, [design, selectedEdgeId, activeArea]);
 
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState(nodes);
   const [rfEdges, setRfEdges, onEdgesChange] = useEdgesState(edges);
@@ -744,24 +787,44 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
     if (c.source && c.target) setDesign((d) => connect(d, c.source!, c.target!));
   }, []);
 
-  const onNodeDragStop = useCallback((_e: unknown, node: Node) => {
-    setDesign((d) => {
-      if (node.type === "shape") {
+  const onNodeDragStop = useCallback(
+    (_e: unknown, node: Node) => {
+      setDesign((d) => {
+        if (node.type === "shape") {
+          return {
+            ...d,
+            shapes: (d.shapes ?? []).map((s) =>
+              s.id === node.id ? { ...s, x: node.position.x, y: node.position.y } : s,
+            ),
+          };
+        }
+        // On a subject-area tab, dragging moves the table on THIS tab only.
+        if (activeAreaId) {
+          return {
+            ...d,
+            areas: (d.areas ?? []).map((a) =>
+              a.id === activeAreaId
+                ? {
+                    ...a,
+                    positions: {
+                      ...(a.positions ?? {}),
+                      [node.id]: { x: node.position.x, y: node.position.y },
+                    },
+                  }
+                : a,
+            ),
+          };
+        }
         return {
           ...d,
-          shapes: (d.shapes ?? []).map((s) =>
-            s.id === node.id ? { ...s, x: node.position.x, y: node.position.y } : s,
+          tables: d.tables.map((tb) =>
+            tb.id === node.id ? { ...tb, x: node.position.x, y: node.position.y } : tb,
           ),
         };
-      }
-      return {
-        ...d,
-        tables: d.tables.map((tb) =>
-          tb.id === node.id ? { ...tb, x: node.position.x, y: node.position.y } : tb,
-        ),
-      };
-    });
-  }, []);
+      });
+    },
+    [activeAreaId],
+  );
 
   const onNodeClick: NodeMouseHandler = (_e, node) => {
     if (node.type === "shape") {
@@ -806,12 +869,39 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
     if (!pending) return;
     const ids = new Set(pending.nodes);
     const edgeIds = new Set(pending.edges);
-    setDesign((d) => ({
-      ...d,
-      tables: d.tables.filter((t) => !ids.has(t.id)),
-      relations: d.relations.filter((r) => !ids.has(r.from) && !ids.has(r.to) && !edgeIds.has(r.id)),
-      shapes: (d.shapes ?? []).filter((s) => !ids.has(s.id)),
-    }));
+    setDesign((d) => {
+      // On a subject-area tab, "delete" only removes the tables from THIS tab
+      // (DA#-style: the model keeps them; the 전체 tab still shows them).
+      // Relationship edges are model-level either way.
+      if (activeAreaId) {
+        return {
+          ...d,
+          relations: d.relations.filter((r) => !edgeIds.has(r.id)),
+          areas: (d.areas ?? []).map((a) =>
+            a.id === activeAreaId
+              ? {
+                  ...a,
+                  tableIds: a.tableIds.filter((tid) => !ids.has(tid)),
+                  positions: Object.fromEntries(
+                    Object.entries(a.positions ?? {}).filter(([tid]) => !ids.has(tid)),
+                  ),
+                }
+              : a,
+          ),
+          shapes: (d.shapes ?? []).filter((s) => !ids.has(s.id)),
+        };
+      }
+      return {
+        ...d,
+        tables: d.tables.filter((t) => !ids.has(t.id)),
+        relations: d.relations.filter((r) => !ids.has(r.from) && !ids.has(r.to) && !edgeIds.has(r.id)),
+        shapes: (d.shapes ?? []).filter((s) => !ids.has(s.id)),
+        areas: (d.areas ?? []).map((a) => ({
+          ...a,
+          tableIds: a.tableIds.filter((tid) => !ids.has(tid)),
+        })),
+      };
+    });
     setSelectedId(null);
     setSelectedShapeId(null);
     setSelectedEdgeId(null);
@@ -883,12 +973,38 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
 
   const rfRef = useRef<ReactFlowInstance<Node, Edge> | null>(null);
   const [layoutDir, setLayoutDir] = useState<"TB" | "LR">("TB");
+  // Run a layout function over the visible canvas: the whole model, or — when
+  // a subject-area tab is active — just that tab (writing the tab's positions).
+  const applyLayout = useCallback(
+    (fn: (d: ErdDesign) => ErdDesign) => {
+      setDesign((d) => {
+        if (!activeAreaId) return fn(d);
+        const area = (d.areas ?? []).find((a) => a.id === activeAreaId);
+        if (!area) return fn(d);
+        const ids = new Set(area.tableIds);
+        const sub: ErdDesign = {
+          tables: d.tables
+            .filter((t) => ids.has(t.id))
+            .map((t) => ({ ...t, x: area.positions?.[t.id]?.x ?? t.x, y: area.positions?.[t.id]?.y ?? t.y })),
+          relations: d.relations.filter((r) => ids.has(r.from) && ids.has(r.to)),
+        };
+        const laid = fn(sub);
+        const positions: Record<string, { x: number; y: number }> = {};
+        for (const t of laid.tables) positions[t.id] = { x: t.x, y: t.y };
+        return {
+          ...d,
+          areas: (d.areas ?? []).map((a) => (a.id === activeAreaId ? { ...a, positions } : a)),
+        };
+      });
+      setTimeout(() => rfRef.current?.fitView({ padding: 0.2, duration: 300 }), 60);
+    },
+    [activeAreaId],
+  );
+
   const onAutoLayout = (dir: "TB" | "LR" = layoutDir) => {
     if (design.tables.length === 0) return;
     setLayoutDir(dir);
-    setDesign((d) => autoLayout(d, dir));
-    // Re-fit after the new positions render.
-    setTimeout(() => rfRef.current?.fitView({ padding: 0.2, duration: 300 }), 60);
+    applyLayout((d) => autoLayout(d, dir));
   };
 
   const onExportPng = async () => {
@@ -1018,18 +1134,35 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
     e.target.value = "";
     if (!file) return;
     try {
-      const incoming = parseDamx(await file.arrayBuffer());
+      const incoming = parseDamxWithAreas(await file.arrayBuffer());
       if (incoming.tables.length === 0) {
         toast.error(t("erdDesign.damxEmpty"));
         return;
       }
       // If DA# diagram positions were reliably recovered, keep them; otherwise
-      // fall back to auto-layout.
+      // fall back to auto-layout. Subject areas come in as tabs (Phase AKH).
       const positioned = (incoming as ErdDesign & { __damxPositioned?: boolean }).__damxPositioned;
-      // Positioned import: keep DA# layout but separate any overlapping boxes.
-      setDesign((d) =>
-        positioned ? removeOverlaps(mergeDesign(d, incoming)) : autoLayout(mergeDesign(d, incoming)),
-      );
+      setDesign((d) => {
+        const merged = mergeDesign(d, incoming);
+        const laid = positioned ? removeOverlaps(merged) : autoLayout(merged);
+        // mergeDesign dedupes same-named tables (keeping the existing id), so
+        // remap the incoming areas' memberships/positions onto the final ids
+        // and APPEND to any tabs the diagram already had.
+        const nameByIncomingId = new Map(incoming.tables.map((tb) => [tb.id, tb.name]));
+        const idByName = new Map(laid.tables.map((tb) => [tb.name, tb.id]));
+        const remap = (id: string) => idByName.get(nameByIncomingId.get(id) ?? "") ?? null;
+        const incomingAreas = (incoming.areas ?? []).map((a) => {
+          const tableIds = a.tableIds.map(remap).filter((x): x is string => !!x);
+          const positions: Record<string, { x: number; y: number }> = {};
+          for (const [oldId, pos] of Object.entries(a.positions ?? {})) {
+            const nid = remap(oldId);
+            if (nid) positions[nid] = pos;
+          }
+          return { ...a, tableIds, positions };
+        });
+        return layoutAreas({ ...laid, areas: [...(d.areas ?? []), ...incomingAreas] });
+      });
+      setActiveAreaId(null);
       setTimeout(() => rfRef.current?.fitView({ padding: 0.2, duration: 300 }), 60);
       toast.success(t("erdDesign.damxImported", { n: incoming.tables.length }));
     } catch {
@@ -1040,7 +1173,18 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
   const onAddTable = () =>
     setDesign((d) => {
       const n = d.tables.length;
-      return addTable(d, `table_${n + 1}`, 60 + (n % 4) * 280, 60 + Math.floor(n / 4) * 220);
+      const next = addTable(d, `table_${n + 1}`, 60 + (n % 4) * 280, 60 + Math.floor(n / 4) * 220);
+      // A table created while a subject-area tab is active joins that tab.
+      if (activeAreaId) {
+        const created = next.tables[next.tables.length - 1];
+        return {
+          ...next,
+          areas: (next.areas ?? []).map((a) =>
+            a.id === activeAreaId ? { ...a, tableIds: [...a.tableIds, created.id] } : a,
+          ),
+        };
+      }
+      return next;
     });
 
   const duplicateTable = (id: string) =>
@@ -1240,10 +1384,7 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
           <Button
             size="sm"
             variant="ghost"
-            onClick={() => {
-              setDesign((d) => removeOverlaps(d));
-              setTimeout(() => rfRef.current?.fitView({ padding: 0.2, duration: 300 }), 60);
-            }}
+            onClick={() => applyLayout((d) => removeOverlaps(d))}
             disabled={design.tables.length === 0}
             title={t("erdDesign.declutterHint")}
           >
@@ -1323,6 +1464,82 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
 
       <div className="flex min-h-0 flex-1">
         <div className="relative min-w-0 flex-1 bg-bg">
+          {(design.areas ?? []).length > 0 || design.tables.length > 0 ? (
+            <div className="absolute left-2 top-2 z-20 flex max-w-[calc(100%-1rem)] flex-wrap items-center gap-1 rounded-lg border border-border-subtle bg-surface/95 p-1 shadow-sm">
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveAreaId(null);
+                  setTimeout(() => rfRef.current?.fitView({ padding: 0.2, duration: 300 }), 60);
+                }}
+                className={`cursor-pointer rounded-md px-2 py-1 text-xs font-medium transition-colors ${
+                  activeAreaId === null
+                    ? "bg-accent/15 text-accent"
+                    : "text-text-secondary hover:bg-overlay hover:text-text"
+                }`}
+              >
+                {t("erdDesign.areaAll")}
+                <span className="ml-1 text-[10px] opacity-70">{design.tables.length}</span>
+              </button>
+              {(design.areas ?? []).map((a) =>
+                renamingAreaId === a.id ? (
+                  <Input
+                    key={a.id}
+                    autoFocus
+                    value={areaRenameVal}
+                    onChange={(e) => setAreaRenameVal(e.target.value)}
+                    onBlur={() => commitAreaRename(a.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                      if (e.key === "Escape") setRenamingAreaId(null);
+                    }}
+                    className="h-6 w-32 text-xs"
+                  />
+                ) : (
+                  <button
+                    key={a.id}
+                    type="button"
+                    onClick={() => {
+                      setActiveAreaId(a.id);
+                      setTimeout(() => rfRef.current?.fitView({ padding: 0.2, duration: 300 }), 60);
+                    }}
+                    onDoubleClick={() => {
+                      setAreaRenameVal(a.name);
+                      setRenamingAreaId(a.id);
+                    }}
+                    title={t("erdDesign.areaTabHint")}
+                    className={`group cursor-pointer rounded-md px-2 py-1 text-xs font-medium transition-colors ${
+                      activeAreaId === a.id
+                        ? "bg-accent/15 text-accent"
+                        : "text-text-secondary hover:bg-overlay hover:text-text"
+                    }`}
+                  >
+                    {a.name}
+                    <span className="ml-1 text-[10px] opacity-70">{a.tableIds.length}</span>
+                    {activeAreaId === a.id ? (
+                      <XIcon
+                        size={11}
+                        className="ml-1 inline-block opacity-60 hover:opacity-100"
+                        aria-label={t("erdDesign.areaDelete")}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setPendingAreaDelete(a.id);
+                        }}
+                      />
+                    ) : null}
+                  </button>
+                ),
+              )}
+              <button
+                type="button"
+                onClick={onAddArea}
+                title={t("erdDesign.areaAdd")}
+                className="cursor-pointer rounded-md px-1.5 py-1 text-text-muted hover:bg-overlay hover:text-text"
+              >
+                <PlusIcon size={12} />
+              </button>
+            </div>
+          ) : null}
           {loaded && design.tables.length === 0 ? (
             <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
               <div className="rounded-lg border border-border-subtle bg-surface/90 px-5 py-4 text-center text-sm text-text-muted shadow-sm">
@@ -1508,12 +1725,25 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
 
       <ConfirmDialog
         open={pendingNodeDelete !== null}
-        title={t("erdDesign.confirmDeleteTitle", { n: (pendingNodeDelete?.nodes.length ?? 0) + (pendingNodeDelete?.edges.length ?? 0) })}
-        description={t("erdDesign.confirmDeleteDesc")}
-        confirmLabel={t("erdDesign.deleteTable")}
-        destructive
+        title={t(activeAreaId ? "erdDesign.confirmRemoveFromAreaTitle" : "erdDesign.confirmDeleteTitle", {
+          n: (pendingNodeDelete?.nodes.length ?? 0) + (pendingNodeDelete?.edges.length ?? 0),
+        })}
+        description={t(activeAreaId ? "erdDesign.confirmRemoveFromAreaDesc" : "erdDesign.confirmDeleteDesc")}
+        confirmLabel={t(activeAreaId ? "erdDesign.removeFromArea" : "erdDesign.deleteTable")}
+        destructive={!activeAreaId}
         onConfirm={confirmNodeDelete}
         onCancel={() => setPendingNodeDelete(null)}
+      />
+      <ConfirmDialog
+        open={pendingAreaDelete !== null}
+        title={t("erdDesign.areaDeleteTitle", {
+          name: (design.areas ?? []).find((a) => a.id === pendingAreaDelete)?.name ?? "",
+        })}
+        description={t("erdDesign.areaDeleteDesc")}
+        confirmLabel={t("erdDesign.areaDelete")}
+        destructive
+        onConfirm={confirmAreaDelete}
+        onCancel={() => setPendingAreaDelete(null)}
       />
       {showImport && ws?.id ? (
         <ImportTablesDialog

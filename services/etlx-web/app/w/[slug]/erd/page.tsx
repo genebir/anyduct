@@ -19,8 +19,8 @@ import { Input } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ApiError, erdApi, type ErdDiagramSummary } from "@/lib/api";
 import { EMPTY_DESIGN, type ErdDesign } from "@/lib/erd-design";
-import { parseDamx, parseDamxAreas } from "@/lib/damx";
-import { autoLayout, removeOverlaps } from "@/lib/erd-layout";
+import { parseDamxWithAreas } from "@/lib/damx";
+import { autoLayout, layoutAreas, removeOverlaps } from "@/lib/erd-layout";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import { useLocale } from "@/components/providers/locale-provider";
 import { absoluteTime, relativeTime } from "@/lib/format-time";
@@ -57,38 +57,32 @@ export default function ErdListPage() {
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [importing, setImporting] = useState(false);
 
-  // Import a .damx as DA# organizes it: one diagram per subject area (주제영역),
-  // each with that pane's own table positions. Files without multiple named
-  // panes fall back to a single whole-model diagram.
+  // Import a .damx as ONE diagram whose subject areas (주제영역) become tabs
+  // inside the designer — like DA#'s pane list. Files without multiple named
+  // panes import as a plain single-canvas diagram.
   const onDamxFile = async (file: File) => {
     if (!ws?.id || importing) return;
     setImporting(true);
     try {
       const buf = await file.arrayBuffer();
-      const areas = parseDamxAreas(buf);
-      if (areas.length === 0) {
-        const design = parseDamx(buf);
-        if (design.tables.length === 0) {
-          toast.error(t("erdList.importEmpty"));
-          return;
-        }
-        const positioned = (design as ErdDesign & { __damxPositioned?: boolean }).__damxPositioned;
-        const created = await erdApi.create(ws.id, {
-          name: file.name.replace(/\.damx$/i, ""),
-          design_json: positioned ? removeOverlaps(design) : autoLayout(design),
-        });
-        toast.success(t("erdList.importedSingle"));
-        router.push(`/w/${slug}/erd/${created.id}`);
+      let design = parseDamxWithAreas(buf);
+      if (design.tables.length === 0) {
+        toast.error(t("erdList.importEmpty"));
         return;
       }
-      for (const a of areas) {
-        await erdApi.create(ws.id, {
-          name: a.name,
-          design_json: a.positioned ? removeOverlaps(a.design) : autoLayout(a.design),
-        });
-      }
-      toast.success(t("erdList.importedAreas", { n: areas.length }));
-      await refresh(ws.id);
+      const positioned = (design as ErdDesign & { __damxPositioned?: boolean }).__damxPositioned;
+      design = positioned ? removeOverlaps(design) : autoLayout(design);
+      design = layoutAreas(design); // fill per-tab positions where DA#'s weren't recoverable
+      const created = await erdApi.create(ws.id, {
+        name: file.name.replace(/\.damx$/i, ""),
+        design_json: design,
+      });
+      toast.success(
+        design.areas?.length
+          ? t("erdList.importedAreas", { n: design.areas.length })
+          : t("erdList.importedSingle"),
+      );
+      router.push(`/w/${slug}/erd/${created.id}`);
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : t("erdList.importError"));
     } finally {

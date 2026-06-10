@@ -8,6 +8,10 @@
  * oriented to that side. Because connection points follow the nodes rather
  * than a fixed Left/Right handle, lines don't pile up on top of each other
  * after auto-layout or dragging. Self-references draw a small loop.
+ *
+ * All routing math (facing-side anchors, sibling distribution, straight
+ * snapping, obstacle-aware bends) lives in lib/erd-edge-geometry so the
+ * auto-layout can predict these lines exactly (Phase ALB).
  */
 
 import { useRef, useState } from "react";
@@ -19,141 +23,49 @@ import {
   getSmoothStepPath,
   useInternalNode,
   useStore,
-  type Edge,
   type EdgeProps,
   type InternalNode,
 } from "@xyflow/react";
+import {
+  anchorAt,
+  bestCenter,
+  distributeAnchor,
+  sideNormal,
+  straightSnap,
+  type GRect,
+  type Side,
+} from "@/lib/erd-edge-geometry";
 
 const STROKE = "rgb(var(--accent))";
 const FOOT = 16; // crow's-foot depth
 const SPREAD = 7; // crow's-foot half-width
 const BAR = 11; // "one" bar offset from the border
 
-/** Border point of ``node`` along the line toward ``other``'s center. */
-function intersection(node: InternalNode, other: InternalNode): { x: number; y: number } {
-  const w = (node.measured.width ?? 220) / 2;
-  const h = (node.measured.height ?? 80) / 2;
-  const cx = node.internals.positionAbsolute.x + w;
-  const cy = node.internals.positionAbsolute.y + h;
-  const ox = other.internals.positionAbsolute.x + (other.measured.width ?? 220) / 2;
-  const oy = other.internals.positionAbsolute.y + (other.measured.height ?? 80) / 2;
-  const xx = (ox - cx) / (2 * w) - (oy - cy) / (2 * h);
-  const yy = (ox - cx) / (2 * w) + (oy - cy) / (2 * h);
-  const a = 1 / (Math.abs(xx) + Math.abs(yy) || 1);
-  const sx = a * xx;
-  const sy = a * yy;
-  return { x: w * (sx + sy) + cx, y: h * (-sx + sy) + cy };
+const POS: Record<Side, Position> = {
+  left: Position.Left,
+  right: Position.Right,
+  top: Position.Top,
+  bottom: Position.Bottom,
+};
+
+function rectOf(node: InternalNode): GRect {
+  return {
+    x: node.internals.positionAbsolute.x,
+    y: node.internals.positionAbsolute.y,
+    w: node.measured.width ?? 220,
+    h: node.measured.height ?? 80,
+  };
 }
-
-/** Which side of ``node`` the point sits on. */
-function sideOf(node: InternalNode, p: { x: number; y: number }): Position {
-  const nx = node.internals.positionAbsolute.x;
-  const ny = node.internals.positionAbsolute.y;
-  const w = node.measured.width ?? 220;
-  const h = node.measured.height ?? 80;
-  if (p.x <= nx + 1) return Position.Left;
-  if (p.x >= nx + w - 1) return Position.Right;
-  if (p.y <= ny + 1) return Position.Top;
-  return Position.Bottom;
-}
-
-/** Outward unit normal for a side. */
-function normal(pos: Position): { nx: number; ny: number } {
-  switch (pos) {
-    case Position.Left:
-      return { nx: -1, ny: 0 };
-    case Position.Right:
-      return { nx: 1, ny: 0 };
-    case Position.Top:
-      return { nx: 0, ny: -1 };
-    default:
-      return { nx: 0, ny: 1 };
-  }
-}
-
-
-/**
- * Anchor with sibling spacing (Phase AKR). When several relationships attach
- * to the SAME side of a node they used to converge on (almost) one border
- * point and read as a single thick line. Instead, collect the edges sharing
- * this side, order them by where the opposite table sits (minimizes
- * crossings), and distribute the anchors evenly along the side.
- */
-function distributedAnchor(
-  node: InternalNode,
-  other: InternalNode,
-  edgeId: string,
-  edges: Edge[],
-  lookup: Map<string, InternalNode>,
-): { x: number; y: number; pos: Position } {
-  const p = intersection(node, other);
-  const pos = sideOf(node, p);
-  const horiz = pos === Position.Top || pos === Position.Bottom;
-  const sibs: { id: string; t: number }[] = [];
-  for (const e of edges) {
-    if (e.source === e.target) continue;
-    const otherId = e.source === node.id ? e.target : e.target === node.id ? e.source : null;
-    if (!otherId) continue;
-    const o = lookup.get(otherId);
-    if (!o) continue;
-    if (sideOf(node, intersection(node, o)) !== pos) continue;
-    const oc = horiz
-      ? o.internals.positionAbsolute.x + (o.measured.width ?? 220) / 2
-      : o.internals.positionAbsolute.y + (o.measured.height ?? 80) / 2;
-    sibs.push({ id: e.id, t: oc });
-  }
-  if (sibs.length <= 1) return { x: p.x, y: p.y, pos };
-  sibs.sort((a, b) => a.t - b.t || a.id.localeCompare(b.id));
-  const idx = sibs.findIndex((s) => s.id === edgeId);
-  if (idx < 0) return { x: p.x, y: p.y, pos };
-  const nx = node.internals.positionAbsolute.x;
-  const ny = node.internals.positionAbsolute.y;
-  const w = node.measured.width ?? 220;
-  const h = node.measured.height ?? 80;
-  const frac = (idx + 1) / (sibs.length + 1);
-  switch (pos) {
-    case Position.Left:
-      return { x: nx, y: ny + h * frac, pos };
-    case Position.Right:
-      return { x: nx + w, y: ny + h * frac, pos };
-    case Position.Top:
-      return { x: nx + w * frac, y: ny, pos };
-    default:
-      return { x: nx + w * frac, y: ny + h, pos };
-  }
-}
-
-
 
 /** Manual endpoint anchor (Phase ALA): a side of the node + ratio along it. */
 export interface AnchorSpec {
-  side: "left" | "right" | "top" | "bottom";
+  side: Side;
   t: number;
-}
-
-function anchorPoint(node: InternalNode, spec: AnchorSpec): { x: number; y: number; pos: Position } {
-  const nx = node.internals.positionAbsolute.x;
-  const ny = node.internals.positionAbsolute.y;
-  const w = node.measured.width ?? 220;
-  const h = node.measured.height ?? 80;
-  switch (spec.side) {
-    case "left":
-      return { x: nx, y: ny + h * spec.t, pos: Position.Left };
-    case "right":
-      return { x: nx + w, y: ny + h * spec.t, pos: Position.Right };
-    case "top":
-      return { x: nx + w * spec.t, y: ny, pos: Position.Top };
-    default:
-      return { x: nx + w * spec.t, y: ny + h, pos: Position.Bottom };
-  }
 }
 
 /** Project a flow-space pointer position onto the node border → AnchorSpec. */
 function specFor(node: InternalNode, p: { x: number; y: number }): AnchorSpec {
-  const nx = node.internals.positionAbsolute.x;
-  const ny = node.internals.positionAbsolute.y;
-  const w = node.measured.width ?? 220;
-  const h = node.measured.height ?? 80;
+  const { x: nx, y: ny, w, h } = rectOf(node);
   const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
   const dl = Math.abs(p.x - nx);
   const dr = Math.abs(p.x - (nx + w));
@@ -166,76 +78,10 @@ function specFor(node: InternalNode, p: { x: number; y: number }): AnchorSpec {
   return { side: "bottom", t: clamp((p.x - nx) / w, 0.05, 0.95) };
 }
 
-/**
- * Obstacle-aware bend placement (Phase AKS). A smooth-step path bends at a
- * center line; with the default midpoint that middle segment (and the runs
- * leading to it) often slices straight through an unrelated table. Scan
- * candidate center positions between the two anchors, count how many node
- * boxes the 3-segment orthogonal path would cross, and keep the candidate
- * with the fewest crossings (preferring the one closest to the middle).
- */
-interface Rect {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-}
-const PAD = 6; // clearance around nodes
-
-function hCross(y: number, x1: number, x2: number, r: Rect): boolean {
-  const lo = Math.min(x1, x2);
-  const hi = Math.max(x1, x2);
-  return y >= r.y - PAD && y <= r.y + r.h + PAD && hi >= r.x - PAD && lo <= r.x + r.w + PAD;
-}
-function vCross(x: number, y1: number, y2: number, r: Rect): boolean {
-  const lo = Math.min(y1, y2);
-  const hi = Math.max(y1, y2);
-  return x >= r.x - PAD && x <= r.x + r.w + PAD && hi >= r.y - PAD && lo <= r.y + r.h + PAD;
-}
-
-function bestCenter(
-  sp: { x: number; y: number },
-  tp: { x: number; y: number },
-  horizontal: boolean, // true → vertical middle segment at centerX
-  rects: Rect[],
-): number | undefined {
-  const a = horizontal ? sp.x : sp.y;
-  const b = horizontal ? tp.x : tp.y;
-  if (Math.abs(b - a) < 24 || rects.length === 0) return undefined;
-  const crossings = (c: number): number => {
-    let n = 0;
-    for (const r of rects) {
-      if (horizontal) {
-        if (hCross(sp.y, sp.x, c, r)) n += 1;
-        if (vCross(c, sp.y, tp.y, r)) n += 1;
-        if (hCross(tp.y, c, tp.x, r)) n += 1;
-      } else {
-        if (vCross(sp.x, sp.y, c, r)) n += 1;
-        if (hCross(c, sp.x, tp.x, r)) n += 1;
-        if (vCross(tp.x, c, tp.y, r)) n += 1;
-      }
-    }
-    return n;
-  };
-  const mid = (a + b) / 2;
-  let best: number | undefined;
-  let bestScore = crossings(mid);
-  if (bestScore === 0) return undefined; // default is already clean
-  for (let i = 1; i <= 9; i++) {
-    const c = a + ((b - a) * i) / 10;
-    const s = crossings(c);
-    if (s < bestScore || (s === bestScore && best !== undefined && Math.abs(c - mid) < Math.abs(best - mid))) {
-      bestScore = s;
-      best = c;
-    }
-  }
-  return best;
-}
-
 /** Crow's foot (many): three prongs from an apex out along the normal back
  *  to the border, spread perpendicular to the normal. */
-function foot(x: number, y: number, pos: Position): string {
-  const { nx, ny } = normal(pos);
+function foot(x: number, y: number, side: Side): string {
+  const { nx, ny } = sideNormal(side);
   const ax = x + nx * FOOT;
   const ay = y + ny * FOOT;
   // perpendicular
@@ -249,8 +95,8 @@ function foot(x: number, y: number, pos: Position): string {
 }
 
 /** "one" bar: a tick perpendicular to the side, set off from the border. */
-function oneBar(x: number, y: number, pos: Position): string {
-  const { nx, ny } = normal(pos);
+function oneBar(x: number, y: number, side: Side): string {
+  const { nx, ny } = sideNormal(side);
   const bx = x + nx * BAR;
   const by = y + ny * BAR;
   const px = -ny;
@@ -258,8 +104,8 @@ function oneBar(x: number, y: number, pos: Position): string {
   return `M ${bx + px * SPREAD},${by + py * SPREAD} L ${bx - px * SPREAD},${by - py * SPREAD}`;
 }
 
-function mark(card: string, x: number, y: number, pos: Position): string {
-  return card === "many" ? foot(x, y, pos) : oneBar(x, y, pos);
+function mark(card: string, x: number, y: number, side: Side): string {
+  return card === "many" ? foot(x, y, side) : oneBar(x, y, side);
 }
 
 export function CrowsFootEdge({ id, source, target, label, style, data, selected }: EdgeProps) {
@@ -295,8 +141,8 @@ export function CrowsFootEdge({ id, source, target, label, style, data, selected
     return (
       <>
         <BaseEdge id={id} path={path} style={style} />
-        <path d={mark(sourceCard, rx, y1, Position.Right)} stroke={STROKE} strokeWidth={1.5} fill="none" />
-        <path d={mark(targetCard, rx, y2, Position.Right)} stroke={STROKE} strokeWidth={1.5} fill="none" />
+        <path d={mark(sourceCard, rx, y1, "right")} stroke={STROKE} strokeWidth={1.5} fill="none" />
+        <path d={mark(targetCard, rx, y2, "right")} stroke={STROKE} strokeWidth={1.5} fill="none" />
         {label ? (
           <EdgeLabelRenderer>
             <div
@@ -315,68 +161,43 @@ export function CrowsFootEdge({ id, source, target, label, style, data, selected
     );
   }
 
+  const sRect = rectOf(sourceNode);
+  const tRect = rectOf(targetNode);
+  const getRect = (nid: string): GRect | undefined => {
+    const n = nodeLookup.get(nid);
+    return n ? rectOf(n) : undefined;
+  };
+
   const manualS = dragAnchor?.end === "source" ? dragAnchor.spec : (data?.sourceAnchor as AnchorSpec | undefined);
   const manualT = dragAnchor?.end === "target" ? dragAnchor.spec : (data?.targetAnchor as AnchorSpec | undefined);
-  const sa = manualS ? anchorPoint(sourceNode, manualS) : distributedAnchor(sourceNode, targetNode, id, edges, nodeLookup);
-  const ta = manualT ? anchorPoint(targetNode, manualT) : distributedAnchor(targetNode, sourceNode, id, edges, nodeLookup);
-  const sp = { x: sa.x, y: sa.y };
-  const tp = { x: ta.x, y: ta.y };
-  const sPos = sa.pos;
-  const tPos = ta.pos;
+  const sa = manualS
+    ? { ...anchorAt(sRect, manualS.side, manualS.t), side: manualS.side }
+    : distributeAnchor(source, target, id, edges, getRect);
+  const ta = manualT
+    ? { ...anchorAt(tRect, manualT.side, manualT.t), side: manualT.side }
+    : distributeAnchor(target, source, id, edges, getRect);
   // Move the bend off any table the default midpoint path would cut through.
-  const obstacles: Rect[] = [];
+  const obstacles: GRect[] = [];
   for (const [nid, n] of nodeLookup) {
     if (nid === source || nid === target) continue;
     if (n.type === "shape") continue; // background boxes may be crossed
-    obstacles.push({
-      x: n.internals.positionAbsolute.x,
-      y: n.internals.positionAbsolute.y,
-      w: n.measured.width ?? 220,
-      h: n.measured.height ?? 80,
-    });
+    obstacles.push(rectOf(n));
   }
   const horizRoute =
-    (sPos === Position.Left || sPos === Position.Right) &&
-    (tPos === Position.Left || tPos === Position.Right);
+    (sa.side === "left" || sa.side === "right") && (ta.side === "left" || ta.side === "right");
   const vertRoute =
-    (sPos === Position.Top || sPos === Position.Bottom) &&
-    (tPos === Position.Top || tPos === Position.Bottom);
+    (sa.side === "top" || sa.side === "bottom") && (ta.side === "top" || ta.side === "bottom");
   // ── Bend minimisation (Phase AKZ): nearly-aligned anchors snap to a dead-
   // straight line — most of the "중구난방" feel comes from tiny S-bends.
-  const SNAP = 14;
-  let straight = false;
   const anyManualAnchor = !!manualS || !!manualT;
-  if (!anyManualAnchor && horizRoute && Math.abs(sp.y - tp.y) <= SNAP) {
-    const lo = Math.max(
-      sourceNode.internals.positionAbsolute.y + 10,
-      targetNode.internals.positionAbsolute.y + 10,
-    );
-    const hi = Math.min(
-      sourceNode.internals.positionAbsolute.y + (sourceNode.measured.height ?? 80) - 10,
-      targetNode.internals.positionAbsolute.y + (targetNode.measured.height ?? 80) - 10,
-    );
-    if (lo < hi) {
-      const y = Math.min(Math.max((sp.y + tp.y) / 2, lo), hi);
-      sp.y = y;
-      tp.y = y;
-      straight = true;
-    }
-  } else if (!anyManualAnchor && vertRoute && Math.abs(sp.x - tp.x) <= SNAP) {
-    const lo = Math.max(
-      sourceNode.internals.positionAbsolute.x + 10,
-      targetNode.internals.positionAbsolute.x + 10,
-    );
-    const hi = Math.min(
-      sourceNode.internals.positionAbsolute.x + (sourceNode.measured.width ?? 220) - 10,
-      targetNode.internals.positionAbsolute.x + (targetNode.measured.width ?? 220) - 10,
-    );
-    if (lo < hi) {
-      const x = Math.min(Math.max((sp.x + tp.x) / 2, lo), hi);
-      sp.x = x;
-      tp.x = x;
-      straight = true;
-    }
-  }
+  const snapped = anyManualAnchor
+    ? { sp: { x: sa.x, y: sa.y }, tp: { x: ta.x, y: ta.y }, straight: false }
+    : straightSnap({ x: sa.x, y: sa.y }, { x: ta.x, y: ta.y }, sa.side, ta.side, sRect, tRect);
+  const sp = snapped.sp;
+  const tp = snapped.tp;
+  const straight = snapped.straight;
+  const sPos = POS[sa.side];
+  const tPos = POS[ta.side];
   // Bend position: manual ratio (dragged/persisted) wins; else obstacle-aware.
   const axisA = horizRoute ? sp.x : sp.y;
   const axisB = horizRoute ? tp.x : tp.y;
@@ -514,8 +335,8 @@ export function CrowsFootEdge({ id, source, target, label, style, data, selected
           />
         </EdgeLabelRenderer>
       ) : null}
-      <path d={mark(sourceCard, sp.x, sp.y, sPos)} stroke={STROKE} strokeWidth={1.5} fill="none" />
-      <path d={mark(targetCard, tp.x, tp.y, tPos)} stroke={STROKE} strokeWidth={1.5} fill="none" />
+      <path d={mark(sourceCard, sp.x, sp.y, sa.side)} stroke={STROKE} strokeWidth={1.5} fill="none" />
+      <path d={mark(targetCard, tp.x, tp.y, ta.side)} stroke={STROKE} strokeWidth={1.5} fill="none" />
       {label ? (
         <EdgeLabelRenderer>
           <div

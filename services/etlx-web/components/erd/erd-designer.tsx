@@ -236,9 +236,16 @@ function nodeLabel(tb: DesignTable, fkCols: Set<string>, mode: NameMode, scale: 
   const nameSize = Math.round(11 * scale);
   const typeSize = Math.round(10 * scale);
   const icon = Math.round(10 * scale);
+  // Pinned line-height so the rendered node height is exactly the
+  // ERD_NODE_METRICS formula in erd-layout.ts — the auto-layout predicts edge
+  // anchor positions from it, and any drift breaks straight-line snapping.
+  const lh = `${Math.round(16 * scale)}px`;
   return (
     <div className="w-full overflow-hidden text-left">
-      <div className="flex items-center gap-1.5 rounded-t-[7px] border-b-2 border-accent/40 bg-accent/10 px-2.5 py-1.5">
+      <div
+        className="flex items-center gap-1.5 rounded-t-[7px] border-b-2 border-accent/40 bg-accent/10 px-2.5 py-1.5"
+        style={{ lineHeight: lh }}
+      >
         <Table2Icon size={Math.round(11 * scale)} className="shrink-0 text-accent" />
         <span className="truncate font-mono font-semibold text-text" style={{ fontSize: nameSize }}>
           {displayName(tb.name, tb.logical, mode)}
@@ -264,6 +271,7 @@ function nodeLabel(tb: DesignTable, fkCols: Set<string>, mode: NameMode, scale: 
               className={`flex items-center gap-1.5 border-b border-border-subtle/30 px-2.5 py-1 last:border-0 ${
                 c.pk ? "bg-warning/5" : ""
               }`}
+              style={{ lineHeight: lh }}
             >
               {c.pk ? (
                 <KeyIcon size={icon} className="shrink-0 text-warning">
@@ -1159,18 +1167,27 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
             .filter((t) => ids.has(t.id))
             .map((t) => ({ ...t, x: area.positions?.[t.id]?.x ?? t.x, y: area.positions?.[t.id]?.y ?? t.y })),
           relations: d.relations.filter((r) => ids.has(r.from) && ids.has(r.to)),
+          fontScale: d.fontScale,
         };
         const laid = fn(sub);
         const positions: Record<string, { x: number; y: number }> = {};
         for (const t of laid.tables) positions[t.id] = { x: t.x, y: t.y };
         // Node sizes are a table property (not per-tab) — apply any size the
-        // layout chose (AKV visibility sizing) globally.
+        // layout chose (AKV visibility sizing) globally. Same for the routing
+        // fields the layout assigned (ALB channel centerRatios).
         const sizeBy = new Map(laid.tables.map((tb) => [tb.id, { w: tb.w, h: tb.h }]));
+        const relBy = new Map(laid.relations.map((r) => [r.id, r]));
         return {
           ...d,
           tables: d.tables.map((tb) => {
             const s = sizeBy.get(tb.id);
             return s ? { ...tb, w: s.w, h: s.h } : tb;
+          }),
+          relations: d.relations.map((r) => {
+            const lr = relBy.get(r.id);
+            return lr
+              ? { ...r, centerRatio: lr.centerRatio, sourceAnchor: lr.sourceAnchor, targetAnchor: lr.targetAnchor }
+              : r;
           }),
           areas: (d.areas ?? []).map((a) => (a.id === activeAreaId ? { ...a, positions } : a)),
         };

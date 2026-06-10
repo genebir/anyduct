@@ -9,6 +9,12 @@
 
 ## [Unreleased]
 
+### Changed
+- **ERD 자동정렬 전면 재작성 — 가시성 최적화 (Phase ALB, 2026-06-10, ADR-0092)**: 레이아웃이 렌더러의 선 기하(접점 분배/직선 스냅/장애물 회피)를 픽셀-정확히 예측하며 노드 크기·접점·선 경로·배치를 함께 최적화.
+  - 신규 `lib/erd-edge-geometry.ts`(렌더러·레이아웃 공유 순수 기하) + 노드 lineHeight 고정으로 auto 높이 공식화(fontScale 반영).
+  - dagre 2-pass(실측 면별 접점 수 → 허브 크기/랭크 갭 보정) → 접점 정렬 스위프(후보-시프트 스코어링 + 가중 PAVA) → 직선 레스큐(그리디 힐클라임) → 채널 배정(세로 구간 분리, 개선 시에만 centerRatio 영속).
+  - 실 .damx 4종 검증: 직선 +27~41%, 노드 관통 −14~38%, 평행 세그먼트 겹침 3~7→0, 멱등성/300테이블 ≤160ms.
+
 ### Added
 - **커넥터 12종 추가 — DW·NoSQL·Streaming (Phases AGE→AGN, AGT, AGU, 2026-06-05, ADR-0077~0087)**:
   - **Data Warehouse (4)**: Snowflake(`[snowflake]`), BigQuery(`[bigquery]`, DBAPI/백틱/PK NOT ENFORCED), Redshift(`[redshift]`, SUPER/VARBYTE/MERGE), ClickHouse(`[clickhouse]`, MergeTree/no row-upsert). 로드맵 DW 완주.

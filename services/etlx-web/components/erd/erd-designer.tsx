@@ -910,6 +910,10 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
         target: r.to,
         label: r.fromColumn,
         type: "crowsfoot",
+        // The designer replaces the edge array on every render (memo), which
+        // wipes React Flow's own selection flag — set it explicitly so the
+        // CrowsFootEdge sees selected=true and shows the bend handle (AKZ).
+        selected: r.id === selectedEdgeId,
         data: {
           sourceCard: r.sourceCard ?? "many",
           targetCard: r.targetCard ?? "one",

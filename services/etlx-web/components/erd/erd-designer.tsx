@@ -792,6 +792,14 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
     return target.tableIds.filter((tid) => !others.has(tid)).length;
   }, [design.areas, pendingAreaDelete]);
 
+  // Persist a manually-dragged edge bend (Phase AKZ); undefined = back to auto.
+  const setEdgeCenterRatio = useCallback((edgeId: string, ratio: number | undefined) => {
+    setDesign((d) => ({
+      ...d,
+      relations: d.relations.map((r) => (r.id === edgeId ? { ...r, centerRatio: ratio } : r)),
+    }));
+  }, []);
+
   // Persist a user-resized node size (px at fontScale 1). Width and height
   // persist independently so a width tweak doesn't freeze the auto height.
   const setTableSize = useCallback((id: string, patch: { w?: number; h?: number }) => {
@@ -902,14 +910,19 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
         target: r.to,
         label: r.fromColumn,
         type: "crowsfoot",
-        data: { sourceCard: r.sourceCard ?? "many", targetCard: r.targetCard ?? "one" },
+        data: {
+          sourceCard: r.sourceCard ?? "many",
+          targetCard: r.targetCard ?? "one",
+          centerRatio: r.centerRatio,
+          onCenterRatio: setEdgeCenterRatio,
+        },
         style: {
           stroke: "rgb(var(--accent))",
           strokeWidth: r.id === selectedEdgeId ? 2.5 : 1.5,
         },
         labelStyle: { fontSize: 10, fill: "rgb(var(--text-muted))" },
       }));
-  }, [design, selectedEdgeId, activeArea]);
+  }, [design, selectedEdgeId, activeArea, setEdgeCenterRatio]);
 
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState(nodes);
   const [rfEdges, setRfEdges, onEdgesChange] = useEdgesState(edges);
@@ -1150,6 +1163,11 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
   const onAutoLayout = (dir: "TB" | "LR" = layoutDir) => {
     if (design.tables.length === 0) return;
     setLayoutDir(dir);
+    // Fresh layout = fresh routing: drop manual bends so lines re-optimise.
+    setDesign((d) => ({
+      ...d,
+      relations: d.relations.map((r) => (r.centerRatio !== undefined ? { ...r, centerRatio: undefined } : r)),
+    }));
     applyLayout((d) => autoLayout(d, dir));
   };
 

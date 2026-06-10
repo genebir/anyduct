@@ -59,6 +59,9 @@ export interface DesignRelation {
   sourceCard?: Cardinality;
   /** cardinality at the ``to`` (target) end — default "one" (referenced) */
   targetCard?: Cardinality;
+  /** Manual bend position along the route axis (0..1), dragged by the user
+   *  (Phase AKZ). Absent = automatic obstacle-aware routing. */
+  centerRatio?: number;
 }
 
 /** A background annotation drawn behind the tables — a grouping box or a memo

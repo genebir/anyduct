@@ -10,6 +10,8 @@
  * after auto-layout or dragging. Self-references draw a small loop.
  */
 
+import { useRef, useState } from "react";
+import { useLocale } from "@/components/providers/locale-provider";
 import {
   BaseEdge,
   EdgeLabelRenderer,
@@ -218,11 +220,17 @@ function mark(card: string, x: number, y: number, pos: Position): string {
   return card === "many" ? foot(x, y, pos) : oneBar(x, y, pos);
 }
 
-export function CrowsFootEdge({ id, source, target, label, style, data }: EdgeProps) {
+export function CrowsFootEdge({ id, source, target, label, style, data, selected }: EdgeProps) {
   const sourceNode = useInternalNode(source);
   const targetNode = useInternalNode(target);
   const edges = useStore((s) => s.edges);
   const nodeLookup = useStore((s) => s.nodeLookup);
+  const zoom = useStore((s) => s.transform[2]);
+  // Manual bend dragging (Phase AKZ): live ratio while dragging, committed to
+  // the design (relation.centerRatio) on pointer-up via data.onCenterRatio.
+  const [dragRatio, setDragRatio] = useState<number | null>(null);
+  const dragStart = useRef<{ ratio: number; px: number } | null>(null);
+  const { t } = useLocale();
   if (!sourceNode || !targetNode) return null;
 
   const sourceCard = (data?.sourceCard as string) ?? "many";
@@ -285,25 +293,119 @@ export function CrowsFootEdge({ id, source, target, label, style, data }: EdgePr
   const vertRoute =
     (sPos === Position.Top || sPos === Position.Bottom) &&
     (tPos === Position.Top || tPos === Position.Bottom);
-  const center = horizRoute
-    ? bestCenter(sp, tp, true, obstacles)
-    : vertRoute
-      ? bestCenter(sp, tp, false, obstacles)
-      : undefined;
-  const [path, labelX, labelY] = getSmoothStepPath({
-    sourceX: sp.x,
-    sourceY: sp.y,
-    sourcePosition: sPos,
-    targetX: tp.x,
-    targetY: tp.y,
-    targetPosition: tPos,
-    ...(horizRoute && center !== undefined ? { centerX: center } : {}),
-    ...(vertRoute && center !== undefined ? { centerY: center } : {}),
-  });
+  // ── Bend minimisation (Phase AKZ): nearly-aligned anchors snap to a dead-
+  // straight line — most of the "중구난방" feel comes from tiny S-bends.
+  const SNAP = 14;
+  let straight = false;
+  if (horizRoute && Math.abs(sp.y - tp.y) <= SNAP) {
+    const lo = Math.max(
+      sourceNode.internals.positionAbsolute.y + 10,
+      targetNode.internals.positionAbsolute.y + 10,
+    );
+    const hi = Math.min(
+      sourceNode.internals.positionAbsolute.y + (sourceNode.measured.height ?? 80) - 10,
+      targetNode.internals.positionAbsolute.y + (targetNode.measured.height ?? 80) - 10,
+    );
+    if (lo < hi) {
+      const y = Math.min(Math.max((sp.y + tp.y) / 2, lo), hi);
+      sp.y = y;
+      tp.y = y;
+      straight = true;
+    }
+  } else if (vertRoute && Math.abs(sp.x - tp.x) <= SNAP) {
+    const lo = Math.max(
+      sourceNode.internals.positionAbsolute.x + 10,
+      targetNode.internals.positionAbsolute.x + 10,
+    );
+    const hi = Math.min(
+      sourceNode.internals.positionAbsolute.x + (sourceNode.measured.width ?? 220) - 10,
+      targetNode.internals.positionAbsolute.x + (targetNode.measured.width ?? 220) - 10,
+    );
+    if (lo < hi) {
+      const x = Math.min(Math.max((sp.x + tp.x) / 2, lo), hi);
+      sp.x = x;
+      tp.x = x;
+      straight = true;
+    }
+  }
+  // Bend position: manual ratio (dragged/persisted) wins; else obstacle-aware.
+  const axisA = horizRoute ? sp.x : sp.y;
+  const axisB = horizRoute ? tp.x : tp.y;
+  const manualRatio = dragRatio ?? (data?.centerRatio as number | undefined);
+  const autoCenter = straight
+    ? undefined
+    : horizRoute
+      ? bestCenter(sp, tp, true, obstacles)
+      : vertRoute
+        ? bestCenter(sp, tp, false, obstacles)
+        : undefined;
+  const center =
+    !straight && manualRatio !== undefined && Math.abs(axisB - axisA) > 24
+      ? axisA + (axisB - axisA) * manualRatio
+      : autoCenter;
+  const [path, labelX, labelY] = straight
+    ? [`M ${sp.x},${sp.y} L ${tp.x},${tp.y}`, (sp.x + tp.x) / 2, (sp.y + tp.y) / 2]
+    : getSmoothStepPath({
+        sourceX: sp.x,
+        sourceY: sp.y,
+        sourcePosition: sPos,
+        targetX: tp.x,
+        targetY: tp.y,
+        targetPosition: tPos,
+        ...(horizRoute && center !== undefined ? { centerX: center } : {}),
+        ...(vertRoute && center !== undefined ? { centerY: center } : {}),
+      });
+  // Drag handle on the middle segment (selected, routable edges only).
+  const routable = !straight && (horizRoute || vertRoute) && Math.abs(axisB - axisA) > 24;
+  const onCenterRatio = data?.onCenterRatio as ((edgeId: string, ratio: number | undefined) => void) | undefined;
+  const curRatio =
+    manualRatio ?? (center !== undefined ? (center - axisA) / (axisB - axisA) : 0.5);
+  const handleX = horizRoute ? (center ?? (sp.x + tp.x) / 2) : (sp.x + tp.x) / 2;
+  const handleY = horizRoute ? (sp.y + tp.y) / 2 : (center ?? (sp.y + tp.y) / 2);
 
   return (
     <>
       <BaseEdge id={id} path={path} style={style} />
+      {selected && routable && onCenterRatio ? (
+        <EdgeLabelRenderer>
+          <div
+            style={{
+              position: "absolute",
+              transform: `translate(-50%, -50%) translate(${handleX}px, ${handleY}px)`,
+              pointerEvents: "all",
+              cursor: horizRoute ? "ew-resize" : "ns-resize",
+              width: 14,
+              height: 14,
+              borderRadius: 7,
+              background: "rgb(var(--accent))",
+              border: "2px solid rgb(var(--bg-elevated))",
+              boxShadow: "0 1px 3px rgb(0 0 0 / 0.3)",
+            }}
+            title={t("erdDesign.edgeBendHint")}
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              (e.target as Element).setPointerCapture(e.pointerId);
+              dragStart.current = { ratio: curRatio, px: horizRoute ? e.clientX : e.clientY };
+              setDragRatio(curRatio);
+            }}
+            onPointerMove={(e) => {
+              if (!dragStart.current) return;
+              const d = ((horizRoute ? e.clientX : e.clientY) - dragStart.current.px) / zoom;
+              const next = dragStart.current.ratio + d / (axisB - axisA);
+              setDragRatio(Math.min(0.95, Math.max(0.05, next)));
+            }}
+            onPointerUp={() => {
+              if (dragStart.current && dragRatio !== null) onCenterRatio(id, dragRatio);
+              dragStart.current = null;
+              setDragRatio(null);
+            }}
+            onDoubleClick={(e) => {
+              e.stopPropagation();
+              onCenterRatio(id, undefined);
+            }}
+          />
+        </EdgeLabelRenderer>
+      ) : null}
       <path d={mark(sourceCard, sp.x, sp.y, sPos)} stroke={STROKE} strokeWidth={1.5} fill="none" />
       <path d={mark(targetCard, tp.x, tp.y, tPos)} stroke={STROKE} strokeWidth={1.5} fill="none" />
       {label ? (

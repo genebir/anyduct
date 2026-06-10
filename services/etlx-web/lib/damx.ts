@@ -178,6 +178,19 @@ function parseCanvasBounds(b: Uint8Array): Map<string, { x: number; y: number; w
 }
 
 
+
+/** Apply a DA# box size to a design table (Phase AKW/AKY). Width maps with the
+ *  same 0.6 scale as positions — at that scale DA#'s row pitch (~43 raw ≈ 26px)
+ *  matches our 25px rows, so text/box proportions track the original. Height
+ *  is taken only when it covers the content under OUR row metrics; otherwise
+ *  auto, so no column is ever clipped. */
+function applyDamxSize(t: DesignTable, w: number, h: number, scale: number): void {
+  t.w = Math.min(640, Math.max(140, Math.round(w * scale)));
+  const contentH = 40 + Math.max(1, t.columns.length) * 25 + 16; // mirrors erd-layout
+  const hh = Math.round(h * scale);
+  if (hh >= contentH) t.h = Math.min(1400, hh);
+}
+
 interface ParsedColumn {
   name: string;
   type: string;
@@ -613,15 +626,13 @@ export function parseDamx(buf: ArrayBuffer): ErdDesign {
       if (bd) {
         t.x = Math.round(bd.x * SCALE);
         t.y = Math.round(bd.y * SCALE);
+        applyDamxSize(t, bd.w, bd.h, SCALE);
       }
     }
   }
-  // Node sizes: the stored rect's v5/v6 are NOT the rendered box size (cross-
-  // checked against a DA# print — 사용자정보's 24 rows vs 부서's 9 rows should be
-  // ~2.7× taller but v6 differs only 1.8×, and widths don't track the print
-  // either). DA# auto-fits entity boxes to their content, so the faithful
-  // "same look" is a content-fitted width under OUR font metrics (Phase AKW′).
-  for (const t of design.tables) t.w = fitWidth(t);
+  // DA# 저장 크기를 그대로 사용(사용자 요청, AKY). bounds를 못 찾은 테이블만
+  // content-fit 폭으로 보정(잘림 방지) — DA#-sized 박스는 건드리지 않는다.
+  for (const t of design.tables) if (t.w === undefined) t.w = fitWidth(t);
   (design as ErdDesign & { __damxPositioned?: boolean }).__damxPositioned = reliable;
   return design;
 }
@@ -892,6 +903,10 @@ export function parseDamxWithAreas(buf: ArrayBuffer): ErdDesign {
   for (const t of full.tables) byKorean.set(t.logical ?? t.name, t);
   const areas: NonNullable<ErdDesign["areas"]> = [];
   const SCALE = 0.6;
+  // parseDamx may have content-fitted widths already (multi-pane files skip its
+  // bounds path) — track which tables got a REAL DA# size here so the first
+  // pane's box dimensions win over the fallback fit.
+  const damxSized = new Set<string>();
   for (const [name, members] of areaMembers) {
     const pos = areaPos.get(name)!;
     const tableIds: string[] = [];
@@ -907,6 +922,11 @@ export function parseDamxWithAreas(buf: ArrayBuffer): ErdDesign {
         positions[t.id] = { x: Math.round(bd.x * SCALE), y: Math.round(bd.y * SCALE) };
         placed += 1;
         distinct.add(`${bd.x},${bd.y}`);
+        // Node size straight from DA# (first pane that shows the table wins).
+        if (!damxSized.has(t.id)) {
+          damxSized.add(t.id);
+          applyDamxSize(t, bd.w, bd.h, SCALE);
+        }
       }
     }
     if (tableIds.length === 0) continue;

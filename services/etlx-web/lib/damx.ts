@@ -383,9 +383,14 @@ function parseRelationships(
     if (!/^[가-힣A-Za-z]/.test(f.s) || f.s.includes("고딕") || f.s === "Segoe UI") continue;
     g2n.set(prev, f.s); // accept any name; the canon + names filter applies per pair
   }
+  // First pass: collect bracketed records from the MODEL section ONLY (count-
+  // validated: the diagram section holds stale visual leftovers — e.g. CTC&ARS's
+  // 시뮬레이터 link that DA# no longer renders).
   const out: RawRelation[] = [];
   const seen = new Set<string>();
+  const selfCount = new Map<string, number>();
   for (let i = 1; i < F.length - 2; i++) {
+    if (F[i].off >= DIA) continue; // MODEL section only
     const pn = g2n.get(S[i]);
     const cn = g2n.get(S[i + 1]);
     if (!pn || !cn) continue;
@@ -394,19 +399,22 @@ function parseRelationships(
     const child = canon(cn);
     if (!names.has(parent) || !names.has(child)) continue;
     if (parent === child) {
-      // Self-loop: real only if the table has a UP_<ownPK> self-reference column.
-      const up = upCol(parent);
-      if (!up) continue;
-      const k = `${parent}|self`;
-      if (seen.has(k)) continue;
-      seen.add(k);
-      out.push({ fromTable: parent, fromColumn: up, toTable: parent });
+      // Self-loops are validated by multiplicity below (real ones appear exactly
+      // twice — logical + physical area; entity-definition brackets appear once
+      // or many times).
+      selfCount.set(parent, (selfCount.get(parent) ?? 0) + 1);
       continue;
     }
     const k = `${child}->${parent}`;
     if (seen.has(k)) continue;
     seen.add(k);
     out.push({ fromTable: child, fromColumn: fkColumn(parent, child), toTable: parent });
+  }
+  // Self-loops: a REAL self-relationship's bracket record appears exactly 2×
+  // (count-validated on 4 real exports: 부서/메뉴 x2 everywhere = real, x1 or
+  // x15+ = entity-definition noise like 공통코드그룹/권한).
+  for (const [t, ct] of selfCount) {
+    if (ct === 2) out.push({ fromTable: t, fromColumn: upCol(t) ?? "", toTable: t });
   }
   return out;
 }

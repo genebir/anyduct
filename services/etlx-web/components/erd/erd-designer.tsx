@@ -78,7 +78,7 @@ import { VerifyDbDialog } from "@/components/erd/verify-db-dialog";
 import { CreateMigrationDialog } from "@/components/erd/create-migration-dialog";
 import { ImportDdlDialog } from "@/components/erd/import-ddl-dialog";
 import { parseDamxWithAreas } from "@/lib/damx";
-import { autoLayout, layoutAreas, removeOverlaps } from "@/lib/erd-layout";
+import { autoLayout, layoutAreas, mosaicLayout, removeOverlaps } from "@/lib/erd-layout";
 import { validateErd } from "@/lib/erd-validate";
 import { exportErdExcel } from "@/lib/erd-excel";
 import {
@@ -1152,7 +1152,9 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
   const warnCount = issues.filter((i) => i.severity === "warning").length;
 
   const rfRef = useRef<ReactFlowInstance<Node, Edge> | null>(null);
-  const [layoutDir, setLayoutDir] = useState<"TB" | "LR">("TB");
+  // Default = compact mosaic — the DA# hand-layout feel the user prefers
+  // (dense near-square locality grid); TB/LR layered modes remain selectable.
+  const [layoutDir, setLayoutDir] = useState<"TB" | "LR" | "COMPACT">("COMPACT");
   // Run a layout function over the visible canvas: the whole model, or — when
   // a subject-area tab is active — just that tab (writing the tab's positions).
   const applyLayout = useCallback(
@@ -1197,7 +1199,7 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
     [activeAreaId],
   );
 
-  const onAutoLayout = (dir: "TB" | "LR" = layoutDir) => {
+  const onAutoLayout = (dir: "TB" | "LR" | "COMPACT" = layoutDir) => {
     if (design.tables.length === 0) return;
     setLayoutDir(dir);
     // Fresh layout = fresh routing: drop manual bends so lines re-optimise.
@@ -1209,7 +1211,7 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
           : r,
       ),
     }));
-    applyLayout((d) => autoLayout(d, dir));
+    applyLayout((d) => (dir === "COMPACT" ? mosaicLayout(d) : autoLayout(d, dir)));
   };
 
   // PNG rendering of a big diagram can take many seconds — show a blocking
@@ -1711,12 +1713,13 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
           </Button>
           <select
             value={layoutDir}
-            onChange={(e) => onAutoLayout(e.target.value as "TB" | "LR")}
+            onChange={(e) => onAutoLayout(e.target.value as "TB" | "LR" | "COMPACT")}
             disabled={design.tables.length === 0}
             className="h-8 rounded-md border border-border-subtle bg-bg px-1 text-xs text-text"
             aria-label={t("erdDesign.layoutDir")}
             title={t("erdDesign.layoutDir")}
           >
+            <option value="COMPACT">{t("erdDesign.layoutCompact")}</option>
             <option value="TB">{t("erdDesign.layoutTB")}</option>
             <option value="LR">{t("erdDesign.layoutLR")}</option>
           </select>

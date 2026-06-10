@@ -1165,6 +1165,159 @@ export function autoLayout(design: ErdDesign, dir: LayoutDirection = "TB"): ErdD
 }
 
 /**
+ * Compact mosaic layout (Phase ALC) — the DA# hand-layout feel. Measured on
+ * the user's real DA# diagrams: ~44% density, near-square canvas, related
+ * tables ADJACENT, and lines mostly bent/under nodes (791 box crossings on
+ * CTC!). Humans read these diagrams by locality, not by tracing edges — the
+ * exact opposite trade of the layered autoLayout. So: order tables by
+ * connectivity (BFS per component, hubs first) and greedily place each on a
+ * skyline at the spot closest to its already-placed FK-neighbours, under a
+ * near-square target width. Lines get only the channel pass (separated bend
+ * positions); no rank alignment exists to exploit.
+ */
+// Gaps tuned so the result lands near the DA# hand-layout density (~44%) —
+// tight enough to read by locality, loose enough for the lines to breathe.
+const MOSAIC_GX = 100;
+const MOSAIC_GY = 110;
+
+export function mosaicLayout(design: ErdDesign): ErdDesign {
+  if (design.tables.length === 0) return design;
+  const scale = design.fontScale ?? 1;
+  const nodes: LNode[] = design.tables.map((t) => ({
+    id: t.id,
+    r: { x: 0, y: 0, w: Math.round(fitWidth(t) * scale), h: contentHeight(t.columns.length, scale) },
+    cols: t.columns.length,
+    degree: 0,
+  }));
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const adj = new Map<string, Set<string>>();
+  for (const n of nodes) adj.set(n.id, new Set());
+  for (const r of design.relations) {
+    if (r.from === r.to) continue;
+    adj.get(r.from)?.add(r.to);
+    adj.get(r.to)?.add(r.from);
+  }
+  for (const n of nodes) n.degree = adj.get(n.id)?.size ?? 0;
+
+  // Connectivity order: components (largest first), BFS from the biggest hub,
+  // neighbours by degree — keeps each table next to its relatives in the fill.
+  const comps = components(nodes, design.relations.map((r) => ({ id: r.id, source: r.from, target: r.to })));
+  comps.sort((a, b) => b.nodes.length - a.nodes.length);
+  const order: LNode[] = [];
+  for (const comp of comps) {
+    const seen = new Set<string>();
+    const sorted = [...comp.nodes].sort((a, b) => b.degree - a.degree);
+    for (const start of sorted) {
+      if (seen.has(start.id)) continue;
+      const queue = [start.id];
+      seen.add(start.id);
+      while (queue.length) {
+        const id = queue.shift()!;
+        order.push(byId.get(id)!);
+        const nbs = [...(adj.get(id) ?? [])]
+          .filter((nb) => !seen.has(nb))
+          .sort((a, b) => (byId.get(b)?.degree ?? 0) - (byId.get(a)?.degree ?? 0));
+        for (const nb of nbs) {
+          seen.add(nb);
+          queue.push(nb);
+        }
+      }
+    }
+  }
+
+  // Near-square target width (slightly landscape), DA#-tight gaps.
+  const padded = nodes.reduce((s, n) => s + (n.r.w + MOSAIC_GX) * (n.r.h + MOSAIC_GY), 0);
+  const maxW = Math.max(
+    Math.max(...nodes.map((n) => n.r.w)) + MOSAIC_GX,
+    Math.sqrt((padded / 0.85) * 1.25),
+  );
+
+  // Skyline fill with neighbour affinity.
+  let sky = [{ x: 0, w: maxW, y: 0 }];
+  const placedIds = new Set<string>();
+  for (const n of order) {
+    const w = n.r.w + MOSAIC_GX;
+    const h = n.r.h + MOSAIC_GY;
+    const placedNbs = [...(adj.get(n.id) ?? [])]
+      .filter((id) => placedIds.has(id))
+      .map((id) => byId.get(id)!);
+    let bx = 0;
+    let by = Infinity;
+    let bestCost = Infinity;
+    for (let s = 0; s < sky.length; s++) {
+      const x = sky[s].x;
+      if (x + w > maxW + 1) continue;
+      let y = 0;
+      let span = 0;
+      for (let t = s; t < sky.length && span < w; t++) {
+        y = Math.max(y, sky[t].y);
+        span += sky[t].w;
+      }
+      if (span < w - 1) continue;
+      const cx = x + n.r.w / 2;
+      const cy = y + n.r.h / 2;
+      let cost: number;
+      if (placedNbs.length) {
+        let d = 0;
+        for (const o of placedNbs) d += Math.hypot(cx - (o.r.x + o.r.w / 2), cy - (o.r.y + o.r.h / 2));
+        cost = d / placedNbs.length + 0.6 * y;
+      } else {
+        cost = 1.5 * y + 0.15 * x;
+      }
+      if (cost < bestCost - 1e-9) {
+        bestCost = cost;
+        bx = x;
+        by = y;
+      }
+    }
+    if (!Number.isFinite(by)) {
+      by = Math.max(...sky.map((s) => s.y));
+      bx = 0;
+    }
+    n.r.x = bx;
+    n.r.y = by;
+    placedIds.add(n.id);
+    // Update skyline.
+    const nx2 = bx + w;
+    const next: typeof sky = [];
+    for (const s of sky) {
+      const sx2 = s.x + s.w;
+      if (sx2 <= bx || s.x >= nx2) {
+        next.push(s);
+        continue;
+      }
+      if (s.x < bx) next.push({ x: s.x, w: bx - s.x, y: s.y });
+      if (sx2 > nx2) next.push({ x: nx2, w: sx2 - nx2, y: s.y });
+    }
+    next.push({ x: bx, w, y: by + h });
+    next.sort((a, b) => a.x - b.x);
+    sky = next.reduce<typeof sky>((acc, s) => {
+      const last = acc[acc.length - 1];
+      if (last && Math.abs(last.y - s.y) < 0.5 && Math.abs(last.x + last.w - s.x) < 0.5) last.w += s.w;
+      else acc.push({ ...s });
+      return acc;
+    }, []);
+  }
+
+  // Bend channels still help (separated middle segments); no rank alignment
+  // exists in a mosaic, so the layered passes don't apply.
+  const ratios = new Map<string, number>();
+  for (const comp of comps) for (const [id, v] of assignChannels(comp)) ratios.set(id, v);
+
+  const tables = design.tables.map((t) => {
+    const n = byId.get(t.id)!;
+    return { ...t, x: Math.round(n.r.x), y: Math.round(n.r.y), w: Math.round(n.r.w / scale), h: undefined };
+  });
+  const relations: DesignRelation[] = design.relations.map((r) => ({
+    ...r,
+    centerRatio: ratios.get(r.id),
+    sourceAnchor: undefined,
+    targetAnchor: undefined,
+  }));
+  return { ...design, tables, relations };
+}
+
+/**
  * Fill per-tab positions for subject areas (Phase AKH). Areas that came with
  * reliable DA# positions get an overlap-separation pass; areas without get a
  * fresh auto-layout of just that tab's tables. Global table x/y is untouched.

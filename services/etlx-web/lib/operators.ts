@@ -174,6 +174,9 @@ export interface OperatorSpec {
    *  and aggregate emit dedicated graph-node types, not transform wrappers,
    *  so they don't fit the linear `source → transform* → sink` shape. */
   graphOnly?: boolean;
+  /** Batch-mode only (dataset-level transforms, ADR-0093): an unbounded
+   *  stream has no complete dataset to query. */
+  batchOnly?: boolean;
   fields: FieldDef[];
 }
 
@@ -183,6 +186,9 @@ export function operatorAllowedForMode(
   spec: OperatorSpec,
   mode: "batch" | "stream",
 ): boolean {
+  // Dataset-level transforms need the whole dataset — the core rejects them
+  // on unbounded streams (ADR-0093), so don't offer them there either.
+  if (spec.batchOnly && mode === "stream") return false;
   if (spec.kind !== "source" && spec.kind !== "sink") return true;
   return mode === "stream" ? spec.streaming === true : spec.streaming !== true;
 }
@@ -829,6 +835,42 @@ const TRANSFORMS: OperatorSpec[] = [
     ],
   },
   {
+    // ADR-0093 P1b — dataset-level SQL over the in-flight rows (DuckDB).
+    id: "transform:sql",
+    kind: "transform",
+    connectorType: "sql",
+    label: "SQL (dataset)",
+    description:
+      "Run arbitrary SQL over all rows flowing through — GROUP BY, window functions, QUALIFY, ORDER BY. The incoming rows appear as a table named `input`.",
+    icon: DatabaseZapIcon,
+    accent: "#FACC15",
+    batchOnly: true,
+    fields: [
+      {
+        key: "query",
+        label: "SQL query",
+        kind: "sql",
+        required: true,
+        placeholder: "SELECT region, SUM(amount) AS total FROM input GROUP BY region",
+        help: "Vectorized (DuckDB) — set operations run orders of magnitude faster than per-row Python. The whole stream is queryable; spills to disk past memory.",
+      },
+      {
+        key: "view",
+        label: "Input table name",
+        kind: "string",
+        placeholder: "input",
+        help: "Optional. The name the incoming rows are registered under (default: input).",
+      },
+      {
+        key: "memory_limit",
+        label: "Memory limit",
+        kind: "string",
+        placeholder: "1GB",
+        help: "Optional DuckDB buffer cap (e.g. 512MB, 2GB). Past it the dataset spills to temp disk instead of OOM-ing the worker.",
+      },
+    ],
+  },
+  {
     // Fan-in operator (ADR-0041 G2/I1). Accepts 2+ incoming edges; merges
     // records on the named key columns. Input order = edge creation order
     // (first edge in = left input).
@@ -1057,6 +1099,12 @@ const SINKS: OperatorSpec[] = [
           { label: "overwrite", value: "overwrite" },
           { label: "upsert", value: "upsert" },
         ],
+      },
+      {
+        key: "key_columns",
+        label: "Key columns",
+        kind: "columns",
+        help: "Required for upsert mode. Ticks the destination table's columns.",
       },
       {
         key: "pre_sql",

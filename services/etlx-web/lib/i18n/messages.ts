@@ -1067,6 +1067,9 @@ export const en = {
   "op.transform:custom_python.label": "Custom Python (inline)",
   "op.transform:custom_python.description":
     "Write a transform(record) function in the browser; runs in the worker per record.",
+  "op.transform:sql.label": "SQL (dataset)",
+  "op.transform:sql.description":
+    "Run arbitrary SQL over all rows flowing through — GROUP BY, windows, QUALIFY. Incoming rows appear as a table named `input`.",
   "op.transform:join.label": "Join",
   "op.transform:join.description":
     "Merge two or more inputs on matching key columns (inner / left / right / outer).",
@@ -2486,6 +2489,9 @@ export const ko: Messages = {
   "op.transform:custom_python.label": "커스텀 Python (인라인)",
   "op.transform:custom_python.description":
     "브라우저에서 transform(record) 함수를 작성. 워커가 레코드 단위로 실행합니다.",
+  "op.transform:sql.label": "SQL (데이터셋)",
+  "op.transform:sql.description":
+    "흐르는 전체 행에 임의 SQL 실행 — GROUP BY, 윈도우 함수, QUALIFY. 들어온 행은 `input` 테이블로 조회합니다.",
   "op.transform:join.label": "Join",
   "op.transform:join.description":
     "둘 이상의 입력을 key 컬럼 매칭으로 합칩니다 (inner / left / right / outer).",

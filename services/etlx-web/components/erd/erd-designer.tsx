@@ -13,6 +13,7 @@ import {
   BackgroundVariant,
   Controls,
   MiniMap,
+  Handle,
   NodeResizeControl,
   NodeResizer,
   Position,
@@ -157,34 +158,60 @@ function ShapeNode({ data, selected }: NodeProps) {
   );
 }
 
-/** Table node: the label JSX plus a right-edge width grip when selected
- *  (Phase AKT). Width persists on the design (DesignTable.w). */
+/** Table node (Phase AKT/AKU): the label JSX plus resize grips when selected
+ *  — right edge = width, bottom edge = height, corner = both. Sizes persist
+ *  on the design (DesignTable.w/h). Includes the source/target Handles the
+ *  default node type used to provide — without them React Flow drops every
+ *  edge touching the node (the "lines all vanished" regression).
+ */
+const GRIP: React.CSSProperties = {
+  position: "absolute",
+  borderRadius: 2,
+  background: "rgb(var(--accent) / 0.55)",
+};
 function TableNode({ data, selected }: NodeProps) {
-  const d = data as { label: React.ReactNode; onWidth?: (px: number) => void };
+  const d = data as {
+    label: React.ReactNode;
+    onWidth?: (px: number) => void;
+    onHeight?: (px: number) => void;
+    onBoth?: (w: number, h: number) => void;
+  };
   return (
     <>
-      {selected && d.onWidth ? (
-        <NodeResizeControl
-          position="right"
-          minWidth={160}
-          maxWidth={640}
-          onResizeEnd={(_e, p) => d.onWidth?.(p.width)}
-          style={{ background: "transparent", border: "none" }}
-        >
-          <div
-            style={{
-              position: "absolute",
-              right: 2,
-              top: "50%",
-              transform: "translateY(-50%)",
-              width: 4,
-              height: 30,
-              borderRadius: 2,
-              background: "rgb(var(--accent) / 0.55)",
-              cursor: "ew-resize",
-            }}
-          />
-        </NodeResizeControl>
+      <Handle type="target" position={Position.Left} style={{ opacity: 0 }} />
+      <Handle type="source" position={Position.Right} style={{ opacity: 0 }} />
+      {selected ? (
+        <>
+          <NodeResizeControl
+            position="right"
+            minWidth={160}
+            maxWidth={640}
+            onResizeEnd={(_e, p) => d.onWidth?.(p.width)}
+            style={{ background: "transparent", border: "none" }}
+          >
+            <div style={{ ...GRIP, right: 2, top: "50%", transform: "translateY(-50%)", width: 4, height: 30, cursor: "ew-resize" }} />
+          </NodeResizeControl>
+          <NodeResizeControl
+            position="bottom"
+            minHeight={56}
+            maxHeight={1400}
+            onResizeEnd={(_e, p) => d.onHeight?.(p.height)}
+            style={{ background: "transparent", border: "none" }}
+          >
+            <div style={{ ...GRIP, bottom: 2, left: "50%", transform: "translateX(-50%)", height: 4, width: 30, cursor: "ns-resize" }} />
+          </NodeResizeControl>
+          <NodeResizeControl
+            position="bottom-right"
+            minWidth={160}
+            maxWidth={640}
+            minHeight={56}
+            maxHeight={1400}
+            onResizeEnd={(_e, p) => d.onBoth?.(p.width, p.height)}
+            style={{ background: "transparent", border: "none" }}
+          >
+            <div style={{ ...GRIP, right: 1, bottom: 1, width: 9, height: 9, cursor: "nwse-resize" }} />
+          </NodeResizeControl>
+        </>
       ) : null}
       {d.label}
     </>
@@ -764,11 +791,20 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
     return target.tableIds.filter((tid) => !others.has(tid)).length;
   }, [design.areas, pendingAreaDelete]);
 
-  // Persist a user-resized node width (px at fontScale 1).
-  const setTableWidth = useCallback((id: string, pxAtScale1: number) => {
+  // Persist a user-resized node size (px at fontScale 1). Width and height
+  // persist independently so a width tweak doesn't freeze the auto height.
+  const setTableSize = useCallback((id: string, patch: { w?: number; h?: number }) => {
     setDesign((d) => ({
       ...d,
-      tables: d.tables.map((tb) => (tb.id === id ? { ...tb, w: Math.round(pxAtScale1) } : tb)),
+      tables: d.tables.map((tb) =>
+        tb.id === id
+          ? {
+              ...tb,
+              ...(patch.w !== undefined ? { w: Math.round(patch.w) } : {}),
+              ...(patch.h !== undefined ? { h: Math.round(patch.h) } : {}),
+            }
+          : tb,
+      ),
     }));
   }, []);
 
@@ -791,19 +827,22 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
       position: activeArea?.positions?.[tb.id] ?? { x: tb.x, y: tb.y },
       data: {
         label: nodeLabel(tb, fkByTable.get(tb.id) ?? new Set(), nameMode, scale),
-        onWidth: (px: number) => setTableWidth(tb.id, px / scale),
+        onWidth: (px: number) => setTableSize(tb.id, { w: px / scale }),
+        onHeight: (px: number) => setTableSize(tb.id, { h: px / scale }),
+        onBoth: (w: number, h: number) => setTableSize(tb.id, { w: w / scale, h: h / scale }),
       },
       sourcePosition: Position.Right,
       targetPosition: Position.Left,
       style: {
         width: Math.round((tb.w ?? 240) * scale),
+        ...(tb.h ? { height: Math.round(tb.h * scale), overflow: "hidden" } : {}),
         padding: 0,
         borderRadius: 8,
         background: "rgb(var(--bg-elevated))",
         color: "rgb(var(--text))",
       },
     }));
-  }, [design, nameMode, activeArea, setTableWidth]);
+  }, [design, nameMode, activeArea, setTableSize]);
 
   const handleShapeResize = useCallback(
     (id: string, p: { x: number; y: number; width: number; height: number }) =>

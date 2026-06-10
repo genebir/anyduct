@@ -45,7 +45,7 @@ export function removeOverlaps(design: ErdDesign, gap = 28): ErdDesign {
     x: t.x,
     y: t.y,
     w: t.w ?? NODE_WIDTH,
-    h: nodeHeight(t.columns.length),
+    h: t.h ?? nodeHeight(t.columns.length),
   }));
   for (let iter = 0; iter < 80; iter++) {
     let moved = false;

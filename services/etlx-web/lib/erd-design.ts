@@ -35,6 +35,9 @@ export interface DesignTable {
   /** Custom node width in px at fontScale 1 (default 240). User-resizable
    *  via the right-edge grip (Phase AKT). */
   w?: number;
+  /** Custom node height in px at fontScale 1 (default: fits the columns).
+   *  User-resizable via the bottom-edge grip (Phase AKU). */
+  h?: number;
   /** Logical (business) name of the table. Optional; feeds the docs. */
   logical?: string;
   /** Table description / comment. */

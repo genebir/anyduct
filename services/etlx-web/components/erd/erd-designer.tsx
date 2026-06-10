@@ -655,6 +655,18 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
   const [renamingAreaId, setRenamingAreaId] = useState<string | null>(null);
   const [areaRenameVal, setAreaRenameVal] = useState("");
   const [pendingAreaDelete, setPendingAreaDelete] = useState<string | null>(null);
+  // No "전체" tab (user feedback): when areas exist the FIRST tab is the default
+  // view; with no areas the diagram is a plain single canvas.
+  useEffect(() => {
+    const areas = design.areas ?? [];
+    if (areas.length === 0) {
+      if (activeAreaId !== null) setActiveAreaId(null);
+      return;
+    }
+    if (!activeAreaId || !areas.some((a) => a.id === activeAreaId)) {
+      setActiveAreaId(areas[0].id);
+    }
+  }, [design.areas, activeAreaId]);
   const onAddArea = () => {
     const id = newId("area");
     setDesign((d) => ({
@@ -679,9 +691,36 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
     const id = pendingAreaDelete;
     setPendingAreaDelete(null);
     if (!id) return;
-    setDesign((d) => ({ ...d, areas: (d.areas ?? []).filter((a) => a.id !== id) }));
+    setDesign((d) => {
+      const areas = (d.areas ?? []).filter((a) => a.id !== id);
+      // Tables exclusive to the removed tab would become invisible orphans
+      // (no 전체 view) — delete them from the model too.
+      if (areas.length > 0) {
+        const shown = new Set(areas.flatMap((a) => a.tableIds));
+        const orphan = new Set(d.tables.filter((t) => !shown.has(t.id)).map((t) => t.id));
+        return {
+          ...d,
+          tables: d.tables.filter((t) => !orphan.has(t.id)),
+          relations: d.relations.filter((r) => !orphan.has(r.from) && !orphan.has(r.to)),
+          areas,
+        };
+      }
+      // Last tab removed → back to a plain single canvas keeping everything.
+      return { ...d, areas };
+    });
     if (activeAreaId === id) setActiveAreaId(null);
   };
+  // Tables that exist ONLY on the tab pending removal (deleted with it).
+  const pendingAreaExclusive = useMemo(() => {
+    if (!pendingAreaDelete) return 0;
+    const others = new Set(
+      (design.areas ?? []).filter((a) => a.id !== pendingAreaDelete).flatMap((a) => a.tableIds),
+    );
+    const target = (design.areas ?? []).find((a) => a.id === pendingAreaDelete);
+    if (!target) return 0;
+    if ((design.areas ?? []).length <= 1) return 0; // last tab → nothing deleted
+    return target.tableIds.filter((tid) => !others.has(tid)).length;
+  }, [design.areas, pendingAreaDelete]);
 
   // Base nodes: the expensive part (per-column label JSX). Depends only on the
   // design + name mode — NOT on selection — so clicking a node doesn't rebuild
@@ -870,24 +909,28 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
     const ids = new Set(pending.nodes);
     const edgeIds = new Set(pending.edges);
     setDesign((d) => {
-      // On a subject-area tab, "delete" only removes the tables from THIS tab
-      // (DA#-style: the model keeps them; the 전체 tab still shows them).
-      // Relationship edges are model-level either way.
+      // On a subject-area tab: remove from THIS tab; a table that no longer
+      // appears on ANY tab is deleted from the model too (there is no "전체"
+      // tab, so keeping invisible orphans would only confuse).
       if (activeAreaId) {
+        const areas = (d.areas ?? []).map((a) =>
+          a.id === activeAreaId
+            ? {
+                ...a,
+                tableIds: a.tableIds.filter((tid) => !ids.has(tid)),
+                positions: Object.fromEntries(
+                  Object.entries(a.positions ?? {}).filter(([tid]) => !ids.has(tid)),
+                ),
+              }
+            : a,
+        );
+        const stillShown = new Set(areas.flatMap((a) => a.tableIds));
+        const gone = new Set([...ids].filter((tid) => !stillShown.has(tid)));
         return {
           ...d,
-          relations: d.relations.filter((r) => !edgeIds.has(r.id)),
-          areas: (d.areas ?? []).map((a) =>
-            a.id === activeAreaId
-              ? {
-                  ...a,
-                  tableIds: a.tableIds.filter((tid) => !ids.has(tid)),
-                  positions: Object.fromEntries(
-                    Object.entries(a.positions ?? {}).filter(([tid]) => !ids.has(tid)),
-                  ),
-                }
-              : a,
-          ),
+          tables: d.tables.filter((t) => !gone.has(t.id)),
+          relations: d.relations.filter((r) => !gone.has(r.from) && !gone.has(r.to) && !edgeIds.has(r.id)),
+          areas,
           shapes: (d.shapes ?? []).filter((s) => !ids.has(s.id)),
         };
       }
@@ -1464,23 +1507,8 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
 
       <div className="flex min-h-0 flex-1">
         <div className="relative min-w-0 flex-1 bg-bg">
-          {(design.areas ?? []).length > 0 || design.tables.length > 0 ? (
+          {(design.areas ?? []).length > 0 ? (
             <div className="absolute left-2 top-2 z-20 flex max-w-[calc(100%-1rem)] flex-wrap items-center gap-1 rounded-lg border border-border-subtle bg-surface/95 p-1 shadow-sm">
-              <button
-                type="button"
-                onClick={() => {
-                  setActiveAreaId(null);
-                  setTimeout(() => rfRef.current?.fitView({ padding: 0.2, duration: 300 }), 60);
-                }}
-                className={`cursor-pointer rounded-md px-2 py-1 text-xs font-medium transition-colors ${
-                  activeAreaId === null
-                    ? "bg-accent/15 text-accent"
-                    : "text-text-secondary hover:bg-overlay hover:text-text"
-                }`}
-              >
-                {t("erdDesign.areaAll")}
-                <span className="ml-1 text-[10px] opacity-70">{design.tables.length}</span>
-              </button>
               {(design.areas ?? []).map((a) =>
                 renamingAreaId === a.id ? (
                   <Input
@@ -1739,7 +1767,11 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
         title={t("erdDesign.areaDeleteTitle", {
           name: (design.areas ?? []).find((a) => a.id === pendingAreaDelete)?.name ?? "",
         })}
-        description={t("erdDesign.areaDeleteDesc")}
+        description={
+          pendingAreaExclusive > 0
+            ? t("erdDesign.areaDeleteDescOrphans", { n: pendingAreaExclusive })
+            : t("erdDesign.areaDeleteDesc")
+        }
         confirmLabel={t("erdDesign.areaDelete")}
         destructive
         onConfirm={confirmAreaDelete}

@@ -21,11 +21,15 @@ from __future__ import annotations
 
 import decimal
 import importlib
+import os
+import re
+import tempfile
 from collections.abc import Callable, Iterator
 from datetime import datetime
 from typing import Any
 
 from etl_plugins.config.models import TransformConfig
+from etl_plugins.core.arrow import DEFAULT_BATCH_ROWS, records_to_batches
 from etl_plugins.core.exceptions import AssertionFailedError, ConfigError, TransformError
 from etl_plugins.core.pipeline import AnyTransformFn, DatasetTransformFn, TransformFn
 from etl_plugins.core.record import Record
@@ -414,6 +418,10 @@ def _build_assert(config: TransformConfig) -> TransformFn:
 
 _SQL_DEFAULT_VIEW = "input"
 
+#: DuckDB ``SET memory_limit`` values we accept — a number + unit. Validated
+#: because the value is interpolated into a SET statement (no SQL splice).
+_MEMORY_LIMIT_RE = re.compile(r"^\d+(\.\d+)?\s*(KB|MB|GB|TB|KiB|MiB|GiB|TiB)$", re.IGNORECASE)
+
 
 def _plain_value(v: Any) -> Any:
     """Normalize DuckDB/Arrow result scalars to plain Python.
@@ -454,6 +462,12 @@ def _build_sql(config: TransformConfig) -> DatasetTransformFn:
         (an aggregate row has no single source record).
       * Empty input ⇒ empty output (the query is skipped — there is no
         schema to register a zero-row relation with).
+      * **Larger-than-memory works** (Phase P2a): rows stream into a
+        file-backed DuckDB table in Arrow chunks, so the dataset spills
+        to a temp directory instead of living in one Python list. Cap
+        DuckDB's buffer pool with ``memory_limit: "1GB"`` (default:
+        DuckDB's own ~80% of RAM); tune ingest chunking with
+        ``chunk_rows`` (default 50k).
       * Requires the ``duckdb`` extra: ``pip install etl-plugins[duckdb]``.
     """
     query = _config_field(config, "query")
@@ -462,6 +476,20 @@ def _build_sql(config: TransformConfig) -> DatasetTransformFn:
     view = _config_field(config, "view", required=False) or _SQL_DEFAULT_VIEW
     if not isinstance(view, str) or not view.replace("_", "").isalnum():
         raise ConfigError(f"sql: 'view' must be a simple identifier, got {view!r}")
+    if view == "__chunk":
+        raise ConfigError("sql: 'view' name '__chunk' is reserved for the ingest staging relation")
+    memory_limit = _config_field(config, "memory_limit", required=False)
+    if memory_limit is not None and (
+        not isinstance(memory_limit, str) or not _MEMORY_LIMIT_RE.match(memory_limit.strip())
+    ):
+        raise ConfigError(
+            f"sql: 'memory_limit' must look like '512MB' / '2GB', got {memory_limit!r}"
+        )
+    chunk_rows = _config_field(config, "chunk_rows", required=False)
+    if chunk_rows is None:
+        chunk_rows = DEFAULT_BATCH_ROWS
+    if not isinstance(chunk_rows, int) or isinstance(chunk_rows, bool) or chunk_rows <= 0:
+        raise ConfigError(f"sql: 'chunk_rows' must be a positive integer, got {chunk_rows!r}")
 
     def _sql(records: Iterator[Record]) -> Iterator[Record]:
         try:
@@ -472,28 +500,53 @@ def _build_sql(config: TransformConfig) -> DatasetTransformFn:
                 "transform 'sql' requires the [duckdb] extra: uv add 'etl-plugins[duckdb]'"
             ) from exc
 
-        rows = [r.data for r in records]
-        if not rows:
-            return
-        con = duckdb.connect()
-        try:
+        # File-backed database in a throwaway directory: base-table pages
+        # evict to disk under memory pressure, so the dataset may exceed
+        # RAM (an in-memory DuckDB can spill operators but not tables).
+        with tempfile.TemporaryDirectory(prefix="etlx-sql-") as tmpdir:
+            con = duckdb.connect(os.path.join(tmpdir, "work.duckdb"))
             try:
-                table = pa.Table.from_pylist(rows)
-            except (pa.ArrowInvalid, pa.ArrowTypeError) as exc:
-                raise TransformError(f"sql: cannot infer Arrow schema from records: {exc}") from exc
-            con.register(view, table)
-            try:
-                result = con.execute(query)
-                # duckdb ≥1.4 renamed fetch_record_batch → to_arrow_reader.
-                to_reader = getattr(result, "to_arrow_reader", None) or result.fetch_record_batch
-                reader = to_reader()
-            except duckdb.Error as exc:
-                raise TransformError(f"sql: query failed: {exc}") from exc
-            for batch in reader:
-                for data in batch.to_pylist():
-                    yield Record(data={k: _plain_value(v) for k, v in data.items()})
-        finally:
-            con.close()
+                if memory_limit is not None:
+                    con.execute(f"SET memory_limit='{memory_limit.strip()}'")
+                created = False
+                try:
+                    batches = records_to_batches(records, batch_rows=chunk_rows)
+                    for batch in batches:
+                        con.register("__chunk", pa.Table.from_batches([batch]))
+                        if not created:
+                            con.execute(f'CREATE TABLE "{view}" AS SELECT * FROM __chunk')
+                            created = True
+                        else:
+                            # BY NAME: later chunks may order/omit columns
+                            # differently; missing ones become NULL. A chunk
+                            # introducing a NEW column still fails — records
+                            # must keep a consistent shape.
+                            con.execute(f'INSERT INTO "{view}" BY NAME SELECT * FROM __chunk')
+                        con.unregister("__chunk")
+                except (pa.ArrowInvalid, pa.ArrowTypeError) as exc:
+                    raise TransformError(
+                        f"sql: cannot infer Arrow schema from records: {exc}"
+                    ) from exc
+                except duckdb.Error as exc:
+                    raise TransformError(
+                        f"sql: ingest failed (records must keep a consistent column set): {exc}"
+                    ) from exc
+                if not created:
+                    return
+                try:
+                    result = con.execute(query)
+                    # duckdb ≥1.4 renamed fetch_record_batch → to_arrow_reader.
+                    to_reader = (
+                        getattr(result, "to_arrow_reader", None) or result.fetch_record_batch
+                    )
+                    reader = to_reader()
+                except duckdb.Error as exc:
+                    raise TransformError(f"sql: query failed: {exc}") from exc
+                for out_batch in reader:
+                    for data in out_batch.to_pylist():
+                        yield Record(data={k: _plain_value(v) for k, v in data.items()})
+            finally:
+                con.close()
 
     # Marker consumed by Pipeline._run_task / execute_graph_node staging.
     _sql.dataset_transform = True  # type: ignore[attr-defined]

@@ -200,3 +200,57 @@ class TestStreamRejection:
         p = Pipeline(name="p", mode="stream", tasks=[task])
         with pytest.raises(TaskError, match="batch mode"):
             await p.arun_stream(connectors={"src": _FakeStreamSource(), "dst": _FakeStreamSink()})
+
+
+class TestSpillIngest:
+    """Phase P2a: chunked Arrow ingest into a file-backed (spillable) DuckDB."""
+
+    def test_chunked_ingest_crosses_chunk_boundaries(self) -> None:
+        # chunk_rows=3 over 10 rows → 4 ingest chunks, one aggregate answer.
+        fn = build_transform(
+            TransformConfig(
+                type="sql",
+                query="SELECT COUNT(*) AS n, SUM(amount) AS total FROM input",
+                chunk_rows=3,
+            )
+        )
+        out = list(fn(_records([{"amount": i} for i in range(10)])))  # type: ignore[operator]
+        assert out[0].data == {"n": 10, "total": 45}
+
+    def test_memory_limit_spills_instead_of_oom(self) -> None:
+        # A 32MB cap forces base-table pages to evict to the temp dir; the
+        # global sort still answers correctly over ~120k wide-ish rows.
+        n = 120_000
+        fn = build_transform(
+            TransformConfig(
+                type="sql",
+                query="SELECT id FROM input ORDER BY pad DESC, id LIMIT 1",
+                memory_limit="32MB",
+                chunk_rows=20_000,
+            )
+        )
+        rows = ({"id": i, "pad": f"{i:09d}" * 12} for i in range(n))
+        out = list(fn(iter(Record(data=r) for r in rows)))  # type: ignore[operator]
+        assert out[0].data == {"id": n - 1}
+
+    def test_bad_memory_limit_rejected(self) -> None:
+        with pytest.raises(ConfigError, match="memory_limit"):
+            build_transform(
+                TransformConfig(type="sql", query="SELECT 1", memory_limit="lots'; DROP TABLE x")
+            )
+
+    def test_bad_chunk_rows_rejected(self) -> None:
+        with pytest.raises(ConfigError, match="chunk_rows"):
+            build_transform(TransformConfig(type="sql", query="SELECT 1", chunk_rows=0))
+
+    def test_reserved_view_name_rejected(self) -> None:
+        with pytest.raises(ConfigError, match="reserved"):
+            build_transform(TransformConfig(type="sql", query="SELECT 1", view="__chunk"))
+
+    def test_inconsistent_columns_across_chunks_fail_clearly(self) -> None:
+        # Chunk 2 introduces a brand-new column → clear TransformError, not a
+        # cryptic driver message.
+        fn = build_transform(TransformConfig(type="sql", query="SELECT * FROM input", chunk_rows=2))
+        recs = [{"a": 1}, {"a": 2}, {"a": 3, "brand_new": "x"}, {"a": 4, "brand_new": "y"}]
+        with pytest.raises(TransformError, match="consistent column"):
+            list(fn(_records(recs)))  # type: ignore[operator]

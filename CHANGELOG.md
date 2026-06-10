@@ -14,6 +14,7 @@
   - 코어: `DatasetTransformFn` + `is_dataset_transform` + `_run_task` 스테이지 합성(행 구간 DLQ 시맨틱 보존), 그래프 transform 노드 지원, stream 모드 명시 거부(무한 스트림엔 전체 데이터셋 없음).
   - `[duckdb]` extra(duckdb+pyarrow, lazy import), DuckDB Decimal 결과 int/float 평탄화, lint opaque 등록.
   - 12 신규 unit → 코어 1201 green. 실측 GROUP BY 500k행 0.5s(99만 rows/s). 후속: 웹 빌더 노출(P1b) → Arrow 벡터 플레인(Phase 2) → 클러스터링 가이드(Phase 3).
+- **Arrow 인터체인지 플레인 + `sql` 변환 디스크 spill (Phase P2a, 2026-06-10, ADR-0093)**: `core/arrow.py`(`Partition` 클러스터링 훅 + `ArrowReadable/ArrowWritable` Protocol + Record↔Batch 어댑터). sql 변환이 전량 메모리 버퍼 → 청크 Arrow ingest + 파일-백 DuckDB로 — **메모리보다 큰 데이터셋 처리 가능**(`memory_limit` 캡, 32MB+120k행 spill 검증). ADR-0093에 빅데이터 3-Tier 전략 보강(Tier1 Arrow+파티션+COPY / Tier2 pushdown ELT / Tier3 분산 엔진은 트리거 조건 명시 후 보류 — Spark 상시 탑재 기각).
 - **워커 멀티-replica 클러스터링 실증 + asset upsert 레이스 수정 (Phase P3a, 2026-06-10)**: SKIP LOCKED 큐(ADR-0021)의 "워커만 늘리면 분산" 약속을 처음으로 e2e 검증 — 3 replica 동시 claim 무중복 분배 + 실제 RunWorker 2대 공동 드레인. e2e가 발견한 실버그: 동시 run 완료 시 카탈로그 asset/edge upsert(select-then-insert)가 유니크 충돌로 run 실패 → `ON CONFLICT DO NOTHING` 원자화.
 
 ### Changed

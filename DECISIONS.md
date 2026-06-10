@@ -2774,7 +2774,13 @@ L1 출시 직후 사용자가 5개 회신:
 - 배선: `[duckdb]` extra(duckdb+pyarrow, lazy import), dev-deps 포함, mypy override.
 - 실측: GROUP BY 500k행 0.5s(**99만 rows/s** — 행 단위 Python 집계 대비 수십×). 단, 출력행이 많은 쿼리는 87k rows/s — **병목이 출력측 Record 재조립**임을 확인 = Phase 2의 직접 근거.
 
-**Phase 2 (다음): Arrow RecordBatch 벡터 플레인.** 커넥터 옵셔널 `read_batches()/write_batches()`(pyarrow), 미지원 커넥터는 Record↔Batch 어댑터로 호환. sql 변환은 Arrow를 그대로 통과(재조립 0). 그래프 실행의 메모리 list도 Arrow로. postgres COPY 등 bulk fast-path, same-connection은 `INSERT INTO…SELECT` 푸시다운.
+**Phase 2 (진행 중): Arrow RecordBatch 벡터 플레인.** 커넥터 옵셔널 Arrow 프로토콜(`ArrowReadable.read_arrow`/`ArrowWritable.write_arrow`, **파티션 술어 포함** — 클러스터링 훅), 미지원 커넥터는 Record↔Batch 어댑터로 호환. sql 변환은 Arrow를 그대로 통과(재조립 0). 그래프 실행의 메모리 list도 Arrow로. postgres COPY 등 bulk fast-path, same-connection은 `INSERT INTO…SELECT` 푸시다운.
+- **P2a(2026-06-10 구현)**: `etl_plugins/core/arrow.py` — `Partition`(half-open 범위, 단일-run scale-out의 분할 단위) + `ArrowReadable`/`ArrowWritable` Protocol + `records_to_batches`/`batches_to_records` 어댑터(pyarrow lazy). **sql 변환 spill 재작성**: 전량 Python list 버퍼(OOM 지뢰) → 청크 Arrow ingest(`INSERT … BY NAME`) + **파일-백 DuckDB**(임시 디렉토리, 베이스 테이블이 디스크로 evict — 메모리보다 큰 데이터셋 동작) + `memory_limit`/`chunk_rows` 옵션(SET 인젝션 방지 정규식 검증).
+
+**빅데이터 3-Tier 전략 (2026-06-10 보강 — 사용자 질문 "TB 단위는 Spark를 올려야 하나?")**: 현 상태로 TB 불가는 사실(워커당 ~15만 rows/s, sql 변환 전량 버퍼(→P2a로 해소), 그래프 메모리 materialize, 단일-run 분할 부재). 그러나 워크로드를 쪼개면 Spark는 지금 불필요:
+- **Tier 1 — 수십~수백 GB, 실제 이동(마이그레이션류, 현 주력)**: 병목은 컴퓨트가 아니라 추출/적재. Spark도 결국 JDBC 파티션 읽기 — 우리의 파티션 분할 실행 + COPY bulk path와 동일 전략. **Phase 2~3로 해결, 엔진 불필요.**
+- **Tier 2 — TB급, 데이터가 이미 DW에(Snowflake/BigQuery/ClickHouse/Vertica)**: TB는 애초에 우리(나 Spark)를 통과하면 안 됨 — **pushdown ELT**(DW 안에서 `INSERT INTO…SELECT`, 데이터 무이동)가 정답. dbt가 TB를 다루는 방식 그대로(엔진=웨어하우스). 보유 자산(DW 커넥터 9종 + sql_exec)의 1급화 = **Phase 2.5**.
+- **Tier 3 — 공통 DW 없는 TB×TB 분산 shuffle JOIN**: 이때만 분산 컴퓨트 엔진이 정당. **트리거 조건을 명시하고 보류** — "Tier 1/2로 환원 안 되는 TB×TB 조인이 반복 워크로드로 등장"하면 Arrow 핸드오프 어댑터(Spark/Ray 등)를 extra로 추가. Arrow가 분산 엔진들의 공용 인터체인지라 지금 선택이 길을 막지 않음. Spark 상시 탑재는 ADR-0040 제거 사유(JVM 클러스터 운영 부담, 수백 GB까지 단일 노드 벡터 엔진 우위) 그대로 기각.
 
 **Phase 3 (클러스터링) — 사용자 질문 "별개 문제인가?"에 대한 답: 80% 별개, 20% 지금 훅.**
 - **run 단위 scale-out은 이미 설계됨**: runs 테이블 = 큐, `FOR UPDATE SKIP LOCKED` claim(ADR-0021) — 워커 replica를 늘리면 run들이 분산됨. stream-worker도 K2b에서 schedule-row 락 + RUNNING 중복 체크로 멀티 replica 안전. 남은 일: 배포 스토리(compose/k8s), 모니터링. 데이터 플레인과 독립. **P3a(같은 날) 실증 완료**: 멀티-replica 경합 e2e 2종(3-replica claim 무중복 분배 / RunWorker 2대 공동 드레인) — e2e가 카탈로그 asset/edge upsert의 select-then-insert 레이스(동시 run 완료 시 `uq_asset_ws_key` 충돌로 run 실패)를 발견, `INSERT … ON CONFLICT DO NOTHING`으로 원자화.

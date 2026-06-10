@@ -176,6 +176,18 @@ function parseCanvasBounds(b: Uint8Array): Map<string, { x: number; y: number; w
   return out;
 }
 
+
+/** Apply a DA# box size to a design table (Phase AKW). Width maps directly
+ *  (same 0.6 scale as positions). Height is taken only when it's at least the
+ *  content height under OUR row metrics — DA#'s rows are shorter, and a fixed
+ *  height below content would clip columns; auto keeps every column visible. */
+function applyDamxSize(t: DesignTable, w: number, h: number, scale: number): void {
+  t.w = Math.min(640, Math.max(140, Math.round(w * scale)));
+  const contentH = 40 + Math.max(1, t.columns.length) * 25 + 16; // mirrors erd-layout
+  const hh = Math.round(h * scale);
+  if (hh >= contentH) t.h = Math.min(1400, hh);
+}
+
 interface ParsedColumn {
   name: string;
   type: string;
@@ -611,6 +623,7 @@ export function parseDamx(buf: ArrayBuffer): ErdDesign {
       if (bd) {
         t.x = Math.round(bd.x * SCALE);
         t.y = Math.round(bd.y * SCALE);
+        applyDamxSize(t, bd.w, bd.h, SCALE);
       }
     }
   }
@@ -824,10 +837,10 @@ export function parseDamxWithAreas(buf: ArrayBuffer): ErdDesign {
   // both the ci link and its rect are resolved segment-locally. Validated:
   // 안전지원 8 tabs all fully positioned, multi-tab tables get per-tab coords.
   const i32 = (off: number) => (off + 4 <= b.length ? dv.getInt32(off, true) : 0);
-  const rectAt = (end: number): { x: number; y: number } | null => {
+  const rectAt = (end: number): { x: number; y: number; w: number; h: number } | null => {
     const v = [0, 1, 2, 3, 4, 5, 6].map((k) => i32(end + 4 * k));
     if (v[0] === 0 && v[3] === 0 && v[4] === 0 && v[5] > 50 && v[5] < 4000 && v[6] > 50 && v[6] < 6000 && v[1] >= 0 && v[1] < 60000 && v[2] >= 0 && v[2] < 60000) {
-      return { x: v[1], y: v[2] };
+      return { x: v[1], y: v[2], w: v[5], h: v[6] };
     }
     return null;
   };
@@ -843,7 +856,7 @@ export function parseDamxWithAreas(buf: ArrayBuffer): ErdDesign {
     arr.push(i);
   }
   const areaMembers = new Map<string, Set<string>>();
-  const areaPos = new Map<string, Map<string, { x: number; y: number }>>(); // area → Korean name → rect
+  const areaPos = new Map<string, Map<string, { x: number; y: number; w: number; h: number }>>(); // area → Korean name → rect
   let cur: string | null = null;
   for (let mi = 0; mi < marks.length; mi++) {
     const named = headers.get(mi);
@@ -899,6 +912,8 @@ export function parseDamxWithAreas(buf: ArrayBuffer): ErdDesign {
         positions[t.id] = { x: Math.round(bd.x * SCALE), y: Math.round(bd.y * SCALE) };
         placed += 1;
         distinct.add(`${bd.x},${bd.y}`);
+        // Node size from DA# (first pane that shows the table wins).
+        if (t.w === undefined) applyDamxSize(t, bd.w, bd.h, SCALE);
       }
     }
     if (tableIds.length === 0) continue;

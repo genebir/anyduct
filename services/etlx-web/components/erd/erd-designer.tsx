@@ -34,6 +34,7 @@ import {
   AlertTriangleIcon,
   ArrowDownIcon,
   ArrowLeftIcon,
+  ArrowRightLeftIcon,
   ArrowUpIcon,
   CheckCircle2Icon,
   Table2Icon,
@@ -72,6 +73,7 @@ import { useLocale } from "@/components/providers/locale-provider";
 import { ERD_EDGE_TYPES } from "@/components/erd/crowsfoot-edge";
 import { ImportTablesDialog } from "@/components/erd/import-tables-dialog";
 import { VerifyDbDialog } from "@/components/erd/verify-db-dialog";
+import { CreateMigrationDialog } from "@/components/erd/create-migration-dialog";
 import { ImportDdlDialog } from "@/components/erd/import-ddl-dialog";
 import { parseDamxWithAreas } from "@/lib/damx";
 import { autoLayout, layoutAreas, removeOverlaps } from "@/lib/erd-layout";
@@ -1015,6 +1017,7 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
 
   const [showValidation, setShowValidation] = useState(false);
   const [showDbVerify, setShowDbVerify] = useState(false);
+  const [migrateTableIds, setMigrateTableIds] = useState<string[] | null>(null);
   const issues = useMemo(() => validateErd(design), [design]);
   const warnCount = issues.filter((i) => i.severity === "warning").length;
 
@@ -1525,6 +1528,16 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
           </Button>
           <Button
             size="sm"
+            variant="ghost"
+            onClick={() => setMigrateTableIds((activeArea?.tableIds ?? design.tables.map((tb) => tb.id)))}
+            disabled={design.tables.length === 0 || !ws?.id}
+            title={t("erdMigrate.hint")}
+          >
+            <ArrowRightLeftIcon size={14} />
+            {t("erdMigrate.button")}
+          </Button>
+          <Button
+            size="sm"
             variant="secondary"
             onClick={() => onAutoLayout()}
             disabled={design.tables.length === 0}
@@ -1901,6 +1914,15 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
       ) : null}
       {showDbVerify && ws?.id ? (
         <VerifyDbDialog workspaceId={ws.id} design={design} onClose={() => setShowDbVerify(false)} />
+      ) : null}
+      {migrateTableIds && ws?.id ? (
+        <CreateMigrationDialog
+          workspaceId={ws.id}
+          slug={slug}
+          design={design}
+          initialTableIds={migrateTableIds}
+          onClose={() => setMigrateTableIds(null)}
+        />
       ) : null}
       {showImport && ws?.id ? (
         <ImportTablesDialog

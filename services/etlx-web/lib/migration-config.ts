@@ -313,7 +313,9 @@ export function suggestCursorColumn(columns: SourceColumn[]): string | null {
 /** Extract the table name from a strict ``SELECT * FROM <name>``
  *  query. Returns null for anything richer. */
 export function parseSelectStarTable(query: string): string | null {
-  const m = /^\s*SELECT\s+\*\s+FROM\s+([A-Za-z_][A-Za-z0-9_.]*)\s*;?\s*$/i.exec(
+  // Identifier set includes Hangul — Korean table names (부서, 공통코드그룹)
+  // are real in the field and ERD-generated migrations use them (Phase AKP).
+  const m = /^\s*SELECT\s+\*\s+FROM\s+([A-Za-z_가-힣][A-Za-z0-9_.가-힣]*)\s*;?\s*$/i.exec(
     query,
   );
   return m ? m[1] : null;

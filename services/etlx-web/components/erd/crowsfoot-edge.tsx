@@ -16,6 +16,8 @@ import {
   Position,
   getSmoothStepPath,
   useInternalNode,
+  useStore,
+  type Edge,
   type EdgeProps,
   type InternalNode,
 } from "@xyflow/react";
@@ -67,6 +69,58 @@ function normal(pos: Position): { nx: number; ny: number } {
   }
 }
 
+
+/**
+ * Anchor with sibling spacing (Phase AKR). When several relationships attach
+ * to the SAME side of a node they used to converge on (almost) one border
+ * point and read as a single thick line. Instead, collect the edges sharing
+ * this side, order them by where the opposite table sits (minimizes
+ * crossings), and distribute the anchors evenly along the side.
+ */
+function distributedAnchor(
+  node: InternalNode,
+  other: InternalNode,
+  edgeId: string,
+  edges: Edge[],
+  lookup: Map<string, InternalNode>,
+): { x: number; y: number; pos: Position } {
+  const p = intersection(node, other);
+  const pos = sideOf(node, p);
+  const horiz = pos === Position.Top || pos === Position.Bottom;
+  const sibs: { id: string; t: number }[] = [];
+  for (const e of edges) {
+    if (e.source === e.target) continue;
+    const otherId = e.source === node.id ? e.target : e.target === node.id ? e.source : null;
+    if (!otherId) continue;
+    const o = lookup.get(otherId);
+    if (!o) continue;
+    if (sideOf(node, intersection(node, o)) !== pos) continue;
+    const oc = horiz
+      ? o.internals.positionAbsolute.x + (o.measured.width ?? 220) / 2
+      : o.internals.positionAbsolute.y + (o.measured.height ?? 80) / 2;
+    sibs.push({ id: e.id, t: oc });
+  }
+  if (sibs.length <= 1) return { x: p.x, y: p.y, pos };
+  sibs.sort((a, b) => a.t - b.t || a.id.localeCompare(b.id));
+  const idx = sibs.findIndex((s) => s.id === edgeId);
+  if (idx < 0) return { x: p.x, y: p.y, pos };
+  const nx = node.internals.positionAbsolute.x;
+  const ny = node.internals.positionAbsolute.y;
+  const w = node.measured.width ?? 220;
+  const h = node.measured.height ?? 80;
+  const frac = (idx + 1) / (sibs.length + 1);
+  switch (pos) {
+    case Position.Left:
+      return { x: nx, y: ny + h * frac, pos };
+    case Position.Right:
+      return { x: nx + w, y: ny + h * frac, pos };
+    case Position.Top:
+      return { x: nx + w * frac, y: ny, pos };
+    default:
+      return { x: nx + w * frac, y: ny + h, pos };
+  }
+}
+
 /** Crow's foot (many): three prongs from an apex out along the normal back
  *  to the border, spread perpendicular to the normal. */
 function foot(x: number, y: number, pos: Position): string {
@@ -100,6 +154,8 @@ function mark(card: string, x: number, y: number, pos: Position): string {
 export function CrowsFootEdge({ id, source, target, label, style, data }: EdgeProps) {
   const sourceNode = useInternalNode(source);
   const targetNode = useInternalNode(target);
+  const edges = useStore((s) => s.edges);
+  const nodeLookup = useStore((s) => s.nodeLookup);
   if (!sourceNode || !targetNode) return null;
 
   const sourceCard = (data?.sourceCard as string) ?? "many";
@@ -138,10 +194,12 @@ export function CrowsFootEdge({ id, source, target, label, style, data }: EdgePr
     );
   }
 
-  const sp = intersection(sourceNode, targetNode);
-  const tp = intersection(targetNode, sourceNode);
-  const sPos = sideOf(sourceNode, sp);
-  const tPos = sideOf(targetNode, tp);
+  const sa = distributedAnchor(sourceNode, targetNode, id, edges, nodeLookup);
+  const ta = distributedAnchor(targetNode, sourceNode, id, edges, nodeLookup);
+  const sp = { x: sa.x, y: sa.y };
+  const tp = { x: ta.x, y: ta.y };
+  const sPos = sa.pos;
+  const tPos = ta.pos;
   const [path, labelX, labelY] = getSmoothStepPath({
     sourceX: sp.x,
     sourceY: sp.y,

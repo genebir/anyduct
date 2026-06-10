@@ -204,29 +204,31 @@ const REL_AUDIT = new Set([
 /**
  * Recover each table's PHYSICAL name (테이블명, e.g. TB_TSOBAS011) — Phase AJU.
  * DA# draws the table label as ``[PHYSICAL][LOGICAL]`` in the diagram (e.g.
- * ``TB_TSOBAS011`` then ``운행패턴역``). Returns logical(Korean) → physical.
- * Models that use the Korean name for both yield an empty map.
+ * ``TB_TSOBAS011`` then ``운행패턴역``). Returns both logical(Korean)→physical
+ * (first per table, for the display-name flip) and physical→logical (EVERY
+ * occurrence, last-wins, for canonicalizing relationship records — a table can
+ * have several physical-name occurrences and all must map back). Models that use
+ * the Korean name for both yield empty maps.
  */
-function parsePhysicalTableNames(b: Uint8Array, koreanNames: Set<string>): Map<string, string> {
+function parsePhysicalTableNames(
+  b: Uint8Array,
+  koreanNames: Set<string>,
+): { physByName: Map<string, string>; reversePhys: Map<string, string> } {
   const F = framesWithOffsets(b);
   const diaFrame = F.find((f) => f.s === "DIAGRAM_VERSION");
   const DIA = diaFrame ? diaFrame.off : 0;
-  const out = new Map<string, string>();
+  const physByName = new Map<string, string>();
+  const reversePhys = new Map<string, string>();
   for (let i = 0; i < F.length - 1; i++) {
     if (F[i].off <= DIA) continue; // diagram section only
     const phys = F[i].s;
     const logical = F[i + 1].s;
-    if (
-      koreanNames.has(logical) &&
-      !out.has(logical) &&
-      PHYS_RE.test(phys) &&
-      !phys.startsWith("K_") &&
-      !SQL_TYPES.has(phys)
-    ) {
-      out.set(logical, phys);
+    if (koreanNames.has(logical) && PHYS_RE.test(phys) && !phys.startsWith("K_") && !SQL_TYPES.has(phys)) {
+      if (!physByName.has(logical)) physByName.set(logical, phys);
+      reversePhys.set(phys, logical); // every physical occurrence → its Korean
     }
   }
-  return out;
+  return { physByName, reversePhys };
 }
 
 /**
@@ -310,25 +312,45 @@ function parseMandatory(b: Uint8Array): Map<string, boolean> {
  * key). This replaces the old heuristic which mis-picked columns and missed
  * many links.
  */
-function parseRelationships(b: Uint8Array, tables: ParsedTable[]): RawRelation[] {
+function parseRelationships(
+  b: Uint8Array,
+  tables: ParsedTable[],
+  colByGuid: Map<string, ParsedColumn>,
+  reversePhys: Map<string, string>,
+): RawRelation[] {
+  // DEFINITIVE relationship extraction (Phase AKD) — reverse-engineered + count-
+  // validated against DA# (TMS 265, 테이블표준화 16, exact). A relationship is a
+  // record where a relationship GUID BRACKETS the entity pair:
+  //   [relGUID] [parentEntity] [childEntity] [relGUID]  (F[i-1] === F[i+2])
+  // followed by the parent's FK key attribute GUIDs. DA# stores each cross
+  // relationship twice (logical area uses Korean names, physical area uses the
+  // physical 테이블명) so we canonicalize TB_→Korean and dedupe. Self-loops are
+  // kept only when the table actually has a UP_<ownPK> self-reference column
+  // (filters entity-definition brackets, which are same-entity and have no UP_).
   const F = framesWithOffsets(b);
   const S = F.map((f) => f.s);
   const names = new Set(tables.map((t) => t.name));
   const colsByTable = new Map(tables.map((t) => [t.name, new Set(t.columns.map((c) => c.name))]));
   const pkByTable = new Map(tables.map((t) => [t.name, new Set(t.columns.filter((c) => c.pk).map((c) => c.name))]));
-  // A self-reference exists only when the ``UP_<X>`` column's base X is the
-  // table's OWN primary key (e.g. 부서.UP_DEPT_NO → 부서). ``UP_<otherPK>``
-  // (e.g. 공통코드.UP_COM_CD_GROUP_ID, base = 공통코드그룹's PK) is NOT a
-  // self-ref — that was creating bogus self N:1 links.
-  const upByTable = new Map<string, string>();
-  for (const t of tables) {
-    const colNames = new Set(t.columns.map((c) => c.name));
-    // ``UP_<X>`` is a self-ref only when the base column X also exists in the
-    // table (e.g. 부서.UP_DEPT_NO ↔ DEPT_NO). Non-root tables are filtered out
-    // later via isChildOfOther.
-    const up = t.columns.find((c) => c.name.startsWith("UP_") && colNames.has(c.name.slice(3)));
-    if (up) upByTable.set(t.name, up.name);
-  }
+  const canon = (nm: string) => reversePhys.get(nm) ?? nm; // physical 테이블명 → Korean
+  // The bracket record reliably gives the pair+direction, but its first attr is
+  // NOT the FK; derive the FK column from the shared key (parent's PK preferred).
+  const fkColumn = (parent: string, child: string): string => {
+    const cp = colsByTable.get(parent);
+    const cc = colsByTable.get(child);
+    if (!cp || !cc) return "";
+    const shared = [...cp].filter((x) => cc.has(x) && !REL_AUDIT.has(x) && !x.startsWith("UP_"));
+    const keyish = shared.filter((x) => /(_ID|_NO|_CD)$/i.test(x));
+    const pk = pkByTable.get(parent);
+    const sharedPk = pk ? shared.filter((x) => pk.has(x)) : [];
+    return sharedPk[0] ?? keyish[0] ?? shared[0] ?? "";
+  };
+  const upCol = (t: string): string | null => {
+    const cs = colsByTable.get(t);
+    if (!cs) return null;
+    for (const c of cs) if (c.startsWith("UP_") && cs.has(c.slice(3))) return c;
+    return null;
+  };
   const diaFrame = F.find((f) => f.s === "DIAGRAM_VERSION");
   const DIA = diaFrame ? diaFrame.off : 0;
   const strict = new TextDecoder("utf-16le", { fatal: true });
@@ -351,94 +373,43 @@ function parseRelationships(b: Uint8Array, tables: ParsedTable[]): RawRelation[]
       if (ci && GUID_RE.test(ci)) entset.add(f.s);
     }
   }
-  // Entity GUID -> table name (last model occurrence; must be a real table).
+  // Entity GUID → name (Korean logical-area name OR physical 테이블명), captured
+  // from the model section. Accept both so logical AND physical records resolve.
   const g2n = new Map<string, string>();
   for (let i = 1; i < F.length; i++) {
     const f = F[i];
     const prev = F[i - 1].s;
-    if (f.off < DIA && entset.has(prev) && !GUID_RE.test(f.s) && /^[가-힣A-Za-z]/.test(f.s) && names.has(f.s)) {
-      g2n.set(prev, f.s);
-    }
+    if (f.off >= DIA || !entset.has(prev) || GUID_RE.test(f.s)) continue;
+    if (!/^[가-힣A-Za-z]/.test(f.s) || f.s.includes("고딕") || f.s === "Segoe UI") continue;
+    g2n.set(prev, f.s); // accept any name; the canon + names filter applies per pair
   }
   const out: RawRelation[] = [];
   const seen = new Set<string>();
-  const add = (child: string, col: string, parent: string) => {
-    const k = [child, parent].sort().join("|") + "|" + col;
-    if (seen.has(k)) return;
-    seen.add(k);
-    out.push({ fromTable: child, fromColumn: col, toTable: parent });
-  };
-  // Collect ONE candidate per table-pair (first occurrence in stream order =
-  // [parent][child] direction), recording all shared keys for later re-selection.
-  const candByPair = new Map<string, { child: string; parent: string; key: string; shared: string[] }>();
-  for (let i = 0; i < S.length - 1; i++) {
-    const parent = g2n.get(S[i]);
-    const child = g2n.get(S[i + 1]);
-    if (!parent || !child || parent === child) continue;
-    const pairKey = [parent, child].sort().join("|");
-    if (candByPair.has(pairKey)) continue;
-    const cp = colsByTable.get(parent);
-    const cc = colsByTable.get(child);
-    if (!cp || !cc) continue;
-    const shared = [...cp].filter((x) => cc.has(x) && !REL_AUDIT.has(x) && !x.startsWith("UP_"));
-    const keyish = shared.filter((x) => /(_ID|_NO|_CD)$/i.test(x));
-    const parentPk = pkByTable.get(parent);
-    const sharedPk = parentPk ? shared.filter((x) => parentPk.has(x)) : [];
-    const key = sharedPk[0] ?? keyish[0] ?? shared[0];
-    if (key) candByPair.set(pairKey, { child, parent, key, shared });
-  }
-  const cand = [...candByPair.values()];
-  // A table is "a child via key K" if it has an outgoing FK on K (from the
-  // deduped set). Used to detect sibling-adjacency noise.
-  const childByKey = new Set(cand.map((c) => `${c.child}|${c.key}`));
-  // Consensus OWNER of a key = the table that is most often the parent (target)
-  // for that key. A table that owns the key by consensus is the real dimension
-  // for it, so a relationship pointing to it is genuine even if it also appears
-  // as a child via the same key elsewhere (e.g. 원시운행계획선정보 owns LNE_CD).
-  const targetCounts = new Map<string, Map<string, number>>();
-  for (const c of cand) {
-    let m = targetCounts.get(c.key);
-    if (!m) {
-      m = new Map();
-      targetCounts.set(c.key, m);
-    }
-    m.set(c.parent, (m.get(c.parent) ?? 0) + 1);
-  }
-  const ownerByKey = new Map<string, string>();
-  for (const [k, m] of targetCounts) {
-    let best: string | null = null;
-    let bc = -1;
-    for (const [tbl, ct] of m) if (ct > bc) ((bc = ct), (best = tbl));
-    if (best) ownerByKey.set(k, best);
-  }
-  // History/change-log tables are named base+"…이력" (e.g. 사용자별부서변경이력);
-  // they legitimately reference their base via a shared key.
-  const isHistoryOf = (child: string, parent: string) => child.startsWith(parent) && /이력$/.test(child);
-  for (const c of cand) {
-    const ambiguous =
-      childByKey.has(`${c.parent}|${c.key}`) &&
-      ownerByKey.get(c.key) !== c.parent &&
-      !isHistoryOf(c.child, c.parent);
-    if (!ambiguous) {
-      add(c.child, c.key, c.parent);
+  for (let i = 1; i < F.length - 2; i++) {
+    const pn = g2n.get(S[i]);
+    const cn = g2n.get(S[i + 1]);
+    if (!pn || !cn) continue;
+    if (!GUID_RE.test(S[i - 1]) || S[i - 1] !== S[i + 2]) continue; // relGUID bracket
+    const parent = canon(pn);
+    const child = canon(cn);
+    if (!names.has(parent) || !names.has(child)) continue;
+    if (parent === child) {
+      // Self-loop: real only if the table has a UP_<ownPK> self-reference column.
+      const up = upCol(parent);
+      if (!up) continue;
+      const k = `${parent}|self`;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push({ fromTable: parent, fromColumn: up, toTable: parent });
       continue;
     }
-    // Re-select a shared key the parent actually OWNS (doesn't use as its own
-    // FK) — recovers composite-key links (e.g. 가상궤도정보 → 가상역정보 via
-    // STN_INDEX_NO instead of the shared master VR_MSTR_ID). Drop only if none.
-    const alt =
-      c.shared.find((k) => k !== c.key && !childByKey.has(`${c.parent}|${k}`) && /(_ID|_NO|_CD)$/i.test(k)) ??
-      c.shared.find((k) => k !== c.key && !childByKey.has(`${c.parent}|${k}`));
-    if (alt) add(c.child, alt, c.parent);
-  }
-  // Self-references: ``UP_<ownPK>`` on a ROOT table (not a child of another).
-  const isChildOfOther = new Set(cand.map((c) => c.child));
-  for (const [name, up] of upByTable) {
-    if (!isChildOfOther.has(name)) add(name, up, name);
+    const k = `${child}->${parent}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push({ fromTable: child, fromColumn: fkColumn(parent, child), toTable: parent });
   }
   return out;
 }
-
 // Constraint / index pseudo-entity names (e.g. ``<table>_PK``) — DA# emits
 // these and they must not be mistaken for real tables.
 const CONSTRAINT_RE = /_(PK|FK|UK|UQ|IDX|IX|AK)\d*$/i;
@@ -448,6 +419,9 @@ function isEntityName(s: string): boolean {
   if (GUID_RE.test(s) || s.startsWith("K_") || /^\d+$/.test(s)) return false;
   if (SQL_TYPES.has(s) || PHYS_RE.test(s)) return false;
   if (s.includes("--") || CONSTRAINT_RE.test(s)) return false;
+  // Real table names are single tokens; a name with whitespace is a description
+  // text mis-captured as a name (DA# stores a desc sentence after the name).
+  if (/\s/.test(s)) return false;
   const c = s.trim()[0];
   return !(c === ":" || c === "," || c === "(" || c === ";" || c === "-");
 }
@@ -544,7 +518,21 @@ export function parseDamx(buf: ArrayBuffer): ErdDesign {
     // immediately by a ``K_*`` property key is a COLUMN's logical name (e.g.
     // 세션아이디 → K_ATTR_DATA_OWNER), not a table — excluding it prevents a
     // phantom table that would steal the real table's leading columns.
-    if (cols.length > 0 && isEntityName(s) && !(S[i + 1] ?? "").startsWith("K_")) {
+    // Accept Korean names (isEntityName) AND ALL-CAPS English *word* table names
+    // (PIT, CROSSING, …) which isEntityName rejects as column-like. Require NO
+    // digits and no ``TB_`` prefix so we don't pick up DA#'s separate physical-
+    // area table definitions (TB_TSOBAS011 etc., which are digit-bearing codes
+    // duplicating the real Korean tables). The GUID-run + no-type-ahead guard
+    // below further distinguishes a table from a column.
+    const nameOk =
+      isEntityName(s) ||
+      (PHYS_RE.test(s) &&
+        !/\d/.test(s) &&
+        !s.startsWith("TB_") &&
+        !SQL_TYPES.has(s) &&
+        !s.startsWith("K_") &&
+        !CONSTRAINT_RE.test(s));
+    if (cols.length > 0 && nameOk && !(S[i + 1] ?? "").startsWith("K_")) {
       const win = S.slice(i + 1, i + 5);
       const guidCount = win.filter((w) => GUID_RE.test(w)).length;
       const hasColumnAhead = S.slice(i + 1, i + 7).some((w) => SQL_TYPES.has(w));
@@ -573,6 +561,10 @@ export function parseDamx(buf: ArrayBuffer): ErdDesign {
   }
 
   const deduped = dedupeTables(tables);
+  const { physByName, reversePhys } = parsePhysicalTableNames(
+    new Uint8Array(buf),
+    new Set(deduped.map((t) => t.name)),
+  );
   // Drop duplicate columns within a table (the grouping heuristic can pick the
   // same physical column twice) — a table can't have two identical column names,
   // and duplicates break React keys downstream. Keep the first (richer) one.
@@ -588,8 +580,7 @@ export function parseDamx(buf: ArrayBuffer): ErdDesign {
       if (!c.logical && rawLogical.has(c.name)) c.logical = rawLogical.get(c.name);
     }
   }
-  const rels = parseRelationships(new Uint8Array(buf), deduped);
-  const physByName = parsePhysicalTableNames(new Uint8Array(buf), new Set(deduped.map((t) => t.name)));
+  const rels = parseRelationships(new Uint8Array(buf), deduped, colByGuid, reversePhys);
   const design = toDesign(deduped, rels, physByName);
 
   // Apply DA#'s real diagram positions (Phase AJG) so the imported ERD matches

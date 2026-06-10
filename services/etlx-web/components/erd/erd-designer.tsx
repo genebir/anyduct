@@ -1054,10 +1054,16 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
     applyLayout((d) => autoLayout(d, dir));
   };
 
+  // PNG rendering of a big diagram can take many seconds — show a blocking
+  // "generating image" overlay so it doesn't look frozen.
+  const [exportingPng, setExportingPng] = useState(false);
   const onExportPng = async () => {
-    if (design.tables.length === 0) return;
+    if (design.tables.length === 0 || exportingPng) return;
     const el = document.querySelector<HTMLElement>(".react-flow__viewport");
     if (!el) return;
+    setExportingPng(true);
+    // Let the overlay paint before toPng() hogs the main thread.
+    await new Promise((r) => setTimeout(r, 50));
     // Fit the image tightly to the node bounding box (no wasted whitespace) and
     // render crisp. `scale` enlarges small/medium ERDs for sharp text but is
     // clamped so even a 300-table diagram stays under the browser canvas limit.
@@ -1097,6 +1103,8 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
       a.click();
     } catch {
       toast.error(t("erdDesign.exportImageError"));
+    } finally {
+      setExportingPng(false);
     }
   };
 
@@ -1866,6 +1874,17 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
         onConfirm={confirmAreaDelete}
         onCancel={() => setPendingAreaDelete(null)}
       />
+      {exportingPng ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="flex items-center gap-3 rounded-lg border border-border-subtle bg-surface px-5 py-4 shadow-xl">
+            <span className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-accent/30 border-t-accent" />
+            <div>
+              <p className="text-sm font-medium text-text">{t("erdDesign.exportingImage")}</p>
+              <p className="text-xs text-text-muted">{t("erdDesign.exportingImageHint")}</p>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {showDbVerify && ws?.id ? (
         <VerifyDbDialog workspaceId={ws.id} design={design} onClose={() => setShowDbVerify(false)} />
       ) : null}

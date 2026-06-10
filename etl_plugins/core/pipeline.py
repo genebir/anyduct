@@ -17,6 +17,7 @@ from typing import Any, cast
 import structlog
 
 from etl_plugins.config.models import DlqConfig, RetryConfig
+from etl_plugins.core.arrow import ArrowReadable, ArrowWritable
 from etl_plugins.core.asset import (
     AssetKey,
     AssetLineage,
@@ -1350,6 +1351,11 @@ class Pipeline:
         # the target rows this run re-inserts → delete-then-insert idempotency.
         self._run_pre_sql(task, connectors)
 
+        cursored_run = cursor_from is not None or cursor_to is not None
+        fast = self._try_arrow_fast_path(task, source, sinks, cursored=cursored_run)
+        if fast is not None:
+            return fast
+
         records_read = 0
         new_cursor: CursorValue = None
         dlq_enabled = self.dlq is not None
@@ -1513,6 +1519,51 @@ class Pipeline:
                 **spec.options,
             )
         return records_read, written, new_cursor
+
+    def _try_arrow_fast_path(
+        self,
+        task: Task,
+        source: BatchSource,
+        sinks: list[tuple[SinkSpec, BatchSink]],
+        *,
+        cursored: bool,
+    ) -> tuple[int, int, CursorValue] | None:
+        """Bulk Arrow path (ADR-0093 P2b): bypass the Record plane entirely.
+
+        Eligible when nothing in the task needs per-record Python: no
+        transforms (row or dataset), no cursor window, exactly one sink
+        with no ``when`` routing, mode append/overwrite, and BOTH
+        connectors declare the Arrow capabilities. Returns ``None`` to
+        fall through to the Record path. Semantics are identical for
+        eligible tasks — DLQ only fires on transform errors, and there
+        are none here.
+        """
+        if task.transforms or cursored or len(sinks) != 1:
+            return None
+        spec, sink = sinks[0]
+        if spec.when is not None or spec.mode not in ("append", "overwrite"):
+            return None
+        if not isinstance(source, ArrowReadable) or not isinstance(sink, ArrowWritable):
+            return None
+
+        _module_logger.info("arrow_fast_path", pipeline=self.name, task=task.name, mode=spec.mode)
+        records_read = 0
+
+        def _counted() -> Iterator[Any]:
+            nonlocal records_read
+            for batch in source.read_arrow(query=task.query, **task.source_options):
+                records_read += batch.num_rows
+                yield batch
+
+        written = sink.write_arrow(
+            _counted(),
+            mode=spec.mode,
+            key_columns=spec.key_columns,
+            table=spec.table,
+            pre_sql=spec.pre_sql,
+            **spec.options,
+        )
+        return records_read, written, None
 
     def _fire(self, event: str, *args: Any) -> None:
         for hook in self._hooks.get(event, []):

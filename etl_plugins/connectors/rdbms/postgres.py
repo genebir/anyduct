@@ -11,23 +11,34 @@ Modes (``write``):
 
 Reads stream rows through a server-side cursor (``itersize=chunk_size``) so
 memory usage stays bounded for arbitrarily large result sets.
+
+Arrow fast path (ADR-0093 P2b): :meth:`read_arrow` / :meth:`write_arrow`
+move data as Arrow RecordBatches over COPY csv — no per-cell Python object,
+so bulk pipelines bypass the Record plane entirely (pyarrow required;
+ships with the ``[duckdb]`` / ``[s3]`` extras).
 """
 
 from __future__ import annotations
 
+import io
 import re
 from collections.abc import Iterable, Iterator
-from typing import Any
+from itertools import chain
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 import psycopg
 from psycopg import sql
 
+from etl_plugins.core.arrow import Partition
 from etl_plugins.core.connector import BatchSink, BatchSource
 from etl_plugins.core.exceptions import ConnectError, ReadError, WriteError
 from etl_plugins.core.inspect import ColumnInfo
 from etl_plugins.core.record import Record
 from etl_plugins.core.registry import ConnectorRegistry
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    import pyarrow as pa
 
 # Identifier validation regexes for DDL string interpolation
 # (psycopg.sql.Identifier handles parameterised values; identifiers
@@ -223,7 +234,7 @@ class PostgresConnector(BatchSource, BatchSink):
                     cur.execute(f'DROP TABLE "{schema}"."{name}"')
         elif if_exists not in {"skip", "drop", "error"}:
             raise WriteError(
-                f"ensure_table: unknown if_exists={if_exists!r} " "(use 'skip', 'drop', or 'error')"
+                f"ensure_table: unknown if_exists={if_exists!r} (use 'skip', 'drop', or 'error')"
             )
 
         col_names = {c.name for c in columns}
@@ -407,6 +418,147 @@ class PostgresConnector(BatchSource, BatchSink):
             self._conn.rollback()
             raise WriteError(f"postgres write failed: {exc}") from exc
 
+    # ---------- Arrow fast path (ADR-0093 P2b) ------------------------------
+
+    def read_arrow(
+        self,
+        *,
+        query: str | None = None,
+        partition: Partition | None = None,
+        **options: Any,
+    ) -> Iterator[pa.RecordBatch]:
+        """Bulk read as Arrow RecordBatches via ``COPY (query) TO STDOUT csv``.
+
+        The CSV bytes stream straight into pyarrow's vectorized CSV reader —
+        no per-cell Python object. Column types come from a ``LIMIT 0`` probe
+        of the query (OID → Arrow mapping below); unmapped types (e.g.
+        ``numeric``) fall back to pyarrow's inference. ``partition`` narrows
+        the read to one half-open ``(lower, upper]`` slice for split reads.
+        """
+        if query is None:
+            raise ReadError("PostgresConnector.read_arrow requires a SQL query")
+        if self._conn is None:
+            raise ConnectError("PostgresConnector is not connected")
+        import pyarrow as pa
+        import pyarrow.csv as pacsv
+
+        wrapped = sql.SQL("({})").format(sql.SQL(query))
+        if partition is not None:
+            col = sql.Identifier(partition.column)
+            clauses: list[sql.Composable] = []
+            if partition.lower is not None:
+                clauses.append(sql.SQL("{} > {}").format(col, sql.Literal(partition.lower)))
+            if partition.upper is not None:
+                clauses.append(sql.SQL("{} <= {}").format(col, sql.Literal(partition.upper)))
+            if clauses:
+                wrapped = sql.SQL("(SELECT * FROM {} AS __p WHERE {})").format(
+                    wrapped, sql.SQL(" AND ").join(clauses)
+                )
+
+        try:
+            # Schema probe: drive pyarrow's column types from the real
+            # result OIDs so '123' stays text when the column is text.
+            with self._conn.cursor() as cur:
+                cur.execute(sql.SQL("SELECT * FROM {} AS __probe LIMIT 0").format(wrapped))
+                description = cur.description or []
+            column_types = {
+                d.name: t for d in description if (t := _arrow_type_for_oid(d.type_code))
+            }
+            convert = pacsv.ConvertOptions(
+                column_types=column_types,
+                # Postgres CSV: NULL = unquoted empty, '' = quoted empty,
+                # and booleans render as t/f.
+                strings_can_be_null=True,
+                quoted_strings_can_be_null=False,
+                true_values=["t", "true"],
+                false_values=["f", "false"],
+            )
+            # No readahead thread: pyarrow would read the psycopg COPY
+            # stream from a worker thread, and psycopg connections are not
+            # thread-safe (observed as a silent deadlock).
+            read_opts = pacsv.ReadOptions(use_threads=False)
+            copy_stmt = sql.SQL("COPY {} TO STDOUT (FORMAT csv, HEADER true)").format(wrapped)
+            with self._conn.cursor() as cur, cur.copy(copy_stmt) as copy:
+                reader = pacsv.open_csv(
+                    _CopyByteStream(copy), read_options=read_opts, convert_options=convert
+                )
+                yield from reader
+        except psycopg.Error as exc:
+            raise ReadError(f"postgres read_arrow failed: {exc}") from exc
+        except pa.ArrowInvalid as exc:
+            raise ReadError(f"postgres read_arrow: CSV→Arrow conversion failed: {exc}") from exc
+
+    def write_arrow(
+        self,
+        batches: Iterable[pa.RecordBatch],
+        *,
+        table: str | None = None,
+        mode: str = "append",
+        key_columns: list[str] | None = None,
+        pre_sql: str | None = None,
+        **options: Any,
+    ) -> int:
+        """Bulk write Arrow RecordBatches via ``COPY ... FROM STDIN csv``.
+
+        Each batch is serialized by pyarrow's vectorized CSV writer and
+        streamed into COPY — no per-row Python loop. Supports ``append`` /
+        ``overwrite`` (upsert needs per-row conflict handling — use the
+        Record path). NULL→unquoted, ''→quoted (``all_valid`` quoting), so
+        the empty-string/NULL distinction survives.
+        """
+        if self._conn is None:
+            raise ConnectError("PostgresConnector is not connected")
+        if not table:
+            raise WriteError("PostgresConnector.write_arrow requires 'table'")
+        if mode not in ("append", "overwrite"):
+            raise WriteError(
+                f"write_arrow supports 'append'/'overwrite', got {mode!r} "
+                "(upsert routes through the Record path)"
+            )
+        import pyarrow.csv as pacsv
+
+        it = iter(batches)
+        first = next(it, None)
+        if first is None and not pre_sql:
+            return 0
+        try:
+            if pre_sql:
+                with self._conn.cursor() as cur:
+                    cur.execute(pre_sql)
+            if first is None:
+                self._conn.commit()
+                return 0
+            columns = list(first.schema.names)
+            if mode == "overwrite":
+                with self._conn.cursor() as cur:
+                    cur.execute(sql.SQL("TRUNCATE TABLE {}").format(_table_ident(table)))
+            copy_stmt = sql.SQL("COPY {table} ({cols}) FROM STDIN (FORMAT csv)").format(
+                table=_table_ident(table),
+                cols=sql.SQL(", ").join(map(sql.Identifier, columns)),
+            )
+            write_opts = pacsv.WriteOptions(include_header=False, quoting_style="all_valid")
+            count = 0
+            with self._conn.cursor() as cur, cur.copy(copy_stmt) as copy:
+                for batch in chain([first], it):
+                    if list(batch.schema.names) != columns:
+                        # COPY is positional — reorder (or fail clearly when
+                        # a batch is missing columns).
+                        try:
+                            batch = batch.select(columns)
+                        except KeyError as exc:
+                            raise WriteError(
+                                f"write_arrow: batch schema drifted from first batch: {exc}"
+                            ) from exc
+                    buf = io.BytesIO()
+                    pacsv.write_csv(batch, buf, write_options=write_opts)
+                    copy.write(buf.getvalue())
+                    count += batch.num_rows
+            self._conn.commit()
+            return count
+        except psycopg.Error as exc:
+            self._conn.rollback()
+            raise WriteError(f"postgres write_arrow failed: {exc}") from exc
+
     # ---------- internal helpers -------------------------------------------
 
     def _copy_insert(
@@ -467,6 +619,76 @@ class PostgresConnector(BatchSource, BatchSink):
                 cur.execute(stmt, tuple(record.data.get(c) for c in columns))
                 count += 1
         return count
+
+
+class _CopyByteStream:
+    """Minimal file-like over a psycopg COPY TO stream for pyarrow.
+
+    Arrow's PythonFile treats a short read as EOF, while ``Copy.read()``
+    returns driver-sized chunks — so buffer until the requested size is
+    available (or the stream truly ends).
+    """
+
+    def __init__(self, copy: Any) -> None:
+        self._copy = copy
+        self._buf = bytearray()
+        self._eof = False
+
+    def read(self, size: int = -1) -> bytes:
+        while not self._eof and (size < 0 or len(self._buf) < size):
+            chunk = self._copy.read()
+            if not chunk:
+                self._eof = True
+                break
+            self._buf.extend(chunk)
+        if size < 0 or size >= len(self._buf):
+            out = bytes(self._buf)
+            self._buf.clear()
+            return out
+        out = bytes(self._buf[:size])
+        del self._buf[:size]
+        return out
+
+    def readable(self) -> bool:
+        return True
+
+    @property
+    def closed(self) -> bool:
+        # pyarrow checks the ATTRIBUTE — a plain method here reads as a
+        # truthy bound method, i.e. "closed", and open_csv refuses the file.
+        return False
+
+    def close(self) -> None:  # pragma: no cover - stream owned by the cursor
+        return None
+
+
+def _arrow_type_for_oid(oid: int) -> pa.DataType | None:
+    """Map common Postgres type OIDs to Arrow types for CSV conversion.
+
+    ``None`` = let pyarrow infer (e.g. ``numeric`` — precision-bearing
+    decimals don't round-trip CSV faithfully; inference yields float64,
+    documented loss for the fast path).
+    """
+    import pyarrow as pa
+
+    mapping: dict[int, pa.DataType] = {
+        16: pa.bool_(),  # bool
+        20: pa.int64(),  # int8
+        21: pa.int16(),  # int2
+        23: pa.int32(),  # int4
+        25: pa.string(),  # text
+        700: pa.float32(),  # float4
+        701: pa.float64(),  # float8
+        1042: pa.string(),  # bpchar
+        1043: pa.string(),  # varchar
+        1082: pa.date32(),  # date
+        1114: pa.timestamp("us"),  # timestamp
+        1184: pa.timestamp("us", tz="UTC"),  # timestamptz
+        2950: pa.string(),  # uuid
+        114: pa.string(),  # json
+        3802: pa.string(),  # jsonb
+    }
+    return mapping.get(oid)
 
 
 def _table_ident(table: str) -> sql.Composed:

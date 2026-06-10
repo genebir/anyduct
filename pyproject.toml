@@ -304,6 +304,8 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = ["duckdb", "duckdb.*", "pyarrow", "pyarrow.*"]
 ignore_missing_imports = true
+# pyarrow.csv re-exports from pyarrow._csv without __all__ — allow it.
+implicit_reexport = true
 
 [[tool.mypy.overrides]]
 module = ["prometheus_client", "prometheus_client.*"]

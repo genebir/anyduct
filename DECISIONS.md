@@ -2775,6 +2775,7 @@ L1 출시 직후 사용자가 5개 회신:
 - 실측: GROUP BY 500k행 0.5s(**99만 rows/s** — 행 단위 Python 집계 대비 수십×). 단, 출력행이 많은 쿼리는 87k rows/s — **병목이 출력측 Record 재조립**임을 확인 = Phase 2의 직접 근거.
 
 **Phase 2 (진행 중): Arrow RecordBatch 벡터 플레인.** 커넥터 옵셔널 Arrow 프로토콜(`ArrowReadable.read_arrow`/`ArrowWritable.write_arrow`, **파티션 술어 포함** — 클러스터링 훅), 미지원 커넥터는 Record↔Batch 어댑터로 호환. sql 변환은 Arrow를 그대로 통과(재조립 0). 그래프 실행의 메모리 list도 Arrow로. postgres COPY 등 bulk fast-path, same-connection은 `INSERT INTO…SELECT` 푸시다운.
+- **P2b(2026-06-10 구현)**: postgres `read_arrow`/`write_arrow`(COPY csv ↔ pyarrow 벡터 파서/직렬화, OID 타입 프로브, Partition 슬라이스, NULL vs '' 보존) + 런타임 `_try_arrow_fast_path`(변환 0·단일 sink·append/overwrite·양단 Arrow-capable → Record 우회; 그 외 기존 경로). 실측 PG→PG 500k행 **3.4×**(63.5만 rows/s, 단일 스트림 — 파티션 병렬은 P3 후속에서 곱해짐).
 - **P2a(2026-06-10 구현)**: `etl_plugins/core/arrow.py` — `Partition`(half-open 범위, 단일-run scale-out의 분할 단위) + `ArrowReadable`/`ArrowWritable` Protocol + `records_to_batches`/`batches_to_records` 어댑터(pyarrow lazy). **sql 변환 spill 재작성**: 전량 Python list 버퍼(OOM 지뢰) → 청크 Arrow ingest(`INSERT … BY NAME`) + **파일-백 DuckDB**(임시 디렉토리, 베이스 테이블이 디스크로 evict — 메모리보다 큰 데이터셋 동작) + `memory_limit`/`chunk_rows` 옵션(SET 인젝션 방지 정규식 검증).
 
 **빅데이터 3-Tier 전략 (2026-06-10 보강 — 사용자 질문 "TB 단위는 Spark를 올려야 하나?")**: 현 상태로 TB 불가는 사실(워커당 ~15만 rows/s, sql 변환 전량 버퍼(→P2a로 해소), 그래프 메모리 materialize, 단일-run 분할 부재). 그러나 워크로드를 쪼개면 Spark는 지금 불필요:

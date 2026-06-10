@@ -117,7 +117,15 @@ uv run mypy etl_plugins
 
 ## 5. 현재 단계
 
-> **최신 마일스톤 (2026-06-07): .damx import + ERD 폴리시 + 페르소나 dogfood 자율런 (Phase AHE→AIJ, ADR-0091).** 사용자의 DA#(.damx) ERD를 가져오고, ERD/앱을 페르소나(데이터모델러/운영자/분석가/데이터엔지니어)로 dogfood. 웹 전용(코어/서버는 ERD 서버백킹 AHD 외 무변경). 핵심:
+> **최신 마일스톤 (2026-06-10): ERD 완성 마감 — .damx 전수 정확 복원 + 주제영역 탭 + 산출물/검증/실행 연결 (Phase AJO→AKP).** 사용자 피드백 주도 인터랙티브 세션, 웹 전용(코어/서버 0). ERD는 "가져오기→그리기→검증→산출물→실행" 사이클이 닫힌 성숙 단계로 마감:
+> - **.damx 정확 복원(전수 검증)**: 관계 = bracket 시그니처(`[relGUID][부모][자식][relGUID]`, MODEL 섹션 한정, 자기참조는 bracket x2 검증, 물리→한글 canon dedup) — 사용자 기준값 4파일 전수 일치(TMS 265/테이블표준화 16/CTC 147/안전지원 144, AKD/AKE). NOT NULL 플래그(TYPE 뒤 int32, 길이有+8/無+12, AJQ), PK 관계추론+PK→NN(AJO), 컬럼 논리명 전역 보강(AJS), 테이블 물리명(`[물리][논리]` 라벨, AJU), 영문 테이블명(PIT/CROSSING) 파싱(AKD).
+> - **주제영역 탭(AKF→AKJ)**: DA# pane 구조 리버스(K_PANE_PRINT_DEV 경계+헤더명+논리/물리 pane쌍) → 한 다이어그램 안의 탭(ErdDesign.areas, 멤버십+탭별 좌표). "전체" 탭 없음(첫 탭 기본), 탭별 DA# 좌표 pane-구간-내 rect 탐색으로 전 탭 복원(다중탭 테이블 탭별 상이 좌표, FK-국소성 검증). 탭 인식 드래그/추가/삭제(고아 방지 시맨틱)/autoLayout/겹침정리.
+> - **산출물/검증**: Excel 정의서(.xlsx, ExcelJS lazy — 개요/테이블/컬럼/관계·제약/주제영역 5시트, Apple풍 서식: #1D1D1F ink+헤어라인+#F5F5F7 헤더 freeze/autofilter+절제된 #0A84FF, AKN; 매핑정의서 S2T는 빈 템플릿이라 제거 AKO). DB 일치 검증(VerifyDbDialog — 실스키마 대조, 테이블/컬럼/타입 드리프트, AKK). 검색 자동완성(%부분일치+논리명+탭 점프, AKK). PNG(타이트 핏+선명도+캔버스 클램프 AJY, 다크 배경 AJZ, 로딩 오버레이 AKM).
+> - **실행 연결(AKP)**: ERD→마이그레이션 생성 — 테이블당 파이프라인(mirror=ERD PK→key_columns, append=MDFCN_DT/REG_DT 커서 폴백), 기존 migration-config 재사용으로 detail/list 그대로 인식. parseSelectStarTable 한글 식별자 허용(기존 갭).
+> - **앱 전반**: 모든 삭제 confirm(ERD목록/캔버스 onBeforeDelete/스케줄 clear — 나머지는 기존 보유, AKG), 다크모드 React Flow 줌버튼(unlayered+!important — @layer는 unlayered lib CSS에 짐, AKB), Vertica dialect(AKL).
+> - 검증 방법: 순수 로직은 esbuild 번들+node 드라이버를 실제 .damx 4종에 실행(관계 수/좌표 분리/Excel zip 구조 등 구조 검증), web tsc clean + dev 라우트 200 매 슬라이스. **남은 후보(필요시)**: ERD diff→ALTER DDL / DB검증→ERD 반영 / 카탈로그 연동 / undo / composite FK.
+>
+> **이전 마일스톤 (2026-06-07): .damx import + ERD 폴리시 + 페르소나 dogfood 자율런 (Phase AHE→AIJ, ADR-0091).** 사용자의 DA#(.damx) ERD를 가져오고, ERD/앱을 페르소나(데이터모델러/운영자/분석가/데이터엔지니어)로 dogfood. 웹 전용(코어/서버는 ERD 서버백킹 AHD 외 무변경). 핵심:
 > - **.damx 파서 (ADR-0091)**: DA#의 독자 .NET 바이너리(`FF FE FF <len> UTF-16LE`)를 리버스 — 컬럼/타입/PK 추출 + **실제 관계 레코드 파싱**(엔티티쌍 `[부모][자식]`+부모 키속성, 이름추측 아님) + 유령/중복 테이블 dedup. 실제 도면(i.png) 대조로 16관계 정확 복원. 디자이너 "Import .damx" 버튼.
 > - **ERD 폴리시**: 까치발 floating 엣지(겹침방지), 클러스터-패킹 자동정렬(+LR/TB 토글), 미니맵+테이블검색+PNG export+SQL위상정렬(FK 전방참조 방지), 그래프용지 격자, Delete키 삭제, 빈상태/저장상태/테이블수 표시, 목록 검색/inline rename, 노드 "SQL 복사". 리니지/컬럼리니지 그래프에도 미니맵.
 > - **앱 dogfood/수정**: cron 미리보기 UTC 불일치 버그 수정(서버=UTC), audit·runs CSV 내보내기, assets 필터 카운트, 대시보드 ERD 카드, 연결폼 비밀번호 표시토글, ERD목록 에러토스트(silent-swallow 수정), 하드코딩 aria-label i18n화, 모달 배경 일관화.

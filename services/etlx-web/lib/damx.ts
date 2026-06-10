@@ -550,6 +550,13 @@ export function parseDamx(buf: ArrayBuffer): ErdDesign {
   }
 
   const deduped = dedupeTables(tables);
+  // Drop duplicate columns within a table (the grouping heuristic can pick the
+  // same physical column twice) — a table can't have two identical column names,
+  // and duplicates break React keys downstream. Keep the first (richer) one.
+  for (const t of deduped) {
+    const seenCol = new Set<string>();
+    t.columns = t.columns.filter((c) => (seenCol.has(c.name) ? false : (seenCol.add(c.name), true)));
+  }
   // Fill any column logical names missed by the main loop (DA# logical/physical
   // areas are separate) from a global raw scan — e.g. COM_CD_GROUP_ID.
   const rawLogical = parseLogicalByName(new Uint8Array(buf));

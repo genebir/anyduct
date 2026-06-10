@@ -35,9 +35,9 @@ function tableNode(table: string, columns: ErdColumn[], t: Translate): React.Rea
         {columns.length === 0 ? (
           <div className="px-2.5 py-1.5 text-[10px] italic text-text-muted">{t("erd.noColumns")}</div>
         ) : (
-          columns.map((c) => (
+          columns.map((c, ci) => (
             <div
-              key={c.name}
+              key={`${c.name}-${ci}`}
               className="flex items-center gap-1.5 border-b border-border-subtle/40 px-2.5 py-1 last:border-0"
             >
               {c.isKey ? (

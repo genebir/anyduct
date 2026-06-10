@@ -177,7 +177,7 @@ function nodeLabel(tb: DesignTable, fkCols: Set<string>, mode: NameMode, scale: 
         </span>
       </div>
       <div>
-        {tb.columns.map((c) => {
+        {tb.columns.map((c, ci) => {
           const isFk = fkCols.has(c.name) && !c.pk;
           const tip = [
             c.logical ? `${c.name} (${c.logical})` : c.name,
@@ -191,7 +191,7 @@ function nodeLabel(tb: DesignTable, fkCols: Set<string>, mode: NameMode, scale: 
             .replace(" · \n", "\n");
           return (
             <div
-              key={c.name}
+              key={`${c.name}-${ci}`}
               title={tip}
               className={`flex items-center gap-1.5 border-b border-border-subtle/30 px-2.5 py-1 last:border-0 ${
                 c.pk ? "bg-warning/5" : ""

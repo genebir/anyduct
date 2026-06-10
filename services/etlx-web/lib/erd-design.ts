@@ -436,10 +436,31 @@ function topoSortTables(design: ErdDesign): DesignTable[] {
   return result;
 }
 
-export function toSql(design: ErdDesign, dialect: string): string {
+export function toSql(
+  design: ErdDesign,
+  dialect: string,
+  opts: { comments?: boolean } = {},
+): string {
   const q = (s: string) => quoteIdent(s, dialect);
   const byId = new Map(design.tables.map((t) => [t.id, t]));
   const out: string[] = [];
+  // Comment text = the logical (Korean) name, falling back to the description.
+  const esc = (s: string) => s.replace(/'/g, "''");
+  const commentOf = (logical?: string, desc?: string): string | null => {
+    const v = (logical?.trim() || desc?.trim()) ?? "";
+    return v ? v : null;
+  };
+  // How each dialect takes comments: standalone COMMENT ON (postgres/vertica/
+  // snowflake), inline COMMENT '…' (mysql), inline OPTIONS(description)
+  // (bigquery), or plain ``--`` trailers (sqlite has no comment DDL).
+  const style =
+    dialect === "mysql"
+      ? "inline"
+      : dialect === "bigquery"
+        ? "options"
+        : dialect === "sqlite"
+          ? "dashes"
+          : "commentOn";
   for (const t of topoSortTables(design)) {
     const lines: string[] = [];
     for (const c of t.columns) {
@@ -448,6 +469,14 @@ export function toSql(design: ErdDesign, dialect: string): string {
       if (c.notNull) line += " NOT NULL";
       if (c.defaultValue != null && String(c.defaultValue).trim() !== "") {
         line += ` DEFAULT ${c.defaultValue}`;
+      }
+      if (opts.comments) {
+        const cm = commentOf(c.logical, c.comment);
+        if (cm) {
+          if (style === "inline") line += ` COMMENT '${esc(cm)}'`;
+          else if (style === "options") line += ` OPTIONS(description='${esc(cm)}')`;
+          else if (style === "dashes") line += ` -- ${cm}`;
+        }
       }
       lines.push(line);
     }
@@ -463,7 +492,33 @@ export function toSql(design: ErdDesign, dialect: string): string {
         `  FOREIGN KEY (${q(r.fromColumn)}) REFERENCES ${q(target.name)} (${q(pkColumn(target))})`,
       );
     }
-    out.push(`CREATE TABLE ${q(t.name)} (\n${lines.join(",\n")}\n);`);
+    // ``-- comment`` trailers sit AFTER the comma so each line stays valid SQL.
+    const body =
+      style === "dashes" && opts.comments
+        ? lines
+            .map((ln, i) => {
+              const m = ln.match(/^(.*?)( -- .*)$/);
+              const isLast = i === lines.length - 1;
+              if (!m) return isLast ? ln : `${ln},`;
+              return `${m[1]}${isLast ? "" : ","}${m[2]}`;
+            })
+            .join("\n")
+        : lines.join(",\n");
+    const tableCm = opts.comments ? commentOf(t.logical, t.comment) : null;
+    let create = `CREATE TABLE ${q(t.name)} (\n${body}\n)`;
+    if (tableCm && style === "inline") create += ` COMMENT='${esc(tableCm)}'`;
+    if (tableCm && style === "options") create += ` OPTIONS(description='${esc(tableCm)}')`;
+    create += ";";
+    if (tableCm && style === "dashes") create = `-- ${tableCm}\n${create}`;
+    const stmts = [create];
+    if (opts.comments && style === "commentOn") {
+      if (tableCm) stmts.push(`COMMENT ON TABLE ${q(t.name)} IS '${esc(tableCm)}';`);
+      for (const c of t.columns) {
+        const cm = commentOf(c.logical, c.comment);
+        if (cm) stmts.push(`COMMENT ON COLUMN ${q(t.name)}.${q(c.name)} IS '${esc(cm)}';`);
+      }
+    }
+    out.push(stmts.join("\n"));
   }
   return out.join("\n\n");
 }

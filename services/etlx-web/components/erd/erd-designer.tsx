@@ -597,6 +597,8 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
   const [nameMode, setNameMode] = useState<NameMode>("physical");
   const [dialect, setDialect] = useState("postgres");
   const [sql, setSql] = useState<string | null>(null);
+  // SQL export: emit table/column comments from logical names (Phase AKQ).
+  const [sqlComments, setSqlComments] = useState(true);
   const [loaded, setLoaded] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [showDdl, setShowDdl] = useState(false);
@@ -1114,7 +1116,7 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
   const onGenerateDoc = (kind: string) => {
     if (design.tables.length === 0) return;
     if (kind === "sql") {
-      setSql(toSql(design, dialect));
+      setSql(toSql(design, dialect, { comments: sqlComments }));
       return;
     }
     if (kind === "image") {
@@ -1165,7 +1167,7 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
         [`${base}_테이블정의서.csv`]: strToU8(tableDefinitionCsv(design)),
         [`${base}_제약인덱스정의서.csv`]: strToU8(constraintSpecCsv(design)),
         [`${base}_데이터정의서.md`]: strToU8(fullSpecMarkdown(design, docName || "ERD", today)),
-        [`${base}_${dialect}.sql`]: strToU8(toSql(design, dialect)),
+        [`${base}_${dialect}.sql`]: strToU8(toSql(design, dialect, { comments: sqlComments })),
       };
       const zipped = zipSync(files);
       const blob = new Blob([zipped], { type: "application/zip" });
@@ -1850,9 +1852,22 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
           >
             <div className="flex items-center justify-between">
               <span className="text-sm font-semibold text-text">{t("erdDesign.sqlTitle", { dialect })}</span>
-              <button onClick={() => setSql(null)} aria-label={t("common.close")} className="text-text-muted hover:text-text">
-                <XIcon size={16} />
-              </button>
+              <div className="flex items-center gap-3">
+                <label className="flex cursor-pointer items-center gap-1.5 text-xs text-text-secondary">
+                  <input
+                    type="checkbox"
+                    checked={sqlComments}
+                    onChange={(e) => {
+                      setSqlComments(e.target.checked);
+                      setSql(toSql(design, dialect, { comments: e.target.checked }));
+                    }}
+                  />
+                  {t("erdDesign.sqlComments")}
+                </label>
+                <button onClick={() => setSql(null)} aria-label={t("common.close")} className="text-text-muted hover:text-text">
+                  <XIcon size={16} />
+                </button>
+              </div>
             </div>
             <textarea
               readOnly

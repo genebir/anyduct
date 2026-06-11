@@ -62,6 +62,7 @@ def test_pushdown_runs_in_database_without_moving_rows(
     result = Pipeline(name="p", tasks=[_task()]).run(connectors={"db": conn})
     assert result.records_read == 5
     assert result.records_written == 5
+    assert result.data_paths == {"t": "pushdown"}
     assert _rows(db) == [(i, f"n{i}") for i in range(5)]
     conn.close()
 
@@ -79,6 +80,7 @@ def test_different_connections_fall_back(db: str, tmp_path: Path) -> None:
     task = _task(sink="other")
     result = Pipeline(name="p", tasks=[task]).run(connectors={"db": src, "other": dst})
     assert result.records_written == 5  # record path still works
+    assert result.data_paths == {"t": "records"}
     src.close()
     dst.close()
 

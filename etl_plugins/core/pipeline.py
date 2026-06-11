@@ -330,6 +330,12 @@ class RunResult:
     # Per-task terminal state (ADR-0028). Empty for non-DAG runs; otherwise maps
     # task name → success / failed / skipped / upstream_failed.
     task_states: dict[str, str] = field(default_factory=dict)
+    # Which data path each task took (ADR-0093 P2): task name →
+    # "pushdown" (in-database INSERT…SELECT) / "arrow" (bulk COPY, no
+    # Record plane) / "records" (row-by-row) / "graph" (materialize
+    # engine). Operators read this off the run to answer "why was this
+    # fast/slow" without spelunking logs.
+    data_paths: dict[str, str] = field(default_factory=dict)
 
 
 def _project_columns_through_transforms(source_columns: list[Any], task: Task) -> list[Any]:
@@ -668,6 +674,10 @@ class Pipeline:
     # / older builds) — emitters fall back to table-level lineage only.
     column_lineage: ColumnLineage | None = None
     _hooks: dict[str, list[Hook]] = field(default_factory=dict)
+    # Scratch: per-task data path of the CURRENT run (reset by ``run``;
+    # copied into ``RunResult.data_paths``). Pipelines are built per run by
+    # the worker, so instance state is safe here.
+    _task_data_paths: dict[str, str] = field(default_factory=dict)
 
     def add(self, task: Task) -> Pipeline:
         self.tasks.append(task)
@@ -844,6 +854,7 @@ class Pipeline:
         attrs = {"pipeline": self.name, "mode": self.mode}
 
         result = RunResult(run_id=ctx.run_id, pipeline_name=self.name, success=False)
+        self._task_data_paths = {}
         task_runner = self._run_task
         if self.retry is not None:
             task_runner = retryable(**self._retry_kwargs())(task_runner)
@@ -949,6 +960,7 @@ class Pipeline:
             self._fire("on_error", ctx, exc)
             raise
         finally:
+            result.data_paths = dict(self._task_data_paths)
             result.duration_seconds = time.monotonic() - start
             metrics.histogram(DURATION_SECONDS).record(result.duration_seconds, attrs)
             run_span.set_attribute("duration_seconds", result.duration_seconds)
@@ -1324,6 +1336,7 @@ class Pipeline:
         cursor_to: CursorValue = None,
     ) -> tuple[int, int, CursorValue]:
         if task.graph_nodes:
+            self._task_data_paths[task.name or "task"] = "graph"
             return self._run_graph_task(task, connectors, cursor_from, cursor_to)
         if not task.source:
             raise TaskError(f"Task missing source: {task!r}")
@@ -1364,6 +1377,7 @@ class Pipeline:
         fast = self._try_arrow_fast_path(task, source, sinks, cursored=cursored_run)
         if fast is not None:
             return fast
+        self._task_data_paths[task.name or "task"] = "records"
 
         records_read = 0
         new_cursor: CursorValue = None
@@ -1567,6 +1581,7 @@ class Pipeline:
             return None
 
         _module_logger.info("sql_pushdown", pipeline=self.name, task=task.name, table=spec.table)
+        self._task_data_paths[task.name or "task"] = "pushdown"
         n = source.execute_statement(f"INSERT INTO {spec.table} {task.query}")
         rows = max(0, int(n))
         return rows, rows, None
@@ -1598,6 +1613,7 @@ class Pipeline:
             return None
 
         _module_logger.info("arrow_fast_path", pipeline=self.name, task=task.name, mode=spec.mode)
+        self._task_data_paths[task.name or "task"] = "arrow"
         records_read = 0
 
         def _counted() -> Iterator[Any]:
@@ -1727,6 +1743,7 @@ class Pipeline:
             self._fire("on_error", ctx, exc)
             raise
         finally:
+            result.data_paths = dict(self._task_data_paths)
             result.duration_seconds = time.monotonic() - start
             metrics.histogram(DURATION_SECONDS).record(result.duration_seconds, attrs)
             self._fire("post_run", ctx, result)

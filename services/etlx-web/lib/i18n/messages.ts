@@ -1191,6 +1191,13 @@ export const en = {
   "runDetail.recordsDeltaHint":
     "Rows read from the source but not written to the sink — filtered, deduped, or routed to the DLQ.",
   // Phase AFB (2026-06-04) — DLQ-routed record count from run metrics.
+  "runDetail.dataPath": "Data path",
+  "runDetail.dataPathHint":
+    "How the rows moved. In-database pushdown never moves them; Arrow bulk skips the row-by-row plane entirely.",
+  "runDetail.pathPushdown": "In-database (pushdown)",
+  "runDetail.pathArrow": "Arrow bulk",
+  "runDetail.pathRecords": "Row-by-row",
+  "runDetail.pathGraph": "Graph engine",
   "runDetail.dlqLabel": "Dead-letter queue",
   "runDetail.dlqRouted": "{count} routed to DLQ",
   "runDetail.dlqHint":
@@ -2609,6 +2616,13 @@ export const ko: Messages = {
   "runDetail.recordsDeltaHint":
     "소스에서 읽었지만 싱크에 기록되지 않은 행 — 필터/중복제거/DLQ 경로.",
   // Phase AFB (2026-06-04) — run 메트릭에서 DLQ 라우팅 행 수.
+  "runDetail.dataPath": "데이터 경로",
+  "runDetail.dataPathHint":
+    "행이 이동한 방식. DB 내부 푸시다운은 아예 이동이 없고, Arrow 벌크는 행 단위 처리를 통째로 건너뜁니다.",
+  "runDetail.pathPushdown": "DB 내부 (푸시다운)",
+  "runDetail.pathArrow": "Arrow 벌크",
+  "runDetail.pathRecords": "행 단위",
+  "runDetail.pathGraph": "그래프 엔진",
   "runDetail.dlqLabel": "데드레터 큐",
   "runDetail.dlqRouted": "{count}개 DLQ로 라우팅됨",
   "runDetail.dlqHint":

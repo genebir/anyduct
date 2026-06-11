@@ -1421,6 +1421,10 @@ def _record_success(run: Run, result: RunResult) -> None:
     # stamping the core's run_id for cross-system correlation.
     merged: dict[str, Any] = dict(run.result_json or {})
     merged["core_run_id"] = result.run_id
+    # ADR-0093 P2: which data path each task took (pushdown / arrow /
+    # records / graph) — surfaces "why was this fast" in the run UI.
+    if result.data_paths:
+        merged["data_paths"] = result.data_paths
     run.result_json = merged
 
 

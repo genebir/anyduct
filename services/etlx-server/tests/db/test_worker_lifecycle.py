@@ -319,6 +319,10 @@ async def test_executor_happy_path_sqlite(session: AsyncSession, tmp_path: Path)
     assert refreshed.error_message is None
     # Core run_id stamped into result_json.
     assert "core_run_id" in refreshed.result_json
+    # ADR-0093 P2 — per-task data path surfaces in result_json. sqlite has
+    # no Arrow fast-path and src/dst are distinct connections, so the
+    # classic Record plane carried the rows.
+    assert list(refreshed.result_json["data_paths"].values()) == ["records"]
 
     # Sanity-check that the data actually landed.
     conn = sqlite3.connect(db_path)

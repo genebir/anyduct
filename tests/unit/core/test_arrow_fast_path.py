@@ -105,6 +105,7 @@ def test_fast_path_engages_and_counts() -> None:
     assert not src.read_called and not dst.write_called
     assert result.records_read == 7
     assert result.records_written == 7
+    assert result.data_paths == {"t": "arrow"}
     assert dst.rows == _ROWS
 
 

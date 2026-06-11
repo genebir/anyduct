@@ -986,6 +986,25 @@ function Summary({
     rj.backfill && typeof rj.backfill === "object"
       ? (rj.backfill as Record<string, unknown>)
       : null;
+  // ADR-0093 P2 — which data path each task took. "pushdown" never moved
+  // the rows at all; "arrow" bulk-copied them past the Record plane;
+  // "records" is the classic row-by-row path. Answers "why was this run
+  // fast/slow" right on the page instead of in worker logs.
+  const dataPaths =
+    rj.data_paths && typeof rj.data_paths === "object"
+      ? Object.entries(rj.data_paths as Record<string, unknown>).filter(
+          (e): e is [string, string] => typeof e[1] === "string",
+        )
+      : [];
+  const uniquePaths = [...new Set(dataPaths.map(([, p]) => p))];
+  const pathLabel = (p: string) =>
+    p === "pushdown"
+      ? t("runDetail.pathPushdown")
+      : p === "arrow"
+        ? t("runDetail.pathArrow")
+        : p === "graph"
+          ? t("runDetail.pathGraph")
+          : t("runDetail.pathRecords");
   const runHref = (rid: string) =>
     workspaceSlug ? `/w/${workspaceSlug}/runs/${rid}` : "#";
   const runLink = (rid: string) => (
@@ -1105,6 +1124,27 @@ function Summary({
           </span>
         }
       />
+      {uniquePaths.length > 0 ? (
+        <Field
+          label={t("runDetail.dataPath")}
+          value={
+            <span className="inline-flex flex-wrap items-center gap-1.5" title={t("runDetail.dataPathHint")}>
+              {uniquePaths.map((p) => (
+                <span
+                  key={p}
+                  className={`rounded px-1.5 py-0.5 text-xs ${
+                    p === "pushdown" || p === "arrow"
+                      ? "bg-accent/10 text-accent"
+                      : "bg-overlay text-text-secondary"
+                  }`}
+                >
+                  {pathLabel(p)}
+                </span>
+              ))}
+            </span>
+          }
+        />
+      ) : null}
       {/* Phase AFB (2026-06-04) — name the DLQ-routed slice of the
           filtered records (AEZ) when a transform sent bad rows to a
           dead-letter queue, so the operator knows they were captured. */}

@@ -434,6 +434,10 @@ export default function RunsPage() {
       "duration_seconds",
       "records_written",
       "error_class",
+      // ADR-0095 — partitioned-backfill markers so sibling windows
+      // correlate in a spreadsheet (group ties them, index orders them).
+      "partition_group",
+      "partition_index",
       "run_id",
     ];
     const esc = (v: unknown) => {
@@ -453,6 +457,8 @@ export default function RunsPage() {
           r.duration_seconds,
           r.records_written,
           r.error_class,
+          r.partition?.group,
+          r.partition != null ? r.partition.index : null,
           r.id,
         ]
           .map(esc)

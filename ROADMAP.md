@@ -595,8 +595,8 @@
 - [x] **Audit log 뷰어** (2026-05-18) — `/w/[slug]/audit`. `GET /audit?workspace_id=…` 호출(서버는 멤버이면 자동 ACL, SuperAdmin bypass). 필터: resource_type select(workspace/membership/connection/pipeline/schedule/run/all) + resource_id 정확 매치 input. row expand → before_json / after_json side-by-side pre 패널. Pagination via offset(100/page).
 
 ### 10.7 빈 상태 / 에러 / 로딩 패스 점검
-- [ ] 전 페이지 empty state (DESIGN.md §7.11)
-- [ ] 전역 error boundary
+- [x] 전 페이지 empty state (DESIGN.md §7.11) — ✅ 사실상 완료(EmptyState primitive + ACQ/ADP/ACZ 등 dogfood 웨이브로 전 목록 정비; 2026-06-12 확인)
+- [x] **전역 error boundary** ✅ (2026-06-12) — `app/error.tsx`(세그먼트 — 프로바이더 살아있어 i18n EmptyState 카드 + reset 재시도 + 워크스페이스 링크), `app/global-error.tsx`(루트 레이아웃 자체가 죽은 케이스 — 자체 html/body, 이중언어 정적 카피), `app/not-found.tsx`(404 — i18n + CTA). 런타임 에러 시 백지/Next 기본화면이 사라짐.
 - [ ] Skeleton + 핑크 shimmer
 
 ### 10.8 품질 게이트 🔄

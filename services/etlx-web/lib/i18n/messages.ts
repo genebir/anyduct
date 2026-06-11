@@ -1123,6 +1123,16 @@ export const en = {
   "runs.partitionTitle":
     "Partitioned backfill — window {index} of {of} (group {group}). Click to show only this group.",
   "runs.filteredByPartition": "Showing one partitioned backfill group ({group}…)",
+  // Step 10.7 (2026-06-12) — global error boundary + 404.
+  "appError.title": "Something went wrong",
+  "appError.desc": "This page failed to render. Retrying usually fixes a transient hiccup.",
+  "appError.descWithDigest":
+    "This page failed to render (digest {digest}). Retrying usually fixes a transient hiccup.",
+  "appError.retry": "Try again",
+  "appError.home": "Go to workspaces",
+  "notFound.title": "Page not found",
+  "notFound.desc": "The address doesn't match anything here — it may have been moved or deleted.",
+  "notFound.home": "Go to workspaces",
   "runs.triggerManualTitle": "User-triggered (Run now)",
   // Phase ABU (2026-06-01) — friendly self-actor on manual trigger
   "runs.triggerManualByYou": "by you",
@@ -2576,6 +2586,16 @@ export const ko: Messages = {
   "runs.partitionTitle":
     "분할 백필 — {of}개 중 {index}번째 윈도우 (그룹 {group}). 클릭하면 이 그룹만 표시합니다.",
   "runs.filteredByPartition": "분할 백필 그룹 하나만 표시 중 ({group}…)",
+  // Step 10.7 (2026-06-12) — 전역 에러 바운더리 + 404.
+  "appError.title": "문제가 발생했습니다",
+  "appError.desc": "이 페이지 렌더링에 실패했습니다. 일시적 문제라면 다시 시도로 해결됩니다.",
+  "appError.descWithDigest":
+    "이 페이지 렌더링에 실패했습니다 (digest {digest}). 일시적 문제라면 다시 시도로 해결됩니다.",
+  "appError.retry": "다시 시도",
+  "appError.home": "워크스페이스로 이동",
+  "notFound.title": "페이지를 찾을 수 없습니다",
+  "notFound.desc": "주소에 해당하는 페이지가 없습니다 — 이동되었거나 삭제되었을 수 있습니다.",
+  "notFound.home": "워크스페이스로 이동",
   "runs.triggerManualTitle": "사용자가 수동 실행 (Run now)",
   // Phase ABU (2026-06-01) — 본인이 친 수동 실행 친화 표시
   "runs.triggerManualByYou": "내가 실행",

@@ -100,6 +100,15 @@ _PUSHDOWN_TABLE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_
 _PUSHDOWN_VIEW_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
+def _pyarrow_available() -> bool:
+    """True when pyarrow is importable (it ships with separate extras)."""
+    try:
+        import pyarrow  # noqa: F401
+    except ImportError:  # pragma: no cover - depends on installed extras
+        return False
+    return True
+
+
 def _elt_pushdown_select(task: Task) -> str | None:
     """ELT pushdown (ADR-0094, Tier 2): when the task's ONLY transform is a
     ``sql`` dataset transform with ``pushdown: true``, the source query and
@@ -1774,6 +1783,12 @@ class Pipeline:
         if spec.when is not None or spec.mode not in ("append", "overwrite"):
             return None
         if not isinstance(source, ArrowReadable) or not isinstance(sink, ArrowWritable):
+            return None
+        # Capability without the library: connectors declare read_arrow/
+        # write_arrow unconditionally, but pyarrow ships with separate
+        # extras — fall back to the Record path instead of crashing the
+        # run mid-fast-path on ImportError.
+        if not _pyarrow_available():
             return None
 
         _module_logger.info("arrow_fast_path", pipeline=self.name, task=task.name, mode=spec.mode)

@@ -172,6 +172,21 @@ def test_record_only_sink_uses_record_path() -> None:
     assert not src.read_arrow_called
 
 
+def test_missing_pyarrow_falls_back_to_record_path(monkeypatch) -> None:
+    """Connectors declare the Arrow methods unconditionally but pyarrow
+    ships with separate extras — without it the task must fall back to
+    the Record path, not crash mid-fast-path on ImportError."""
+    import etl_plugins.core.pipeline as pipeline_mod
+
+    monkeypatch.setattr(pipeline_mod, "_pyarrow_available", lambda: False)
+    src, dst = FakeArrowSource(), FakeArrowSink()
+    task = Task(name="t", source="src", sink="dst", query="q", sink_table="out")
+    result = _run(task, src, dst)
+    assert src.read_called and dst.write_called
+    assert not src.read_arrow_called and not dst.write_arrow_called
+    assert result.data_paths == {"t": "records"}
+
+
 # --- graph trivial chain (ADR-0093 P2 follow-up): the builder saves every
 # pipeline as a graph, so source → sink must take the same bulk path. ------
 

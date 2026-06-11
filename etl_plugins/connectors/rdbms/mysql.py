@@ -20,16 +20,21 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable, Iterator
-from typing import Any
+from itertools import chain
+from typing import TYPE_CHECKING, Any
 
 import pymysql
-from pymysql.cursors import SSDictCursor
+from pymysql.cursors import SSCursor, SSDictCursor
 
+from etl_plugins.core.arrow import DEFAULT_BATCH_ROWS, Partition
 from etl_plugins.core.connector import BatchSink, BatchSource
 from etl_plugins.core.exceptions import ConnectError, ReadError, WriteError
 from etl_plugins.core.inspect import ColumnInfo
 from etl_plugins.core.record import Record
 from etl_plugins.core.registry import ConnectorRegistry
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    import pyarrow as pa
 
 # DDL identifier whitelist — identifiers don't accept parameterised
 # placeholders, so we validate before string interpolation.
@@ -303,6 +308,146 @@ class MySQLConnector(BatchSource, BatchSink):
         except pymysql.MySQLError as exc:
             raise ReadError(f"mysql read_since failed: {exc}") from exc
 
+    # ---------- Arrow fast path (ADR-0093 P2) -------------------------------
+
+    def read_arrow(
+        self,
+        *,
+        query: str | None = None,
+        partition: Partition | None = None,
+        **options: Any,
+    ) -> Iterator[pa.RecordBatch]:
+        """Bulk read as Arrow RecordBatches.
+
+        MySQL has no client-streamable COPY equivalent, so this fetches
+        tuple rows through a server-side cursor and builds columnar
+        batches directly — the win over ``read`` is skipping the per-row
+        ``Record``/pydantic layer, not the wire format. Column types are
+        pinned from the cursor description's MySQL field types where the
+        code is unambiguous (ints/floats/datetime/date); ambiguous codes
+        (BLOB covers TEXT *and* bytes, DECIMAL) are inferred from the
+        first chunk's values and then frozen so later chunks can't drift.
+        ``partition`` narrows the read to one half-open ``(lower, upper]``
+        slice via a parameterised predicate.
+        """
+        if query is None:
+            raise ReadError("MySQLConnector.read_arrow requires a SQL query")
+        if self._conn is None or not self._conn.open:
+            raise ConnectError("MySQLConnector is not connected")
+        import pyarrow as pa
+
+        sql_text = query
+        params: tuple[Any, ...] = ()
+        if partition is not None:
+            clauses: list[str] = []
+            values: list[Any] = []
+            if partition.lower is not None:
+                clauses.append(f"{_ident(partition.column)} > %s")
+                values.append(partition.lower)
+            if partition.upper is not None:
+                clauses.append(f"{_ident(partition.column)} <= %s")
+                values.append(partition.upper)
+            if clauses:
+                sql_text = f"SELECT * FROM ({query}) AS __p WHERE {' AND '.join(clauses)}"
+                params = tuple(values)
+
+        chunk_rows = int(options.get("chunk_size", DEFAULT_BATCH_ROWS))
+        try:
+            cur = self._conn.cursor(SSCursor)
+            try:
+                cur.execute(sql_text, params or None)
+                description = cur.description or []
+                names = [d[0] for d in description]
+                # Per-column Arrow type: pinned by field-type code where
+                # deterministic, None = infer from the first chunk then lock.
+                locked: list[pa.DataType | None] = [_arrow_type_for_mysql(d) for d in description]
+                while True:
+                    rows = cur.fetchmany(chunk_rows)
+                    if not rows:
+                        return
+                    columns = list(zip(*rows, strict=False))
+                    arrays = []
+                    for i in range(len(names)):
+                        arr = pa.array(list(columns[i]), type=locked[i])
+                        if locked[i] is None and not pa.types.is_null(arr.type):
+                            locked[i] = arr.type
+                        arrays.append(arr)
+                    yield pa.RecordBatch.from_arrays(arrays, names=names)
+            finally:
+                cur.close()
+        except pymysql.MySQLError as exc:
+            raise ReadError(f"mysql read_arrow failed: {exc}") from exc
+        except (pa.ArrowInvalid, pa.ArrowTypeError) as exc:
+            raise ReadError(f"mysql read_arrow: Arrow conversion failed: {exc}") from exc
+
+    def write_arrow(
+        self,
+        batches: Iterable[pa.RecordBatch],
+        *,
+        table: str | None = None,
+        mode: str = "append",
+        key_columns: list[str] | None = None,
+        pre_sql: str | None = None,
+        batch_size: int = 1000,
+        **options: Any,
+    ) -> int:
+        """Bulk write Arrow RecordBatches via multi-row ``executemany``.
+
+        Same transactional semantics as ``write`` (``pre_sql`` runs first
+        inside the transaction; ``overwrite`` TRUNCATEs). Supports
+        ``append`` / ``overwrite`` — upsert routes through the Record
+        path. Rows are bound in ``batch_size`` slices so one statement
+        never exceeds ``max_allowed_packet``.
+        """
+        if self._conn is None or not self._conn.open:
+            raise ConnectError("MySQLConnector is not connected")
+        if not table:
+            raise WriteError("MySQLConnector.write_arrow requires 'table'")
+        if mode not in ("append", "overwrite"):
+            raise WriteError(
+                f"write_arrow supports 'append'/'overwrite', got {mode!r} "
+                "(upsert routes through the Record path)"
+            )
+
+        it = iter(batches)
+        first = next(it, None)
+        if first is None and not pre_sql:
+            return 0
+        try:
+            if pre_sql:
+                with self._conn.cursor() as cur:
+                    cur.execute(pre_sql)
+            if first is None:
+                self._conn.commit()
+                return 0
+            columns = list(first.schema.names)
+            if mode == "overwrite":
+                with self._conn.cursor() as cur:
+                    cur.execute(f"TRUNCATE TABLE {_table_ident(table)}")
+            col_list = ", ".join(_ident(c) for c in columns)
+            placeholders = ", ".join(["%s"] * len(columns))
+            stmt = f"INSERT INTO {_table_ident(table)} ({col_list}) VALUES ({placeholders})"
+            count = 0
+            with self._conn.cursor() as cur:
+                for batch in chain([first], it):
+                    if list(batch.schema.names) != columns:
+                        try:
+                            batch = batch.select(columns)
+                        except KeyError as exc:
+                            raise WriteError(
+                                f"write_arrow: batch schema drifted from first batch: {exc}"
+                            ) from exc
+                    rows = batch.to_pylist()
+                    for start in range(0, len(rows), batch_size):
+                        slice_ = rows[start : start + batch_size]
+                        cur.executemany(stmt, [tuple(r.get(c) for c in columns) for r in slice_])
+                        count += len(slice_)
+            self._conn.commit()
+            return count
+        except pymysql.MySQLError as exc:
+            self._conn.rollback()
+            raise WriteError(f"mysql write_arrow failed: {exc}") from exc
+
     # ---------- BatchSink --------------------------------------------------
 
     def write(
@@ -427,6 +572,49 @@ class MySQLConnector(BatchSource, BatchSink):
                 cur.executemany(stmt, buf)
                 count += len(buf)
         return count
+
+
+def _arrow_type_for_mysql(description: tuple[Any, ...]) -> Any:
+    """Map an unambiguous MySQL field-type code to an Arrow type.
+
+    ``description`` is one pymysql cursor-description entry:
+    ``(name, type_code, display_size, internal_size, precision, scale,
+    null_ok)``. DECIMAL pins to the *declared* precision/scale — inferring
+    it from the first chunk's values under-sizes the type the moment a
+    later chunk carries more integer digits. Returns ``None`` for codes
+    whose Python value shape pymysql decides at conversion time (BLOB
+    family is TEXT *or* bytes depending on charset; TIME is a
+    ``timedelta``) — those are inferred from the first chunk and then
+    locked by the caller.
+    """
+    import pyarrow as pa
+    from pymysql.constants import FIELD_TYPE
+
+    type_code = description[1]
+    if type_code in (
+        FIELD_TYPE.TINY,
+        FIELD_TYPE.SHORT,
+        FIELD_TYPE.LONG,
+        FIELD_TYPE.LONGLONG,
+        FIELD_TYPE.INT24,
+        FIELD_TYPE.YEAR,
+    ):
+        return pa.int64()
+    if type_code in (FIELD_TYPE.FLOAT, FIELD_TYPE.DOUBLE):
+        return pa.float64()
+    if type_code in (FIELD_TYPE.TIMESTAMP, FIELD_TYPE.DATETIME):
+        return pa.timestamp("us")
+    if type_code in (FIELD_TYPE.DATE, FIELD_TYPE.NEWDATE):
+        return pa.date32()
+    if type_code in (FIELD_TYPE.DECIMAL, FIELD_TYPE.NEWDECIMAL):
+        precision = description[4]
+        scale = description[5]
+        if isinstance(precision, int) and isinstance(scale, int) and 1 <= precision <= 38:
+            return pa.decimal128(precision, scale)
+        if isinstance(precision, int) and isinstance(scale, int) and precision <= 76:
+            return pa.decimal256(precision, scale)
+        return None
+    return None
 
 
 def _ident(name: str) -> str:

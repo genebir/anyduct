@@ -2845,4 +2845,22 @@ L1 출시 직후 사용자가 5개 회신:
 
 ---
 
+## ADR-0096: Helm 차트 + prod 이미지 커넥터 extras — k8s 배포 1급화
+
+**Date**: 2026-06-12
+**Status**: Accepted (구현 + kind 실배포 검증 완료)
+**Context**: Step 11 잔여 항목. compose prod가 레퍼런스 토폴로지(5 프로세스 1 이미지 + web + 메타DB)였고, k8s는 deployment.md의 단편 안내뿐. P3a/P3c로 멀티-replica 운영이 입증·문서화된 상태라 차트는 직역에 가깝다.
+
+**Decision**:
+- **`services/charts/etlx`**: 옵션 내장 Postgres(StatefulSet, dev 전용 — 프로덕션은 `externalDatabase.url`+`postgresql.enabled=false`), Alembic migrate **Job을 `post-install,pre-upgrade` hook**으로(첫 설치는 DB 기동을 backoff 재시도로 흡수, 업그레이드는 새 pod 롤 전에 스키마 선행), server(liveness `/health`/readiness `/ready`), **worker `replicas` 기본 2**(SKIP LOCKED — 처리량 스케일 축), scheduler/reaper/stream-worker 각 1(멀티-replica 안전하지만 HA 용도), web 토글. JWT는 `existingSecret` 또는 PEM 값 주입. vault/prometheus는 차트 범위 밖(외부 권장 + extraEnv 훅).
+- **검증(kind 실배포)**: install → 7 pod Ready(서버 readiness=DB ping) → `admin create-user` → login → **파이프라인 trigger → k8s worker가 run SUCCEEDED(Arrow fast-path)** 까지 전 사이클.
+- **검증이 발견한 실결함 — prod 이미지 커넥터 0**: 서버 패키지는 `etl-plugins` base만 의존하고 dev 환경은 dev-deps가 전 드라이버를 깔아줘서 가려짐 — `uv sync --no-dev`(Dockerfile)로 빌드된 prod 이미지는 **postgres 파이프라인조차 RegistryError로 실패**. `etlx-server[connectors]` extras 신설(경량/순수파이썬 티어: postgres·mysql·duckdb·s3·kafka·mongodb·redis·sqs·kinesis·dynamodb·rabbitmq·nats) + Dockerfile `--extra connectors`. 무겁거나 C-ext인 드라이버(cassandra/mssql/vertica/클라우드 DW)는 커스텀 이미지 레이어로 opt-in(문서화).
+- **운영 교훈(검증 중 실측)**: 이미지 교체는 **`helm upgrade`로** — `kubectl rollout restart`만 하면 migrate hook이 안 돌아 새 코드가 스키마를 앞섬(UndefinedColumn 실제 발생). NOTES/문서에 명시.
+
+**Consequences**:
+- ✅ Step 11의 Helm 항목 닫힘 + compose prod 사용자도 connectors extras 수혜(동일 Dockerfile). helm lint clean, kind e2e green.
+- ⚠️ 내장 Postgres는 단일 replica/PVC — 프로덕션 비권장(차트 values에 명시). Ingress/TLS는 기존 정책대로 범위 밖.
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

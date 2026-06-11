@@ -1740,6 +1740,11 @@ dependencies = [
     { name = "uvicorn", extra = ["standard"] },
 ]
 
+[package.optional-dependencies]
+connectors = [
+    { name = "etl-plugins", extra = ["duckdb", "dynamodb", "kafka", "kinesis", "mongodb", "mysql", "nats", "postgres", "rabbitmq", "redis", "s3", "sqs"] },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "alembic", specifier = ">=1.13" },
@@ -1749,6 +1754,7 @@ requires-dist = [
     { name = "croniter", specifier = ">=2.0" },
     { name = "email-validator", specifier = ">=2.2" },
     { name = "etl-plugins", editable = "." },
+    { name = "etl-plugins", extras = ["postgres", "mysql", "duckdb", "s3", "kafka", "mongodb", "redis", "sqs", "kinesis", "dynamodb", "rabbitmq", "nats"], marker = "extra == 'connectors'", editable = "." },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "pydantic-settings", specifier = ">=2.5" },
     { name = "pyjwt", extras = ["crypto"], specifier = ">=2.9" },
@@ -1756,6 +1762,7 @@ requires-dist = [
     { name = "typer", specifier = ">=0.12" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
 ]
+provides-extras = ["connectors"]
 
 [[package]]
 name = "exceptiongroup"

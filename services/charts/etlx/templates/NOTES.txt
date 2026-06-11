@@ -1,0 +1,18 @@
+etlx deployed.
+
+  server:   kubectl port-forward svc/{{ include "etlx.fullname" . }}-server {{ .Values.server.service.port }}:{{ .Values.server.service.port }}
+            → http://localhost:{{ .Values.server.service.port }}/docs
+{{- if .Values.web.enabled }}
+  web:      kubectl port-forward svc/{{ include "etlx.fullname" . }}-web {{ .Values.web.service.port }}:{{ .Values.web.service.port }}
+{{- end }}
+
+Seed the first admin:
+  kubectl exec deploy/{{ include "etlx.fullname" . }}-server -- \
+    etlx-server admin create-user --email you@example.com --name You --superadmin
+
+Scale run throughput (SKIP LOCKED queue — replicas never double-claim):
+  kubectl scale deploy/{{ include "etlx.fullname" . }}-worker --replicas=4
+
+IMPORTANT — ship new images with `helm upgrade`, not a bare rollout
+restart: the Alembic migrate Job is a pre-upgrade hook, so a restart
+alone leaves new code ahead of the schema (UndefinedColumn at runtime).

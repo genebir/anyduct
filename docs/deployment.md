@@ -7,7 +7,8 @@ containers, see [Quickstart](getting-started/quickstart.md).
 
 The reference deployment is `services/docker-compose.prod.yml` — every
 container, env var, and dependency edge listed here is exercised by that
-file, and the Helm chart (Step 11) will follow the same topology.
+file. The Helm chart (`services/charts/etlx`, see the Kubernetes section)
+deploys the same topology.
 
 ## Topology
 
@@ -231,6 +232,33 @@ what you know of the data's distribution (the server intentionally does
 not auto-split a min/max scan into equal arithmetic windows — that
 produces skew on gappy ids or bursty time ranges).
 
+## Kubernetes (Helm)
+
+`services/charts/etlx` deploys the same topology (verified end-to-end on
+a kind cluster: install → migrate hook → all pods Ready → login →
+pipeline run SUCCEEDED through a k8s worker):
+
+```bash
+helm install etlx services/charts/etlx \
+  --set-file jwt.privateKeyPem=.run/jwt_private.pem \
+  --set-file jwt.publicKeyPem=.run/jwt_public.pem
+```
+
+* **Embedded Postgres is dev-only** — set `postgresql.enabled=false` and
+  `externalDatabase.url` for production.
+* **Migrations run as a `post-install,pre-upgrade` hook Job.** Ship new
+  images with `helm upgrade` — a bare `kubectl rollout restart` skips
+  the hook and leaves new code ahead of the schema (UndefinedColumn at
+  runtime; we hit exactly this during chart verification).
+* Scale run throughput with `worker.replicas` (SKIP LOCKED queue — see
+  Worker scaling above). Scheduler/reaper/stream-worker default to 1
+  replica (extra replicas are HA, not throughput).
+* The production server image installs the lightweight connector tier
+  via the `etlx-server[connectors]` extra (postgres/mysql/duckdb/s3/
+  kafka/mongodb/redis/sqs/kinesis/dynamodb/rabbitmq/nats). Heavy or
+  C-extension drivers (cassandra, mssql, vertica, cloud DWs) need a
+  custom image layer: `RUN uv pip install 'etl-plugins[snowflake]'`.
+
 ## Health, readiness, observability
 
 * `GET /health` — liveness. Always 200 while the process is running.
@@ -264,5 +292,4 @@ not the secret bytes.
   HTTP. `CORS_ORIGINS` should match the public URL of the web UI.
 * **Multi-region replication** of the metadata DB. Set up read replicas
   + failover at the Postgres layer if you need it.
-* **Helm chart.** Coming in Step 11. The compose file mirrors the
-  intended deployment shape so the chart is a straight translation.
+* (The Helm chart used to be on this list — it now exists, see below.)

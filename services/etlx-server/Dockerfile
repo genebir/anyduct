@@ -51,12 +51,12 @@ COPY etl_plugins/ /app/etl_plugins/
 COPY services/etlx-server/pyproject.toml services/etlx-server/README.md /app/services/etlx-server/
 
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --package etlx-server --no-install-project
+    uv sync --frozen --no-dev --package etlx-server --extra connectors --no-install-project
 
 # Now copy the rest of the server source and finalize the install.
 COPY services/etlx-server /app/services/etlx-server/
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --package etlx-server
+    uv sync --frozen --no-dev --package etlx-server --extra connectors
 
 # ---------- runtime ---------------------------------------------------------
 FROM python:3.11-slim AS runtime

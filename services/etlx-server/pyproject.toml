@@ -25,6 +25,19 @@ dependencies = [
     "typer>=0.12",            # etlx-server admin CLI (Step 7.3)
 ]
 
+[project.optional-dependencies]
+# Data-plane connector drivers for the PRODUCTION image (Step 11,
+# 2026-06-12). The dev environment gets every driver via the workspace's
+# dev-dependencies, which hid a real gap: `uv sync --no-dev --package
+# etlx-server` (the Dockerfile) shipped ZERO connector extras — a deployed
+# worker couldn't run even a postgres pipeline (RegistryError at build).
+# This set is the pure-python / lightweight tier; heavy or C-extension
+# drivers (cassandra, mssql/vertica, cloud DWs) stay opt-in via a custom
+# image layer (see docs/deployment.md).
+connectors = [
+    "etl-plugins[postgres,mysql,duckdb,s3,kafka,mongodb,redis,sqs,kinesis,dynamodb,rabbitmq,nats]",
+]
+
 [project.scripts]
 # Admin CLI for the metadata DB (Step 7.3). Stays on the service side so the
 # core ``etlx`` CLI in etl_plugins.cli remains DB-agnostic (ADR-0017).

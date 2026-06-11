@@ -16,7 +16,7 @@ repos:
         # cannot construct. The example connections file uses the custom
         # ``!secret`` tag (ADR-0024) for the same reason. yamllint still
         # lints both files' structure.
-        exclude: ^(mkdocs\.yml|examples/connections\.example\.yaml)$
+        exclude: ^(mkdocs\.yml|examples/connections\.example\.yaml|services/charts/.*/templates/.*)$
       - id: check-toml
       - id: check-json
       - id: check-added-large-files

@@ -1,6 +1,11 @@
 ---
 extends: default
 
+# Helm templates are Go templates, not plain YAML — yamllint can't parse
+# {{ ... }} actions. values.yaml / Chart.yaml are still linted.
+ignore: |
+  services/charts/*/templates/
+
 rules:
   line-length:
     max: 120

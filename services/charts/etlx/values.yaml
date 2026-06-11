@@ -1,0 +1,89 @@
+---
+# etlx Helm values. The chart mirrors docker-compose.prod.yml: five
+# process types share the server image (command differs), web is its own
+# image, and the metadata DB is either the embedded dev Postgres below or
+# an external URL (recommended in production).
+
+image:
+  server:
+    repository: etlx-server
+    tag: prod
+    pullPolicy: IfNotPresent
+  web:
+    repository: etlx-web
+    tag: prod
+    pullPolicy: IfNotPresent
+
+# --- metadata DB -----------------------------------------------------------
+# Production: point externalDatabase.url at a managed Postgres and set
+# postgresql.enabled=false. The embedded StatefulSet is for dev/demo only
+# (single replica, simple PVC).
+externalDatabase:
+  # e.g. postgresql+asyncpg://user:pass@host:5432/etlx
+  url: ""
+
+postgresql:
+  enabled: true
+  image: postgres:16-alpine
+  auth:
+    username: etlx
+    password: etlx  # pragma: allowlist secret — dev default, override in prod
+    database: etlx
+  storage: 1Gi
+  storageClassName: ""
+
+# --- auth ------------------------------------------------------------------
+# Either reference an existing Secret with keys `private.pem` / `public.pem`,
+# or inline the PEM bodies (the chart then creates the Secret).
+jwt:
+  existingSecret: ""
+  privateKeyPem: ""
+  publicKeyPem: ""
+
+# --- server / workers ------------------------------------------------------
+server:
+  replicas: 1
+  port: 8000
+  service:
+    type: ClusterIP
+    port: 8000
+  resources: {}
+
+# The batch worker scales horizontally — the runs queue is claimed with
+# FOR UPDATE SKIP LOCKED, so add replicas for run throughput (P3a-proven).
+worker:
+  replicas: 2
+  logFlushInterval: "2.0"
+  resources: {}
+
+# Scheduler / reaper / stream-worker are also multi-replica SAFE (schedule
+# rows claimed with SKIP LOCKED), but one replica each is plenty — extra
+# replicas only add HA, not throughput.
+scheduler:
+  replicas: 1
+  resources: {}
+reaper:
+  replicas: 1
+  resources: {}
+streamWorker:
+  replicas: 1
+  resources: {}
+
+web:
+  enabled: true
+  replicas: 1
+  port: 3000
+  service:
+    type: ClusterIP
+    port: 3000
+  resources: {}
+
+# --- shared env ------------------------------------------------------------
+env:
+  corsOrigins: '["http://localhost:3000"]'
+  secretBackend: env  # pragma: allowlist secret — backend NAME, not a value
+  environment: production
+  jwtIssuer: etlx-server
+  jwtAudience: etlx
+# Appended verbatim to every server-image container (e.g. OPENLINEAGE_URL).
+extraEnv: []

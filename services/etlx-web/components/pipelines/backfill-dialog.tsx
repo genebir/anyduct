@@ -28,12 +28,14 @@ export function BackfillDialog({
   const { t } = useLocale();
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
+  const [splits, setSplits] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     if (open) {
       setFrom("");
       setTo("");
+      setSplits("");
     }
   }, [open, pipeline?.id]);
 
@@ -50,13 +52,38 @@ export function BackfillDialog({
 
   async function submit() {
     if (!pipeline) return;
+    // Phase P3b (ADR-0095): interior split points turn the range into N
+    // parallel sub-runs — boundaries = [from, ...splits, to], one half-open
+    // window per consecutive pair. Splitting needs both outer bounds.
+    const splitTokens = splits
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (splitTokens.length > 0 && (!from.trim() || !to.trim())) {
+      toast.error(t("backfill.splitNeedsBounds"));
+      return;
+    }
     setSubmitting(true);
     try {
-      await pipelinesApi.backfill(workspaceId, pipeline.id, {
-        cursor_from: from.trim() || null,
-        cursor_to: to.trim() || null,
-      });
-      toast.success(t("backfill.queued", { name: pipeline.name }));
+      if (splitTokens.length > 0) {
+        const raw = [from.trim(), ...splitTokens, to.trim()];
+        // The server requires same-typed boundaries; numeric cursors must go
+        // as numbers or "9" < "10" fails the lexicographic increase check.
+        const allNumeric = raw.every((v) => /^-?\d+(\.\d+)?$/.test(v));
+        const boundaries = allNumeric ? raw.map(Number) : raw;
+        const runs = await pipelinesApi.partitionedBackfill(workspaceId, pipeline.id, {
+          boundaries,
+        });
+        toast.success(
+          t("backfill.queuedMany", { count: String(runs.length), name: pipeline.name }),
+        );
+      } else {
+        await pipelinesApi.backfill(workspaceId, pipeline.id, {
+          cursor_from: from.trim() || null,
+          cursor_to: to.trim() || null,
+        });
+        toast.success(t("backfill.queued", { name: pipeline.name }));
+      }
       onClose();
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : t("backfill.failed"));
@@ -107,6 +134,17 @@ export function BackfillDialog({
             />
           </label>
           <p className="text-[11px] text-text-muted">{t("backfill.rangeHint")}</p>
+          <label className="flex flex-col gap-1">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-text-secondary">
+              {t("backfill.split")}
+            </span>
+            <Input
+              value={splits}
+              placeholder={t("backfill.splitPlaceholder")}
+              onChange={(e) => setSplits(e.target.value)}
+            />
+          </label>
+          <p className="text-[11px] text-text-muted">{t("backfill.splitHint")}</p>
         </div>
         <div className="mt-6 flex justify-end gap-2">
           <Button variant="ghost" onClick={onClose} disabled={submitting}>

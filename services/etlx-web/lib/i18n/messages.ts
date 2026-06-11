@@ -813,6 +813,13 @@ export const en = {
   "backfill.run": "Queue backfill",
   "backfill.queued": "Backfill queued for {name}",
   "backfill.failed": "Backfill failed — does the source have a cursor column?",
+  // Phase P3b (ADR-0095) — partitioned backfill: split points → N parallel sub-runs.
+  "backfill.split": "Split points (optional)",
+  "backfill.splitPlaceholder": "e.g. 2026-01-10, 2026-01-20 — comma-separated",
+  "backfill.splitHint":
+    "Splits the range into parallel runs at these points — worker replicas process the windows concurrently. Requires both From and To.",
+  "backfill.splitNeedsBounds": "Split points need both From and To set.",
+  "backfill.queuedMany": "{count} parallel backfill runs queued for {name}",
 
   // pipeline builder (edit page + builder components)
   "builder.title": "Pipeline builder",
@@ -2247,6 +2254,13 @@ export const ko: Messages = {
   "backfill.run": "백필 실행",
   "backfill.queued": "{name} 백필이 큐에 추가됨",
   "backfill.failed": "백필 실패 — 소스에 커서 컬럼이 있나요?",
+  // Phase P3b (ADR-0095) — 분할 백필: 분할 지점 → N개 병렬 sub-run.
+  "backfill.split": "분할 지점 (선택)",
+  "backfill.splitPlaceholder": "예: 2026-01-10, 2026-01-20 — 쉼표 구분",
+  "backfill.splitHint":
+    "이 지점들에서 범위를 병렬 run으로 분할합니다 — 워커 replica들이 윈도우를 동시에 처리합니다. From/To 둘 다 필요.",
+  "backfill.splitNeedsBounds": "분할 지점은 From과 To가 모두 필요합니다.",
+  "backfill.queuedMany": "{name} 병렬 백필 {count}개가 큐에 추가됨",
 
   "builder.title": "파이프라인 빌더",
   "builder.draft": "초안",

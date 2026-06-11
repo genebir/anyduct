@@ -440,6 +440,18 @@ export const pipelinesApi = {
       method: "POST",
       json: body,
     }),
+  /** Phase P3b (ADR-0095) — split one cursor range into N parallel
+   *  sub-runs (one per consecutive boundary pair, half-open windows).
+   *  The multi-replica worker fleet claims them concurrently. */
+  partitionedBackfill: (
+    workspaceId: string,
+    id: string,
+    body: { boundaries: (string | number)[] },
+  ) =>
+    api<RunSummary[]>(`/workspaces/${workspaceId}/pipelines/${id}/partitioned-backfill`, {
+      method: "POST",
+      json: body,
+    }),
   dryRun: (workspaceId: string, id: string) =>
     api<DryRunResponse>(
       `/workspaces/${workspaceId}/pipelines/${id}/dry-run`,

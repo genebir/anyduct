@@ -2839,7 +2839,8 @@ L1 출시 직후 사용자가 5개 회신:
 **Consequences**:
 - ✅ Tier 1(수십~수백 GB 실이동) 대형 historical load가 **워커 replica 수에 비례해 스케일아웃** — 분산 엔진 없이. 서버 e2e 3(3윈도우 무중복·완전 적재 + boundaries 검증 + cursor 필수).
 - ⚠️ 파티션별 완전 독립 실행(embarrassingly parallel) — 집계/dedupe가 윈도우 경계를 넘는 파이프라인은 부적합(ADR-0093 Phase 3 경고 그대로).
-- ⚠️ web 노출(빌더 Backfill 다이얼로그에 분할 옵션) 후속. Arrow `Partition`(P2a) key-range와의 결합(비-커서 분할)도 후속.
+- ✅ web 노출(같은 날): Backfill 다이얼로그에 "분할 지점" 입력(쉼표 구분) — `[From, ...splits, To]`를 boundaries로 전송, 전부 숫자면 number로 강제 변환("9"<"10" 사전순 함정 회피), 분할 시 From/To 필수 클라이언트 검증, "{count}개 병렬 백필 큐 추가" 토스트.
+- ⚠️ Arrow `Partition`(P2a) key-range와의 결합(비-커서 분할)은 후속.
 
 ---
 

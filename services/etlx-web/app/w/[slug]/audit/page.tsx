@@ -6,6 +6,7 @@ import { ChevronDownIcon, ChevronRightIcon, ScrollTextIcon } from "lucide-react"
 import { toast } from "sonner";
 import { Header } from "@/components/shell/header";
 import { Card, CardHeader } from "@/components/ui/card";
+import { TableSkeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -277,9 +278,7 @@ export default function AuditPage() {
 
         <Card>
           {rows === null ? (
-            <div className="py-12 text-center text-sm text-text-muted">
-              {t("common.loading")}
-            </div>
+            <div className="px-4 py-4"><TableSkeleton /></div>
           ) : rows.length === 0 ? (
             <EmptyState
               icon={<ScrollTextIcon size={36} strokeWidth={1.5} />}

@@ -15,6 +15,7 @@ import {
 import { toast } from "sonner";
 import { Header } from "@/components/shell/header";
 import { Card, CardHeader } from "@/components/ui/card";
+import { TableSkeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { DataTable, type Column } from "@/components/ui/data-table";
@@ -622,7 +623,7 @@ export default function SensorsPage() {
         <Card>
           <CardHeader title={t("sensors.listTitle")} description={t("sensors.listDesc")} />
           {rows === null ? (
-            <p className="px-1 text-sm text-text-muted">{t("common.loading")}</p>
+            <TableSkeleton rows={4} />
           ) : rows.length === 0 ? (
             <EmptyState
               icon={<RadarIcon size={28} />}

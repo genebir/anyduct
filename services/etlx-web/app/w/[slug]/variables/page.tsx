@@ -6,6 +6,7 @@ import { Trash2Icon } from "lucide-react";
 import { toast } from "sonner";
 import { Header } from "@/components/shell/header";
 import { Card, CardHeader } from "@/components/ui/card";
+import { TableSkeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -153,7 +154,7 @@ export default function VariablesPage() {
         <Card>
           <CardHeader title={t("variables.title")} description={t("variables.desc")} />
           {vars === null ? (
-            <p className="text-sm text-text-muted">{t("common.loading")}</p>
+            <TableSkeleton rows={4} />
           ) : vars.length === 0 ? (
             <p className="text-sm text-text-muted">{t("variables.empty")}</p>
           ) : (

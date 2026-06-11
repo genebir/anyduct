@@ -14,6 +14,7 @@ import {
 import { toast } from "sonner";
 import { Header } from "@/components/shell/header";
 import { Card } from "@/components/ui/card";
+import { TableSkeleton } from "@/components/ui/skeleton";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -470,9 +471,7 @@ export default function ConnectionsPage() {
 
         <Card>
           {rows === null ? (
-            <div className="py-12 text-center text-sm text-text-muted">
-              {t("common.loading")}
-            </div>
+            <div className="px-4 py-4"><TableSkeleton /></div>
           ) : filteredRows.length === 0 && (search || typeFilter || usageFilter) ? (
             <div className="py-8 text-center text-sm text-text-muted">
               {t("connections.filterNoMatch")}

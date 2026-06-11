@@ -17,6 +17,7 @@ import {
 import { toast } from "sonner";
 import { Header } from "@/components/shell/header";
 import { Card } from "@/components/ui/card";
+import { TableSkeleton } from "@/components/ui/skeleton";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import {
   ContextMenu,
@@ -621,9 +622,7 @@ export default function RunsPage() {
       <main className="mx-auto w-full max-w-6xl flex-1 space-y-6 overflow-y-auto px-6 py-8">
         <Card>
           {rows === null ? (
-            <div className="py-12 text-center text-sm text-text-muted">
-              {t("common.loading")}
-            </div>
+            <div className="px-4 py-4"><TableSkeleton /></div>
           ) : (
             <DataTable
               columns={buildColumns(

@@ -245,3 +245,28 @@
 .react-flow__controls-button:disabled svg {
   fill: rgb(var(--text-disabled)) !important;
 }
+
+/* ───────────────────────────────────────────────────────────────────────
+   Skeleton shimmer (Step 10.7, DESIGN.md §6.2) — bg-elevated → bg-overlay
+   over 1.5s. Static bg-elevated under prefers-reduced-motion (§6.3).
+   ─────────────────────────────────────────────────────────────────────── */
+@layer components {
+  .skeleton {
+    background-color: rgb(var(--bg-elevated));
+    border-radius: 0.375rem;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .skeleton {
+      animation: skeleton-shimmer 1.5s ease-in-out infinite;
+    }
+  }
+  @keyframes skeleton-shimmer {
+    0%,
+    100% {
+      background-color: rgb(var(--bg-elevated));
+    }
+    50% {
+      background-color: rgb(var(--bg-overlay));
+    }
+  }
+}

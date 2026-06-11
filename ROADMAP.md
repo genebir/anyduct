@@ -597,7 +597,7 @@
 ### 10.7 빈 상태 / 에러 / 로딩 패스 점검
 - [x] 전 페이지 empty state (DESIGN.md §7.11) — ✅ 사실상 완료(EmptyState primitive + ACQ/ADP/ACZ 등 dogfood 웨이브로 전 목록 정비; 2026-06-12 확인)
 - [x] **전역 error boundary** ✅ (2026-06-12) — `app/error.tsx`(세그먼트 — 프로바이더 살아있어 i18n EmptyState 카드 + reset 재시도 + 워크스페이스 링크), `app/global-error.tsx`(루트 레이아웃 자체가 죽은 케이스 — 자체 html/body, 이중언어 정적 카피), `app/not-found.tsx`(404 — i18n + CTA). 런타임 에러 시 백지/Next 기본화면이 사라짐.
-- [ ] Skeleton + 핑크 shimmer
+- [x] **Skeleton shimmer** ✅ (2026-06-12) — `Skeleton`/`TableSkeleton` primitive(+story, DESIGN §6.2: bg-elevated→bg-overlay 1.5s, `prefers-reduced-motion`은 정적) + 9개 목록 페이지의 "Loading…" 텍스트 교체(runs/pipelines/connections/schedules/assets/variables/members/audit/sensors). 행 폭 가변(균일 폭은 glitch로 읽힘). → **10.7 완료**.
 
 ### 10.8 품질 게이트 🔄
 - [x] **Storybook 9 + addon-a11y 부트스트랩** — `services/etlx-web/.storybook/` (`@storybook/nextjs-vite` framework, Tailwind v4 via `@tailwindcss/vite`로 DESIGN.md §11.1 토큰 로드, light/dark `data-theme` 데코레이터, `addon-a11y` 글로벌). `pnpm --filter @etlx/web build-storybook` 통과. `*.stories.tsx`는 `@storybook/react-vite`에서 type 임포트.

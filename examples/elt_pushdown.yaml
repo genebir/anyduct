@@ -1,0 +1,47 @@
+# In-warehouse ELT via SQL pushdown — zero data movement (ADR-0094).
+#
+# Source and sink share ONE connection and the only transform is a
+# ``sql`` transform with ``pushdown: true`` — so the runtime composes
+# the whole task into a single in-database statement:
+#
+#     INSERT INTO daily_revenue
+#     WITH input AS (SELECT order_day, amount FROM orders)
+#     SELECT order_day, SUM(amount) AS revenue, COUNT(*) AS orders
+#     FROM input GROUP BY order_day
+#
+# No rows ever leave the database or touch Python — this is how
+# terabyte-scale transforms run when the data already lives in a
+# warehouse (dbt's model; ADR-0093 Tier 2). The same SQL runs locally
+# in DuckDB if you drop ``pushdown: true`` — but note the dialect then
+# changes from your warehouse's to DuckDB's.
+#
+# Eligibility (otherwise the run falls back to local DuckDB and the
+# dry run explains why — lint code ``sql_pushdown_ineligible``):
+#   * source.connection == sink.connection
+#   * this is the task's ONLY transform
+#   * sink mode is ``append`` with no when/pre_sql
+#   * the connector supports INSERT INTO…SELECT (RDBMS + warehouses)
+#
+# After a run, the run detail's "Data path" chip shows "In-database
+# (pushdown)" — that's how you verify nothing moved.
+#
+# Pair with ``examples/connections.example.yaml`` and run:
+#
+#     uv run etlx validate examples/elt_pushdown.yaml \
+#         --connections examples/connections.example.yaml
+#
+name: daily_revenue_rollup
+mode: batch
+source:
+  connection: pg_oltp
+  query: SELECT order_day, amount FROM orders
+transforms:
+  - type: sql
+    pushdown: true
+    query: |
+      SELECT order_day, SUM(amount) AS revenue, COUNT(*) AS orders
+      FROM input GROUP BY order_day
+sink:
+  connection: pg_oltp
+  table: daily_revenue
+  mode: append

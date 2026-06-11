@@ -74,3 +74,20 @@ def test_stream_queue_to_stream_example_validates() -> None:
     assert pc.sink is not None and pc.sink.connection == "redis_events"
     assert pc.commit is not None
     assert pc.commit.strategy == "after_sink_flush"
+
+
+def test_elt_pushdown_example_validates() -> None:
+    """ADR-0094: in-warehouse ELT — same-connection + sql transform with
+    ``pushdown: true`` composes into one INSERT INTO…WITH…SELECT. The
+    example must stay pushdown-ELIGIBLE (lint-clean), or the docs would
+    promise zero movement while the runtime quietly runs DuckDB."""
+    from etl_plugins.runtime.lint import lint_pipeline
+
+    pc = load_pipeline(EXAMPLES / "elt_pushdown.yaml")
+    assert pc.name == "daily_revenue_rollup"
+    assert pc.source is not None and pc.sink is not None
+    assert pc.source.connection == pc.sink.connection
+    assert len(pc.transforms) == 1
+    assert pc.transforms[0].model_dump().get("pushdown") is True
+    codes = {w.code for w in lint_pipeline(pc)}
+    assert "sql_pushdown_ineligible" not in codes

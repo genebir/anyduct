@@ -117,7 +117,14 @@ uv run mypy etl_plugins
 
 ## 5. 현재 단계
 
-> **최신 마일스톤 (2026-06-10): ERD 완성 마감 — .damx 전수 정확 복원 + 주제영역 탭 + 산출물/검증/실행 연결 (Phase AJO→AKP).** 사용자 피드백 주도 인터랙티브 세션, 웹 전용(코어/서버 0). ERD는 "가져오기→그리기→검증→산출물→실행" 사이클이 닫힌 성숙 단계로 마감:
+> **최신 마일스톤 (2026-06-10~11): 데이터 플레인 개편 — SQL-first(DuckDB) + Arrow 벡터 + 푸시다운 ELT (ADR-0093/0094).** 행 단위 Record 플레인의 성능(3~6× 느림)·자유도·러닝커브 한계를 사용자 평가로 합의, 운영 플레인은 유지하고 데이터 플레인만 단계 개편:
+> - **Phase 1 완료 — `sql` 데이터셋 변환**: `{type: sql, query}` — in-flight 레코드를 DuckDB 릴레이션 `input`으로, 임의 SQL(JOIN/GROUP BY/윈도우/QUALIFY) 1급(P1a). 빌더 transform:sql operator(SQL IDE, batchOnly, P1b). 멀티-소스 JOIN e2e: pg×mysql → graph fan-in join → sql GROUP BY → pg 적재 testcontainers 검증(P1c).
+> - **Phase 2 — Arrow/푸시다운**: `core/arrow.py`(Partition+Protocol+어댑터) + sql 변환 파일-백 DuckDB spill(메모리 초과 데이터셋 OK, P2a). postgres `read_arrow`/`write_arrow` COPY fast-path — 변환 0 단일-sink append/overwrite면 Record 플레인 통째 우회, PG→PG 500k행 **3.4×**(P2b). same-connection이면 `INSERT INTO…SELECT` 한 문장 무이동(P2c). **run별 데이터 경로 가시화**: `RunResult.data_paths`(pushdown/arrow/records/graph) → `result_json` → run 상세 칩(P2d).
+> - **P2.5 pushdown ELT 1급화 (ADR-0094)**: `{type: sql, pushdown: true}`(유일 변환+P2c 자격)이면 `INSERT INTO <t> WITH <view> AS (<source>) <query>` — **DW 안에서 변환 실행, 데이터 무이동**(Tier 2, dbt 방식). opt-in(로컬=DuckDB vs 푸시다운=타깃 dialect). 부적격은 로컬 폴백 + lint `sql_pushdown_ineligible`(차단 조건 명시) + data_paths 이중 가시화. **graph trivial 체인도 동작**(빌더는 graph로 저장 — `_try_graph_pushdown`, `SinkSpec.connection_name` 이름 비교로 mint된 sink 인스턴스 대응) + 빌더 pushdown 토글.
+> - **Phase 3 — 클러스터링**: 멀티-replica 경합 실증(3-replica claim 무중복 + RunWorker 2대 공동 드레인) + asset upsert 레이스 `ON CONFLICT` 수정(P3a). **남은 것: 파티션 분할 실행(run→N sub-run, 키/커서 범위) / 배포(compose/k8s) 가이드 / stream-worker 멀티 replica 문서. ← 다음 후보**
+> - 검증: 코어 unit 1249 green, PG/멀티소스 통합 11, 서버 워커 47 회귀 0, mypy/ruff/web tsc clean. 3-Tier 빅데이터 전략은 ADR-0093 보강분 참조(Tier 3 분산 엔진은 트리거 조건 명시 후 보류).
+>
+> **이전 마일스톤 (2026-06-10): ERD 완성 마감 — .damx 전수 정확 복원 + 주제영역 탭 + 산출물/검증/실행 연결 (Phase AJO→AKP).** 사용자 피드백 주도 인터랙티브 세션, 웹 전용(코어/서버 0). ERD는 "가져오기→그리기→검증→산출물→실행" 사이클이 닫힌 성숙 단계로 마감:
 > - **.damx 정확 복원(전수 검증)**: 관계 = bracket 시그니처(`[relGUID][부모][자식][relGUID]`, MODEL 섹션 한정, 자기참조는 bracket x2 검증, 물리→한글 canon dedup) — 사용자 기준값 4파일 전수 일치(TMS 265/테이블표준화 16/CTC 147/안전지원 144, AKD/AKE). NOT NULL 플래그(TYPE 뒤 int32, 길이有+8/無+12, AJQ), PK 관계추론+PK→NN(AJO), 컬럼 논리명 전역 보강(AJS), 테이블 물리명(`[물리][논리]` 라벨, AJU), 영문 테이블명(PIT/CROSSING) 파싱(AKD).
 > - **주제영역 탭(AKF→AKJ)**: DA# pane 구조 리버스(K_PANE_PRINT_DEV 경계+헤더명+논리/물리 pane쌍) → 한 다이어그램 안의 탭(ErdDesign.areas, 멤버십+탭별 좌표). "전체" 탭 없음(첫 탭 기본), 탭별 DA# 좌표 pane-구간-내 rect 탐색으로 전 탭 복원(다중탭 테이블 탭별 상이 좌표, FK-국소성 검증). 탭 인식 드래그/추가/삭제(고아 방지 시맨틱)/autoLayout/겹침정리.
 > - **산출물/검증**: Excel 정의서(.xlsx, ExcelJS lazy — 개요/테이블/컬럼/관계·제약/주제영역 5시트, Apple풍 서식: #1D1D1F ink+헤어라인+#F5F5F7 헤더 freeze/autofilter+절제된 #0A84FF, AKN; 매핑정의서 S2T는 빈 템플릿이라 제거 AKO). DB 일치 검증(VerifyDbDialog — 실스키마 대조, 테이블/컬럼/타입 드리프트, AKK). 검색 자동완성(%부분일치+논리명+탭 점프, AKK). PNG(타이트 핏+선명도+캔버스 클램프 AJY, 다크 배경 AJZ, 로딩 오버레이 AKM).

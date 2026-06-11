@@ -238,6 +238,118 @@ def test_elt_pushdown_extra_transform_falls_back_to_local(db: str) -> None:
     conn.close()
 
 
+# --- graph-chain ELT pushdown (ADR-0094): the builder UI emits graphs ------
+
+
+def _graph_config(db: str, *, sink_connection: str = "db", view: str = "input") -> Any:
+    from etl_plugins.config.models import PipelineConfig
+
+    return PipelineConfig.model_validate(
+        {
+            "name": "gp",
+            "graph": {
+                "nodes": [
+                    {
+                        "id": "s",
+                        "type": "source",
+                        "connection": "db",
+                        "query": "SELECT id, name FROM src",
+                    },
+                    {
+                        "id": "x",
+                        "type": "transform",
+                        "transform": {
+                            "type": "sql",
+                            "query": f"SELECT id, UPPER(name) AS name FROM {view}",
+                            "pushdown": True,
+                            **({} if view == "input" else {"view": view}),
+                        },
+                    },
+                    {"id": "k", "type": "sink", "connection": sink_connection, "table": "dst"},
+                ],
+                "edges": [
+                    {"from_node": "s", "to_node": "x"},
+                    {"from_node": "x", "to_node": "k"},
+                ],
+            },
+        }
+    )
+
+
+def test_graph_chain_pushdown_runs_in_database(db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """source → sql(pushdown) → sink as a GRAPH (the shape the builder UI
+    saves) composes the same one-statement path as the linear twin."""
+    from etl_plugins.runtime.builder import build_pipeline
+
+    conn = SQLiteConnector(database=db)
+    conn.connect()
+    pipeline, built = build_pipeline(_graph_config(db), connectors={"db": conn})
+    monkeypatch.setattr(
+        SQLiteConnector, "write", lambda *a, **k: (_ for _ in ()).throw(AssertionError("write"))
+    )
+    monkeypatch.setattr(
+        SQLiteConnector, "read", lambda *a, **k: (_ for _ in ()).throw(AssertionError("read"))
+    )
+    result = pipeline.run(connectors=built)
+    assert result.data_paths == {"gp": "pushdown"}
+    assert result.records_written == 5
+    assert _rows(db) == [(i, f"N{i}") for i in range(5)]
+    conn.close()
+
+
+def test_graph_chain_pushdown_with_minted_sink_instance(
+    db: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With a connector_factory the graph builder mints a SECOND instance
+    for the sink (deadlock guard) — pushdown must still recognise both
+    ends as the same database (connection_name, not instance identity)."""
+    from etl_plugins.runtime.builder import build_pipeline
+
+    conn = SQLiteConnector(database=db)
+    conn.connect()
+    pipeline, built = build_pipeline(
+        _graph_config(db),
+        connectors={"db": conn},
+        connector_factory=lambda name: SQLiteConnector(database=db),
+    )
+    assert len(built) == 2  # the minted sink instance exists…
+    for c in built.values():
+        c.connect()
+    monkeypatch.setattr(
+        SQLiteConnector, "write", lambda *a, **k: (_ for _ in ()).throw(AssertionError("write"))
+    )
+    monkeypatch.setattr(
+        SQLiteConnector, "read", lambda *a, **k: (_ for _ in ()).throw(AssertionError("read"))
+    )
+    result = pipeline.run(connectors=built)  # …but no rows flow through it
+    assert result.data_paths == {"gp": "pushdown"}
+    assert _rows(db) == [(i, f"N{i}") for i in range(5)]
+    for c in built.values():
+        c.close()
+
+
+def test_graph_chain_cross_connection_falls_back_to_materialize(db: str, tmp_path: Path) -> None:
+    other = str(tmp_path / "other_graph.db")
+    con = sqlite3.connect(other)
+    con.execute("CREATE TABLE dst (id INTEGER, name TEXT)")
+    con.commit()
+    con.close()
+    from etl_plugins.runtime.builder import build_pipeline
+
+    src = SQLiteConnector(database=db)
+    dst = SQLiteConnector(database=other)
+    src.connect()
+    dst.connect()
+    pipeline, built = build_pipeline(
+        _graph_config(db, sink_connection="other"), connectors={"db": src, "other": dst}
+    )
+    result = pipeline.run(connectors=built)
+    assert result.data_paths == {"gp": "graph"}  # materialize engine, local DuckDB
+    assert _rows(other) == [(i, f"N{i}") for i in range(5)]
+    src.close()
+    dst.close()
+
+
 def test_pushdown_flag_typo_rejected_at_build() -> None:
     """``pushdown: "yes"`` would silently never engage — reject it."""
     from etl_plugins.core.exceptions import ConfigError

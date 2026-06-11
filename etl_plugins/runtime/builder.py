@@ -270,7 +270,12 @@ def _build_graph_task(
             if n.transform is None:
                 raise ConfigError(f"{label}: transform node {n.id!r} missing 'transform'")
             nodes.append(
-                GraphNode(id=n.id, kind="transform", transform_fn=build_transform(n.transform))
+                GraphNode(
+                    id=n.id,
+                    kind="transform",
+                    transform_fn=build_transform(n.transform),
+                    transform_spec=n.transform.model_dump(),
+                )
             )
         elif n.type == "sink":
             if not n.connection or n.connection not in connectors:
@@ -297,6 +302,7 @@ def _build_graph_task(
                         auto_create_if_exists=str(
                             n.model_dump().get("auto_create_if_exists") or "skip"
                         ),
+                        connection_name=n.connection,
                     ),
                 )
             )

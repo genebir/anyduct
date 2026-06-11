@@ -519,24 +519,63 @@ def test_pushdown_task_shape_location() -> None:
     assert warnings[0].location == "tasks.0.transforms.0"
 
 
-def test_pushdown_graph_shape_always_warns() -> None:
-    cfg = PipelineConfig.model_validate(
+def _graph_cfg(
+    *,
+    sink: dict | None = None,
+    extra_nodes: list[dict] | None = None,
+    extra_edges: list[dict] | None = None,
+) -> PipelineConfig:
+    """Trivial source → sql(pushdown) → sink chain, optionally perturbed."""
+    return PipelineConfig.model_validate(
         {
             "name": "p",
             "graph": {
                 "nodes": [
                     {"id": "s", "type": "source", "connection": "wh", "query": "SELECT a FROM t"},
                     {"id": "x", "type": "transform", "transform": _sql_pd()},
-                    {"id": "k", "type": "sink", "connection": "wh", "table": "out"},
+                    sink or {"id": "k", "type": "sink", "connection": "wh", "table": "out"},
+                    *(extra_nodes or []),
                 ],
                 "edges": [
                     {"from_node": "s", "to_node": "x"},
                     {"from_node": "x", "to_node": "k"},
+                    *(extra_edges or []),
                 ],
             },
         }
     )
+
+
+def test_pushdown_graph_trivial_chain_is_eligible() -> None:
+    """The builder UI emits graphs — the simple chain must lint clean
+    (the runtime composes it via ``_try_graph_pushdown``, ADR-0094)."""
+    assert _pd(_graph_cfg()) == []
+
+
+def test_pushdown_graph_cross_connection_warns() -> None:
+    cfg = _graph_cfg(sink={"id": "k", "type": "sink", "connection": "other", "table": "out"})
     warnings = _pd(cfg)
     assert len(warnings) == 1
     assert warnings[0].location == "graph.nodes.x"
-    assert "graph" in warnings[0].message
+    assert "differ" in warnings[0].message
+
+
+def test_pushdown_graph_non_append_warns() -> None:
+    cfg = _graph_cfg(
+        sink={"id": "k", "type": "sink", "connection": "wh", "table": "out", "mode": "overwrite"}
+    )
+    warnings = _pd(cfg)
+    assert len(warnings) == 1
+    assert "'append'" in warnings[0].message
+
+
+def test_pushdown_graph_non_trivial_shape_warns() -> None:
+    cfg = _graph_cfg(
+        extra_nodes=[
+            {"id": "k2", "type": "sink", "connection": "wh", "table": "out2"},
+        ],
+        extra_edges=[{"from_node": "x", "to_node": "k2"}],
+    )
+    warnings = _pd(cfg)
+    assert len(warnings) == 1
+    assert "chain" in warnings[0].message

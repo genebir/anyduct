@@ -351,6 +351,11 @@ def _lint_auto_create_table_planned(cfg: PipelineConfig) -> list[LintWarning]:
     return warnings
 
 
+#: Mirrors ``etl_plugins.core.pipeline._PUSHDOWN_TABLE_RE`` — plain
+#: (optionally schema-qualified) identifier the pushdown may inline.
+_PLAIN_TABLE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$")
+
+
 def _sql_pushdown_requested(tc: TransformConfig) -> bool:
     """True if this is a ``sql`` transform with ``pushdown: true`` (an
     ``extra``-field opt-in, ADR-0094)."""
@@ -371,24 +376,54 @@ def _lint_sql_pushdown_ineligible(cfg: PipelineConfig) -> list[LintWarning]:
     warnings: list[LintWarning] = []
 
     if cfg.graph is not None:
-        for node in cfg.graph.nodes:
+        # Graph shape: pushdown engages only for the trivial chain
+        # source → sql(pushdown) → sink (the shape the builder UI emits
+        # for a simple pipeline). Mirror ``Pipeline._try_graph_pushdown``.
+        nodes = cfg.graph.nodes
+        g_sources = [n for n in nodes if n.type == "source"]
+        g_sinks = [n for n in nodes if n.type == "sink"]
+        for node in nodes:
             if (
-                node.type == "transform"
-                and node.transform is not None
-                and _sql_pushdown_requested(node.transform)
+                node.type != "transform"
+                or node.transform is None
+                or not _sql_pushdown_requested(node.transform)
             ):
-                warnings.append(
-                    LintWarning(
-                        code="sql_pushdown_ineligible",
-                        message=(
-                            "pushdown: true has no effect in a graph pipeline — "
-                            "pushdown composes a linear source → sql → sink task "
-                            "into one in-database statement. The transform will "
-                            "run locally (DuckDB)."
-                        ),
-                        location=f"graph.nodes.{node.id}",
-                    )
+                continue
+            g_blocker: str | None = None
+            if len(nodes) != 3 or len(g_sources) != 1 or len(g_sinks) != 1:
+                g_blocker = (
+                    "pushdown composes only the trivial source → sql → sink "
+                    f"chain (this graph has {len(nodes)} nodes)"
                 )
+            elif any(e.when for e in cfg.graph.edges):
+                g_blocker = "an edge has a 'when' predicate"
+            elif {(e.from_node, e.to_node) for e in cfg.graph.edges} != {
+                (g_sources[0].id, node.id),
+                (node.id, g_sinks[0].id),
+            }:
+                g_blocker = "the nodes aren't wired source → sql → sink"
+            elif g_sinks[0].connection != g_sources[0].connection:
+                g_blocker = (
+                    f"source connection {g_sources[0].connection!r} and sink "
+                    f"connection {g_sinks[0].connection!r} differ — pushdown "
+                    "runs inside ONE database"
+                )
+            elif g_sinks[0].mode != "append":
+                g_blocker = f"sink mode is {g_sinks[0].mode!r} — pushdown needs 'append'"
+            elif not g_sinks[0].table or not _PLAIN_TABLE_RE.match(g_sinks[0].table):
+                g_blocker = f"sink table {g_sinks[0].table!r} is not a plain identifier"
+            if g_blocker is None:
+                continue
+            warnings.append(
+                LintWarning(
+                    code="sql_pushdown_ineligible",
+                    message=(
+                        f"pushdown: true won't engage — {g_blocker}. The transform "
+                        "will run locally (DuckDB) instead of in-database."
+                    ),
+                    location=f"graph.nodes.{node.id}",
+                )
+            )
         return warnings
 
     has_explicit_tasks = bool(cfg.tasks)
@@ -419,9 +454,7 @@ def _lint_sql_pushdown_ineligible(cfg: PipelineConfig) -> list[LintWarning]:
             blocker = "the sink has a 'when' routing predicate"
         elif sinks[0].model_dump().get("pre_sql"):
             blocker = "the sink has 'pre_sql' (it must stay in the write transaction)"
-        elif not sinks[0].table or not re.match(
-            r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$", sinks[0].table
-        ):
+        elif not sinks[0].table or not _PLAIN_TABLE_RE.match(sinks[0].table):
             blocker = f"sink table {sinks[0].table!r} is not a plain identifier"
         if blocker is None:
             continue

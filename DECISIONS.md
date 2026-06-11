@@ -2811,14 +2811,14 @@ L1 출시 직후 사용자가 5개 회신:
 - **자동이 아니라 opt-in인 이유**: 로컬 실행 엔진은 DuckDB, 푸시다운은 타깃 DB dialect — QUALIFY 등 DuckDB 전용 문법은 PG에서 죽는다. 자동 전환은 침묵 시맨틱 변경. 플래그 = "이 SQL은 타깃 DB dialect로 썼다"는 사용자 선언.
 - **부적격 시 침묵 폴백 + 이중 가시성**: 조건 미달이면 기존 로컬 DuckDB 경로로 폴백(결과 동일, 위치만 다름). (a) dry-run lint `sql_pushdown_ineligible`이 **차단 조건을 구체적으로** 설명(advisory, 기존 DryRunPanel에 자동 표시) (b) run 후엔 `RunResult.data_paths`(P2d)가 실제 경로를 보고. "웨어하우스에 시켰는데 Python이 했다"가 조용히 지나가지 않음.
 - **typo 가드**: `pushdown: "yes"` 같은 비-불리언은 build 시 ConfigError(침묵 미발동 방지). counts는 statement rowcount(집계면 결과 행 수) — P2c와 동일 시맨틱.
-- **그래프 파이프라인은 비대상**: 푸시다운은 linear source→sql→sink 합성 — 그래프 transform 노드의 `pushdown: true`는 lint가 "무효"라고 경고.
+- **그래프 trivial 체인도 대상 (같은 날 후속)**: 웹 빌더는 모든 파이프라인을 graph shape으로 저장(serializeGraph) — linear 한정이면 빌더 사용자는 영원히 비대상이 된다. `_try_graph_pushdown`: 그래프가 정확히 `source → sql(pushdown) → sink` 3노드 체인(edge when 없음, 단일 append sink)이고 **양 끝이 같은 커넥션 이름**이면 동일 합성. 그래프 빌더는 sink에 두 번째 인스턴스를 mint(데드락 가드)하므로 인스턴스 동일성 비교는 불가 — `SinkSpec.connection_name`(원본 커넥션 이름) 신설로 이름 비교(같은 이름=같은 DB, 푸시다운은 한 문장이라 데드락 우려 없음). `GraphNode.transform_spec`(raw dump) 신설. lint graph 분기도 "항상 무효" → 자격 검사로 교체. 비-trivial 그래프(fan-in/when/다중 sink)는 materialize 엔진 그대로. 서버 node-level 실행(opt-in node_runs)은 노드 단위 dispatch라 푸시다운 비적용(기본 경로만).
 
 **거부된 대안**: (a) 자동 푸시다운(플래그 없이 자격 충족 시) — dialect 차이로 침묵 동작 변경, 기각. (b) 변환 쿼리의 `input` 참조를 소스 쿼리로 텍스트 치환 — SQL 재작성은 신뢰 불가, CTE가 정확하고 전 dialect 호환. (c) 별도 변환 타입(`sql_pushdown`) — 같은 쿼리를 로컬/푸시다운 전환할 때 타입 교체를 강요, 플래그가 마찰 최소.
 
 **Consequences**:
 - ✅ DW-내부 ELT 파이프라인(Tier 2)이 1급 — Snowflake/BigQuery/ClickHouse 등 9 dialect에서 TB급도 데이터 무이동으로 변환 가능(엔진=웨어하우스). 코어 unit 1243 passed, PG 통합 +1(GROUP BY 무이동 실증), mypy/ruff clean.
 - ⚠️ 푸시다운 SQL의 dialect 검증은 사용자 몫(실행 시 DB 에러로 표면화). dry-run은 연결성만 확인.
-- ⚠️ web 빌더 노출(`pushdown` 토글)은 별도 슬라이스.
+- ✅ web 빌더 노출: transform:sql 오퍼레이터에 "Run inside the database (pushdown)" boolean 토글(help가 동일-커넥션/유일-변환/append 조건 + dialect 주의 설명). 빌더 graph shape 그대로 동작(`_try_graph_pushdown`).
 
 ---
 

@@ -118,16 +118,21 @@ def _elt_pushdown_select(task: Task) -> str | None:
     specs = list(task.transform_specs or [])
     if len(task.transforms) != 1 or len(specs) != 1:
         return None
-    spec = specs[0]
+    return _compose_pushdown_select(task.query, specs[0])
+
+
+def _compose_pushdown_select(source_query: str | None, spec: dict[str, Any]) -> str | None:
+    """Compose the in-database SELECT for one ``sql`` transform spec
+    (ADR-0094) — shared by the linear task path and the graph-chain path."""
     if spec.get("type") != "sql" or spec.get("pushdown") is not True:
         return None
     transform_query = spec.get("query")
-    if not task.query or not transform_query or not isinstance(transform_query, str):
+    if not source_query or not transform_query or not isinstance(transform_query, str):
         return None
     view = spec.get("view") or "input"
     if not isinstance(view, str) or not _PUSHDOWN_VIEW_RE.match(view):
         return None
-    return f"WITH {view} AS ({task.query}) {transform_query}"
+    return f"WITH {view} AS ({source_query}) {transform_query}"
 
 
 @dataclass
@@ -160,6 +165,11 @@ class SinkSpec:
     # Phase AAA (ADR-0071, 2026-05-29): forwarded to
     # ``SchemaWriter.ensure_table(if_exists=...)``.
     auto_create_if_exists: str = "skip"
+    # ADR-0094: the ORIGINAL config connection name. ``name`` is the
+    # connectors-dict key, which the graph builder may point at a minted
+    # second instance (deadlock guard) — pushdown eligibility needs to know
+    # both ends are the same *database*, not the same instance.
+    connection_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -201,6 +211,10 @@ class GraphNode:
     sql_statement: str | None = None
     # transform — row-level or dataset-level (ADR-0093)
     transform_fn: AnyTransformFn | None = None
+    # Raw TransformConfig dump for introspection (mirrors
+    # ``Task.transform_specs``) — e.g. the graph-chain ELT pushdown
+    # (ADR-0094) reads the ``sql`` transform's query/view/pushdown here.
+    transform_spec: dict[str, Any] | None = None
     # sink
     sink: SinkSpec | None = None
     # join (fan-in, ADR-0041) — merge ≥2 inputs on ``join_on`` keys
@@ -1206,6 +1220,13 @@ class Pipeline:
         if cursor_from is not None or cursor_to is not None:
             raise TaskError("graph pipelines do not support cursor backfill yet")
 
+        # ELT pushdown (ADR-0094): the builder UI emits every pipeline as a
+        # graph, so the trivial source → sql(pushdown) → sink chain must
+        # compose into one in-database statement exactly like its linear twin.
+        fast = self._try_graph_pushdown(task, connectors)
+        if fast is not None:
+            return fast
+
         by_id = {n.id: n for n in task.graph_nodes}
         incoming: dict[str, list[GraphEdge]] = {n.id: [] for n in task.graph_nodes}
         for e in task.graph_edges:
@@ -1229,6 +1250,66 @@ class Pipeline:
             written += result.records_written
 
         return records_read, written, None
+
+    def _try_graph_pushdown(
+        self,
+        task: Task,
+        connectors: dict[str, Connector],
+    ) -> tuple[int, int, CursorValue] | None:
+        """ELT pushdown for the trivial graph chain (ADR-0094).
+
+        Engages only for exactly ``source → sql(pushdown: true) → sink``
+        with unfiltered edges, one ``append`` sink and BOTH ends on the
+        same connection *name* — the graph builder mints a second connector
+        instance for a sink that reuses a source connection (deadlock
+        guard), so identity comparison would never match; same name ⇒ same
+        database, and pushdown is a single statement so the deadlock the
+        second instance guards against can't occur. Everything else falls
+        through to the materialize engine.
+        """
+        if len(task.graph_nodes) != 3 or len(task.graph_edges) != 2:
+            return None
+        by_kind: dict[str, GraphNode] = {}
+        for n in task.graph_nodes:
+            if n.kind in by_kind:
+                return None
+            by_kind[n.kind] = n
+        src = by_kind.get("source")
+        transform = by_kind.get("transform")
+        snk = by_kind.get("sink")
+        if src is None or transform is None or snk is None:
+            return None
+        if any(e.when is not None for e in task.graph_edges):
+            return None
+        if {(e.from_id, e.to_id) for e in task.graph_edges} != {
+            (src.id, transform.id),
+            (transform.id, snk.id),
+        }:
+            return None
+        if transform.transform_spec is None:
+            return None
+        select_sql = _compose_pushdown_select(src.query, transform.transform_spec)
+        if select_sql is None:
+            return None
+        spec = snk.sink
+        if spec is None or spec.mode != "append" or spec.when is not None or spec.pre_sql:
+            return None
+        if not spec.table or not _PUSHDOWN_TABLE_RE.match(spec.table):
+            return None
+        sink_conn_name = spec.connection_name or spec.name
+        if not src.source_name or src.source_name != sink_conn_name:
+            return None
+        source = connectors.get(src.source_name)
+        if source is None or not getattr(source, "supports_sql_pushdown", False):
+            return None
+        if not isinstance(source, SqlExecutor):
+            return None
+
+        _module_logger.info("sql_pushdown", pipeline=self.name, task=task.name, table=spec.table)
+        self._task_data_paths[task.name or "task"] = "pushdown"
+        count = source.execute_statement(f"INSERT INTO {spec.table} {select_sql}")
+        rows = max(0, int(count))
+        return rows, rows, None
 
     def _auto_create_sink_tables(
         self,

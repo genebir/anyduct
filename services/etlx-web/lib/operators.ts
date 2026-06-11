@@ -868,6 +868,14 @@ const TRANSFORMS: OperatorSpec[] = [
         placeholder: "1GB",
         help: "Optional DuckDB buffer cap (e.g. 512MB, 2GB). Past it the dataset spills to temp disk instead of OOM-ing the worker.",
       },
+      {
+        // ELT pushdown (ADR-0094): compose source query + this SQL into one
+        // in-database INSERT INTO … WITH <view> AS (<source>) <query>.
+        key: "pushdown",
+        label: "Run inside the database (pushdown)",
+        kind: "boolean",
+        help: "When source and sink use the SAME connection (and this is the only transform, append mode), the query runs inside that database — no rows ever move. Write the SQL in that database's dialect, not DuckDB's. Dry run explains when the task doesn't qualify; ineligible tasks fall back to local execution.",
+      },
     ],
   },
   {

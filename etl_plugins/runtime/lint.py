@@ -189,6 +189,11 @@ def _rule_column_mapping_recommended(tc: TransformConfig, location: str) -> list
     data = tc.model_dump()
     if data.get("column_mapping") is not None:
         return []
+    # ``sql`` dataset transforms (ADR-0093): the body is SQL, so the
+    # Phase X sqlglot walker infers lineage automatically — the nudge is
+    # noise unless the query is one sqlglot can't analyse.
+    if tc.type == "sql" and _sql_transform_analysable(data):
+        return []
     return [
         LintWarning(
             code="column_mapping_recommended",
@@ -203,6 +208,21 @@ def _rule_column_mapping_recommended(tc: TransformConfig, location: str) -> list
             location=location,
         )
     ]
+
+
+def _sql_transform_analysable(data: dict[str, object]) -> bool:
+    """True when the sqlglot lineage walker can read this ``sql``
+    transform's query — mirrors the runtime inference in
+    :mod:`etl_plugins.runtime.column_lineage`. The lint runs without the
+    upstream column set, so a single fake column stands in for the view
+    schema (enough for ``SELECT *`` expansion and parseability)."""
+    from etl_plugins.runtime.sql_lineage import extract_sql_lineage
+
+    query = data.get("query")
+    view = data.get("view") or "input"
+    if not isinstance(query, str) or not query.strip() or not isinstance(view, str):
+        return False
+    return extract_sql_lineage(query, dialect="duckdb", schema={view: {"_c": "TEXT"}}) is not None
 
 
 def _lint_column_mapping_consistency(cfg: PipelineConfig) -> list[LintWarning]:

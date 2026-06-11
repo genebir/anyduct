@@ -497,3 +497,125 @@ def test_fan_out_emits_edges_per_sink() -> None:
         "wh/b_only:a": ("wh/t1:a",),
         "wh/b_only:b": ("wh/t1:b",),
     }
+
+
+# ---------- sql dataset transform (ADR-0093) — sqlglot-inferred lineage ----
+
+
+def test_sql_transform_aggregate_traces_to_source_columns() -> None:
+    """SUM(b) GROUP BY a — both outputs trace through the in-flight view
+    back to the source table, no manual column_mapping needed."""
+    out = _edge_map(
+        derive_column_lineage(
+            _cfg(
+                transforms=[
+                    {
+                        "type": "sql",
+                        "query": "SELECT a, SUM(b) AS total FROM input GROUP BY a",
+                    }
+                ]
+            )
+        )
+    )
+    assert out == {
+        "wh/t2:a": ("wh/t1:a",),
+        "wh/t2:total": ("wh/t1:b",),
+    }
+
+
+def test_sql_transform_rename_and_combine() -> None:
+    """a AS key + (a || b) AS combo — multi-upstream union survives."""
+    out = _edge_map(
+        derive_column_lineage(
+            _cfg(
+                transforms=[
+                    {
+                        "type": "sql",
+                        "query": "SELECT a AS key, a || b AS combo FROM input",
+                    }
+                ]
+            )
+        )
+    )
+    assert out["wh/t2:key"] == ("wh/t1:a",)
+    assert set(out["wh/t2:combo"]) == {"wh/t1:a", "wh/t1:b"}
+
+
+def test_sql_transform_custom_view_name() -> None:
+    out = _edge_map(
+        derive_column_lineage(
+            _cfg(
+                transforms=[
+                    {
+                        "type": "sql",
+                        "query": "SELECT a FROM rows_in",
+                        "view": "rows_in",
+                    }
+                ]
+            )
+        )
+    )
+    assert out == {"wh/t2:a": ("wh/t1:a",)}
+
+
+def test_sql_transform_select_star_expands_via_view_schema() -> None:
+    """The view's columns ARE the upstream mapping keys — star expands."""
+    out = _edge_map(
+        derive_column_lineage(_cfg(transforms=[{"type": "sql", "query": "SELECT * FROM input"}]))
+    )
+    assert out == {
+        "wh/t2:a": ("wh/t1:a",),
+        "wh/t2:b": ("wh/t1:b",),
+    }
+
+
+def test_sql_transform_constant_column_has_empty_upstream() -> None:
+    out = _edge_map(
+        derive_column_lineage(
+            _cfg(transforms=[{"type": "sql", "query": "SELECT a, 'x' AS tag FROM input"}])
+        )
+    )
+    assert out["wh/t2:a"] == ("wh/t1:a",)
+    assert out["wh/t2:tag"] == ()
+
+
+def test_sql_transform_chains_with_row_transforms() -> None:
+    """rename → sql — the sql stage sees the RENAMED column names."""
+    out = _edge_map(
+        derive_column_lineage(
+            _cfg(
+                transforms=[
+                    {"type": "rename", "mapping": {"a": "id"}},
+                    {
+                        "type": "sql",
+                        "query": "SELECT id, COUNT(*) AS n FROM input GROUP BY id",
+                    },
+                ]
+            )
+        )
+    )
+    assert out["wh/t2:id"] == ("wh/t1:a",)
+
+
+def test_sql_transform_unparseable_query_marks_opaque() -> None:
+    cfg = _cfg(transforms=[{"type": "sql", "query": "NOT REALLY ((( SQL"}])
+    assert _is_opaque(cfg, AssetKey.of("wh", "t2"))
+
+
+def test_sql_transform_explicit_column_mapping_still_wins() -> None:
+    """Phase CC declaration overrides the sqlglot inference (user ground
+    truth beats heuristics — same precedence as every other type)."""
+    out = _edge_map(
+        derive_column_lineage(
+            _cfg(
+                transforms=[
+                    {
+                        "type": "sql",
+                        "query": "SELECT a AS weird FROM input",
+                        "column_mapping": {"weird": ["b"]},
+                    }
+                ]
+            )
+        )
+    )
+    assert out == {"wh/t2:weird": ("wh/t1:b",)}

@@ -195,8 +195,59 @@ def _apply_transform(mapping: _Mapping, tc: TransformConfig) -> _Mapping | None:
         # cast = type only; filter/dedupe/assert = row-level decisions
         # (assert may fail the run, but it never reshapes the columns).
         return mapping
-    # python / custom_python / sql_exec / anything we don't recognize → opaque.
+    if tc.type == "sql":
+        # Dataset-level SQL transform (ADR-0093): the body is SQL, which
+        # the Phase X sqlglot worker can read — no manual column_mapping
+        # needed for the common case. Analysis failure falls through to
+        # opaque (and the executor's schema-passthrough fallback).
+        inferred = _apply_sql_dataset_transform(mapping, data)
+        if inferred is not None:
+            return inferred
+    # python / custom_python / sql_exec / unanalysable sql / anything we
+    # don't recognize → opaque.
     return None
+
+
+def _apply_sql_dataset_transform(mapping: _Mapping, data: dict[str, Any]) -> _Mapping | None:
+    """Column lineage through a ``sql`` dataset transform (ADR-0093).
+
+    The in-flight rows are registered as one relation (``view``, default
+    ``input``) whose columns are exactly the upstream mapping's keys — so
+    we hand sqlglot that schema, run the same lineage walker the source
+    query uses (Phase X), and splice each output column's ``(view, col)``
+    leaves back through the upstream mapping. Leaves that don't resolve
+    to the view (inline CTE literals, VALUES) contribute no upstream —
+    same semantics as ``add_constant``. Returns ``None`` when sqlglot
+    can't analyse the query (caller treats the transform as opaque).
+    """
+    query = data.get("query")
+    view = data.get("view") or "input"
+    if not isinstance(query, str) or not query.strip() or not isinstance(view, str):
+        return None
+    if not mapping:
+        return None
+    # The sql transform executes in DuckDB (the local path) — parse with
+    # its dialect so QUALIFY etc. resolve.
+    schema = {view: dict.fromkeys(mapping, "TEXT")}
+    resolved = extract_sql_lineage(query, dialect="duckdb", schema=schema)
+    if resolved is None:
+        return None
+    view_lower = view.lower()
+    out: _Mapping = {}
+    for output_col, leaves in resolved.items():
+        upstreams: list[ColumnRef] = []
+        seen: set[tuple[AssetKey, str]] = set()
+        for tbl, col in leaves:
+            if not tbl or (tbl.split(".")[-1].lower() != view_lower):
+                continue
+            for ref in mapping.get(col, ()):
+                key = (ref.asset, ref.column)
+                if key in seen:
+                    continue
+                seen.add(key)
+                upstreams.append(ref)
+        out[output_col] = tuple(upstreams)
+    return out
 
 
 def _apply_explicit_column_mapping(

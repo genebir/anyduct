@@ -579,3 +579,21 @@ def test_pushdown_graph_non_trivial_shape_warns() -> None:
     warnings = _pd(cfg)
     assert len(warnings) == 1
     assert "chain" in warnings[0].message
+
+
+# ---------- sql transform: nudge only when sqlglot can't analyse ----------
+
+
+def test_sql_transform_analysable_emits_no_mapping_nudge() -> None:
+    """ADR-0093 f/u: the sqlglot walker infers lineage for sql transforms
+    automatically — recommending a manual column_mapping is noise."""
+    cfg = _cfg(
+        transforms=[{"type": "sql", "query": "SELECT a, SUM(b) AS total FROM input GROUP BY a"}]
+    )
+    assert _mapping_warnings(cfg) == []
+
+
+def test_sql_transform_unparseable_still_nudges() -> None:
+    cfg = _cfg(transforms=[{"type": "sql", "query": "NOT REALLY ((( SQL"}])
+    warnings = _mapping_warnings(cfg)
+    assert len(warnings) == 1

@@ -117,7 +117,14 @@ uv run mypy etl_plugins
 
 ## 5. 현재 단계
 
-> **최신 마일스톤 (2026-06-10~11): 데이터 플레인 개편 — SQL-first(DuckDB) + Arrow 벡터 + 푸시다운 ELT (ADR-0093/0094).** 행 단위 Record 플레인의 성능(3~6× 느림)·자유도·러닝커브 한계를 사용자 평가로 합의, 운영 플레인은 유지하고 데이터 플레인만 단계 개편:
+> **최신 마일스톤 (2026-06-12 새벽 자율런): 데이터 플레인 마감 폴리시 + 컬럼 리니지 일반화 — 페르소나 dogfood 주도 (12 슬라이스).** am 6:00까지 자율 윈도우, live dev 스택(server+worker+web) 위에서 운영자/분석가/데이터엔지니어/데이터모델러 페르소나로 매 기능 실주행 검증:
+> - **[운영자] 분할 backfill 운영 완결**: run 상세 + runs 목록 partition i/N 칩(`RunSummary.partition` — Run ORM @property lift, 목록 N+1 없이) · **분할 경계 제안**(`GET /pipelines/{pid}/cursor-stats` MIN/MAX/COUNT read-only + 다이얼로그 "제안" 버튼 — 채워주기만, 결정은 운영자. MIN-미만 nudge/MAX-원본 보존/좁은범위 degrade footgun 가드) · **마이그레이션 상세 Backfill 버튼**(append 전략=커서 파이프라인인데 진입점이 없던 dogfood 갭). live: 4윈도우 분할→무중복 적재→칩 노출 전 과정 실주행.
+> - **[데이터엔지니어] P2f mysql Arrow fast-path**: read_arrow(SSCursor→컬럼 직조립, DECIMAL은 선언 precision 핀 — 첫-청크 추론이 자릿수 증가에 깨지는 것을 통합테스트가 발견) + write_arrow(executemany 슬라이스). mysql→pg cross-vendor 인터체인지 포함 통합 10. **보너스 버그픽스**: pyarrow 미설치 시 Arrow fast-path가 폴백 대신 ImportError로 죽던 갭(`_pyarrow_available` 가드).
+> - **[분석가] 컬럼 리니지 대폭 정확화**: ① **sql 변환 자동 추론**(본문이 SQL → Phase X sqlglot 워커를 in-flight view 스키마로 재사용; 집계/rename/`SELECT *`/체인 정확, 실패는 opaque 폴백; `column_mapping_recommended`는 분석 불가 쿼리에만으로 노이즈 제거; Phase CC 명시 선언 우선 유지) ② **graph join/aggregate 리니지**(v1 선형-한정 → 토폴로지 워크: join=컬럼 합집합+공유키 양쪽 union, aggregate=group키+집계출력 재성형 — **v1이 aggregate 노드를 조용히 건너뛰던 부정확 수정**). live: 멀티소스(2 커넥션) join→sql 집계 카탈로그가 `total ← orders2.amount` 정확, **ELT pushdown(무이동) 실행에서도 리니지 정확**. 서버 e2e 잠금(`test_sql_transform_lineage_scenario`).
+> - **[데이터모델러] ERD 무결성 점검**: CRUD/rename/delete REST + 목록/에디터 라우트 전부 정상(발견 0 — 성숙 영역).
+> - examples/elt_pushdown.yaml(+자격 lint 가드). 검증: 코어 unit 1270 / 서버 it 519+ / 코어 통합 226 전부 green(매 슬라이스), web tsc clean, live 스택 실주행. **다음 후보**: OpenLineage export(E) / 분포-기반 자동 분할(소스 통계) / DW Arrow fast-path(live 게이트).
+>
+> **이전 마일스톤 (2026-06-10~11): 데이터 플레인 개편 — SQL-first(DuckDB) + Arrow 벡터 + 푸시다운 ELT (ADR-0093/0094).** 행 단위 Record 플레인의 성능(3~6× 느림)·자유도·러닝커브 한계를 사용자 평가로 합의, 운영 플레인은 유지하고 데이터 플레인만 단계 개편:
 > - **Phase 1 완료 — `sql` 데이터셋 변환**: `{type: sql, query}` — in-flight 레코드를 DuckDB 릴레이션 `input`으로, 임의 SQL(JOIN/GROUP BY/윈도우/QUALIFY) 1급(P1a). 빌더 transform:sql operator(SQL IDE, batchOnly, P1b). 멀티-소스 JOIN e2e: pg×mysql → graph fan-in join → sql GROUP BY → pg 적재 testcontainers 검증(P1c).
 > - **Phase 2 — Arrow/푸시다운**: `core/arrow.py`(Partition+Protocol+어댑터) + sql 변환 파일-백 DuckDB spill(메모리 초과 데이터셋 OK, P2a). postgres `read_arrow`/`write_arrow` COPY fast-path — 변환 0 단일-sink append/overwrite면 Record 플레인 통째 우회, PG→PG 500k행 **3.4×**(P2b). same-connection이면 `INSERT INTO…SELECT` 한 문장 무이동(P2c). **run별 데이터 경로 가시화**: `RunResult.data_paths`(pushdown/arrow/records/graph) → `result_json` → run 상세 칩(P2d).
 > - **P2e graph trivial-체인 fast-path (2026-06-12)**: 빌더(graph shape) 파이프라인이 P2b/P2c를 못 타던 침묵 갭 해소 — `source→sink` 2노드 무필터 체인을 shadow Task로 linear 헬퍼에 라우팅(same-connection=자동 푸시다운 / cross-connection Arrow=bulk COPY). PG 통합 graph→COPY 실검증.

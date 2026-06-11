@@ -826,6 +826,8 @@ export const en = {
   "backfill.suggestUnavailable": "Can't suggest — {reason}",
   "backfill.suggestUnsupported": "Can't suggest for this cursor type — enter boundaries manually.",
   "backfill.suggestFilled": "Suggested {count} windows over {rows} rows — adjust as needed.",
+  "migrations.backfillHint":
+    "Re-run a cursor window (append strategy reads new rows by cursor). Split points queue parallel runs.",
 
   // pipeline builder (edit page + builder components)
   "builder.title": "Pipeline builder",
@@ -2281,6 +2283,8 @@ export const ko: Messages = {
   "backfill.suggestUnavailable": "제안 불가 — {reason}",
   "backfill.suggestUnsupported": "이 커서 타입은 제안할 수 없습니다 — 경계를 직접 입력하세요.",
   "backfill.suggestFilled": "{rows}행에 대해 {count}개 윈도우 제안됨 — 필요시 조정하세요.",
+  "migrations.backfillHint":
+    "커서 윈도우 재실행 (append 전략은 커서로 새 행을 읽음). 분할 지점을 주면 병렬 run으로 큐잉됩니다.",
 
   "builder.title": "파이프라인 빌더",
   "builder.draft": "초안",

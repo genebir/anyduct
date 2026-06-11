@@ -21,6 +21,7 @@ import { useParams, useRouter } from "next/navigation";
 import {
   CalendarClockIcon,
   HandIcon,
+  HistoryIcon,
   PlayIcon,
   ShieldCheckIcon,
   Trash2Icon,
@@ -48,6 +49,7 @@ import { relativeTime, absoluteTime } from "@/lib/format-time";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import { useLocale } from "@/components/providers/locale-provider";
 import { MigrationForm } from "@/components/migrations/migration-form";
+import { BackfillDialog } from "@/components/pipelines/backfill-dialog";
 import {
   buildMigrationConfig,
   parseMigrationConfig,
@@ -85,6 +87,10 @@ export default function MigrationDetailPage() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmClearSchedule, setConfirmClearSchedule] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  // ADR-0095 — append-strategy migrations are cursor pipelines, the
+  // canonical backfill target ("reload last week's window", split big
+  // historical loads across worker replicas).
+  const [backfillOpen, setBackfillOpen] = useState(false);
   // Recent runs panel (Phase AAN4) — close the loop so the user
   // sees the migration in motion without leaving the page.
   const [runs, setRuns] = useState<RunSummary[] | null>(null);
@@ -369,6 +375,18 @@ export default function MigrationDetailPage() {
                 <ShieldCheckIcon size={14} />
                 {t("migrations.dryRun")}
               </Button>
+              {form?.strategy === "append" ? (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={!pipeline.current_version || hasMissingConnection}
+                  onClick={() => setBackfillOpen(true)}
+                  title={t("migrations.backfillHint")}
+                >
+                  <HistoryIcon size={14} />
+                  {t("backfill.action")}
+                </Button>
+              ) : null}
               <Button
                 size="sm"
                 loading={triggering}
@@ -513,6 +531,14 @@ export default function MigrationDetailPage() {
         }}
         onCancel={() => setConfirmClearSchedule(false)}
       />
+      {ws ? (
+        <BackfillDialog
+          open={backfillOpen}
+          workspaceId={ws.id}
+          pipeline={pipeline}
+          onClose={() => setBackfillOpen(false)}
+        />
+      ) : null}
     </>
   );
 }

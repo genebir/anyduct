@@ -188,18 +188,48 @@ docker compose -f services/docker-compose.prod.yml run --rm etlx-migrate \
 ## Worker scaling
 
 The batch worker (`etlx-worker`), scheduler, reaper, and stream-worker
-are each separate processes. Scale the worker independently when run
-throughput needs it:
+are each separate processes sharing one image. **All four are
+multi-replica safe** — every contended row is claimed with
+`FOR UPDATE SKIP LOCKED`, so adding replicas never double-runs anything:
+
+| Process | Contention point | Scaling unit |
+|---|---|---|
+| `etlx-worker` | runs queue (ADR-0021) | pending runs — add replicas for run throughput |
+| scheduler | schedule rows (ADR-0041 K2) | HA only — one tick fires each schedule once |
+| stream-worker | schedule rows + RUNNING re-check (K2b) | active *stream schedules* — replicas split schedules, not one stream's partitions |
+| reaper | stale runs (SKIP LOCKED) | HA only |
 
 ```bash
 docker compose -f services/docker-compose.prod.yml up -d --scale etlx-worker=4
 ```
 
-The worker uses `FOR UPDATE SKIP LOCKED` on the runs queue, so multiple
-replicas are safe (ADR-0021). The stream-worker and scheduler are
-**single-replica** — running multiple instances will double-fire
-schedules or duplicate stream consumers (Step 11.x will add leader
-election).
+The no-double-claim property is exercised by a real-concurrency e2e
+(2026-06-10, P3a): three replicas claiming one queue distribute twelve
+runs with no overlap, and two live `RunWorker` processes co-drain a
+shared queue to completion.
+
+### Scaling one big run — partitioned backfill
+
+Adding workers spreads *runs*; a single huge historical load is still
+one run. Split it into parallel windows with **partitioned backfill**
+(ADR-0095) — each consecutive boundary pair becomes an independent
+sub-run over `(left, right]` on the source's `cursor_column`, and the
+worker fleet claims the windows concurrently:
+
+```bash
+curl -X POST "$API/workspaces/$WS/pipelines/$PID/partitioned-backfill" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"boundaries": ["2025-01-01", "2025-04-01", "2025-07-01", "2025-10-01", "2026-01-01"]}'
+# → 4 sub-runs, half-open windows: no overlap, union = (first, last]
+```
+
+The same control lives in the UI's Backfill dialog ("Split points").
+Windows execute fully independently — suitable for plain
+extract-load / per-row transforms; don't split pipelines whose
+aggregation or dedupe crosses window boundaries. Pick boundaries from
+what you know of the data's distribution (the server intentionally does
+not auto-split a min/max scan into equal arithmetic windows — that
+produces skew on gappy ids or bursty time ranges).
 
 ## Health, readiness, observability
 
@@ -232,8 +262,6 @@ not the secret bytes.
 * **Reverse proxy / TLS.** Put a real proxy (Caddy, Traefik, nginx, an
   ingress controller) in front. The default container listens on plain
   HTTP. `CORS_ORIGINS` should match the public URL of the web UI.
-* **Leader election** for scheduler / stream-worker (single-replica only
-  today — see Worker scaling).
 * **Multi-region replication** of the metadata DB. Set up read replicas
   + failover at the Postgres layer if you need it.
 * **Helm chart.** Coming in Step 11. The compose file mirrors the

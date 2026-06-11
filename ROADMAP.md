@@ -575,7 +575,7 @@
 - **Phase 3 — 클러스터링**:
   - [x] **P3a 멀티-replica 경합 실증 + asset upsert 레이스 수정** ✅ (2026-06-10) — worker_lifecycle이 deferred했던 "real concurrency test"를 구현: 자체 커밋 세션(replica당 별도 커넥션)으로 ① 3 replica 동시 claim 12 run 무중복·완전 분배 + worker_id 스탬프, ② 실제 RunWorker 2대가 같은 PG 큐에서 6 run 전부 SUCCEEDED(양쪽 모두 claim 승리). **e2e가 실버그 발견**: 두 replica가 같은 파이프라인 run을 동시에 끝내면 카탈로그 `_upsert_asset/_upsert_edge`(select-then-insert)가 `uq_asset_ws_key/uq_asset_edge` 충돌로 run 실패 → PG `INSERT … ON CONFLICT DO NOTHING`+재select로 원자화. 서버 it +2, 카탈로그/워커 회귀 53 green.
   - [x] **P3b 파티션 분할 실행** ✅ (2026-06-12, ADR-0095) — `POST /pipelines/{pid}/partitioned-backfill {boundaries}` → 연속 쌍마다 half-open 커서 윈도우 backfill sub-run N개 enqueue(무중복+완전커버가 시맨틱으로 보장), `result_json.partition {group,index,of}` + audit `run.backfill_partitioned`. **워커/코어 변경 0** — 멀티-replica SKIP LOCKED 큐(P3a)가 병렬 분배. boundaries 검증(2~65, 동일타입, 강증가). 서버 e2e 3. **web(같은 날)**: Backfill 다이얼로그 분할 지점 입력(쉼표 구분, 숫자 자동 강제변환, From/To 필수 검증). 분포 기반 자동 분할은 후속.
-  - [ ] 배포(compose/k8s) 가이드 / stream-worker 멀티 replica 운영 문서. ← 다음
+  - [x] **P3c 배포 가이드 현행화 — 멀티-replica 운영 문서** ✅ (2026-06-12) — `docs/deployment.md` Worker scaling 재작성: 4 프로세스(worker/scheduler/stream-worker/reaper) 전부 SKIP LOCKED 멀티-replica 안전 매트릭스(경합 지점·스케일 단위 명시) + P3a 실증 인용 + **"Scaling one big run" 섹션**(partitioned backfill curl + UI 분할 지점 + 집계 경계 경고 + 자동 등분 기각 사유). "scheduler/stream-worker는 single-replica, leader election 예정"이라던 **stale 서술 제거**(K2/K2b 이후 사실과 불일치). mkdocs strict green. → **ADR-0093 데이터플레인+클러스터링 트랙 전 항목 완료.**
 
 ### 10.5 Schedule + Run 모니터링 (← 작업 중, 2026-05-18 Schedule CRUD + Run 상세까지 완료)
 - [x] Run 목록 (Data Table, StatusBadge, 5s polling) — `/w/[slug]/runs`. Row 클릭 시 상세 페이지로 이동.

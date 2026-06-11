@@ -25,9 +25,10 @@ The same logic powers both pipeline shapes:
 
 * single-task / Task-DAG: every task derives its own mapping through
   ``effective_tasks()``.
-* graph: each sink walks back to a source through a linear transform chain
-  (graph ``join`` nodes still mark all sinks opaque — multi-source graph
-  lineage is a separate slice from the SQL multi-source case handled here).
+* graph: a topological walk computes one mapping per node — ``join``
+  nodes union their inputs' columns, ``aggregate`` nodes reshape to
+  group keys + aggregation outputs, ``sql`` transform nodes run the
+  sqlglot inference (2026-06-12; v1 marked join/multi-source opaque).
 """
 
 from __future__ import annotations
@@ -315,80 +316,125 @@ def _process_graph(
     mark_opaque: Any,  # Callable[[AssetKey | None], None]
     schemas: dict[str, dict[str, dict[str, str]]] | None = None,
 ) -> None:
-    """v1: linear graph (one source, transform/sink nodes only) → walk each
-    sink back to the source via incoming edges. ``join`` nodes or multi-source
-    graphs mark all sink keys opaque (separate slice for graph-level joins —
-    SQL-level joins are now handled inside :func:`_initial_mapping`)."""
-    by_id = {n.id: n for n in graph.nodes}
+    """Topological walk computing one column mapping per node.
+
+    Every node type is declarative enough to propagate:
+
+    * ``source`` — sqlglot over its query (:func:`_initial_mapping`);
+    * ``transform`` — :func:`_apply_transform` (incl. the sql dataset
+      transform's sqlglot inference);
+    * ``join`` — the runtime hash-join merges record dicts, so the output
+      columns are the UNION of both inputs' columns; a name present on
+      both sides gets the union of both upstreams (honest "could come
+      from either" attribution);
+    * ``aggregate`` — ``group_by`` keys keep their upstream, each
+      aggregation's output column traces to its input ``column``
+      (``count`` without a column ⇒ no upstream);
+    * ``sink`` — passthrough of its single input (edges emitted).
+
+    ``None`` anywhere (unparseable source SQL, an opaque transform,
+    ``sql_exec``) poisons everything downstream of it — those sinks are
+    marked opaque. Edge ``when`` predicates filter rows, not columns.
+    """
     incoming: dict[str, list[str]] = {n.id: [] for n in graph.nodes}
     for edge in graph.edges:
         incoming[edge.to_node].append(edge.from_node)
 
-    sources = [n for n in graph.nodes if n.type == "source"]
-    sinks = [n for n in graph.nodes if n.type == "sink"]
-    has_join_or_multi = len(sources) != 1 or any(n.type == "join" for n in graph.nodes)
+    mappings: dict[str, _Mapping | None] = {}
+    for node in _topo_order(graph.nodes, incoming):
+        parents = incoming[node.id]
+        parent_mappings = [mappings.get(p) for p in parents]
+        mappings[node.id] = _node_mapping(node, parent_mappings, schemas)
 
-    if has_join_or_multi:
-        for snk in sinks:
+    for snk in (n for n in graph.nodes if n.type == "sink"):
+        mapping = mappings.get(snk.id)
+        if mapping is None:
             mark_opaque(_node_asset_key(snk))
-        return
-
-    src = sources[0]
-    base_mapping = _initial_mapping(src.connection, src.query, schemas)
-
-    for snk in sinks:
-        snk_key = _node_asset_key(snk)
-        if base_mapping is None:
-            mark_opaque(snk_key)
-            continue
-        chain = _path_transforms(snk.id, src.id, by_id, incoming)
-        if chain is None:
-            mark_opaque(snk_key)
-            continue
-        path_mapping: _Mapping = dict(base_mapping)
-        path_opaque = False
-        for transform_cfg in chain:
-            next_mapping = _apply_transform(path_mapping, transform_cfg)
-            if next_mapping is None:
-                path_opaque = True
-                break
-            path_mapping = next_mapping
-        if path_opaque:
-            mark_opaque(snk_key)
         else:
-            _emit_edges(path_mapping, snk_key, edges)
+            _emit_edges(mapping, _node_asset_key(snk), edges)
+
+
+def _node_mapping(
+    node: GraphNodeConfig,
+    parents: list[_Mapping | None],
+    schemas: dict[str, dict[str, dict[str, str]]] | None,
+) -> _Mapping | None:
+    if node.type == "source":
+        return _initial_mapping(node.connection, node.query, schemas)
+    if node.type == "transform" and node.transform is not None and len(parents) == 1:
+        return None if parents[0] is None else _apply_transform(parents[0], node.transform)
+    if node.type == "join" and len(parents) >= 2:
+        return _join_mappings(parents)
+    if node.type == "aggregate" and len(parents) == 1:
+        return None if parents[0] is None else _aggregate_mapping(parents[0], node)
+    if node.type == "sink" and len(parents) == 1:
+        return parents[0]
+    # sql_exec (zero-record side effect) / malformed wiring → opaque.
+    return None
+
+
+def _join_mappings(parents: list[_Mapping | None]) -> _Mapping | None:
+    """Fan-in merge: union of columns; same-named columns union upstreams."""
+    if not parents or any(p is None for p in parents):
+        return None
+    out: _Mapping = {}
+    for parent in parents:
+        assert parent is not None  # narrowed above; mypy can't see it
+        for col, refs in parent.items():
+            if col not in out:
+                out[col] = refs
+                continue
+            seen = {(r.asset, r.column) for r in out[col]}
+            merged = list(out[col])
+            for ref in refs:
+                if (ref.asset, ref.column) not in seen:
+                    seen.add((ref.asset, ref.column))
+                    merged.append(ref)
+            out[col] = tuple(merged)
+    return out
+
+
+def _aggregate_mapping(mapping: _Mapping, node: GraphNodeConfig) -> _Mapping:
+    """Aggregate reshapes columns: group keys + one column per aggregation.
+
+    (Previously the v1 walker silently skipped aggregate nodes, leaving
+    the pre-aggregation column set in the lineage — wrong columns on the
+    sink. This makes the node's actual output shape authoritative.)
+    """
+    out: _Mapping = {}
+    for key in node.group_by or []:
+        out[key] = mapping.get(key, ())
+    for agg in node.aggregations or []:
+        out[agg.name] = mapping.get(agg.column, ()) if agg.column else ()
+    return out
+
+
+def _topo_order(
+    nodes: list[GraphNodeConfig],
+    incoming: dict[str, list[str]],
+) -> list[GraphNodeConfig]:
+    """Kahn's algorithm — GraphConfig validation already guarantees the
+    graph is acyclic, so every node is emitted exactly once."""
+    by_id = {n.id: n for n in nodes}
+    degree = {n.id: len(incoming[n.id]) for n in nodes}
+    downstream: dict[str, list[str]] = {n.id: [] for n in nodes}
+    for node_id, ups in incoming.items():
+        for up in ups:
+            downstream[up].append(node_id)
+    queue = [n.id for n in nodes if degree[n.id] == 0]
+    order: list[GraphNodeConfig] = []
+    while queue:
+        cur = queue.pop(0)
+        order.append(by_id[cur])
+        for nxt in downstream[cur]:
+            degree[nxt] -= 1
+            if degree[nxt] == 0:
+                queue.append(nxt)
+    return order
 
 
 def _node_asset_key(node: GraphNodeConfig) -> AssetKey | None:
     return derive_asset_key(node.connection, node.model_dump())
-
-
-def _path_transforms(
-    sink_id: str,
-    source_id: str,
-    by_id: dict[str, GraphNodeConfig],
-    incoming: dict[str, list[str]],
-) -> list[TransformConfig] | None:
-    """Walk parent chain ``sink → … → source`` collecting transform configs in
-    source→sink order. Returns ``None`` if any node has ≠1 incoming edge (we
-    only handle the linear case in v1; join nodes were already filtered)."""
-    chain: list[TransformConfig] = []
-    cur = sink_id
-    seen: set[str] = set()
-    while cur != source_id:
-        if cur in seen:
-            return None  # cycle (should be caught by GraphConfig validation)
-        seen.add(cur)
-        ups = incoming.get(cur, [])
-        if len(ups) != 1:
-            return None  # only linear chains in v1
-        parent_id = ups[0]
-        cur_node = by_id[cur]
-        if cur_node.type == "transform" and cur_node.transform is not None:
-            chain.append(cur_node.transform)
-        cur = parent_id
-    chain.reverse()
-    return chain
 
 
 __all__ = ["derive_column_lineage"]

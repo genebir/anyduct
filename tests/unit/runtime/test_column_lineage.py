@@ -416,7 +416,10 @@ def test_graph_linear_chain_propagates_through_transforms() -> None:
     assert out == {"wh/t2:id": ("wh/t1:a",), "wh/t2:b": ("wh/t1:b",)}
 
 
-def test_graph_join_marks_all_sinks_opaque() -> None:
+def test_graph_join_unions_both_sides() -> None:
+    """Fan-in join lineage (2026-06-12): the hash-join merges record
+    dicts, so output columns = union of both inputs; the shared ``id``
+    key traces to BOTH source tables. (v1 marked all of this opaque.)"""
     cfg = PipelineConfig.model_validate(
         {
             "name": "p",
@@ -446,8 +449,102 @@ def test_graph_join_marks_all_sinks_opaque() -> None:
         }
     )
     lineage = derive_column_lineage(cfg)
-    assert lineage.edges == []
-    assert AssetKey.of("wh", "joined") in lineage.opaque_assets
+    assert AssetKey.of("wh", "joined") not in lineage.opaque_assets
+    out = _edge_map(lineage)
+    assert set(out["wh/joined:id"]) == {"wh/t1:id", "wh/t2:id"}
+    assert out["wh/joined:a"] == ("wh/t1:a",)
+    assert out["wh/joined:b"] == ("wh/t2:b",)
+
+
+def test_graph_multi_source_join_then_sql_transform() -> None:
+    """The P1c shape: two sources → join → sql aggregate → sink. The
+    catalog traces the aggregate output through the join to the right
+    source table."""
+    cfg = PipelineConfig.model_validate(
+        {
+            "name": "p",
+            "graph": {
+                "nodes": [
+                    {
+                        "id": "orders",
+                        "type": "source",
+                        "connection": "pg",
+                        "query": "SELECT customer_id, amount FROM orders",
+                    },
+                    {
+                        "id": "customers",
+                        "type": "source",
+                        "connection": "my",
+                        "query": "SELECT customer_id, region FROM customers",
+                    },
+                    {"id": "j", "type": "join", "on": ["customer_id"]},
+                    {
+                        "id": "agg",
+                        "type": "transform",
+                        "transform": {
+                            "type": "sql",
+                            "query": (
+                                "SELECT region, SUM(amount) AS total " "FROM input GROUP BY region"
+                            ),
+                        },
+                    },
+                    {"id": "k", "type": "sink", "connection": "pg", "table": "region_totals"},
+                ],
+                "edges": [
+                    {"from_node": "orders", "to_node": "j"},
+                    {"from_node": "customers", "to_node": "j"},
+                    {"from_node": "j", "to_node": "agg"},
+                    {"from_node": "agg", "to_node": "k"},
+                ],
+            },
+        }
+    )
+    out = _edge_map(derive_column_lineage(cfg))
+    assert out == {
+        "pg/region_totals:region": ("my/customers:region",),
+        "pg/region_totals:total": ("pg/orders:amount",),
+    }
+
+
+def test_graph_aggregate_node_reshapes_columns() -> None:
+    """Aggregate node lineage (2026-06-12): output = group keys + agg
+    names. (The v1 walker silently skipped aggregate nodes, leaving the
+    pre-aggregation column set on the sink — wrong columns.)"""
+    cfg = PipelineConfig.model_validate(
+        {
+            "name": "p",
+            "graph": {
+                "nodes": [
+                    {
+                        "id": "s",
+                        "type": "source",
+                        "connection": "wh",
+                        "query": "SELECT region, amount FROM sales",
+                    },
+                    {
+                        "id": "g",
+                        "type": "aggregate",
+                        "group_by": ["region"],
+                        "aggregations": [
+                            {"op": "sum", "column": "amount", "name": "total"},
+                            {"op": "count", "name": "n"},
+                        ],
+                    },
+                    {"id": "k", "type": "sink", "connection": "wh", "table": "rollup"},
+                ],
+                "edges": [
+                    {"from_node": "s", "to_node": "g"},
+                    {"from_node": "g", "to_node": "k"},
+                ],
+            },
+        }
+    )
+    out = _edge_map(derive_column_lineage(cfg))
+    assert out == {
+        "wh/rollup:region": ("wh/sales:region",),
+        "wh/rollup:total": ("wh/sales:amount",),
+        "wh/rollup:n": (),
+    }
 
 
 # ---------- task-DAG ----------

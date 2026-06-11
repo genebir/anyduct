@@ -619,3 +619,38 @@ def test_sql_transform_explicit_column_mapping_still_wins() -> None:
         )
     )
     assert out == {"wh/t2:weird": ("wh/t1:b",)}
+
+
+def test_graph_sql_transform_node_infers_lineage() -> None:
+    """The builder saves pipelines as graphs — the sql transform node's
+    sqlglot inference must work there too (same _apply_transform)."""
+    cfg = PipelineConfig.model_validate(
+        {
+            "name": "p",
+            "graph": {
+                "nodes": [
+                    {
+                        "id": "s",
+                        "type": "source",
+                        "connection": "wh",
+                        "query": "SELECT a, b FROM t1",
+                    },
+                    {
+                        "id": "x",
+                        "type": "transform",
+                        "transform": {
+                            "type": "sql",
+                            "query": "SELECT a, SUM(b) AS total FROM input GROUP BY a",
+                        },
+                    },
+                    {"id": "k", "type": "sink", "connection": "wh", "table": "t2"},
+                ],
+                "edges": [
+                    {"from_node": "s", "to_node": "x"},
+                    {"from_node": "x", "to_node": "k"},
+                ],
+            },
+        }
+    )
+    out = _edge_map(derive_column_lineage(cfg))
+    assert out == {"wh/t2:a": ("wh/t1:a",), "wh/t2:total": ("wh/t1:b",)}

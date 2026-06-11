@@ -614,8 +614,8 @@
 
 - [x] **멀티 테넌시 격리 부담 테스트** ✅ (2026-06-12) — 100 workspace × 동일 connection명/테이블/asset_key가 한 큐를 공유, 1 워커 드레인 후 ws별 정확히 자기 run/데이터/카탈로그(HH의 fleet 스케일업). 실측 100 run 드레인 4.2s(24 runs/s) + 시간 로그/완만한 천장(O(N²) claim 회귀 가드). `test_multi_tenancy_load_scenario.py`.
 - [ ] Helm chart (`services/charts/etlx/`) — postgres, vault, server, web, prometheus 일괄
-- [ ] `services/docker-compose.services.yml` — 로컬 풀스택 실행
-- [ ] 백업 가이드: metadata DB dump + 시크릿 백엔드 export
+- [x] 로컬 풀스택 실행 ✅ — `services/docker-compose.prod.yml`이 실물(db→migrate→server/worker/scheduler/reaper/stream-worker→web, docs/deployment.md "One-command local production stack"). stale했던 Step 7.1 placeholder `docker-compose.services.yml`은 포인터로 정리(2026-06-12).
+- [x] 백업 가이드 ✅ — `docs/deployment.md` §Backups(metadata pg_dump cadence + 시크릿은 SECRET_BACKEND 벤더별 별도 백업·DB엔 ref만 명시). (2026-06-12 확인)
 - [ ] 운영 메트릭 Grafana 대시보드 템플릿
 - [ ] 첫 서비스 릴리스 (v1.0 — 코어는 0.x여도 서비스는 별도 SemVer)
 

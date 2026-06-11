@@ -1,43 +1,10 @@
 ---
-# Step 7.1 placeholder.
-# Full stack (etlx-server + etlx-web + metadata postgres + Redis [if needed]
-# + secret backend) lands in Step 11.0. For now this file documents the
-# intended layout; `docker compose up` is wired up later.
-
-services:
-  # services/etlx-server (FastAPI) — Step 7~9, 11
-  etlx-server:
-    profiles: [server]
-    build:
-      context: ../
-      dockerfile: services/etlx-server/Dockerfile      # not yet present
-    depends_on: [metadata-db]
-    ports: ["8000:8000"]
-    environment:
-      DATABASE_URL: postgresql+asyncpg://etlx:etlx@metadata-db:5432/etlx
-    command: uvicorn etlx_server.main:app --host 0.0.0.0 --port 8000
-
-  # services/etlx-web (Next.js) — Step 10
-  etlx-web:
-    profiles: [web]
-    build:
-      context: ./etlx-web
-    depends_on: [etlx-server]
-    ports: ["3000:3000"]
-    environment:
-      NEXT_PUBLIC_API_URL: http://localhost:8000
-
-  # metadata DB (ADR-0020). 코어 통합 테스트의 postgres와 별 인스턴스.
-  metadata-db:
-    profiles: [server]
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_USER: etlx
-      POSTGRES_PASSWORD: etlx
-      POSTGRES_DB: etlx
-    ports: ["5433:5432"]   # 5432는 docker-compose.dev.yml 의 ETL 대상 DB와 충돌 회피
-    volumes:
-      - metadata_pgdata:/var/lib/postgresql/data
-
-volumes:
-  metadata_pgdata: {}
+# SUPERSEDED (2026-06-12). This file was the Step 7.1 placeholder sketch;
+# the real, exercised full-stack compose is ``docker-compose.prod.yml``
+# in this directory (db → migrate → server/worker/scheduler/reaper/
+# stream-worker → web, healthchecks, JWT env wiring). See
+# ``docs/deployment.md`` ("One-command local production stack") for the
+# run instructions, and ``../start.sh`` for the non-container dev loop.
+#
+# Kept as a pointer so old links/docs don't 404; do not add services here.
+services: {}

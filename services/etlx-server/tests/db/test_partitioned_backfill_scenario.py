@@ -168,3 +168,42 @@ async def test_partitioned_backfill_requires_cursor_column(
         )
         assert r.status_code == 400
         assert "cursor_column" in r.json()["detail"]
+
+
+async def test_cursor_stats_reports_range(session: AsyncSession, tmp_path: Path) -> None:
+    """GET /cursor-stats answers MIN/MAX/COUNT over the cursor column —
+    the data the Backfill dialog's "suggest split points" runs on."""
+    db_path = _seed_ten_day_warehouse(tmp_path)
+
+    app = _build_app(session)
+    async with _client(app) as client:
+        token = await _seed_user_and_login(session, client, email="cs@example.com")
+        h = {"Authorization": f"Bearer {token}"}
+        ws_id, pipe_id = await _setup_pipeline(client, h, str(db_path))
+
+        r = await client.get(f"/workspaces/{ws_id}/pipelines/{pipe_id}/cursor-stats", headers=h)
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["available"] is True
+        assert body["cursor_column"] == "created_at"
+        assert body["min_value"] == "2026-05-01"
+        assert body["max_value"] == "2026-05-10"
+        assert body["row_count"] == 10
+
+
+async def test_cursor_stats_without_cursor_reports_reason(
+    session: AsyncSession, tmp_path: Path
+) -> None:
+    db_path = _seed_ten_day_warehouse(tmp_path)
+
+    app = _build_app(session)
+    async with _client(app) as client:
+        token = await _seed_user_and_login(session, client, email="cs2@example.com")
+        h = {"Authorization": f"Bearer {token}"}
+        ws_id, pipe_id = await _setup_pipeline(client, h, str(db_path), cursor=False)
+
+        r = await client.get(f"/workspaces/{ws_id}/pipelines/{pipe_id}/cursor-stats", headers=h)
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["available"] is False
+        assert body["reason"] == "no_cursor"

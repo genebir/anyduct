@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ApiError, pipelinesApi, type PipelineSummary } from "@/lib/api";
+import { suggestBoundaries } from "@/lib/backfill-suggest";
 import { cn } from "@/lib/cn";
 import { useLocale } from "@/components/providers/locale-provider";
 
@@ -30,6 +31,7 @@ export function BackfillDialog({
   const [to, setTo] = useState("");
   const [splits, setSplits] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [suggesting, setSuggesting] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -49,6 +51,40 @@ export function BackfillDialog({
   }, [open, onClose]);
 
   if (!open || !pipeline) return null;
+
+  // ADR-0095 f/u — fetch the cursor range and pre-fill From/To + interior
+  // split points (4 equal windows). A SUGGESTION the operator edits:
+  // arithmetic windows skew on gappy data, which is why the server never
+  // auto-splits (the rejected alternative in ADR-0095).
+  async function suggest() {
+    if (!pipeline) return;
+    setSuggesting(true);
+    try {
+      const stats = await pipelinesApi.cursorStats(workspaceId, pipeline.id);
+      if (!stats.available) {
+        toast.error(t("backfill.suggestUnavailable", { reason: stats.reason ?? "?" }));
+        return;
+      }
+      const boundaries = suggestBoundaries(stats.min_value, stats.max_value, 4);
+      if (!boundaries) {
+        toast.error(t("backfill.suggestUnsupported"));
+        return;
+      }
+      setFrom(String(boundaries[0]));
+      setTo(String(boundaries[boundaries.length - 1]));
+      setSplits(boundaries.slice(1, -1).join(", "));
+      toast.success(
+        t("backfill.suggestFilled", {
+          count: String(boundaries.length - 1),
+          rows: (stats.row_count ?? 0).toLocaleString(),
+        }),
+      );
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : t("backfill.failed"));
+    } finally {
+      setSuggesting(false);
+    }
+  }
 
   async function submit() {
     if (!pipeline) return;
@@ -138,11 +174,22 @@ export function BackfillDialog({
             <span className="text-[11px] font-semibold uppercase tracking-wider text-text-secondary">
               {t("backfill.split")}
             </span>
-            <Input
-              value={splits}
-              placeholder={t("backfill.splitPlaceholder")}
-              onChange={(e) => setSplits(e.target.value)}
-            />
+            <div className="flex items-center gap-2">
+              <Input
+                value={splits}
+                placeholder={t("backfill.splitPlaceholder")}
+                onChange={(e) => setSplits(e.target.value)}
+              />
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={suggest}
+                loading={suggesting}
+                title={t("backfill.suggestTitle")}
+              >
+                {t("backfill.suggest")}
+              </Button>
+            </div>
           </label>
           <p className="text-[11px] text-text-muted">{t("backfill.splitHint")}</p>
         </div>

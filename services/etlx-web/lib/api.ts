@@ -443,6 +443,10 @@ export const pipelinesApi = {
       method: "POST",
       json: body,
     }),
+  /** ADR-0095 f/u — MIN/MAX/COUNT over the source's cursor column.
+   *  Powers the Backfill dialog's "suggest split points". Read-only. */
+  cursorStats: (workspaceId: string, id: string) =>
+    api<CursorStatsResponse>(`/workspaces/${workspaceId}/pipelines/${id}/cursor-stats`),
   /** Phase P3b (ADR-0095) — split one cursor range into N parallel
    *  sub-runs (one per consecutive boundary pair, half-open windows).
    *  The multi-replica worker fleet claims them concurrently. */
@@ -528,6 +532,19 @@ export interface DlqPreviewResponse {
   table: string | null;
   connector_type: string | null;
   records: Record<string, unknown>[];
+  error: string | null;
+}
+
+/** ADR-0095 f/u — cursor-range stats behind "suggest split points". */
+export interface CursorStatsResponse {
+  available: boolean;
+  reason: string | null;
+  connection: string | null;
+  connector_type: string | null;
+  cursor_column: string | null;
+  min_value: unknown;
+  max_value: unknown;
+  row_count: number | null;
   error: string | null;
 }
 

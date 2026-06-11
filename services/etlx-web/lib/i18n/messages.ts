@@ -820,6 +820,12 @@ export const en = {
     "Splits the range into parallel runs at these points — worker replicas process the windows concurrently. Requires both From and To.",
   "backfill.splitNeedsBounds": "Split points need both From and To set.",
   "backfill.queuedMany": "{count} parallel backfill runs queued for {name}",
+  "backfill.suggest": "Suggest",
+  "backfill.suggestTitle":
+    "Read the cursor column's MIN/MAX and pre-fill 4 equal windows — edit before queuing (equal windows skew on gappy data).",
+  "backfill.suggestUnavailable": "Can't suggest — {reason}",
+  "backfill.suggestUnsupported": "Can't suggest for this cursor type — enter boundaries manually.",
+  "backfill.suggestFilled": "Suggested {count} windows over {rows} rows — adjust as needed.",
 
   // pipeline builder (edit page + builder components)
   "builder.title": "Pipeline builder",
@@ -2269,6 +2275,12 @@ export const ko: Messages = {
     "이 지점들에서 범위를 병렬 run으로 분할합니다 — 워커 replica들이 윈도우를 동시에 처리합니다. From/To 둘 다 필요.",
   "backfill.splitNeedsBounds": "분할 지점은 From과 To가 모두 필요합니다.",
   "backfill.queuedMany": "{name} 병렬 백필 {count}개가 큐에 추가됨",
+  "backfill.suggest": "제안",
+  "backfill.suggestTitle":
+    "커서 컬럼의 MIN/MAX를 읽어 균등 4윈도우를 채웁니다 — 큐잉 전에 수정하세요(균등 분할은 데이터 쏠림에 취약).",
+  "backfill.suggestUnavailable": "제안 불가 — {reason}",
+  "backfill.suggestUnsupported": "이 커서 타입은 제안할 수 없습니다 — 경계를 직접 입력하세요.",
+  "backfill.suggestFilled": "{rows}행에 대해 {count}개 윈도우 제안됨 — 필요시 조정하세요.",
 
   "builder.title": "파이프라인 빌더",
   "builder.draft": "초안",

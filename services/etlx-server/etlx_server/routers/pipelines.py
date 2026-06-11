@@ -36,6 +36,7 @@ from etl_plugins.config.secrets import SecretBackend
 from etlx_server.audit.dependencies import get_audit_service
 from etlx_server.audit.service import AuditService
 from etlx_server.auth.schemas import (
+    CursorStatsResponse,
     DlqPreviewResponse,
     DryRunConnectorCheck,
     DryRunLintWarning,
@@ -57,6 +58,7 @@ from etlx_server.auth.workspace_context import (
 from etlx_server.db.enums import WorkspaceRole
 from etlx_server.db.models import Pipeline, PipelineVersion
 from etlx_server.dependencies import get_secret_backend_dep, get_session
+from etlx_server.pipelines.cursor_stats import CursorStatsService
 from etlx_server.pipelines.dlq_preview import DlqPreviewService
 from etlx_server.pipelines.dry_run import DryRunService
 from etlx_server.pipelines.repository import (
@@ -413,6 +415,38 @@ async def preview_dlq_records(
         connector_type=p.connector_type,
         records=p.records,
         error=p.error,
+    )
+
+
+@router.get("/{pipeline_id}/cursor-stats", response_model=CursorStatsResponse)
+async def cursor_stats(
+    pipeline_id: UUID,
+    ctx: WorkspaceContext = _require_runner,
+    session: AsyncSession = Depends(get_session),  # noqa: B008
+    backend: SecretBackend = Depends(get_secret_backend_dep),  # noqa: B008
+) -> CursorStatsResponse:
+    """MIN/MAX/COUNT over the source's ``cursor_column`` (ADR-0095 f/u).
+
+    Powers the Backfill dialog's "suggest split points" — the server only
+    reports the range; the operator edits and confirms the boundaries
+    (auto-splitting was rejected in ADR-0095: arithmetic windows skew).
+    Read-only (no audit); ``available=False`` + ``reason`` when the
+    pipeline has no cursor or the source can't answer.
+    """
+    pipeline, current = await _load_pipeline_and_current(
+        session, workspace_id=ctx.workspace.id, pipeline_id=pipeline_id
+    )
+    s = await CursorStatsService(session, backend).stats(pipeline, current)
+    return CursorStatsResponse(
+        available=s.available,
+        reason=s.reason,
+        connection=s.connection,
+        connector_type=s.connector_type,
+        cursor_column=s.cursor_column,
+        min_value=s.min_value,
+        max_value=s.max_value,
+        row_count=s.row_count,
+        error=s.error,
     )
 
 

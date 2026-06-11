@@ -654,6 +654,25 @@ class RunBackfillRequest(BaseModel):
     cursor_to: str | int | float | None = None
 
 
+class CursorStatsResponse(BaseModel):
+    """Response of ``GET /workspaces/{ws}/pipelines/{pid}/cursor-stats``
+    (ADR-0095 follow-up). MIN/MAX/COUNT over the source's
+    ``cursor_column`` so the Backfill dialog can *suggest* split
+    boundaries — the operator edits and confirms; the server never
+    auto-splits. ``available=False`` carries a stable machine ``reason``.
+    """
+
+    available: bool
+    reason: str | None = None
+    connection: str | None = None
+    connector_type: str | None = None
+    cursor_column: str | None = None
+    min_value: Any = None
+    max_value: Any = None
+    row_count: int | None = None
+    error: str | None = None
+
+
 class PartitionedBackfillRequest(BaseModel):
     """Body of ``POST /workspaces/{ws}/pipelines/{pid}/partitioned-backfill``
     (ADR-0095) — single-run scale-out by cursor-range partitioning.

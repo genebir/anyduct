@@ -986,6 +986,11 @@ function Summary({
     rj.backfill && typeof rj.backfill === "object"
       ? (rj.backfill as Record<string, unknown>)
       : null;
+  // Phase P3b (ADR-0095) — partitioned backfill sub-run marker.
+  const partition =
+    rj.partition && typeof rj.partition === "object"
+      ? (rj.partition as Record<string, unknown>)
+      : null;
   // ADR-0093 P2 — which data path each task took. "pushdown" never moved
   // the rows at all; "arrow" bulk-copied them past the Record plane;
   // "records" is the classic row-by-row path. Answers "why was this run
@@ -1083,6 +1088,27 @@ function Summary({
               {String(backfill.cursor_from ?? "—")} →{" "}
               {String(backfill.cursor_to ?? "—")}
             </code>
+          }
+        />
+      ) : null}
+      {/* Phase P3b (ADR-0095) — partitioned backfill: this run is window
+          index+1 of `of` parallel sub-runs; the group id ties siblings
+          together (find them in the runs list around the same time). */}
+      {partition ? (
+        <Field
+          label={t("runDetail.partition")}
+          value={
+            <span
+              className="rounded bg-overlay px-1.5 py-0.5 text-xs text-text-secondary"
+              title={t("runDetail.partitionHint", {
+                group: String(partition.group ?? "—"),
+              })}
+            >
+              {t("runDetail.partitionValue", {
+                index: String(Number(partition.index ?? 0) + 1),
+                of: String(partition.of ?? "?"),
+              })}
+            </span>
           }
         />
       ) : null}

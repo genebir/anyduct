@@ -1270,6 +1270,11 @@ export const en = {
   "runDetail.retryOf": "Retry of",
   "runDetail.autoTriggeredBy": "Auto-triggered by",
   "runDetail.backfillWindow": "Backfill window",
+  // Phase P3b (ADR-0095) — partitioned backfill sub-run marker.
+  "runDetail.partition": "Partition",
+  "runDetail.partitionValue": "window {index} of {of}",
+  "runDetail.partitionHint":
+    "One of {of} parallel sub-runs from a partitioned backfill (group {group}). Sibling windows appear in the runs list around the same time.",
   // Phase ABW (2026-06-01) — trigger source field
   "runDetail.triggerSource": "Triggered by",
   "runDetail.triggerScheduled": "schedule",
@@ -2702,6 +2707,11 @@ export const ko: Messages = {
   "runDetail.retryOf": "재시도 원본",
   "runDetail.autoTriggeredBy": "자동 트리거 출처",
   "runDetail.backfillWindow": "백필 범위",
+  // Phase P3b (ADR-0095) — 분할 백필 sub-run 마커.
+  "runDetail.partition": "파티션",
+  "runDetail.partitionValue": "{of}개 중 {index}번째 윈도우",
+  "runDetail.partitionHint":
+    "분할 백필의 병렬 sub-run {of}개 중 하나입니다 (그룹 {group}). 형제 윈도우들은 비슷한 시각의 runs 목록에서 볼 수 있습니다.",
   // Phase ABW (2026-06-01) — 트리거 출처 필드
   "runDetail.triggerSource": "트리거",
   "runDetail.triggerScheduled": "스케줄",

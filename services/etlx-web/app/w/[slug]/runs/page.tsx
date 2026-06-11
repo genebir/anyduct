@@ -57,6 +57,8 @@ function buildColumns(
   /** Phase ABU (2026-06-01) — used to render "by you" when the
    *  signed-in user fired the run, mirroring ABT on the audit log. */
   currentUserId: string | null,
+  /** ADR-0095 — chip click isolates the partition group (ACF pattern). */
+  onPartitionClick: (group: string) => void,
 ): Column<RunSummary>[] {
   return [
     {
@@ -108,19 +110,25 @@ function buildColumns(
         // backfill land as N adjacent rows; the i/N chip makes the group
         // readable at a glance (group id on hover).
         const partitionChip = r.partition ? (
-          <span
-            className="inline-flex h-5 items-center rounded-sm bg-overlay px-1.5 font-mono text-[10px] text-text-muted"
+          <button
+            type="button"
+            className="inline-flex h-5 cursor-pointer items-center rounded-sm bg-overlay px-1.5 font-mono text-[10px] text-text-muted hover:text-text"
             title={t("runs.partitionTitle", {
               index: String((r.partition.index ?? 0) + 1),
               of: String(r.partition.of ?? "?"),
               group: String(r.partition.group ?? "—"),
             })}
+            onClick={(e) => {
+              e.stopPropagation(); // don't open the run row
+              const group = r.partition?.group;
+              if (group) onPartitionClick(group);
+            }}
           >
             {t("runs.partitionChip", {
               index: String((r.partition.index ?? 0) + 1),
               of: String(r.partition.of ?? "?"),
             })}
-          </span>
+          </button>
         ) : null;
         let trigger;
         if (r.schedule_id) {
@@ -274,6 +282,9 @@ export default function RunsPage() {
     triggerFilterRaw === "auto"
       ? triggerFilterRaw
       : null;
+  // ADR-0095 — isolate one partitioned backfill's sibling windows.
+  // Set by clicking a run's partition chip; URL-synced for share links.
+  const partitionGroupFilter = search.get("partition_group");
   const ws = useWorkspaceFromSlug(slug);
   const { t } = useLocale();
   // Phase ABU (2026-06-01) — pass to buildColumns for "by you" chip.
@@ -296,7 +307,7 @@ export default function RunsPage() {
   useEffect(() => {
     setLimit(PAGE_SIZE);
     setMaxedOut(false);
-  }, [pipelineFilter, statusFilter, triggerFilter]);
+  }, [pipelineFilter, statusFilter, triggerFilter, partitionGroupFilter]);
 
   /** Update the ``?status=`` URL param (preserve any ``?pipeline=``).
    *  Empty value clears the filter. */
@@ -305,6 +316,18 @@ export default function RunsPage() {
       const params = new URLSearchParams(search.toString());
       if (next) params.set("status", next);
       else params.delete("status");
+      const qs = params.toString();
+      router.push(qs ? `/w/${slug}/runs?${qs}` : `/w/${slug}/runs`);
+    },
+    [router, search, slug],
+  );
+
+  /** ADR-0095 — URL-sync writer for the partition-group filter. */
+  const setPartitionGroupFilter = useCallback(
+    (group: string) => {
+      const params = new URLSearchParams(search.toString());
+      if (group) params.set("partition_group", group);
+      else params.delete("partition_group");
       const qs = params.toString();
       router.push(qs ? `/w/${slug}/runs?${qs}` : `/w/${slug}/runs`);
     },
@@ -393,23 +416,29 @@ export default function RunsPage() {
   // Phase ACA — apply trigger filter client-side over the server's
   // pre-filtered (status, pipeline) rows.
   const filteredRows = useMemo(() => {
-    if (!rows) return null;
-    if (!triggerFilter) return rows;
+    let out = rows;
+    if (!out) return null;
+    // ADR-0095 — partition-group filter (chip click): isolate the N
+    // sibling windows of one partitioned backfill.
+    if (partitionGroupFilter) {
+      out = out.filter((r) => r.partition?.group === partitionGroupFilter);
+    }
+    if (!triggerFilter) return out;
     if (triggerFilter === "scheduled") {
-      return rows.filter((r) => r.schedule_id !== null);
+      return out.filter((r) => r.schedule_id !== null);
     }
     if (triggerFilter === "auto") {
       // Phase AEM — system-fired (sensor / asset auto-materialize):
       // neither a schedule nor a user.
-      return rows.filter(
+      return out.filter(
         (r) => r.schedule_id === null && r.triggered_by_user_id === null,
       );
     }
     // manual: triggered_by_user_id non-null AND schedule_id null
-    return rows.filter(
+    return out.filter(
       (r) => r.schedule_id === null && r.triggered_by_user_id !== null,
     );
-  }, [rows, triggerFilter]);
+  }, [rows, triggerFilter, partitionGroupFilter]);
   const pipelineNameById = new Map(pipelines.map((p) => [p.id, p.name]));
   // Phase ABL (2026-06-01) — migration-aware "Open pipeline" link. The
   // generic pipeline editor is wrong for migrations: that surface is
@@ -569,6 +598,26 @@ export default function RunsPage() {
           </div>
         </div>
       ) : null}
+      {/* ADR-0095 — partition-group banner: a chip click isolated one
+          partitioned backfill's sibling windows. One-click clear. */}
+      {partitionGroupFilter ? (
+        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-accent/40 bg-accent/10 px-6 py-2 text-sm">
+          <span className="text-text">
+            {t("runs.filteredByPartition", {
+              group: partitionGroupFilter.slice(0, 8),
+            })}
+          </span>
+          <button
+            type="button"
+            onClick={() => setPartitionGroupFilter("")}
+            className="inline-flex items-center gap-1 rounded-sm px-2 py-1 text-xs text-text-secondary hover:bg-overlay hover:text-text"
+            aria-label={t("runs.clearFilter")}
+          >
+            <XIcon size={12} />
+            {t("runs.clearFilter")}
+          </button>
+        </div>
+      ) : null}
       <main className="mx-auto w-full max-w-6xl flex-1 space-y-6 overflow-y-auto px-6 py-8">
         <Card>
           {rows === null ? (
@@ -581,6 +630,7 @@ export default function RunsPage() {
                 t,
                 pipelineNameById,
                 currentUser?.id ?? null,
+                setPartitionGroupFilter,
               )}
               rows={filteredRows ?? []}
               onRowClick={(row) => {
@@ -625,7 +675,7 @@ export default function RunsPage() {
                   the visible set, surface "X of Y" so the operator
                   doesn't wonder why Load more keeps fetching. */}
               <span>
-                {triggerFilter && filteredRows && filteredRows.length !== rows.length
+                {(triggerFilter || partitionGroupFilter) && filteredRows && filteredRows.length !== rows.length
                   ? t("runs.showingFiltered", {
                       visible: filteredRows.length,
                       total: rows.length,

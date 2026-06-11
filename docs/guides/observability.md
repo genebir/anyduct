@@ -144,3 +144,25 @@ Secrets are masked by a structlog processor before they reach stdout.
   attributes during cursored runs.
 * [Reference: Observability API](../reference/observability.md) — exact
   signatures for every public symbol.
+
+
+## Grafana dashboard template
+
+`services/grafana/etlx-pipelines-dashboard.json` is a ready-to-import
+dashboard over the Prometheus exporter's metrics (verified against a live
+Grafana 13 import API):
+
+* **Records throughput** — read vs written rate per pipeline (a
+  persistent gap = filtering / dedupe / DLQ routing).
+* **Run duration p50/p95** — from the `etl_plugins_duration_seconds`
+  histogram.
+* **Runs completed / min** — the histogram's sample count.
+* **Errors & DLQ-routed records** — `etl_plugins_errors_total`; the
+  `routed="dlq"` series is captured-bad-records (partial success),
+  anything else is hard errors.
+* **Stream lag** — `etl_plugins_lag_seconds` for streaming pipelines.
+
+Import via *Dashboards → New → Import*, pick your Prometheus data source
+in the `datasource` variable, and filter with the `pipeline` variable.
+The metric names assume the default OpenTelemetry → Prometheus naming
+(dots become underscores, monotonic sums get `_total`).

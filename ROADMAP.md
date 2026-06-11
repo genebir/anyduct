@@ -616,7 +616,7 @@
 - [ ] Helm chart (`services/charts/etlx/`) — postgres, vault, server, web, prometheus 일괄
 - [x] 로컬 풀스택 실행 ✅ — `services/docker-compose.prod.yml`이 실물(db→migrate→server/worker/scheduler/reaper/stream-worker→web, docs/deployment.md "One-command local production stack"). stale했던 Step 7.1 placeholder `docker-compose.services.yml`은 포인터로 정리(2026-06-12).
 - [x] 백업 가이드 ✅ — `docs/deployment.md` §Backups(metadata pg_dump cadence + 시크릿은 SECRET_BACKEND 벤더별 별도 백업·DB엔 ref만 명시). (2026-06-12 확인)
-- [ ] 운영 메트릭 Grafana 대시보드 템플릿
+- [x] **운영 메트릭 Grafana 대시보드 템플릿** ✅ (2026-06-12) — `services/grafana/etlx-pipelines-dashboard.json`(처리량 read/written·duration p50/p95·runs/min·errors+DLQ routed·stream lag, datasource/pipeline 변수). 메트릭 이름은 실제 Prometheus exporter 스크레이프로 실측(`etl_plugins_records_read_total` 등), **live Grafana 13 import API로 검증**. observability 가이드에 사용법.
 - [ ] 첫 서비스 릴리스 (v1.0 — 코어는 0.x여도 서비스는 별도 SemVer)
 
 ---

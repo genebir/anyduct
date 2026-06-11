@@ -548,7 +548,7 @@ def _graph_cfg(
 
 def test_pushdown_graph_trivial_chain_is_eligible() -> None:
     """The builder UI emits graphs — the simple chain must lint clean
-    (the runtime composes it via ``_try_graph_pushdown``, ADR-0094)."""
+    (the runtime composes it via ``_try_graph_fast_paths``, ADR-0094)."""
     assert _pd(_graph_cfg()) == []
 
 

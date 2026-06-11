@@ -328,6 +328,48 @@ def test_graph_chain_pushdown_with_minted_sink_instance(
         c.close()
 
 
+def test_graph_two_node_same_connection_pushes_down_automatically(
+    db: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A plain source → sink graph chain on ONE connection takes the P2c
+    pushdown automatically (no flag) — the graph twin of
+    ``test_pushdown_runs_in_database_without_moving_rows``."""
+    from etl_plugins.config.models import PipelineConfig
+    from etl_plugins.runtime.builder import build_pipeline
+
+    cfg = PipelineConfig.model_validate(
+        {
+            "name": "g2",
+            "graph": {
+                "nodes": [
+                    {
+                        "id": "s",
+                        "type": "source",
+                        "connection": "db",
+                        "query": "SELECT id, name FROM src",
+                    },
+                    {"id": "k", "type": "sink", "connection": "db", "table": "dst"},
+                ],
+                "edges": [{"from_node": "s", "to_node": "k"}],
+            },
+        }
+    )
+    conn = SQLiteConnector(database=db)
+    conn.connect()
+    pipeline, built = build_pipeline(cfg, connectors={"db": conn})
+    monkeypatch.setattr(
+        SQLiteConnector, "write", lambda *a, **k: (_ for _ in ()).throw(AssertionError("write"))
+    )
+    monkeypatch.setattr(
+        SQLiteConnector, "read", lambda *a, **k: (_ for _ in ()).throw(AssertionError("read"))
+    )
+    result = pipeline.run(connectors=built)
+    assert result.data_paths == {"g2": "pushdown"}
+    assert result.records_written == 5
+    assert _rows(db) == [(i, f"n{i}") for i in range(5)]
+    conn.close()
+
+
 def test_graph_chain_cross_connection_falls_back_to_materialize(db: str, tmp_path: Path) -> None:
     other = str(tmp_path / "other_graph.db")
     con = sqlite3.connect(other)

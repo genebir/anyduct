@@ -196,6 +196,69 @@ class TestPipelineFastPath:
                 conn.commit()
 
 
+class TestGraphChainFastPath:
+    """ADR-0093 P2 follow-up: the builder saves pipelines as graphs — a
+    trivial source → sink graph chain must take the same bulk COPY path."""
+
+    def test_graph_two_node_chain_bulk_copies(
+        self,
+        apg: PostgresConnector,
+        pg_conn_params: dict[str, Any],
+        typed_table: str,
+        pg_raw_kwargs: dict[str, Any],
+    ) -> None:
+        from etl_plugins.config.models import PipelineConfig
+        from etl_plugins.runtime.builder import build_pipeline
+
+        dst_table = f"etl_graph_dst_{uuid4().hex[:8]}"
+        with psycopg.connect(**pg_raw_kwargs) as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"CREATE TABLE {dst_table} (id BIGINT, label TEXT)")
+            conn.commit()
+        try:
+            apg.write_arrow(
+                iter([_batch([{"id": i, "label": f"L{i}"} for i in range(300)])]),
+                table=typed_table,
+            )
+            cfg = PipelineConfig.model_validate(
+                {
+                    "name": "graph-bulk",
+                    "graph": {
+                        "nodes": [
+                            {
+                                "id": "s",
+                                "type": "source",
+                                "connection": "src",
+                                "query": f"SELECT id, label FROM {typed_table}",
+                            },
+                            {"id": "k", "type": "sink", "connection": "dst", "table": dst_table},
+                        ],
+                        "edges": [{"from_node": "s", "to_node": "k"}],
+                    },
+                }
+            )
+            dst = PostgresConnector(**pg_conn_params)
+            dst.connect()
+            try:
+                pipeline, built = build_pipeline(cfg, connectors={"src": apg, "dst": dst})
+                result = pipeline.run(connectors=built)
+                assert result.data_paths == {"graph-bulk": "arrow"}
+                assert result.records_read == 300
+                assert result.records_written == 300
+            finally:
+                dst.close()
+            _end_txn(apg)
+            with psycopg.connect(**pg_raw_kwargs) as conn, conn.cursor() as cur:
+                cur.execute(f"SELECT COUNT(*) FROM {dst_table}")
+                row = cur.fetchone()
+                assert row is not None and row[0] == 300
+        finally:
+            with psycopg.connect(**pg_raw_kwargs) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(f"DROP TABLE IF EXISTS {dst_table}")
+                conn.commit()
+
+
 class TestSqlPushdown:
     """ADR-0093 P2c: source==sink connection collapses to INSERT…SELECT."""
 

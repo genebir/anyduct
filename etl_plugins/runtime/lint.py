@@ -378,7 +378,7 @@ def _lint_sql_pushdown_ineligible(cfg: PipelineConfig) -> list[LintWarning]:
     if cfg.graph is not None:
         # Graph shape: pushdown engages only for the trivial chain
         # source → sql(pushdown) → sink (the shape the builder UI emits
-        # for a simple pipeline). Mirror ``Pipeline._try_graph_pushdown``.
+        # for a simple pipeline). Mirror ``Pipeline._try_graph_fast_paths``.
         nodes = cfg.graph.nodes
         g_sources = [n for n in nodes if n.type == "source"]
         g_sinks = [n for n in nodes if n.type == "sink"]

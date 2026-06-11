@@ -1220,10 +1220,10 @@ class Pipeline:
         if cursor_from is not None or cursor_to is not None:
             raise TaskError("graph pipelines do not support cursor backfill yet")
 
-        # ELT pushdown (ADR-0094): the builder UI emits every pipeline as a
-        # graph, so the trivial source → sql(pushdown) → sink chain must
-        # compose into one in-database statement exactly like its linear twin.
-        fast = self._try_graph_pushdown(task, connectors)
+        # Linear fast paths (ADR-0093/0094): the builder UI emits every
+        # pipeline as a graph, so trivial chains must take the same
+        # pushdown / Arrow shortcuts as their linear twins.
+        fast = self._try_graph_fast_paths(task, connectors)
         if fast is not None:
             return fast
 
@@ -1251,65 +1251,105 @@ class Pipeline:
 
         return records_read, written, None
 
-    def _try_graph_pushdown(
-        self,
-        task: Task,
-        connectors: dict[str, Connector],
-    ) -> tuple[int, int, CursorValue] | None:
-        """ELT pushdown for the trivial graph chain (ADR-0094).
+    @staticmethod
+    def _trivial_graph_chain(task: Task) -> tuple[GraphNode, GraphNode | None, GraphNode] | None:
+        """Recognise ``source → sink`` / ``source → transform → sink``.
 
-        Engages only for exactly ``source → sql(pushdown: true) → sink``
-        with unfiltered edges, one ``append`` sink and BOTH ends on the
-        same connection *name* — the graph builder mints a second connector
-        instance for a sink that reuses a source connection (deadlock
-        guard), so identity comparison would never match; same name ⇒ same
-        database, and pushdown is a single statement so the deadlock the
-        second instance guards against can't occur. Everything else falls
-        through to the materialize engine.
+        Returns ``(source, transform-or-None, sink)`` for an unfiltered
+        single-path chain, ``None`` for anything else (fan-in/out, ``when``
+        edges, extra nodes) — those need the materialize engine.
         """
-        if len(task.graph_nodes) != 3 or len(task.graph_edges) != 2:
+        nodes = task.graph_nodes
+        edges = task.graph_edges
+        if len(nodes) not in (2, 3) or len(edges) != len(nodes) - 1:
+            return None
+        if any(e.when is not None for e in edges):
             return None
         by_kind: dict[str, GraphNode] = {}
-        for n in task.graph_nodes:
+        for n in nodes:
             if n.kind in by_kind:
                 return None
             by_kind[n.kind] = n
         src = by_kind.get("source")
-        transform = by_kind.get("transform")
         snk = by_kind.get("sink")
-        if src is None or transform is None or snk is None:
+        if src is None or snk is None:
             return None
-        if any(e.when is not None for e in task.graph_edges):
+        transform = by_kind.get("transform")
+        if len(nodes) == 3 and transform is None:
             return None
-        if {(e.from_id, e.to_id) for e in task.graph_edges} != {
-            (src.id, transform.id),
-            (transform.id, snk.id),
-        }:
+        expected = (
+            {(src.id, snk.id)}
+            if transform is None
+            else {(src.id, transform.id), (transform.id, snk.id)}
+        )
+        if {(e.from_id, e.to_id) for e in edges} != expected:
             return None
-        if transform.transform_spec is None:
-            return None
-        select_sql = _compose_pushdown_select(src.query, transform.transform_spec)
-        if select_sql is None:
-            return None
-        spec = snk.sink
-        if spec is None or spec.mode != "append" or spec.when is not None or spec.pre_sql:
-            return None
-        if not spec.table or not _PUSHDOWN_TABLE_RE.match(spec.table):
-            return None
-        sink_conn_name = spec.connection_name or spec.name
-        if not src.source_name or src.source_name != sink_conn_name:
-            return None
-        source = connectors.get(src.source_name)
-        if source is None or not getattr(source, "supports_sql_pushdown", False):
-            return None
-        if not isinstance(source, SqlExecutor):
-            return None
+        return src, transform, snk
 
-        _module_logger.info("sql_pushdown", pipeline=self.name, task=task.name, table=spec.table)
-        self._task_data_paths[task.name or "task"] = "pushdown"
-        count = source.execute_statement(f"INSERT INTO {spec.table} {select_sql}")
-        rows = max(0, int(count))
-        return rows, rows, None
+    def _try_graph_fast_paths(
+        self,
+        task: Task,
+        connectors: dict[str, Connector],
+    ) -> tuple[int, int, CursorValue] | None:
+        """Linear fast paths for trivial graph chains (ADR-0093/0094).
+
+        The builder UI saves every pipeline as a graph, so the chains a
+        linear task would fast-path must fast-path here too:
+
+        * ``source → sink`` — same-connection pushdown (P2c) or the bulk
+          Arrow path (P2b), exactly like the linear twin.
+        * ``source → sql(pushdown: true) → sink`` — ELT pushdown
+          (ADR-0094).
+
+        Same-database is decided by connection *name*: the graph builder
+        mints a second connector instance for a sink that reuses a source
+        connection (deadlock guard), so identity comparison would never
+        match — same name ⇒ same database, and pushdown is a single
+        statement so the deadlock the second instance guards against
+        can't occur. The eligibility details live in the reused linear
+        helpers (``_try_sql_pushdown`` / ``_try_arrow_fast_path``) via a
+        shadow Task; anything ineligible falls through to the
+        materialize engine.
+        """
+        chain = self._trivial_graph_chain(task)
+        if chain is None:
+            return None
+        src, transform, snk = chain
+        spec = snk.sink
+        if spec is None or not src.source_name or not src.query:
+            return None
+        select_sql: str | None = src.query
+        if transform is not None:
+            if transform.transform_spec is None:
+                return None
+            select_sql = _compose_pushdown_select(src.query, transform.transform_spec)
+            if select_sql is None:
+                return None
+        source = connectors.get(src.source_name)
+        if not isinstance(source, BatchSource):
+            return None
+        shadow = Task(
+            name=task.name,
+            source=src.source_name,
+            query=select_sql,
+            source_options=dict(src.source_options),
+        )
+        if (spec.connection_name or spec.name) == src.source_name:
+            # Pass the source as both ends so the helper's identity check
+            # holds — the statement executes on the source connection.
+            pushed = self._try_sql_pushdown(
+                shadow, source, [(spec, cast("BatchSink", source))], cursored=False
+            )
+            if pushed is not None:
+                return pushed
+        if transform is not None:
+            # An ELT chain that can't push down runs locally (DuckDB) in
+            # the materialize engine — dry-run lint explains why.
+            return None
+        sink = connectors.get(spec.name)
+        if not isinstance(sink, BatchSink):
+            return None
+        return self._try_arrow_fast_path(shadow, source, [(spec, sink)], cursored=False)
 
     def _auto_create_sink_tables(
         self,

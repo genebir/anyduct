@@ -170,3 +170,51 @@ def test_record_only_sink_uses_record_path() -> None:
     _run(task, src, dst)
     assert src.read_called and dst.write_called
     assert not src.read_arrow_called
+
+
+# --- graph trivial chain (ADR-0093 P2 follow-up): the builder saves every
+# pipeline as a graph, so source → sink must take the same bulk path. ------
+
+
+def _graph_task(*, mode: str = "append", when: str | None = None) -> Task:
+    from etl_plugins.core.pipeline import GraphEdge, GraphNode
+
+    return Task(
+        name="g",
+        graph_nodes=[
+            GraphNode(id="s", kind="source", source_name="src", query="q"),
+            GraphNode(
+                id="k",
+                kind="sink",
+                sink=SinkSpec(name="dst", table="out", mode=mode, connection_name="dst"),
+            ),
+        ],
+        graph_edges=[GraphEdge(from_id="s", to_id="k", when=when)],
+    )
+
+
+def test_graph_two_node_chain_takes_arrow_path() -> None:
+    src, dst = FakeArrowSource(), FakeArrowSink()
+    result = _run(_graph_task(), src, dst)
+    assert src.read_arrow_called and dst.write_arrow_called
+    assert not src.read_called and not dst.write_called
+    assert result.records_read == 7
+    assert result.records_written == 7
+    assert result.data_paths == {"g": "arrow"}
+    assert dst.rows == _ROWS
+
+
+def test_graph_two_node_upsert_falls_back_to_materialize() -> None:
+    src, dst = FakeArrowSource(), FakeArrowSink()
+    result = _run(_graph_task(mode="upsert"), src, dst)
+    assert src.read_called and dst.write_called
+    assert not dst.write_arrow_called
+    assert result.data_paths == {"g": "graph"}
+
+
+def test_graph_two_node_when_edge_falls_back_to_materialize() -> None:
+    src, dst = FakeArrowSource(), FakeArrowSink()
+    result = _run(_graph_task(when="data['id'] > 3"), src, dst)
+    assert src.read_called and dst.write_called
+    assert not dst.write_arrow_called
+    assert result.data_paths == {"g": "graph"}

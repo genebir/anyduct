@@ -1110,6 +1110,9 @@ export const en = {
   "runs.triggerManual": "manual",
   "runs.triggerAuto": "auto",
   "runs.triggerAutoTitle": "System-triggered — a sensor or an upstream asset's auto-materialize",
+  // Phase P3b (ADR-0095) — partitioned backfill sibling-window chip.
+  "runs.partitionChip": "{index}/{of}",
+  "runs.partitionTitle": "Partitioned backfill — window {index} of {of} (group {group})",
   "runs.triggerManualTitle": "User-triggered (Run now)",
   // Phase ABU (2026-06-01) — friendly self-actor on manual trigger
   "runs.triggerManualByYou": "by you",
@@ -2550,6 +2553,9 @@ export const ko: Messages = {
   "runs.triggerManual": "수동",
   "runs.triggerAuto": "자동",
   "runs.triggerAutoTitle": "시스템 트리거 — 센서 또는 상류 자산의 자동 머티리얼라이즈",
+  // Phase P3b (ADR-0095) — 분할 백필 형제 윈도우 칩.
+  "runs.partitionChip": "{index}/{of}",
+  "runs.partitionTitle": "분할 백필 — {of}개 중 {index}번째 윈도우 (그룹 {group})",
   "runs.triggerManualTitle": "사용자가 수동 실행 (Run now)",
   // Phase ABU (2026-06-01) — 본인이 친 수동 실행 친화 표시
   "runs.triggerManualByYou": "내가 실행",

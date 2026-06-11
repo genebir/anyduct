@@ -104,8 +104,27 @@ function buildColumns(
       header: t("runs.colTrigger"),
       className: "w-28",
       cell: (r) => {
+        // Phase P3b (ADR-0095) — sibling windows of one partitioned
+        // backfill land as N adjacent rows; the i/N chip makes the group
+        // readable at a glance (group id on hover).
+        const partitionChip = r.partition ? (
+          <span
+            className="inline-flex h-5 items-center rounded-sm bg-overlay px-1.5 font-mono text-[10px] text-text-muted"
+            title={t("runs.partitionTitle", {
+              index: String((r.partition.index ?? 0) + 1),
+              of: String(r.partition.of ?? "?"),
+              group: String(r.partition.group ?? "—"),
+            })}
+          >
+            {t("runs.partitionChip", {
+              index: String((r.partition.index ?? 0) + 1),
+              of: String(r.partition.of ?? "?"),
+            })}
+          </span>
+        ) : null;
+        let trigger;
         if (r.schedule_id) {
-          return (
+          trigger = (
             <span
               className="inline-flex h-5 items-center gap-1 rounded-sm bg-accent/15 px-1.5 text-[11px] text-accent"
               title={t("runs.triggerScheduleTitle")}
@@ -114,10 +133,9 @@ function buildColumns(
               {t("runs.triggerSchedule")}
             </span>
           );
-        }
-        if (r.triggered_by_user_id) {
+        } else if (r.triggered_by_user_id) {
           const byYou = r.triggered_by_user_id === currentUserId;
-          return (
+          trigger = (
             <span
               className="inline-flex h-5 items-center gap-1 rounded-sm bg-overlay px-1.5 text-[11px] text-text-secondary"
               title={
@@ -130,18 +148,25 @@ function buildColumns(
               {byYou ? t("runs.triggerManualByYou") : t("runs.triggerManual")}
             </span>
           );
+        } else {
+          // Phase AEK (2026-06-04) — neither a schedule nor a user fired
+          // this, so it was system-triggered (a sensor or an upstream
+          // asset's auto-materialize, ADR-0037/0041). "auto" reads clearer
+          // than a bare "—", which looks like missing data.
+          trigger = (
+            <span
+              className="inline-flex h-5 items-center gap-1 rounded-sm bg-overlay px-1.5 text-[11px] text-text-muted"
+              title={t("runs.triggerAutoTitle")}
+            >
+              <ZapIcon size={11} />
+              {t("runs.triggerAuto")}
+            </span>
+          );
         }
-        // Phase AEK (2026-06-04) — neither a schedule nor a user fired
-        // this, so it was system-triggered (a sensor or an upstream
-        // asset's auto-materialize, ADR-0037/0041). "auto" reads clearer
-        // than a bare "—", which looks like missing data.
         return (
-          <span
-            className="inline-flex h-5 items-center gap-1 rounded-sm bg-overlay px-1.5 text-[11px] text-text-muted"
-            title={t("runs.triggerAutoTitle")}
-          >
-            <ZapIcon size={11} />
-            {t("runs.triggerAuto")}
+          <span className="inline-flex flex-wrap items-center gap-1">
+            {trigger}
+            {partitionChip}
           </span>
         );
       },

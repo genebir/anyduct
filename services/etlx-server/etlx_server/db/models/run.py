@@ -88,6 +88,16 @@ class Run(UUIDMixin, TimestampMixin, Base):
     # 임의 추가 결과 (예: 코어 ``RunResult.run_id``, OpenLineage event id, etc.)
     result_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
 
+    @property
+    def partition(self) -> dict[str, Any] | None:
+        """Partitioned-backfill sub-run marker (ADR-0095): ``{group, index,
+        of}`` or ``None``. Exposed as a property so ``RunSummary``
+        (``from_attributes``) can lift it into list responses — the runs
+        table shows which rows belong to one split without fetching each
+        run's full ``result_json``."""
+        value = (self.result_json or {}).get("partition")
+        return value if isinstance(value, dict) else None
+
     logs: Mapped[list[RunLog]] = relationship(
         back_populates="run",
         cascade="all, delete-orphan",

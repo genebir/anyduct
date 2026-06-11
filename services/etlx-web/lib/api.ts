@@ -206,6 +206,9 @@ export interface RunSummary {
   duration_seconds: number | null;
   error_class: string | null;
   created_at: string;
+  /** ADR-0095 — partitioned-backfill sub-run marker ({group, index, of}).
+   *  Lets the runs list badge sibling windows of one split. */
+  partition: { group?: string; index?: number; of?: number } | null;
 }
 
 export interface RunDetail extends RunSummary {

@@ -96,6 +96,10 @@ async def test_partitioned_backfill_covers_range_without_overlap(
         assert resp.status_code == 202, resp.text
         summaries = resp.json()
         assert len(summaries) == 3
+        # RunSummary carries the partition marker (ORM property lift) so the
+        # runs LIST can badge sibling windows without per-run detail fetches.
+        assert all(s["partition"]["of"] == 3 for s in summaries)
+        assert sorted(s["partition"]["index"] for s in summaries) == [0, 1, 2]
 
         # All three sub-runs drain (multi-replica workers would claim these
         # concurrently — P3a proved the queue's no-double-claim property).

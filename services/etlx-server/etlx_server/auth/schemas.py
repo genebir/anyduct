@@ -492,6 +492,10 @@ class RunSummary(BaseModel):
     duration_seconds: float | None
     error_class: str | None
     created_at: datetime
+    # ADR-0095 — partitioned-backfill sub-run marker ({group, index, of})
+    # lifted from result_json via the ORM property, so the runs list can
+    # badge sibling windows without N+1 detail fetches.
+    partition: dict[str, Any] | None = None
 
 
 class RunDetail(RunSummary):

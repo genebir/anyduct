@@ -2823,4 +2823,24 @@ L1 출시 직후 사용자가 5개 회신:
 
 ---
 
+## ADR-0095: 파티션 분할 실행 — partitioned backfill로 단일-run scale-out
+
+**Date**: 2026-06-12
+**Status**: Accepted (구현 완료)
+**Context**: ADR-0093 Phase 3의 본론 — "단일 run scale-out은 Spark식 shuffle 분산이 아니라 **파티션 분할 실행**(한 run을 키/커서 범위로 N개 sub-run으로 쪼개 같은 워커 플릿이 나눠 처리)". 자산은 이미 보유: ① 커서 backfill(ADR-0039) — `(cursor_from, cursor_to]` half-open 윈도우 시맨틱, 워커가 `result_json.backfill`을 `pipeline.run`에 전달 ② SKIP LOCKED run 큐 멀티-replica(ADR-0021, P3a에서 무중복 분배 실증). 빠진 것은 큰 범위를 N개 윈도우로 쪼개 **동시에 enqueue하는 진입점** 하나.
+
+**Decision**:
+- **`POST /workspaces/{ws}/pipelines/{pid}/partitioned-backfill`** (Runner+, 202 → `list[RunSummary]`). body `{boundaries: [b0..bN]}` — 연속 쌍이 윈도우: sub-run i = backfill `(b[i], b[i+1]]`. **half-open이라 윈도우 무중복 + 합집합 = `(b0, bN]` 정확** — scale-out 정합성의 핵심을 시맨틱이 보장.
+- **워커/코어 변경 0**: sub-run은 평범한 backfill run(`result_json.backfill`). 멀티-replica 워커가 SKIP LOCKED로 병렬 claim — "워커만 늘리면 분산"이 단일 run 내부에도 적용.
+- **observability**: 각 run `result_json.partition = {group, index, of}`(group=uuid가 sub-run 묶음 식별) + audit `run.backfill_partitioned`(resource=pipeline, after에 group/boundaries/run_ids).
+- **검증**: boundaries 2~65개(≤64 윈도우 캡), 전부 숫자 또는 전부 문자열(ISO 날짜는 사전순=시간순), 강증가 — 위반 시 422, 충족 못 하는 파이프라인(cursor_column 없음)은 400.
+- **균등 분할 자동 계산(서버가 min/max 스캔 후 N등분) 기각**: 데이터 분포를 모르는 서버의 산술 등분은 skew를 만든다(예: id 갭, 시간대 몰림). 운영자의 명시적 경계가 정확하고 예측 가능 — 분포 기반 자동 분할은 소스 통계 수집과 함께 후속.
+
+**Consequences**:
+- ✅ Tier 1(수십~수백 GB 실이동) 대형 historical load가 **워커 replica 수에 비례해 스케일아웃** — 분산 엔진 없이. 서버 e2e 3(3윈도우 무중복·완전 적재 + boundaries 검증 + cursor 필수).
+- ⚠️ 파티션별 완전 독립 실행(embarrassingly parallel) — 집계/dedupe가 윈도우 경계를 넘는 파이프라인은 부적합(ADR-0093 Phase 3 경고 그대로).
+- ⚠️ web 노출(빌더 Backfill 다이얼로그에 분할 옵션) 후속. Arrow `Partition`(P2a) key-range와의 결합(비-커서 분할)도 후속.
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

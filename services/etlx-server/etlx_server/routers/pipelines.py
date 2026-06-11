@@ -25,7 +25,7 @@ produce 422 with the Pydantic error chain. The server injects
 from __future__ import annotations
 
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import ValidationError
@@ -40,6 +40,7 @@ from etlx_server.auth.schemas import (
     DryRunConnectorCheck,
     DryRunLintWarning,
     DryRunResponse,
+    PartitionedBackfillRequest,
     PipelineCreateRequest,
     PipelineSummary,
     PipelineTriggersBody,
@@ -520,3 +521,69 @@ async def backfill_pipeline(
     )
     await session.commit()
     return RunSummary.model_validate(run)
+
+
+@router.post(
+    "/{pipeline_id}/partitioned-backfill",
+    response_model=list[RunSummary],
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def partitioned_backfill_pipeline(
+    pipeline_id: UUID,
+    body: PartitionedBackfillRequest,
+    ctx: WorkspaceContext = _require_runner,
+    session: AsyncSession = Depends(get_session),  # noqa: B008
+    audit: AuditService = Depends(get_audit_service),  # noqa: B008
+) -> list[RunSummary]:
+    """Split one cursor range into N parallel sub-runs (ADR-0095).
+
+    Each consecutive boundary pair becomes an independent backfill run
+    over ``(left, right]`` — the existing SKIP LOCKED queue spreads them
+    across worker replicas, so a large historical load scales out with
+    worker count instead of needing a distributed engine. Windows are
+    half-open, so the sub-runs never overlap and their union is exactly
+    ``(first, last]``. ``result_json.partition`` ties the group together
+    for observability.
+    """
+    pipeline, current = await _load_pipeline_and_current(
+        session, workspace_id=ctx.workspace.id, pipeline_id=pipeline_id
+    )
+    if not _config_has_cursor(current.config_json):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="pipeline has no source cursor_column — backfill needs an incremental cursor",
+        )
+    group = str(uuid4())
+    windows = list(zip(body.boundaries, body.boundaries[1:], strict=False))
+    repo = RunRepository(session)
+    runs = []
+    for index, (left, right) in enumerate(windows):
+        runs.append(
+            await repo.add_manual(
+                pipeline=pipeline,
+                version=current,
+                triggered_by_user_id=ctx.user.id,
+                result_json={
+                    "source": "backfill",
+                    "backfill": {"cursor_from": left, "cursor_to": right},
+                    "partition": {"group": group, "index": index, "of": len(windows)},
+                },
+            )
+        )
+    await audit.record(
+        actor_user_id=ctx.user.id,
+        workspace_id=ctx.workspace.id,
+        action="run.backfill_partitioned",
+        resource_type="pipeline",
+        resource_id=str(pipeline.id),
+        before=None,
+        after={
+            "pipeline_version_id": str(current.id),
+            "group": group,
+            "partitions": len(windows),
+            "boundaries": list(body.boundaries),
+            "run_ids": [str(r.id) for r in runs],
+        },
+    )
+    await session.commit()
+    return [RunSummary.model_validate(r) for r in runs]

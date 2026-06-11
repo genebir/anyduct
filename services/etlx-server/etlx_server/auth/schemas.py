@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
 
 
 class LoginRequest(BaseModel):
@@ -648,6 +648,39 @@ class RunBackfillRequest(BaseModel):
 
     cursor_from: str | int | float | None = None
     cursor_to: str | int | float | None = None
+
+
+class PartitionedBackfillRequest(BaseModel):
+    """Body of ``POST /workspaces/{ws}/pipelines/{pid}/partitioned-backfill``
+    (ADR-0095) — single-run scale-out by cursor-range partitioning.
+
+    ``boundaries`` splits one big cursor range into independent sub-runs:
+    window ``i`` covers ``(boundaries[i], boundaries[i+1]]`` on the source's
+    ``cursor_column`` (same half-open semantics as a backfill, so windows
+    never overlap and their union is exactly ``(first, last]``). Each window
+    is enqueued as its own PENDING run — a multi-replica worker fleet claims
+    them in parallel (SKIP LOCKED queue), which is how one large historical
+    load spreads across workers without a distributed engine.
+
+    Boundaries must be all-numeric or all-string (ISO dates sort
+    lexicographically) and strictly increasing. N boundaries ⇒ N-1 sub-runs,
+    capped at 64 windows.
+    """
+
+    boundaries: list[str | int | float] = Field(min_length=2, max_length=65)
+
+    @model_validator(mode="after")
+    def _check_boundaries(self) -> PartitionedBackfillRequest:
+        numeric = all(
+            isinstance(b, int | float) and not isinstance(b, bool) for b in self.boundaries
+        )
+        textual = all(isinstance(b, str) for b in self.boundaries)
+        if not (numeric or textual):
+            raise ValueError("boundaries must be all numbers or all strings (not mixed)")
+        for left, right in zip(self.boundaries, self.boundaries[1:], strict=False):
+            if not left < right:  # type: ignore[operator]
+                raise ValueError(f"boundaries must be strictly increasing ({left!r} !< {right!r})")
+        return self
 
 
 class AuditLogEntry(BaseModel):

@@ -126,3 +126,121 @@ def test_transform_falls_back(db: str) -> None:
     assert result.records_written == 5
     assert _rows(db) == [(i, f"n{i}") for i in range(5)]
     conn.close()
+
+
+# --- ELT pushdown (ADR-0094): sql transform with pushdown: true ------------
+
+
+def _sql_transform(query: str, **extra: Any) -> dict[str, Any]:
+    """Builder-shaped kwargs: compiled callable + raw spec side by side."""
+    cfg = TransformConfig(type="sql", query=query, **extra)
+    return {"transforms": [build_transform(cfg)], "transform_specs": [cfg.model_dump()]}
+
+
+def test_elt_pushdown_runs_transform_in_database(db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The lone ``sql`` transform composes into the INSERT's SELECT via a
+    CTE — proven the same way as the plain pushdown: read/write poisoned,
+    rows still transformed and landed."""
+    conn = SQLiteConnector(database=db)
+    conn.connect()
+    monkeypatch.setattr(
+        SQLiteConnector, "write", lambda *a, **k: (_ for _ in ()).throw(AssertionError("write"))
+    )
+    monkeypatch.setattr(
+        SQLiteConnector, "read", lambda *a, **k: (_ for _ in ()).throw(AssertionError("read"))
+    )
+    task = _task(**_sql_transform("SELECT id, UPPER(name) AS name FROM input", pushdown=True))
+    result = Pipeline(name="p", tasks=[task]).run(connectors={"db": conn})
+    assert result.data_paths == {"t": "pushdown"}
+    assert _rows(db) == [(i, f"N{i}") for i in range(5)]
+    conn.close()
+
+
+def test_elt_pushdown_aggregate_counts_result_rows(db: str) -> None:
+    """An aggregate emits fewer rows than the source had — pushdown reports
+    the statement's rowcount (the rows that landed), not the source size."""
+    con = sqlite3.connect(db)
+    con.execute("CREATE TABLE agg_out (n INTEGER)")
+    con.commit()
+    con.close()
+    conn = SQLiteConnector(database=db)
+    conn.connect()
+    task = _task(
+        sink_table="agg_out",
+        **_sql_transform("SELECT COUNT(*) AS n FROM input", pushdown=True),
+    )
+    result = Pipeline(name="p", tasks=[task]).run(connectors={"db": conn})
+    assert result.data_paths == {"t": "pushdown"}
+    assert result.records_written == 1
+    assert sqlite3.connect(db).execute("SELECT n FROM agg_out").fetchall() == [(5,)]
+    conn.close()
+
+
+def test_elt_pushdown_custom_view_name(db: str) -> None:
+    conn = SQLiteConnector(database=db)
+    conn.connect()
+    task = _task(**_sql_transform("SELECT id, name FROM src_rows", view="src_rows", pushdown=True))
+    result = Pipeline(name="p", tasks=[task]).run(connectors={"db": conn})
+    assert result.data_paths == {"t": "pushdown"}
+    assert _rows(db) == [(i, f"n{i}") for i in range(5)]
+    conn.close()
+
+
+def test_sql_transform_without_flag_stays_local(db: str) -> None:
+    """No ``pushdown: true`` → the established local DuckDB path. Opt-in
+    only: the local and in-database dialects differ, so the user decides."""
+    conn = SQLiteConnector(database=db)
+    conn.connect()
+    task = _task(**_sql_transform("SELECT id, name FROM input ORDER BY id"))
+    result = Pipeline(name="p", tasks=[task]).run(connectors={"db": conn})
+    assert result.data_paths == {"t": "records"}
+    assert _rows(db) == [(i, f"n{i}") for i in range(5)]
+    conn.close()
+
+
+def test_elt_pushdown_different_connections_falls_back_to_local(db: str, tmp_path: Path) -> None:
+    """pushdown: true across two databases can't compose — the transform
+    still runs (locally) and the result is identical, just slower."""
+    other = str(tmp_path / "other_elt.db")
+    con = sqlite3.connect(other)
+    con.execute("CREATE TABLE dst (id INTEGER, name TEXT)")
+    con.commit()
+    con.close()
+    src = SQLiteConnector(database=db)
+    dst = SQLiteConnector(database=other)
+    src.connect()
+    dst.connect()
+    task = _task(
+        sink="other",
+        **_sql_transform("SELECT id, UPPER(name) AS name FROM input", pushdown=True),
+    )
+    result = Pipeline(name="p", tasks=[task]).run(connectors={"db": src, "other": dst})
+    assert result.data_paths == {"t": "records"}
+    assert _rows(other) == [(i, f"N{i}") for i in range(5)]
+    src.close()
+    dst.close()
+
+
+def test_elt_pushdown_extra_transform_falls_back_to_local(db: str) -> None:
+    """A second transform in the chain disqualifies composition — both run
+    locally in order."""
+    sql_kwargs = _sql_transform("SELECT id, name FROM input", pushdown=True)
+    rename_cfg = TransformConfig(type="rename", mapping={})
+    task = _task(
+        transforms=[build_transform(rename_cfg), *sql_kwargs["transforms"]],
+        transform_specs=[rename_cfg.model_dump(), *sql_kwargs["transform_specs"]],
+    )
+    conn = SQLiteConnector(database=db)
+    conn.connect()
+    result = Pipeline(name="p", tasks=[task]).run(connectors={"db": conn})
+    assert result.data_paths == {"t": "records"}
+    assert _rows(db) == [(i, f"n{i}") for i in range(5)]
+    conn.close()
+
+
+def test_pushdown_flag_typo_rejected_at_build() -> None:
+    """``pushdown: "yes"`` would silently never engage — reject it."""
+    from etl_plugins.core.exceptions import ConfigError
+
+    with pytest.raises(ConfigError, match="pushdown"):
+        build_transform(TransformConfig(type="sql", query="SELECT 1", pushdown="yes"))

@@ -95,6 +95,40 @@ Hook = Callable[..., None]
 #: Record/Arrow paths rather than risk dialect-specific quoting.
 _PUSHDOWN_TABLE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$")
 
+#: Plain identifier for the ELT-pushdown CTE name (ADR-0094) — it's inlined
+#: into ``WITH <view> AS (…)``, so the same no-quoting rule applies.
+_PUSHDOWN_VIEW_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _elt_pushdown_select(task: Task) -> str | None:
+    """ELT pushdown (ADR-0094, Tier 2): when the task's ONLY transform is a
+    ``sql`` dataset transform with ``pushdown: true``, the source query and
+    the transform query compose into one in-database SELECT::
+
+        WITH <view> AS (<source query>) <transform query>
+
+    so the warehouse runs the transform itself — no rows reach Python. The
+    transform query references the source rows by the same ``view`` name
+    (default ``input``) it uses locally; in pushdown the SQL runs in the
+    *target database's* dialect rather than DuckDB, which is exactly the
+    user's intent when they opt in. Returns ``None`` when the shape doesn't
+    qualify — the caller falls back to the local DuckDB path (visible on
+    ``RunResult.data_paths``, and dry-run lint explains why).
+    """
+    specs = list(task.transform_specs or [])
+    if len(task.transforms) != 1 or len(specs) != 1:
+        return None
+    spec = specs[0]
+    if spec.get("type") != "sql" or spec.get("pushdown") is not True:
+        return None
+    transform_query = spec.get("query")
+    if not task.query or not transform_query or not isinstance(transform_query, str):
+        return None
+    view = spec.get("view") or "input"
+    if not isinstance(view, str) or not _PUSHDOWN_VIEW_RE.match(view):
+        return None
+    return f"WITH {view} AS ({task.query}) {transform_query}"
+
 
 @dataclass
 class SinkSpec:
@@ -1558,15 +1592,24 @@ class Pipeline:
         zero rows cross the wire or touch Python.
 
         Eligibility keeps the single-statement atomicity story: no
-        transforms, no cursor window, exactly one ``append`` sink with no
-        ``when`` and no per-sink ``pre_sql`` (which the Record path runs
-        inside the write transaction — two statements here would weaken
-        ADR-0035). The dialect opts in via ``supports_sql_pushdown``
-        (CQL, for one, has no INSERT…SELECT). Returns ``None`` to fall
-        through to the Arrow/Record paths.
+        transforms (or exactly one ``sql`` transform with ``pushdown:
+        true`` — ELT pushdown, ADR-0094), no cursor window, exactly one
+        ``append`` sink with no ``when`` and no per-sink ``pre_sql``
+        (which the Record path runs inside the write transaction — two
+        statements here would weaken ADR-0035). The dialect opts in via
+        ``supports_sql_pushdown`` (CQL, for one, has no INSERT…SELECT).
+        Returns ``None`` to fall through to the Arrow/Record paths.
         """
-        if task.transforms or cursored or len(sinks) != 1:
+        if cursored or len(sinks) != 1:
             return None
+        select_sql = task.query
+        if task.transforms:
+            # ELT pushdown (ADR-0094): a lone ``sql`` transform that opted
+            # in composes into the SELECT; any other transform shape keeps
+            # the local paths.
+            select_sql = _elt_pushdown_select(task)
+            if select_sql is None:
+                return None
         spec, sink = sinks[0]
         if spec.when is not None or spec.mode != "append" or spec.pre_sql:
             return None
@@ -1577,12 +1620,12 @@ class Pipeline:
             return None
         if not isinstance(source, SqlExecutor):
             return None
-        if not task.query or not spec.table or not _PUSHDOWN_TABLE_RE.match(spec.table):
+        if not select_sql or not spec.table or not _PUSHDOWN_TABLE_RE.match(spec.table):
             return None
 
         _module_logger.info("sql_pushdown", pipeline=self.name, task=task.name, table=spec.table)
         self._task_data_paths[task.name or "task"] = "pushdown"
-        n = source.execute_statement(f"INSERT INTO {spec.table} {task.query}")
+        n = source.execute_statement(f"INSERT INTO {spec.table} {select_sql}")
         rows = max(0, int(n))
         return rows, rows, None
 

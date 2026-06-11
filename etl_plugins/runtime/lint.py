@@ -25,6 +25,7 @@ transform — would defeat the purpose, so the walker mirrors
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from etl_plugins.config.models import PipelineConfig, TransformConfig
@@ -108,6 +109,12 @@ def lint_pipeline(cfg: PipelineConfig) -> list[LintWarning]:
     # no DLQ fails the whole run on a single bad record. Nudge the operator
     # to configure a dead-letter queue so failures route aside instead.
     warnings.extend(_lint_dlq_recommended(cfg))
+
+    # ADR-0094 (2026-06-11): a ``sql`` transform with ``pushdown: true``
+    # silently runs locally (DuckDB) when the task shape doesn't qualify —
+    # explain why at dry-run so "I asked the warehouse to do it" doesn't
+    # quietly become "Python did it".
+    warnings.extend(_lint_sql_pushdown_ineligible(cfg))
 
     return warnings
 
@@ -338,6 +345,98 @@ def _lint_auto_create_table_planned(cfg: PipelineConfig) -> list[LintWarning]:
                 LintWarning(
                     code="auto_create_table_planned",
                     message=_message(sink.table, sink.auto_create_if_exists),
+                    location=location,
+                )
+            )
+    return warnings
+
+
+def _sql_pushdown_requested(tc: TransformConfig) -> bool:
+    """True if this is a ``sql`` transform with ``pushdown: true`` (an
+    ``extra``-field opt-in, ADR-0094)."""
+    return tc.type == "sql" and tc.model_dump().get("pushdown") is True
+
+
+def _lint_sql_pushdown_ineligible(cfg: PipelineConfig) -> list[LintWarning]:
+    """ELT-pushdown eligibility check (ADR-0094, 2026-06-11).
+
+    ``{type: sql, pushdown: true}`` asks the runtime to compose the task
+    into one in-database ``INSERT INTO … WITH <view> AS (<source>) <query>``.
+    The runtime falls back to the local DuckDB path when the task shape
+    doesn't qualify — correct but surprising, so this rule names the first
+    blocking condition at dry-run. Only config-visible conditions are
+    checked here (connector ``supports_sql_pushdown`` needs a live
+    registry; the run's ``data_paths`` reports the actual path taken).
+    """
+    warnings: list[LintWarning] = []
+
+    if cfg.graph is not None:
+        for node in cfg.graph.nodes:
+            if (
+                node.type == "transform"
+                and node.transform is not None
+                and _sql_pushdown_requested(node.transform)
+            ):
+                warnings.append(
+                    LintWarning(
+                        code="sql_pushdown_ineligible",
+                        message=(
+                            "pushdown: true has no effect in a graph pipeline — "
+                            "pushdown composes a linear source → sql → sink task "
+                            "into one in-database statement. The transform will "
+                            "run locally (DuckDB)."
+                        ),
+                        location=f"graph.nodes.{node.id}",
+                    )
+                )
+        return warnings
+
+    has_explicit_tasks = bool(cfg.tasks)
+    for task_idx, task in enumerate(cfg.effective_tasks()):
+        requested = [
+            (tc_idx, tc) for tc_idx, tc in enumerate(task.transforms) if _sql_pushdown_requested(tc)
+        ]
+        if not requested:
+            continue
+        sinks = task.effective_sinks()
+        blocker: str | None = None
+        if len(task.transforms) != 1:
+            blocker = (
+                "the sql transform must be the task's ONLY transform "
+                f"(this task has {len(task.transforms)})"
+            )
+        elif len(sinks) != 1:
+            blocker = f"the task must have exactly one sink (this task has {len(sinks)})"
+        elif sinks[0].connection != task.source.connection:
+            blocker = (
+                f"source connection {task.source.connection!r} and sink "
+                f"connection {sinks[0].connection!r} differ — pushdown runs "
+                "inside ONE database"
+            )
+        elif sinks[0].mode != "append":
+            blocker = f"sink mode is {sinks[0].mode!r} — pushdown needs 'append'"
+        elif sinks[0].when is not None:
+            blocker = "the sink has a 'when' routing predicate"
+        elif sinks[0].model_dump().get("pre_sql"):
+            blocker = "the sink has 'pre_sql' (it must stay in the write transaction)"
+        elif not sinks[0].table or not re.match(
+            r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$", sinks[0].table
+        ):
+            blocker = f"sink table {sinks[0].table!r} is not a plain identifier"
+        if blocker is None:
+            continue
+        for tc_idx, _tc in requested:
+            if has_explicit_tasks:
+                location = f"tasks.{task_idx}.transforms.{tc_idx}"
+            else:
+                location = f"transforms.{tc_idx}"
+            warnings.append(
+                LintWarning(
+                    code="sql_pushdown_ineligible",
+                    message=(
+                        f"pushdown: true won't engage — {blocker}. The transform "
+                        "will run locally (DuckDB) instead of in-database."
+                    ),
                     location=location,
                 )
             )

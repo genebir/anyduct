@@ -434,3 +434,109 @@ def test_dlq_recommended_fires_in_graph_shape() -> None:
         }
     )
     assert len(_dlq(cfg)) == 1
+
+
+# ---------- sql_pushdown_ineligible (ADR-0094) ----------
+
+
+def _pd(cfg: PipelineConfig) -> list:
+    return [w for w in lint_pipeline(cfg) if w.code == "sql_pushdown_ineligible"]
+
+
+def _sql_pd(**extra: object) -> dict:
+    return {"type": "sql", "query": "SELECT a FROM input", "pushdown": True, **extra}
+
+
+def test_pushdown_eligible_shape_emits_no_warning() -> None:
+    cfg = _cfg(transforms=[_sql_pd()])
+    assert _pd(cfg) == []
+
+
+def test_pushdown_without_flag_emits_no_warning() -> None:
+    cfg = _cfg(transforms=[{"type": "sql", "query": "SELECT a FROM input"}])
+    assert _pd(cfg) == []
+
+
+def test_pushdown_cross_connection_warns() -> None:
+    cfg = _cfg(
+        transforms=[_sql_pd()],
+        sink={"connection": "other", "table": "t2"},
+    )
+    warnings = _pd(cfg)
+    assert len(warnings) == 1
+    assert "differ" in warnings[0].message
+    assert warnings[0].location == "transforms.0"
+
+
+def test_pushdown_non_append_mode_warns() -> None:
+    cfg = _cfg(transforms=[_sql_pd()], sink={"connection": "wh", "table": "t2", "mode": "upsert"})
+    warnings = _pd(cfg)
+    assert len(warnings) == 1
+    assert "'append'" in warnings[0].message
+
+
+def test_pushdown_extra_transform_warns() -> None:
+    cfg = _cfg(transforms=[{"type": "rename", "mapping": {}}, _sql_pd()])
+    warnings = _pd(cfg)
+    assert len(warnings) == 1
+    assert "ONLY transform" in warnings[0].message
+    assert warnings[0].location == "transforms.1"
+
+
+def test_pushdown_sink_pre_sql_warns() -> None:
+    cfg = _cfg(
+        transforms=[_sql_pd()],
+        sink={"connection": "wh", "table": "t2", "pre_sql": "DELETE FROM t2"},
+    )
+    warnings = _pd(cfg)
+    assert len(warnings) == 1
+    assert "pre_sql" in warnings[0].message
+
+
+def test_pushdown_fancy_table_identifier_warns() -> None:
+    cfg = _cfg(transforms=[_sql_pd()], sink={"connection": "wh", "table": 'we"ird'})
+    warnings = _pd(cfg)
+    assert len(warnings) == 1
+    assert "plain identifier" in warnings[0].message
+
+
+def test_pushdown_task_shape_location() -> None:
+    cfg = PipelineConfig.model_validate(
+        {
+            "name": "p",
+            "tasks": [
+                {
+                    "name": "t1",
+                    "source": {"connection": "wh", "query": "SELECT a FROM t"},
+                    "transforms": [_sql_pd()],
+                    "sink": {"connection": "wh", "table": "out", "mode": "overwrite"},
+                }
+            ],
+        }
+    )
+    warnings = _pd(cfg)
+    assert len(warnings) == 1
+    assert warnings[0].location == "tasks.0.transforms.0"
+
+
+def test_pushdown_graph_shape_always_warns() -> None:
+    cfg = PipelineConfig.model_validate(
+        {
+            "name": "p",
+            "graph": {
+                "nodes": [
+                    {"id": "s", "type": "source", "connection": "wh", "query": "SELECT a FROM t"},
+                    {"id": "x", "type": "transform", "transform": _sql_pd()},
+                    {"id": "k", "type": "sink", "connection": "wh", "table": "out"},
+                ],
+                "edges": [
+                    {"from_node": "s", "to_node": "x"},
+                    {"from_node": "x", "to_node": "k"},
+                ],
+            },
+        }
+    )
+    warnings = _pd(cfg)
+    assert len(warnings) == 1
+    assert warnings[0].location == "graph.nodes.x"
+    assert "graph" in warnings[0].message

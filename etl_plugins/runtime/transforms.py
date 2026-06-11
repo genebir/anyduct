@@ -490,6 +490,13 @@ def _build_sql(config: TransformConfig) -> DatasetTransformFn:
         chunk_rows = DEFAULT_BATCH_ROWS
     if not isinstance(chunk_rows, int) or isinstance(chunk_rows, bool) or chunk_rows <= 0:
         raise ConfigError(f"sql: 'chunk_rows' must be a positive integer, got {chunk_rows!r}")
+    # ELT pushdown opt-in (ADR-0094). The flag is consumed by the runtime
+    # (``Pipeline._try_sql_pushdown``), not here — but a typo like
+    # ``pushdown: "yes"`` would silently never engage, so reject non-bools
+    # at build time.
+    pushdown = _config_field(config, "pushdown", required=False)
+    if pushdown is not None and not isinstance(pushdown, bool):
+        raise ConfigError(f"sql: 'pushdown' must be true or false, got {pushdown!r}")
 
     def _sql(records: Iterator[Record]) -> Iterator[Record]:
         try:

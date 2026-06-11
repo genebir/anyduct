@@ -239,3 +239,57 @@ class TestSqlPushdown:
                 with conn.cursor() as cur:
                     cur.execute(f"DROP TABLE IF EXISTS {dst_table}")
                 conn.commit()
+
+    def test_elt_pushdown_runs_sql_transform_in_database(
+        self, apg: PostgresConnector, typed_table: str, pg_raw_kwargs: dict[str, Any]
+    ) -> None:
+        """ADR-0094: ``{type: sql, pushdown: true}`` composes into
+        ``INSERT INTO … WITH input AS (<source>) <query>`` and Postgres
+        runs the GROUP BY itself — read/write poisoned, so any row
+        leaving the database fails the test."""
+        from etl_plugins.config.models import TransformConfig
+        from etl_plugins.runtime.transforms import build_transform
+
+        dst_table = f"etl_elt_dst_{uuid4().hex[:8]}"
+        with psycopg.connect(**pg_raw_kwargs) as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"CREATE TABLE {dst_table} (active BOOLEAN, n BIGINT)")
+            conn.commit()
+        try:
+            apg.write_arrow(
+                iter(
+                    [_batch([{"id": i, "label": f"L{i}", "active": i % 2 == 0} for i in range(50)])]
+                ),
+                table=typed_table,
+            )
+
+            def poison(*a: Any, **k: Any) -> Any:
+                raise AssertionError("moved rows")
+
+            for meth in ("read", "write", "read_arrow", "write_arrow"):
+                setattr(apg, meth, poison)
+            tc = TransformConfig(
+                type="sql",
+                query="SELECT active, COUNT(*) AS n FROM input GROUP BY active",
+                pushdown=True,
+            )
+            task = Task(
+                name="elt",
+                source="db",
+                sink="db",
+                query=f"SELECT id, active FROM {typed_table}",
+                sink_table=dst_table,
+                transforms=[build_transform(tc)],
+                transform_specs=[tc.model_dump()],
+            )
+            result = Pipeline(name="elt-p", tasks=[task]).run(connectors={"db": apg})
+            assert result.data_paths == {"elt": "pushdown"}
+            assert result.records_written == 2  # one row per active group
+            with psycopg.connect(**pg_raw_kwargs) as conn, conn.cursor() as cur:
+                cur.execute(f"SELECT active, n FROM {dst_table} ORDER BY active")
+                assert cur.fetchall() == [(False, 25), (True, 25)]
+        finally:
+            with psycopg.connect(**pg_raw_kwargs) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(f"DROP TABLE IF EXISTS {dst_table}")
+                conn.commit()

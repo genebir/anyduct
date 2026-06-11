@@ -612,7 +612,7 @@
 
 ## Step 11 — 운영 강화
 
-- [ ] 멀티 테넌시 격리 부담 테스트 (workspace 100개 시뮬레이션)
+- [x] **멀티 테넌시 격리 부담 테스트** ✅ (2026-06-12) — 100 workspace × 동일 connection명/테이블/asset_key가 한 큐를 공유, 1 워커 드레인 후 ws별 정확히 자기 run/데이터/카탈로그(HH의 fleet 스케일업). 실측 100 run 드레인 4.2s(24 runs/s) + 시간 로그/완만한 천장(O(N²) claim 회귀 가드). `test_multi_tenancy_load_scenario.py`.
 - [ ] Helm chart (`services/charts/etlx/`) — postgres, vault, server, web, prometheus 일괄
 - [ ] `services/docker-compose.services.yml` — 로컬 풀스택 실행
 - [ ] 백업 가이드: metadata DB dump + 시크릿 백엔드 export

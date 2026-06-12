@@ -18,6 +18,7 @@ import {
 } from "@/lib/api";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import { useLocale } from "@/components/providers/locale-provider";
+import { RequiredMark } from "@/components/ui/required-mark";
 import { inferType } from "@/lib/variable-types";
 import { buildVariableUsage } from "@/lib/variable-usage";
 
@@ -227,6 +228,7 @@ export default function VariablesPage() {
               <label className="flex flex-col gap-1.5">
                 <span className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
                   {t("variables.name")}
+                  <RequiredMark />
                 </span>
                 <Input
                   value={name}

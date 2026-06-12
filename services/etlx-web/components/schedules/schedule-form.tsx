@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/cn";
+import { RequiredMark } from "@/components/ui/required-mark";
 import { CronInput } from "./cron-input";
 import {
   ApiError,
@@ -77,7 +78,7 @@ export function ScheduleCreateForm({
         description={t("schedForm.newDesc")}
       />
       <form onSubmit={onSubmit} className="grid gap-4 md:grid-cols-2">
-        <FieldRow label={t("common.name")} className="md:col-span-2">
+        <FieldRow label={t("common.name")} required className="md:col-span-2">
           <Input
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -90,6 +91,7 @@ export function ScheduleCreateForm({
         </FieldRow>
         <FieldRow
           label={t("schedForm.cron")}
+          required
           help={
             mode === "stream"
               ? t("schedForm.cronHelpStream")
@@ -172,7 +174,7 @@ export function ScheduleEditForm({
         description={t("schedForm.editDesc", { mode: existing.mode })}
       />
       <form onSubmit={onSubmit} className="grid gap-4 md:grid-cols-2">
-        <FieldRow label={t("common.name")} className="md:col-span-2">
+        <FieldRow label={t("common.name")} required className="md:col-span-2">
           <Input
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -181,6 +183,7 @@ export function ScheduleEditForm({
         </FieldRow>
         <FieldRow
           label={t("schedForm.cron")}
+          required
           help={t("schedForm.cronHelpEdit")}
           className="md:col-span-2"
         >
@@ -206,11 +209,13 @@ export function ScheduleEditForm({
 function FieldRow({
   label,
   help,
+  required,
   className,
   children,
 }: {
   label: string;
   help?: string;
+  required?: boolean;
   className?: string;
   children: React.ReactNode;
 }) {
@@ -218,6 +223,7 @@ function FieldRow({
     <label className={cn("flex flex-col gap-1.5", className)}>
       <span className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
         {label}
+        {required ? <RequiredMark /> : null}
       </span>
       {children}
       {help ? <span className="text-[11px] text-text-muted">{help}</span> : null}

@@ -21,6 +21,7 @@ import {
 import { useAuth } from "@/components/providers/auth-provider";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import { useLocale } from "@/components/providers/locale-provider";
+import { RequiredMark } from "@/components/ui/required-mark";
 import type { Messages } from "@/lib/i18n/messages";
 import { cn } from "@/lib/cn";
 
@@ -257,6 +258,7 @@ export default function MembersPage() {
               <label className="flex flex-col gap-1.5">
                 <span className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
                   {t("common.email")}
+                  <RequiredMark />
                 </span>
                 <Input
                   type="email"

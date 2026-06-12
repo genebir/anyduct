@@ -21,6 +21,7 @@ import { ArrowRightIcon } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { RequiredMark } from "@/components/ui/required-mark";
 import { useLocale } from "@/components/providers/locale-provider";
 import { ApiError, connectionsApi, type ConnectionSummary } from "@/lib/api";
 import {
@@ -308,6 +309,7 @@ export function MigrationForm({
         <label className="flex flex-col gap-1.5">
           <span className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
             {t("common.name")}
+            <RequiredMark />
           </span>
           <Input
             value={name}
@@ -368,6 +370,7 @@ export function MigrationForm({
             <label className="flex flex-col gap-1">
               <span className="text-xs text-text-secondary">
                 {t("migrations.fromConnection")}
+            <RequiredMark />
               </span>
               <select
                 value={f.sourceConnection}
@@ -404,6 +407,7 @@ export function MigrationForm({
               <label className="flex flex-col gap-1">
                 <span className="text-xs text-text-secondary">
                   {t("migrations.pickTable")}
+                  <RequiredMark />
                 </span>
                 {/* Phase AAS follow-up (2026-06-01) — user request
                     "직접 테이블명 입력 말고 드롭다운으로 선택할 수
@@ -462,6 +466,7 @@ export function MigrationForm({
                 <label className="flex flex-col gap-1">
                   <span className="text-xs text-text-secondary">
                     {t("migrations.sourceSchema")}
+            <RequiredMark />
                   </span>
                   <select
                     value={f.sourceSchema}
@@ -614,6 +619,7 @@ export function MigrationForm({
             <label className="flex flex-col gap-1">
               <span className="text-xs text-text-secondary">
                 {t("migrations.toConnection")}
+            <RequiredMark />
               </span>
               <select
                 value={f.sinkConnection}
@@ -638,6 +644,7 @@ export function MigrationForm({
               <label className="flex flex-col gap-1">
                 <span className="text-xs text-text-secondary">
                   {t("migrations.destTable")}
+            <RequiredMark />
                 </span>
                 <Input
                   value={f.sinkTable}
@@ -718,6 +725,7 @@ export function MigrationForm({
           <label className="mt-4 flex flex-col gap-1">
             <span className="text-xs text-text-secondary">
               {t("migrations.cursorColumn")}
+            <RequiredMark />
             </span>
             <Input
               value={f.cursorColumn}
@@ -750,6 +758,7 @@ export function MigrationForm({
           <label className="mt-4 flex flex-col gap-1">
             <span className="text-xs text-text-secondary">
               {t("migrations.keyColumnsLabel")}
+            <RequiredMark />
             </span>
             <Input
               value={f.keyColumns}

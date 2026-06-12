@@ -13,7 +13,9 @@ export function RequiredMark() {
   const { t } = useLocale();
   return (
     <span
-      className="-mt-0.5 self-start text-[10px] font-bold leading-none text-error"
+      // self-start/-mt position it top-right in flex labels; align-super
+      // does the same job in plain inline label spans.
+      className="-mt-0.5 ml-0.5 self-start align-super text-[10px] font-bold leading-none text-error"
       title={t("common.requiredField")}
       aria-label={t("common.requiredField")}
       role="img"

@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { useWorkspaces } from "@/components/providers/workspace-provider";
 import { useLocale } from "@/components/providers/locale-provider";
+import { RequiredMark } from "@/components/ui/required-mark";
 import { ApiError, workspacesApi, type WorkspaceSummary } from "@/lib/api";
 import { Input } from "@/components/ui/input";
 
@@ -90,6 +91,7 @@ export default function WorkspacesPage() {
               <label className="flex flex-col gap-1.5">
                 <span className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
                   {t("common.name")}
+                  <RequiredMark />
                 </span>
                 <Input
                   value={name}
@@ -100,6 +102,7 @@ export default function WorkspacesPage() {
               <label className="flex flex-col gap-1.5">
                 <span className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
                   {t("workspaces.slug")}
+                  <RequiredMark />
                 </span>
                 <Input
                   value={slug}

@@ -294,6 +294,11 @@
     width: 1rem;
     height: 1rem;
     flex-shrink: 0;
+    /* Inline inputs default to baseline alignment, which floats the box
+       above the line's vertical centre inside table cells (user report
+       2026-06-12: "살짝 위에 있어서"). Centre it on the line instead;
+       harmless in flex contexts where vertical-align is ignored. */
+    vertical-align: middle;
     cursor: pointer;
     border-radius: 4px;
     border: 1px solid rgb(var(--border-default));

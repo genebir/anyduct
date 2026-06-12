@@ -1358,6 +1358,12 @@ export const en = {
   "assets.columnLineage": "Column lineage",
   // 2026-06-12 — ERD-style column lineage redesign.
   "assets.clHint": "Hover a column to trace its path · click to pin",
+  "assets.clDepth": "Hops",
+  "assets.clTruncated": "more upstream",
+  "assets.clTruncatedHint":
+    "The walk was cut by the hop depth or the asset cap — increase hops or open an upstream asset to keep digging.",
+  "assets.clMoreColumns": "+{count} more columns",
+  "assets.clMoreColumnsHint": "Columns that take no part in this lineage view — click to show them.",
   "assets.clThisAsset": "This asset",
   "assets.clOpenAsset": "Open {key}",
   "assets.clNoUpstream": "const",
@@ -2824,6 +2830,12 @@ export const ko: Messages = {
   "assets.columnLineage": "컬럼 리니지",
   // 2026-06-12 — ERD풍 컬럼 리니지 재설계.
   "assets.clHint": "컬럼에 마우스를 올리면 경로 추적 · 클릭하면 고정",
+  "assets.clDepth": "홉",
+  "assets.clTruncated": "더 위가 있음",
+  "assets.clTruncatedHint":
+    "홉 깊이 또는 자산 수 제한으로 탐색이 잘렸습니다 — 홉을 늘리거나 업스트림 자산을 열어 계속 추적하세요.",
+  "assets.clMoreColumns": "+{count}개 컬럼 더",
+  "assets.clMoreColumnsHint": "이 리니지 뷰에 참여하지 않는 컬럼들입니다 — 클릭하면 표시합니다.",
   "assets.clThisAsset": "이 자산",
   "assets.clOpenAsset": "{key} 열기",
   "assets.clNoUpstream": "상수",

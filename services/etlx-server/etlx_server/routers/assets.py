@@ -22,11 +22,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from etlx_server.assets.repository import AssetRepository
 from etlx_server.auth.schemas import (
     AssetColumnEntry,
+    AssetColumnLineageGraphResponse,
     AssetColumnLineageResponse,
     AssetLineageResponse,
     AssetMaterializationEntry,
     AssetRef,
     AssetSummary,
+    ColumnGraphAssetEntry,
+    ColumnGraphEdgeEntry,
     ColumnUpstreamRef,
 )
 from etlx_server.auth.workspace_context import WorkspaceContext, require_workspace_role
@@ -120,4 +123,49 @@ async def asset_column_lineage(
         asset_key=asset.asset_key,
         opaque=asset.column_lineage_opaque,
         columns=entries,
+    )
+
+
+@router.get("/{asset_id}/column-lineage-graph", response_model=AssetColumnLineageGraphResponse)
+async def asset_column_lineage_graph(
+    asset_id: UUID,
+    depth: int = 3,
+    ctx: WorkspaceContext = _require_viewer,
+    session: AsyncSession = Depends(get_session),  # noqa: B008
+) -> AssetColumnLineageGraphResponse:
+    """Multi-hop upstream column lineage (2026-06-12) — the conventional
+    catalog drill-down: BFS up to ``depth`` hops (clamped to [1, 5]) and
+    at most 40 assets, returning asset cards (with their column lists)
+    plus column→column edges. ``opaque`` refers to the ROOT asset; the
+    UI shows the banner in that case (upstream assets may still be
+    individually opaque — their cards just have no incoming edges)."""
+    depth = max(1, min(depth, 5))
+    asset = await _resolve_or_404(session, workspace_id=ctx.workspace.id, asset_id=asset_id)
+    assets, columns, edges, truncated = await AssetRepository(session).column_lineage_graph(
+        asset_id=asset.id, max_depth=depth
+    )
+    return AssetColumnLineageGraphResponse(
+        id=asset.id,
+        asset_key=asset.asset_key,
+        opaque=asset.column_lineage_opaque,
+        max_depth=depth,
+        truncated=truncated,
+        assets=[
+            ColumnGraphAssetEntry(
+                id=aid,
+                asset_key=a.asset_key,
+                depth=d,
+                columns=columns.get(aid, []),
+            )
+            for aid, (a, d) in sorted(assets.items(), key=lambda kv: (kv[1][1], kv[1][0].asset_key))
+        ],
+        edges=[
+            ColumnGraphEdgeEntry(
+                from_asset_id=up_aid,
+                from_column=up_col,
+                to_asset_id=dn_aid,
+                to_column=dn_col,
+            )
+            for up_aid, up_col, dn_aid, dn_col in edges
+        ],
     )

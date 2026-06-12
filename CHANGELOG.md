@@ -36,6 +36,7 @@
 - **워커 멀티-replica 클러스터링 실증 + asset upsert 레이스 수정 (Phase P3a, 2026-06-10)**: SKIP LOCKED 큐(ADR-0021)의 "워커만 늘리면 분산" 약속을 처음으로 e2e 검증 — 3 replica 동시 claim 무중복 분배 + 실제 RunWorker 2대 공동 드레인. e2e가 발견한 실버그: 동시 run 완료 시 카탈로그 asset/edge upsert(select-then-insert)가 유니크 충돌로 run 실패 → `ON CONFLICT DO NOTHING` 원자화.
 
 ### Changed
+- **컬럼 리니지 멀티-홉 DAG (2026-06-12, 사용자 피드백 "보편 구현에 가깝게")**: DataHub/OpenMetadata식 카탈로그 관례로 — 서버 `GET /assets/{id}/column-lineage-graph?depth=N`(BFS 업스트림, depth 1~5 클램프 + 40자산 캡, `truncated` 신호 — 캡 너머 존재를 1쿼리 프로브) 신설(기존 1홉 endpoint 유지). 웹: 홉당 레인(루트 우측 끝), barycenter 레인 정렬(교차 감소), **전이적 hover/pin 추적**(전 홉 양방향 BFS), 업스트림 카드 비참여 컬럼 "+N개" 접기(루트는 전부 표시), 홉 컨트롤(1~5 재조회) + "더 위가 있음" 칩. live 검증: weekly_summary←daily_totals←raw_events 3-레인 실데이터. 서버 e2e 2.
 - **컬럼 리니지 UI 재설계 (2026-06-12, 사용자 피드백)**: React Flow 캔버스(컬럼별 박스가 둥둥 + 줌/팬/미니맵 + 추적 불가)를 ERD 시각 언어로 교체 — 업스트림 자산=엔티티 카드(헤더 클릭→자산 이동), 현재 자산=우측 카드, 행 포트에서 나오는 베지어 엣지, **hover=경로 하이라이트+나머지 dim, 클릭=고정**, 상수 컬럼 "const" 배지, 스크롤 자연 흐름(캔버스 조작 제거). 결정적 레이아웃이라 측정 불필요. Storybook 스토리 갱신+현실 케이스 추가.
 - **ERD 자동정렬 전면 재작성 — 가시성 최적화 (Phase ALB, 2026-06-10, ADR-0092)**: 레이아웃이 렌더러의 선 기하(접점 분배/직선 스냅/장애물 회피)를 픽셀-정확히 예측하며 노드 크기·접점·선 경로·배치를 함께 최적화.
   - 신규 `lib/erd-edge-geometry.ts`(렌더러·레이아웃 공유 순수 기하) + 노드 lineHeight 고정으로 auto 높이 공식화(fontScale 반영).

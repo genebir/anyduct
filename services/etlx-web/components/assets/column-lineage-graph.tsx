@@ -1,62 +1,41 @@
 "use client";
 
 /**
- * Column-level lineage view (ADR-0041 J3; redesigned 2026-06-12 on user
- * feedback — the React Flow version floated one box per column on a
- * pannable canvas, which read as confetti, hid the asset grouping, and
- * offered no way to trace a column).
+ * Multi-hop column-lineage DAG (2026-06-12 — the conventional catalog
+ * drill-down, DataHub/OpenMetadata-style; supersedes both the floating
+ * React Flow boxes AND the single-hop two-column rewrite).
  *
- * The redesign borrows the ERD designer's visual language:
+ *   - one LANE per hop: the asset being viewed sits rightmost (depth 0),
+ *     its direct upstreams one lane left (depth 1), and so on;
+ *   - assets are entity cards (header + column rows); columns that take
+ *     no part in lineage are collapsed behind a "+N" toggle (the root
+ *     card always shows everything — it's the asset being inspected);
+ *   - row-port béziers connect upstream→downstream columns across lanes;
+ *   - hovering a column traces its FULL transitive path (all hops, both
+ *     directions) and dims the rest; clicking pins the trace;
+ *   - a hop-depth control refetches deeper/shallower graphs, and a
+ *     "more upstream" chip appears when the server truncated the walk.
  *
- *   - assets are entity CARDS (header + column rows), upstream cards on
- *     the left, the current asset on the right;
- *   - edges leave from the exact row port (right edge of an upstream row
- *     → left edge of a downstream row) as cubic béziers in one SVG
- *     overlay — no zoom/pan chrome for what is a static left→right map;
- *   - hovering a row highlights its full path (related rows + edges)
- *     and dims everything else; clicking pins the highlight.
- *
- * Layout is fully deterministic (fixed row heights), so edge coordinates
- * are computed, not measured.
+ * Layout is deterministic (fixed row heights + barycenter lane ordering),
+ * so edge coordinates are computed, never measured.
  */
 
 import { useMemo, useState } from "react";
 import { ExternalLinkIcon } from "lucide-react";
 import { useLocale } from "@/components/providers/locale-provider";
 import { cn } from "@/lib/cn";
-import type { AssetColumnEntry } from "@/lib/api";
+import type { AssetColumnLineageGraphResponse } from "@/lib/api";
 
-const CARD_W = 240;
-const SPAN_W = 170; // horizontal gap the edges cross
-const HEADER_H = 36;
-const ROW_H = 26;
-const CARD_GAP = 16;
-const PORT_R = 3;
+const CARD_W = 220;
+const SPAN_W = 130; // horizontal gap edges cross between lanes
+const HEADER_H = 34;
+const ROW_H = 25;
+const TOGGLE_H = 22;
+const CARD_GAP = 18;
+const PORT_R = 2.5;
 
-type UpstreamGroup = { assetId: string; assetKey: string; columns: string[] };
-
-type RowKey = string; // "up:<assetId>:<col>" | "dn:<col>"
-
-const upKey = (assetId: string, col: string): RowKey => `up:${assetId}:${col}`;
-const dnKey = (col: string): RowKey => `dn:${col}`;
-
-function groupUpstreams(columns: AssetColumnEntry[]): UpstreamGroup[] {
-  const byAsset = new Map<string, { assetKey: string; columns: Set<string> }>();
-  for (const col of columns) {
-    for (const up of col.upstreams) {
-      const entry = byAsset.get(up.asset_id);
-      if (entry) entry.columns.add(up.column);
-      else byAsset.set(up.asset_id, { assetKey: up.asset_key, columns: new Set([up.column]) });
-    }
-  }
-  return Array.from(byAsset.entries())
-    .map(([assetId, v]) => ({
-      assetId,
-      assetKey: v.assetKey,
-      columns: Array.from(v.columns).sort(),
-    }))
-    .sort((a, b) => a.assetKey.localeCompare(b.assetKey));
-}
+type RowKey = string; // `${assetId}:${column}`
+const rowKey = (assetId: string, col: string): RowKey => `${assetId}:${col}`;
 
 /** "conn/table" → emphasized table name with the connection muted. */
 function AssetKeyLabel({ assetKey, current }: { assetKey: string; current?: boolean }) {
@@ -71,78 +50,158 @@ function AssetKeyLabel({ assetKey, current }: { assetKey: string; current?: bool
   );
 }
 
+interface CardLayout {
+  assetId: string;
+  assetKey: string;
+  depth: number;
+  x: number;
+  top: number;
+  /** Visible rows in render order with their absolute port y. */
+  rows: { name: string; y: number }[];
+  hiddenCount: number;
+  height: number;
+}
+
 export function ColumnLineageGraph({
-  columns,
+  graph,
+  depth,
+  onDepthChange,
   onSelectAsset,
 }: {
-  columns: AssetColumnEntry[];
+  graph: AssetColumnLineageGraphResponse;
+  /** Current hop depth (the page owns it — changing refetches). */
+  depth: number;
+  onDepthChange?: (depth: number) => void;
   onSelectAsset?: (assetId: string) => void;
 }) {
   const { t } = useLocale();
   const [hovered, setHovered] = useState<RowKey | null>(null);
   const [pinned, setPinned] = useState<RowKey | null>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const model = useMemo(() => {
-    const groups = groupUpstreams(columns);
-    const downColumns = [...columns].sort((a, b) => a.name.localeCompare(b.name));
+    const maxLane = Math.max(0, ...graph.assets.map((a) => a.depth));
+    const laneX = (d: number) => (maxLane - d) * (CARD_W + SPAN_W);
 
-    // --- row y-coordinates (deterministic) -------------------------------
-    const upRowY = new Map<RowKey, number>();
-    const cards: { group: UpstreamGroup; top: number }[] = [];
-    let y = 0;
-    for (const g of groups) {
-      cards.push({ group: g, top: y });
-      let rowY = y + HEADER_H;
-      for (const col of g.columns) {
-        upRowY.set(upKey(g.assetId, col), rowY + ROW_H / 2);
-        rowY += ROW_H;
-      }
-      y = rowY + CARD_GAP;
+    // Columns that participate in lineage (linked) per asset.
+    const linked = new Map<string, Set<string>>();
+    const touchLinked = (assetId: string, col: string) => {
+      if (!linked.has(assetId)) linked.set(assetId, new Set());
+      linked.get(assetId)!.add(col);
+    };
+    for (const e of graph.edges) {
+      touchLinked(e.from_asset_id, e.from_column);
+      touchLinked(e.to_asset_id, e.to_column);
     }
-    const leftHeight = Math.max(0, y - CARD_GAP);
-    const rightHeight = HEADER_H + downColumns.length * ROW_H;
-    const height = Math.max(leftHeight, rightHeight);
 
-    const dnRowY = new Map<RowKey, number>();
-    downColumns.forEach((col, i) => {
-      dnRowY.set(dnKey(col.name), HEADER_H + i * ROW_H + ROW_H / 2);
+    // Visible rows per asset: root shows ALL columns; upstream cards show
+    // linked columns, the rest collapse behind a "+N" toggle.
+    const visibleRows = new Map<string, { rows: string[]; hidden: number }>();
+    for (const a of graph.assets) {
+      const linkSet = linked.get(a.id) ?? new Set<string>();
+      const showAll = a.depth === 0 || expanded.has(a.id);
+      const rows = showAll ? a.columns : a.columns.filter((c) => linkSet.has(c));
+      visibleRows.set(a.id, { rows, hidden: a.columns.length - rows.length });
+    }
+    const cardHeight = (assetId: string) => {
+      const v = visibleRows.get(assetId)!;
+      return HEADER_H + v.rows.length * ROW_H + (v.hidden > 0 ? TOGGLE_H : 0);
+    };
+
+    // --- lane ordering: barycenter over already-placed downstream rows ---
+    const byLane = new Map<number, typeof graph.assets>();
+    for (const a of graph.assets) {
+      if (!byLane.has(a.depth)) byLane.set(a.depth, []);
+      byLane.get(a.depth)!.push(a);
+    }
+    const rowY = new Map<RowKey, number>();
+    const cards: CardLayout[] = [];
+    for (let d = 0; d <= maxLane; d++) {
+      const lane = [...(byLane.get(d) ?? [])];
+      if (d > 0) {
+        // Mean y of the rows this card feeds (already placed, lanes < d).
+        const bary = (assetId: string): number => {
+          const ys: number[] = [];
+          for (const e of graph.edges) {
+            if (e.from_asset_id !== assetId) continue;
+            const y = rowY.get(rowKey(e.to_asset_id, e.to_column));
+            if (y != null) ys.push(y);
+          }
+          return ys.length ? ys.reduce((a, b) => a + b, 0) / ys.length : Number.MAX_SAFE_INTEGER;
+        };
+        lane.sort((a, b) => bary(a.id) - bary(b.id) || a.asset_key.localeCompare(b.asset_key));
+      }
+      let top = 0;
+      for (const a of lane) {
+        const v = visibleRows.get(a.id)!;
+        const rows = v.rows.map((name, i) => ({
+          name,
+          y: top + HEADER_H + i * ROW_H + ROW_H / 2,
+        }));
+        for (const r of rows) rowY.set(rowKey(a.id, r.name), r.y);
+        cards.push({
+          assetId: a.id,
+          assetKey: a.asset_key,
+          depth: d,
+          x: laneX(d),
+          top,
+          rows,
+          hiddenCount: v.hidden,
+          height: cardHeight(a.id),
+        });
+        top += cardHeight(a.id) + CARD_GAP;
+      }
+    }
+    const height = Math.max(0, ...cards.map((c) => c.top + c.height));
+    const width = (maxLane + 1) * CARD_W + maxLane * SPAN_W;
+
+    // --- edges with computed endpoints ---
+    const cardX = new Map(cards.map((c) => [c.assetId, c.x]));
+    const edges = graph.edges.flatMap((e) => {
+      const from = rowKey(e.from_asset_id, e.from_column);
+      const to = rowKey(e.to_asset_id, e.to_column);
+      const y1 = rowY.get(from);
+      const y2 = rowY.get(to);
+      const fx = cardX.get(e.from_asset_id);
+      const tx = cardX.get(e.to_asset_id);
+      if (y1 == null || y2 == null || fx == null || tx == null) return [];
+      return [{ id: `${from}->${to}`, from, to, x1: fx + CARD_W, y1, x2: tx, y2 }];
     });
 
-    // --- edges + relation sets for highlight ------------------------------
-    type EdgeModel = { id: string; from: RowKey; to: RowKey; y1: number; y2: number };
-    const edges: EdgeModel[] = [];
-    const related = new Map<RowKey, Set<RowKey>>(); // row → {rows it lights up}
-    const touch = (a: RowKey, b: RowKey) => {
-      if (!related.has(a)) related.set(a, new Set([a]));
-      related.get(a)!.add(b);
+    // --- transitive adjacency for the trace ---
+    const adjacency = new Map<RowKey, Set<RowKey>>();
+    const link = (a: RowKey, b: RowKey) => {
+      if (!adjacency.has(a)) adjacency.set(a, new Set());
+      adjacency.get(a)!.add(b);
     };
-    for (const col of columns) {
-      const to = dnKey(col.name);
-      for (const up of col.upstreams) {
-        const from = upKey(up.asset_id, up.column);
-        const y1 = upRowY.get(from);
-        const y2 = dnRowY.get(to);
-        if (y1 == null || y2 == null) continue;
-        edges.push({ id: `${from}->${to}`, from, to, y1, y2 });
-        touch(from, to);
-        touch(to, from);
-      }
+    for (const e of edges) {
+      link(e.from, e.to);
+      link(e.to, e.from);
     }
-    return { groups: cards, downColumns, height, edges, related, upRowY, dnRowY };
-  }, [columns]);
-
-  if (columns.length === 0) {
-    return (
-      <div className="flex h-32 items-center justify-center text-sm text-text-muted" role="status">
-        {t("assets.columnLineageEmpty")}
-      </div>
-    );
-  }
+    return { cards, edges, adjacency, height, width, maxLane };
+  }, [graph, expanded]);
 
   const active = pinned ?? hovered;
-  const activeSet = active ? (model.related.get(active) ?? new Set([active])) : null;
-  const isDim = (key: RowKey) => activeSet !== null && !activeSet.has(key);
+  const activeSet = useMemo(() => {
+    if (!active) return null;
+    // Full transitive closure in both directions — "everything that
+    // contributes to / is derived from this column" across all hops.
+    const seen = new Set<RowKey>([active]);
+    const queue = [active];
+    while (queue.length) {
+      const cur = queue.pop()!;
+      for (const next of model.adjacency.get(cur) ?? []) {
+        if (!seen.has(next)) {
+          seen.add(next);
+          queue.push(next);
+        }
+      }
+    }
+    return seen;
+  }, [active, model.adjacency]);
+
   const isLit = (key: RowKey) => activeSet !== null && activeSet.has(key);
+  const isDim = (key: RowKey) => activeSet !== null && !activeSet.has(key);
 
   const rowProps = (key: RowKey) => ({
     onMouseEnter: () => setHovered(key),
@@ -153,149 +212,161 @@ export function ColumnLineageGraph({
     },
   });
 
-  const totalW = CARD_W * 2 + SPAN_W;
-
   return (
     <div data-testid="column-lineage-graph">
-      <div className="px-2 pb-1 text-right text-[11px] text-text-muted">
-        {t("assets.clHint")}
+      <div className="flex items-center gap-2 px-2 pb-2">
+        <span className="text-[11px] text-text-muted">{t("assets.clDepth")}</span>
+        <div className="flex overflow-hidden rounded-md border border-border-subtle">
+          {[1, 2, 3, 4, 5].map((d) => (
+            <button
+              key={d}
+              type="button"
+              onClick={() => onDepthChange?.(d)}
+              className={cn(
+                "cursor-pointer px-2 py-0.5 text-[11px] transition-colors",
+                d === depth
+                  ? "bg-accent text-white"
+                  : "bg-elevated text-text-secondary hover:bg-overlay",
+              )}
+            >
+              {d}
+            </button>
+          ))}
+        </div>
+        {graph.truncated ? (
+          <span
+            className="rounded bg-warning/15 px-1.5 py-0.5 text-[10px] text-warning"
+            title={t("assets.clTruncatedHint")}
+          >
+            {t("assets.clTruncated")}
+          </span>
+        ) : null}
+        <span className="ml-auto text-[11px] text-text-muted">{t("assets.clHint")}</span>
       </div>
       <div
         className="max-h-[560px] overflow-auto rounded-md border border-border-subtle bg-bg p-4"
         onClick={() => setPinned(null)}
         role="presentation"
       >
-        <div className="relative mx-auto" style={{ width: totalW, height: model.height }}>
-          {/* ---- edges (one SVG overlay, row-port béziers) ---- */}
+        <div className="relative mx-auto" style={{ width: model.width, height: model.height }}>
+          {/* ---- edges ---- */}
           <svg
             className="pointer-events-none absolute inset-0"
-            width={totalW}
+            width={model.width}
             height={model.height}
             aria-hidden="true"
           >
             {model.edges.map((e) => {
-              const x1 = CARD_W;
-              const x2 = CARD_W + SPAN_W;
-              const lit = isLit(e.from) && isLit(e.to) && activeSet !== null;
+              const lit = activeSet !== null && isLit(e.from) && isLit(e.to);
               const dim = activeSet !== null && !lit;
-              const mid = SPAN_W / 2;
+              const bend = Math.max(40, (e.x2 - e.x1) / 2);
               return (
                 <g key={e.id}>
                   <path
-                    d={`M ${x1} ${e.y1} C ${x1 + mid} ${e.y1}, ${x2 - mid} ${e.y2}, ${x2} ${e.y2}`}
+                    d={`M ${e.x1} ${e.y1} C ${e.x1 + bend} ${e.y1}, ${e.x2 - bend} ${e.y2}, ${e.x2} ${e.y2}`}
                     fill="none"
                     stroke={lit ? "rgb(var(--accent))" : "rgb(var(--border-strong))"}
                     strokeWidth={lit ? 1.75 : 1.25}
-                    opacity={dim ? 0.12 : lit ? 1 : 0.55}
+                    opacity={dim ? 0.1 : lit ? 1 : 0.5}
                   />
                   <circle
-                    cx={x1}
+                    cx={e.x1}
                     cy={e.y1}
                     r={PORT_R}
                     fill={lit ? "rgb(var(--accent))" : "rgb(var(--border-strong))"}
-                    opacity={dim ? 0.12 : 1}
+                    opacity={dim ? 0.1 : 1}
                   />
                   <circle
-                    cx={x2}
+                    cx={e.x2}
                     cy={e.y2}
                     r={PORT_R}
                     fill={lit ? "rgb(var(--accent))" : "rgb(var(--border-strong))"}
-                    opacity={dim ? 0.12 : 1}
+                    opacity={dim ? 0.1 : 1}
                   />
                 </g>
               );
             })}
           </svg>
 
-          {/* ---- left: upstream asset cards ---- */}
-          {model.groups.map(({ group, top }) => (
-            <div
-              key={group.assetId}
-              className="absolute left-0 overflow-hidden rounded-lg border border-border-default bg-elevated shadow-sm"
-              style={{ top, width: CARD_W }}
-            >
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onSelectAsset?.(group.assetId);
-                }}
-                title={t("assets.clOpenAsset", { key: group.assetKey })}
-                className="flex w-full cursor-pointer items-center gap-1.5 border-b border-border-subtle bg-overlay/60 px-2.5 text-left hover:bg-overlay"
-                style={{ height: HEADER_H }}
+          {/* ---- asset cards ---- */}
+          {model.cards.map((card) => {
+            const isRoot = card.depth === 0;
+            return (
+              <div
+                key={card.assetId}
+                className={cn(
+                  "absolute overflow-hidden rounded-lg border bg-elevated shadow-sm",
+                  isRoot ? "border-accent/60" : "border-border-default",
+                )}
+                style={{ left: card.x, top: card.top, width: CARD_W }}
               >
-                <AssetKeyLabel assetKey={group.assetKey} />
-                <ExternalLinkIcon size={11} className="ml-auto shrink-0 text-text-muted" />
-              </button>
-              {group.columns.map((col) => {
-                const key = upKey(group.assetId, col);
-                return (
+                {isRoot ? (
                   <div
-                    key={col}
-                    {...rowProps(key)}
-                    className={cn(
-                      "flex cursor-pointer items-center px-2.5 font-mono text-[11px] transition-colors",
-                      isLit(key)
-                        ? "bg-accent/15 text-text"
-                        : isDim(key)
-                          ? "text-text-muted opacity-40"
-                          : "text-text-secondary hover:bg-overlay/60",
-                    )}
-                    style={{ height: ROW_H }}
+                    className="flex items-center gap-1.5 border-b border-border-subtle bg-accent px-2.5"
+                    style={{ height: HEADER_H }}
                   >
-                    <span className="truncate" title={col}>
-                      {col}
-                    </span>
+                    <AssetKeyLabel assetKey={card.assetKey} current />
                   </div>
-                );
-              })}
-            </div>
-          ))}
-
-          {/* ---- right: the current asset card ---- */}
-          <div
-            className="absolute overflow-hidden rounded-lg border border-accent/60 bg-elevated shadow-sm"
-            style={{ left: CARD_W + SPAN_W, top: 0, width: CARD_W }}
-          >
-            <div
-              className="flex items-center gap-1.5 border-b border-border-subtle bg-accent px-2.5"
-              style={{ height: HEADER_H }}
-            >
-              <span className="text-[9px] font-semibold uppercase tracking-widest text-white/80">
-                {t("assets.clThisAsset")}
-              </span>
-            </div>
-            {model.downColumns.map((col) => {
-              const key = dnKey(col.name);
-              return (
-                <div
-                  key={col.name}
-                  {...rowProps(key)}
-                  className={cn(
-                    "flex cursor-pointer items-center gap-1.5 px-2.5 font-mono text-[11px] transition-colors",
-                    isLit(key)
-                      ? "bg-accent/15 text-text"
-                      : isDim(key)
-                        ? "text-text-muted opacity-40"
-                        : "text-text hover:bg-overlay/60",
-                  )}
-                  style={{ height: ROW_H }}
-                >
-                  <span className="truncate" title={col.name}>
-                    {col.name}
-                  </span>
-                  {col.upstreams.length === 0 ? (
-                    <span
-                      className="ml-auto shrink-0 rounded bg-overlay px-1 text-[9px] uppercase tracking-wider text-text-muted"
-                      title={t("assets.clNoUpstreamHint")}
+                ) : (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSelectAsset?.(card.assetId);
+                    }}
+                    title={t("assets.clOpenAsset", { key: card.assetKey })}
+                    className="flex w-full cursor-pointer items-center gap-1.5 border-b border-border-subtle bg-overlay/60 px-2.5 text-left hover:bg-overlay"
+                    style={{ height: HEADER_H }}
+                  >
+                    <AssetKeyLabel assetKey={card.assetKey} />
+                    <ExternalLinkIcon size={11} className="ml-auto shrink-0 text-text-muted" />
+                  </button>
+                )}
+                {card.rows.map((row) => {
+                  const key = rowKey(card.assetId, row.name);
+                  return (
+                    <div
+                      key={row.name}
+                      {...rowProps(key)}
+                      className={cn(
+                        "flex cursor-pointer items-center px-2.5 font-mono text-[11px] transition-colors",
+                        isLit(key)
+                          ? "bg-accent/15 text-text"
+                          : isDim(key)
+                            ? "text-text-muted opacity-40"
+                            : isRoot
+                              ? "text-text hover:bg-overlay/60"
+                              : "text-text-secondary hover:bg-overlay/60",
+                      )}
+                      style={{ height: ROW_H }}
                     >
-                      {t("assets.clNoUpstream")}
-                    </span>
-                  ) : null}
-                </div>
-              );
-            })}
-          </div>
+                      <span className="truncate" title={row.name}>
+                        {row.name}
+                      </span>
+                    </div>
+                  );
+                })}
+                {card.hiddenCount > 0 ? (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setExpanded((cur) => {
+                        const next = new Set(cur);
+                        next.add(card.assetId);
+                        return next;
+                      });
+                    }}
+                    className="flex w-full cursor-pointer items-center px-2.5 text-[10px] text-text-muted hover:bg-overlay/60 hover:text-text-secondary"
+                    style={{ height: TOGGLE_H }}
+                    title={t("assets.clMoreColumnsHint")}
+                  >
+                    {t("assets.clMoreColumns", { count: String(card.hiddenCount) })}
+                  </button>
+                ) : null}
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>

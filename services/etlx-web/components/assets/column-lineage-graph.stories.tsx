@@ -1,12 +1,12 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { MockLocaleProvider } from "../../.storybook/mocks/providers";
 import { ColumnLineageGraph } from "./column-lineage-graph";
+import type { AssetColumnLineageGraphResponse } from "@/lib/api";
 
 /**
- * Column-level lineage view (ADR-0041 J3; ERD-style redesign 2026-06-12).
- * Upstream assets render as entity cards on the left, the current asset
- * as one card on the right; row-port béziers connect them. Hover a row
- * to trace its path (everything else dims); click pins the highlight.
+ * Multi-hop column-lineage DAG (2026-06-12). Lanes per hop (root
+ * rightmost), assets as entity cards, row-port béziers, transitive
+ * hover/pin trace, "+N more columns" collapse on upstream cards.
  */
 
 const meta: Meta<typeof ColumnLineageGraph> = {
@@ -16,7 +16,7 @@ const meta: Meta<typeof ColumnLineageGraph> = {
   decorators: [
     (Story) => (
       <MockLocaleProvider>
-        <div style={{ width: 900, height: 600, padding: 16 }}>
+        <div style={{ width: 1100, padding: 16 }}>
           <Story />
         </div>
       </MockLocaleProvider>
@@ -27,86 +27,111 @@ const meta: Meta<typeof ColumnLineageGraph> = {
 export default meta;
 type Story = StoryObj<typeof ColumnLineageGraph>;
 
-/** Renames + add_constant: 3 downstream columns from one source. The constant
- *  column has no upstream edge. */
-export const RenameAndConstant: Story = {
+function graph(
+  partial: Pick<AssetColumnLineageGraphResponse, "assets" | "edges"> &
+    Partial<AssetColumnLineageGraphResponse>,
+): AssetColumnLineageGraphResponse {
+  return {
+    id: partial.assets[0]?.id ?? "root",
+    asset_key: partial.assets[0]?.asset_key ?? "wh/root",
+    opaque: false,
+    max_depth: 3,
+    truncated: false,
+    ...partial,
+  };
+}
+
+/** raw → staging → mart: the canonical two-hop chain. Hover `total` on
+ *  the mart to see the full transitive trace light up across all lanes. */
+export const TwoHopChain: Story = {
   args: {
-    columns: [
-      {
-        name: "city",
-        upstreams: [{ asset_id: "u1", asset_key: "wh/users", column: "c" }],
-      },
-      {
-        name: "id",
-        upstreams: [{ asset_id: "u1", asset_key: "wh/users", column: "a" }],
-      },
-      { name: "tenant", upstreams: [] }, // add_constant
-    ],
+    depth: 3,
+    graph: graph({
+      assets: [
+        { id: "mart", asset_key: "wh/mart", depth: 0, columns: ["id", "total"] },
+        { id: "stg", asset_key: "wh/staging", depth: 1, columns: ["amount", "id"] },
+        { id: "raw", asset_key: "wh/raw", depth: 2, columns: ["amt", "id"] },
+      ],
+      edges: [
+        { from_asset_id: "raw", from_column: "id", to_asset_id: "stg", to_column: "id" },
+        { from_asset_id: "raw", from_column: "amt", to_asset_id: "stg", to_column: "amount" },
+        { from_asset_id: "stg", from_column: "id", to_asset_id: "mart", to_column: "id" },
+        { from_asset_id: "stg", from_column: "amount", to_asset_id: "mart", to_column: "total" },
+      ],
+    }),
   },
 };
 
-/** Join shape: one downstream column drawn from two source columns
- *  across two upstream assets. */
-export const NToOneJoin: Story = {
+/** Multi-source join feeding a rollup, plus a wide upstream table whose
+ *  unlinked columns collapse behind "+N more". */
+export const JoinWithCollapsedColumns: Story = {
   args: {
-    columns: [
-      {
-        name: "merged",
-        upstreams: [
-          { asset_id: "a", asset_key: "wh/a", column: "x" },
-          { asset_id: "b", asset_key: "wh/b", column: "y" },
-        ],
-      },
-      {
-        name: "id",
-        upstreams: [{ asset_id: "a", asset_key: "wh/a", column: "id" }],
-      },
-    ],
+    depth: 3,
+    graph: graph({
+      assets: [
+        {
+          id: "rollup",
+          asset_key: "pg/region_rollup",
+          depth: 0,
+          columns: ["currency", "region", "total"],
+        },
+        {
+          id: "orders",
+          asset_key: "pg/orders",
+          depth: 1,
+          columns: [
+            "amount",
+            "created_at",
+            "customer_id",
+            "discount",
+            "id",
+            "promo_code",
+            "shipping",
+            "status",
+            "tax",
+            "updated_at",
+          ],
+        },
+        {
+          id: "customers",
+          asset_key: "my/customers",
+          depth: 1,
+          columns: ["customer_id", "region", "segment"],
+        },
+      ],
+      edges: [
+        {
+          from_asset_id: "orders",
+          from_column: "amount",
+          to_asset_id: "rollup",
+          to_column: "total",
+        },
+        {
+          from_asset_id: "customers",
+          from_column: "region",
+          to_asset_id: "rollup",
+          to_column: "region",
+        },
+      ],
+    }),
   },
 };
 
-/** No edges — every downstream column is a constant / opaque expression
- *  (column exists, no upstream). */
-export const AllOpaqueColumns: Story = {
+/** Depth cap hit — the "more upstream" chip appears next to the hop control. */
+export const Truncated: Story = {
   args: {
-    columns: [
-      { name: "computed_at", upstreams: [] },
-      { name: "tenant", upstreams: [] },
-      { name: "version", upstreams: [] },
-    ],
-  },
-};
-
-/** Empty fallback — no successful run has materialized columns yet. */
-export const NoColumns: Story = {
-  args: { columns: [] },
-};
-
-/** A realistic multi-source rollup: three upstream assets, a dozen
- *  downstream columns, several joins and one constant — the case the
- *  old canvas turned into confetti. */
-export const RealisticRollup: Story = {
-  args: {
-    columns: [
-      { name: "order_id", upstreams: [{ asset_id: "o", asset_key: "pg/orders", column: "id" }] },
-      { name: "customer_id", upstreams: [
-        { asset_id: "o", asset_key: "pg/orders", column: "customer_id" },
-        { asset_id: "c", asset_key: "my/customers", column: "customer_id" },
-      ] },
-      { name: "region", upstreams: [{ asset_id: "c", asset_key: "my/customers", column: "region" }] },
-      { name: "segment", upstreams: [{ asset_id: "c", asset_key: "my/customers", column: "segment" }] },
-      { name: "amount", upstreams: [{ asset_id: "o", asset_key: "pg/orders", column: "amount" }] },
-      { name: "discount", upstreams: [
-        { asset_id: "o", asset_key: "pg/orders", column: "amount" },
-        { asset_id: "p", asset_key: "pg/promotions", column: "rate" },
-      ] },
-      { name: "promo_code", upstreams: [{ asset_id: "p", asset_key: "pg/promotions", column: "code" }] },
-      { name: "currency", upstreams: [] },
-      { name: "loaded_at", upstreams: [] },
-      { name: "net_revenue", upstreams: [
-        { asset_id: "o", asset_key: "pg/orders", column: "amount" },
-        { asset_id: "p", asset_key: "pg/promotions", column: "rate" },
-      ] },
-    ],
+    depth: 1,
+    graph: graph({
+      truncated: true,
+      max_depth: 1,
+      assets: [
+        { id: "mart", asset_key: "wh/mart", depth: 0, columns: ["id", "total"] },
+        { id: "stg", asset_key: "wh/staging", depth: 1, columns: ["amount", "id"] },
+      ],
+      edges: [
+        { from_asset_id: "stg", from_column: "id", to_asset_id: "mart", to_column: "id" },
+        { from_asset_id: "stg", from_column: "amount", to_asset_id: "mart", to_column: "total" },
+      ],
+    }),
   },
 };

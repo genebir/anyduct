@@ -12,7 +12,7 @@ import { ColumnLineageGraph } from "@/components/assets/column-lineage-graph";
 import {
   ApiError,
   assetsApi,
-  type AssetColumnLineageResponse,
+  type AssetColumnLineageGraphResponse,
   type AssetLineageResponse,
   type AssetMaterializationEntry,
 } from "@/lib/api";
@@ -27,7 +27,10 @@ export default function AssetDetailPage() {
   const { t } = useLocale();
   const [lineage, setLineage] = useState<AssetLineageResponse | null>(null);
   const [mats, setMats] = useState<AssetMaterializationEntry[] | null>(null);
-  const [columnLineage, setColumnLineage] = useState<AssetColumnLineageResponse | null>(null);
+  const [columnLineage, setColumnLineage] =
+    useState<AssetColumnLineageGraphResponse | null>(null);
+  // Multi-hop drill-down depth (2026-06-12) — changing refetches the graph.
+  const [lineageDepth, setLineageDepth] = useState(3);
 
   useEffect(() => {
     if (!ws) return;
@@ -35,7 +38,7 @@ export default function AssetDetailPage() {
     Promise.all([
       assetsApi.lineage(ws.id, id),
       assetsApi.materializations(ws.id, id),
-      assetsApi.columnLineage(ws.id, id),
+      assetsApi.columnLineageGraph(ws.id, id, lineageDepth),
     ])
       .then(([lin, m, col]) => {
         if (cancelled) return;
@@ -50,7 +53,7 @@ export default function AssetDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [ws, id, t]);
+  }, [ws, id, t, lineageDepth]);
 
   return (
     <>
@@ -112,14 +115,16 @@ export default function AssetDetailPage() {
                     {t("assets.columnLineageOpaqueDesc")}
                   </div>
                 </div>
-              ) : columnLineage.columns.length === 0 ? (
+              ) : columnLineage.assets.every((a) => a.columns.length === 0) ? (
                 <div className="px-4 py-8 text-center text-sm text-text-muted">
                   {t("assets.columnLineageEmpty")}
                 </div>
               ) : (
                 <div className="p-2">
                   <ColumnLineageGraph
-                    columns={columnLineage.columns}
+                    graph={columnLineage}
+                    depth={lineageDepth}
+                    onDepthChange={setLineageDepth}
                     onSelectAsset={(assetId) => router.push(`/w/${slug}/assets/${assetId}`)}
                   />
                 </div>

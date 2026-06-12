@@ -26,6 +26,7 @@ from uuid import UUID
 from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from etl_plugins.core.asset import AssetKey, AssetLineage
 from etl_plugins.core.column_lineage import ColumnEdge, ColumnLineage, ColumnRef
@@ -311,6 +312,103 @@ class AssetRepository:
         for edge, up_col, up_asset in edges_result.all():
             upstream_map[edge.downstream_column_id].append((up_col, up_asset))
         return columns, upstream_map
+
+    async def column_lineage_graph(
+        self, *, asset_id: UUID, max_depth: int, max_assets: int = 40
+    ) -> tuple[
+        dict[UUID, tuple[Asset, int]],
+        dict[UUID, list[str]],
+        list[tuple[UUID, str, UUID, str]],
+        bool,
+    ]:
+        """Multi-hop upstream column-lineage subgraph (2026-06-12).
+
+        BFS from ``asset_id`` walking ``column_lineage_edges`` upstream up
+        to ``max_depth`` hops, capped at ``max_assets`` total assets so a
+        wide warehouse can't explode the response. Returns:
+
+        * ``assets``  — ``{asset_id: (Asset, depth)}``; depth 0 = the root,
+          1 = direct upstream, … (an asset reachable at several depths is
+          recorded at its SHALLOWEST — that's also its render lane).
+        * ``columns`` — ``{asset_id: sorted column names}`` (recorded
+          ``asset_columns`` union names touched by collected edges, so pure
+          source assets that never persisted a column set still show the
+          columns that feed downstream).
+        * ``edges``   — ``(up_asset_id, up_col, down_asset_id, down_col)``.
+        * ``truncated`` — true when the asset cap cut the walk OR more
+          hops exist beyond ``max_depth``.
+        """
+        root = await self._session.get(Asset, asset_id)
+        if root is None:
+            return {}, {}, [], False
+        depths: dict[UUID, tuple[Asset, int]] = {asset_id: (root, 0)}
+        frontier: set[UUID] = {asset_id}
+        edges: list[tuple[UUID, str, UUID, str]] = []
+        seen_edges: set[tuple[UUID, str, UUID, str]] = set()
+        truncated = False
+
+        down_col = aliased(AssetColumn)
+        up_col = aliased(AssetColumn)
+        for depth in range(1, max_depth + 1):
+            if not frontier:
+                break
+            rows = await self._session.execute(
+                select(
+                    up_col.asset_id,
+                    up_col.name,
+                    down_col.asset_id,
+                    down_col.name,
+                    Asset,
+                )
+                .select_from(ColumnLineageEdge)
+                .join(down_col, down_col.id == ColumnLineageEdge.downstream_column_id)
+                .join(up_col, up_col.id == ColumnLineageEdge.upstream_column_id)
+                .join(Asset, Asset.id == up_col.asset_id)
+                .where(down_col.asset_id.in_(frontier))
+            )
+            next_frontier: set[UUID] = set()
+            for up_aid, up_name, dn_aid, dn_name, up_asset in rows.all():
+                key = (up_aid, up_name, dn_aid, dn_name)
+                if up_aid not in depths:
+                    if len(depths) >= max_assets:
+                        truncated = True
+                        continue
+                    depths[up_aid] = (up_asset, depth)
+                    next_frontier.add(up_aid)
+                if key not in seen_edges:
+                    seen_edges.add(key)
+                    edges.append(key)
+            frontier = next_frontier
+
+        if frontier:
+            # Depth cap reached with unexplored assets — does anything feed
+            # them? One existence probe so the UI can say "more upstream".
+            probe = await self._session.execute(
+                select(ColumnLineageEdge.id)
+                .join(down_col, down_col.id == ColumnLineageEdge.downstream_column_id)
+                .where(down_col.asset_id.in_(frontier))
+                .limit(1)
+            )
+            if probe.first() is not None:
+                truncated = True
+
+        cols_result = await self._session.execute(
+            select(AssetColumn.asset_id, AssetColumn.name).where(
+                AssetColumn.asset_id.in_(depths.keys())
+            )
+        )
+        columns: dict[UUID, set[str]] = {aid: set() for aid in depths}
+        for aid, name in cols_result.all():
+            columns[aid].add(name)
+        for up_aid, up_name, dn_aid, dn_name in edges:
+            columns[up_aid].add(up_name)
+            columns[dn_aid].add(dn_name)
+        return (
+            depths,
+            {aid: sorted(names) for aid, names in columns.items()},
+            edges,
+            truncated,
+        )
 
 
 __all__ = ["AssetRepository", "ColumnEdge", "ColumnLineage", "ColumnRef"]

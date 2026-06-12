@@ -277,6 +277,37 @@ class AssetColumnEntry(BaseModel):
     upstreams: list[ColumnUpstreamRef]
 
 
+class ColumnGraphAssetEntry(BaseModel):
+    """One asset card in the multi-hop column-lineage graph (2026-06-12).
+    ``depth`` 0 = the asset being viewed; 1 = direct upstream; …"""
+
+    id: UUID
+    asset_key: str
+    depth: int
+    columns: list[str]
+
+
+class ColumnGraphEdgeEntry(BaseModel):
+    from_asset_id: UUID
+    from_column: str
+    to_asset_id: UUID
+    to_column: str
+
+
+class AssetColumnLineageGraphResponse(BaseModel):
+    """Multi-hop upstream column lineage (the conventional catalog DAG —
+    DataHub/OpenMetadata-style). ``truncated`` = the asset cap cut the
+    walk or more hops exist beyond ``max_depth``."""
+
+    id: UUID
+    asset_key: str
+    opaque: bool
+    max_depth: int
+    truncated: bool
+    assets: list[ColumnGraphAssetEntry]
+    edges: list[ColumnGraphEdgeEntry]
+
+
 class AssetColumnLineageResponse(BaseModel):
     """Response from ``GET /workspaces/{ws}/assets/{id}/column-lineage``.
 

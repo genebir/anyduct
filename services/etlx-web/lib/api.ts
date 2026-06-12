@@ -709,6 +709,32 @@ export interface AssetColumnEntry {
   upstreams: ColumnUpstreamRef[];
 }
 
+/** Multi-hop column-lineage graph (2026-06-12) — the conventional
+ *  catalog drill-down. `depth` 0 = the asset being viewed. */
+export interface ColumnGraphAssetEntry {
+  id: string;
+  asset_key: string;
+  depth: number;
+  columns: string[];
+}
+
+export interface ColumnGraphEdgeEntry {
+  from_asset_id: string;
+  from_column: string;
+  to_asset_id: string;
+  to_column: string;
+}
+
+export interface AssetColumnLineageGraphResponse {
+  id: string;
+  asset_key: string;
+  opaque: boolean;
+  max_depth: number;
+  truncated: boolean;
+  assets: ColumnGraphAssetEntry[];
+  edges: ColumnGraphEdgeEntry[];
+}
+
 export interface AssetColumnLineageResponse {
   id: string;
   asset_key: string;
@@ -810,6 +836,10 @@ export const assetsApi = {
   materializations: (workspaceId: string, assetId: string) =>
     api<AssetMaterializationEntry[]>(
       `/workspaces/${workspaceId}/assets/${assetId}/materializations`,
+    ),
+  columnLineageGraph: (workspaceId: string, assetId: string, depth = 3) =>
+    api<AssetColumnLineageGraphResponse>(
+      `/workspaces/${workspaceId}/assets/${assetId}/column-lineage-graph?depth=${depth}`,
     ),
   columnLineage: (workspaceId: string, assetId: string) =>
     api<AssetColumnLineageResponse>(

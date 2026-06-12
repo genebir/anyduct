@@ -1359,7 +1359,8 @@ export const en = {
   // 2026-06-12 — ERD-style column lineage redesign.
   "assets.clHint": "Hover a column to trace its path · click to pin",
   "assets.clDepth": "Hops",
-  "assets.lgHint": "Hover an asset to trace its path · click to open",
+  "assets.lgHint": "Hover an asset to trace its path · click to pin · ↗ to open",
+  "assets.lgPinHint": "Click to pin this trace; click again or click the background to clear.",
   "assets.clTruncated": "more upstream",
   "assets.clTruncatedHint":
     "The walk was cut by the hop depth or the asset cap — increase hops or open an upstream asset to keep digging.",
@@ -2832,7 +2833,8 @@ export const ko: Messages = {
   // 2026-06-12 — ERD풍 컬럼 리니지 재설계.
   "assets.clHint": "컬럼에 마우스를 올리면 경로 추적 · 클릭하면 고정",
   "assets.clDepth": "홉",
-  "assets.lgHint": "자산에 마우스를 올리면 경로 추적 · 클릭하면 이동",
+  "assets.lgHint": "자산에 마우스를 올리면 경로 추적 · 클릭하면 고정 · ↗로 이동",
+  "assets.lgPinHint": "클릭하면 이 경로를 고정합니다. 다시 클릭하거나 배경을 클릭하면 해제됩니다.",
   "assets.clTruncated": "더 위가 있음",
   "assets.clTruncatedHint":
     "홉 깊이 또는 자산 수 제한으로 탐색이 잘렸습니다 — 홉을 늘리거나 업스트림 자산을 열어 계속 추적하세요.",

@@ -5,10 +5,12 @@
  * lineage redesign's visual language; supersedes the 1-hop React Flow
  * canvas). Lanes per hop: upstream assets left of the asset being
  * viewed (negative depths), downstream right. Hovering a card traces
- * its transitive path; clicking a non-root card navigates to it.
+ * its transitive path, clicking pins the trace, and the ↗ affordance
+ * navigates to the asset (same grammar as the column-lineage view).
  */
 
 import { useMemo, useState } from "react";
+import { ExternalLinkIcon } from "lucide-react";
 import { useLocale } from "@/components/providers/locale-provider";
 import { cn } from "@/lib/cn";
 import type { AssetLineageGraphResponse } from "@/lib/api";
@@ -44,6 +46,9 @@ export function LineageGraph({
 }) {
   const { t } = useLocale();
   const [hovered, setHovered] = useState<string | null>(null);
+  // Click pins the trace (matches the column-lineage view); navigation
+  // moves to the explicit ↗ affordance so the two never conflict.
+  const [pinned, setPinned] = useState<string | null>(null);
 
   const model = useMemo(() => {
     const minDepth = Math.min(0, ...graph.assets.map((a) => a.depth));
@@ -127,10 +132,11 @@ export function LineageGraph({
     return { cards, edges, adjacency, height, width };
   }, [graph]);
 
+  const active = pinned ?? hovered;
   const activeSet = useMemo(() => {
-    if (!hovered) return null;
-    const seen = new Set<string>([hovered]);
-    const queue = [hovered];
+    if (!active) return null;
+    const seen = new Set<string>([active]);
+    const queue = [active];
     while (queue.length) {
       const cur = queue.pop()!;
       for (const next of model.adjacency.get(cur) ?? []) {
@@ -141,7 +147,7 @@ export function LineageGraph({
       }
     }
     return seen;
-  }, [hovered, model.adjacency]);
+  }, [active, model.adjacency]);
 
   const isLit = (id: string) => activeSet !== null && activeSet.has(id);
   const isDim = (id: string) => activeSet !== null && !activeSet.has(id);
@@ -177,7 +183,11 @@ export function LineageGraph({
         ) : null}
         <span className="ml-auto text-[11px] text-text-muted">{t("assets.lgHint")}</span>
       </div>
-      <div className="max-h-[480px] overflow-auto rounded-md border border-border-subtle bg-bg p-4">
+      <div
+        className="max-h-[480px] overflow-auto rounded-md border border-border-subtle bg-bg p-4"
+        onClick={() => setPinned(null)}
+        role="presentation"
+      >
         <div className="relative mx-auto" style={{ width: model.width, height: model.height }}>
           <svg
             className="pointer-events-none absolute inset-0"
@@ -207,34 +217,50 @@ export function LineageGraph({
           {model.cards.map((card) => {
             const isRoot = card.depth === 0 && card.id === graph.id;
             return (
-              <button
+              <div
                 key={card.id}
-                type="button"
-                disabled={isRoot}
-                onClick={() => onSelect?.(card.id)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setPinned((cur) => (cur === card.id ? null : card.id));
+                }}
                 onMouseEnter={() => setHovered(card.id)}
                 onMouseLeave={() => setHovered(null)}
-                title={isRoot ? card.assetKey : t("assets.clOpenAsset", { key: card.assetKey })}
+                title={t("assets.lgPinHint")}
                 className={cn(
-                  "absolute flex flex-col justify-center gap-0.5 overflow-hidden rounded-lg border px-2.5 text-left shadow-sm transition-opacity",
-                  isRoot
-                    ? "border-accent/70 bg-accent"
-                    : "cursor-pointer border-border-default bg-elevated hover:bg-overlay",
+                  "absolute flex cursor-pointer items-center gap-1.5 overflow-hidden rounded-lg border px-2.5 text-left shadow-sm transition-opacity",
+                  isRoot ? "border-accent/70 bg-accent" : "border-border-default bg-elevated hover:bg-overlay",
                   isLit(card.id) && !isRoot ? "border-accent/60" : "",
+                  pinned === card.id ? "ring-2 ring-accent/40" : "",
                   isDim(card.id) ? "opacity-30" : "",
                 )}
                 style={{ left: card.x, top: card.top, width: CARD_W, height: CARD_H }}
               >
-                <AssetKeyLabel assetKey={card.assetKey} current={isRoot} />
-                <span
-                  className={cn(
-                    "text-[9px] uppercase tracking-wider",
-                    isRoot ? "text-white/70" : "text-text-muted",
-                  )}
-                >
-                  {isRoot ? t("assets.clThisAsset") : (card.kind ?? "asset")}
-                </span>
-              </button>
+                <div className="flex min-w-0 flex-1 flex-col justify-center gap-0.5">
+                  <AssetKeyLabel assetKey={card.assetKey} current={isRoot} />
+                  <span
+                    className={cn(
+                      "text-[9px] uppercase tracking-wider",
+                      isRoot ? "text-white/70" : "text-text-muted",
+                    )}
+                  >
+                    {isRoot ? t("assets.clThisAsset") : (card.kind ?? "asset")}
+                  </span>
+                </div>
+                {!isRoot ? (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSelect?.(card.id);
+                    }}
+                    title={t("assets.clOpenAsset", { key: card.assetKey })}
+                    aria-label={t("assets.clOpenAsset", { key: card.assetKey })}
+                    className="shrink-0 cursor-pointer rounded p-1 text-text-muted hover:bg-overlay hover:text-text"
+                  >
+                    <ExternalLinkIcon size={12} />
+                  </button>
+                ) : null}
+              </div>
             );
           })}
         </div>

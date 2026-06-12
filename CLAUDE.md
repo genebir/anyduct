@@ -117,7 +117,12 @@ uv run mypy etl_plugins
 
 ## 5. 현재 단계
 
-> **최신 마일스톤 (2026-06-12 새벽 자율런): 데이터 플레인 마감 폴리시 + 컬럼 리니지 일반화 — 페르소나 dogfood 주도 (12 슬라이스).** am 6:00까지 자율 윈도우, live dev 스택(server+worker+web) 위에서 운영자/분석가/데이터엔지니어/데이터모델러 페르소나로 매 기능 실주행 검증:
+> **최신 마일스톤 (2026-06-12 오전): 카탈로그 리니지 UI 보편화 — 사용자 피드백 "컬럼 리니지 인터페이스가 너무 구린데" → "보편 구현에 가깝게".** React Flow 둥둥 박스(컬럼별 개별 노드, 줌/팬 과잉, 추적 불가)를 DataHub/OpenMetadata 관례로 전면 교체:
+> - **컬럼 리니지 멀티-홉 DAG**: 서버 `GET /assets/{id}/column-lineage-graph?depth=1~5`(column_lineage_edges 업스트림 BFS, 40자산 캡, truncated 프로브) + 웹 홉당 레인(루트 우측 끝)·barycenter 정렬·**전이적 hover/pin 추적**(전 홉 양방향)·비참여 컬럼 "+N개" 접기(루트는 전부)·홉 컨트롤·"더 위가 있음" 칩.
+> - **자산(테이블) 리니지도 동일 관례**: `GET /assets/{id}/lineage-graph`(asset_edges **양방향** BFS — 업스트림 음수 depth 좌/다운스트림 양수 우, 60자산 캡) + 동일 시각 언어 레인 DAG(hover 추적, 클릭=이동). 기존 1홉 endpoint 2종은 하위호환 유지.
+> - 시각 언어 = ERD 디자이너 재사용(엔티티 카드+행 포트 베지어), 결정적 레이아웃(측정 불필요), React Flow 의존은 assets 영역에서 제거. live 검증: weekly_summary←daily_totals←raw_events 3-레인 + daily_totals 중간 노드 양방향. 서버 e2e 4, 스토리 6종 재작성, Storybook 빌드 green.
+>
+> **이전 마일스톤 (2026-06-12 새벽 자율런): 데이터 플레인 마감 폴리시 + 컬럼 리니지 일반화 — 페르소나 dogfood 주도 (12 슬라이스).** am 6:00까지 자율 윈도우, live dev 스택(server+worker+web) 위에서 운영자/분석가/데이터엔지니어/데이터모델러 페르소나로 매 기능 실주행 검증:
 > - **[운영자] 분할 backfill 운영 완결**: run 상세 + runs 목록 partition i/N 칩(`RunSummary.partition` — Run ORM @property lift, 목록 N+1 없이) · **분할 경계 제안**(`GET /pipelines/{pid}/cursor-stats` MIN/MAX/COUNT read-only + 다이얼로그 "제안" 버튼 — 채워주기만, 결정은 운영자. MIN-미만 nudge/MAX-원본 보존/좁은범위 degrade footgun 가드) · **마이그레이션 상세 Backfill 버튼**(append 전략=커서 파이프라인인데 진입점이 없던 dogfood 갭). live: 4윈도우 분할→무중복 적재→칩 노출 전 과정 실주행.
 > - **[데이터엔지니어] P2f mysql Arrow fast-path**: read_arrow(SSCursor→컬럼 직조립, DECIMAL은 선언 precision 핀 — 첫-청크 추론이 자릿수 증가에 깨지는 것을 통합테스트가 발견) + write_arrow(executemany 슬라이스). mysql→pg cross-vendor 인터체인지 포함 통합 10. **보너스 버그픽스**: pyarrow 미설치 시 Arrow fast-path가 폴백 대신 ImportError로 죽던 갭(`_pyarrow_available` 가드).
 > - **[분석가] 컬럼 리니지 대폭 정확화**: ① **sql 변환 자동 추론**(본문이 SQL → Phase X sqlglot 워커를 in-flight view 스키마로 재사용; 집계/rename/`SELECT *`/체인 정확, 실패는 opaque 폴백; `column_mapping_recommended`는 분석 불가 쿼리에만으로 노이즈 제거; Phase CC 명시 선언 우선 유지) ② **graph join/aggregate 리니지**(v1 선형-한정 → 토폴로지 워크: join=컬럼 합집합+공유키 양쪽 union, aggregate=group키+집계출력 재성형 — **v1이 aggregate 노드를 조용히 건너뛰던 부정확 수정**). live: 멀티소스(2 커넥션) join→sql 집계 카탈로그가 `total ← orders2.amount` 정확, **ELT pushdown(무이동) 실행에서도 리니지 정확**. 서버 e2e 잠금(`test_sql_transform_lineage_scenario`).

@@ -26,13 +26,18 @@ from __future__ import annotations
 import contextlib
 import re
 from collections.abc import Iterable, Iterator
-from typing import Any
+from itertools import chain
+from typing import TYPE_CHECKING, Any
 
+from etl_plugins.core.arrow import DEFAULT_BATCH_ROWS, Partition
 from etl_plugins.core.connector import BatchSink, BatchSource
 from etl_plugins.core.exceptions import ConnectError, ReadError, WriteError
 from etl_plugins.core.inspect import ColumnInfo
 from etl_plugins.core.record import Record
 from etl_plugins.core.registry import ConnectorRegistry
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    import pyarrow as pa
 
 _SAFE_IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _SAFE_QUALIFIED_IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$")
@@ -115,7 +120,7 @@ class VerticaConnector(BatchSource, BatchSink):
             import vertica_python
         except ImportError as exc:  # pragma: no cover - import side effect
             raise ConnectError(
-                "vertica-python not installed. Install with: " "pip install 'etl-plugins[vertica]'"
+                "vertica-python not installed. Install with: pip install 'etl-plugins[vertica]'"
             ) from exc
         try:
             self._conn = vertica_python.connect(
@@ -224,7 +229,7 @@ class VerticaConnector(BatchSource, BatchSink):
             raise WriteError(f"ensure_table({table!r}) requires a non-empty column list")
         if if_exists not in {"skip", "drop", "error"}:
             raise WriteError(
-                f"ensure_table: unknown if_exists={if_exists!r} " "(use 'skip', 'drop', or 'error')"
+                f"ensure_table: unknown if_exists={if_exists!r} (use 'skip', 'drop', or 'error')"
             )
 
         schema, sep, name = table.rpartition(".")
@@ -234,7 +239,7 @@ class VerticaConnector(BatchSource, BatchSink):
         cur = self.connection.cursor()
         try:
             cur.execute(
-                "SELECT 1 FROM v_catalog.tables " "WHERE table_schema = %s AND table_name = %s",
+                "SELECT 1 FROM v_catalog.tables WHERE table_schema = %s AND table_name = %s",
                 (schema, name),
             )
             already = cur.fetchone() is not None
@@ -315,6 +320,148 @@ class VerticaConnector(BatchSource, BatchSink):
         finally:
             cur.close()
 
+    # ---------- Arrow fast path (ADR-0093, 2026-06-12) ----------------------
+
+    def read_arrow(
+        self,
+        *,
+        query: str | None = None,
+        partition: Partition | None = None,
+        **options: Any,
+    ) -> Iterator[pa.RecordBatch]:
+        """Bulk read as Arrow RecordBatches.
+
+        Vertica has no client-streamable COPY-to-stdout equivalent in
+        ``vertica-python``, so this follows the mysql shape: stream tuple
+        rows through the server-side cursor and assemble columnar batches
+        directly — the win is skipping the per-row ``Record``/pydantic
+        layer. Column types pin from the cursor description's Vertica type
+        codes where unambiguous; NUMERIC pins to the *declared*
+        precision/scale (first-chunk inference under-sizes the type the
+        moment a later chunk carries more integer digits — the mysql
+        integration lesson). Ambiguous codes infer from the first chunk
+        and then freeze. ``partition`` narrows the read to one half-open
+        ``(lower, upper]`` slice via a parameterised predicate.
+        """
+        if query is None:
+            raise ReadError("VerticaConnector.read_arrow requires a SQL query")
+        import pyarrow as pa
+
+        sql_text = query
+        params: tuple[Any, ...] = ()
+        if partition is not None:
+            clauses: list[str] = []
+            values: list[Any] = []
+            if partition.lower is not None:
+                clauses.append(f"{_q(partition.column)} > %s")
+                values.append(partition.lower)
+            if partition.upper is not None:
+                clauses.append(f"{_q(partition.column)} <= %s")
+                values.append(partition.upper)
+            if clauses:
+                sql_text = f"SELECT * FROM ({query}) AS __p WHERE {' AND '.join(clauses)}"
+                params = tuple(values)
+
+        chunk_rows = int(options.get("chunk_size", DEFAULT_BATCH_ROWS))
+        cur = self.connection.cursor()
+        try:
+            cur.execute(sql_text, params or None)
+            description = cur.description or []
+            names = [d[0] for d in description]
+            if not names:
+                return
+            # Per-column Arrow type: pinned by Vertica type code where
+            # deterministic, None = infer from the first chunk then lock.
+            locked: list[pa.DataType | None] = [_arrow_type_for_vertica(d) for d in description]
+            while True:
+                rows = cur.fetchmany(chunk_rows)
+                if not rows:
+                    return
+                columns = list(zip(*rows, strict=False))
+                arrays = []
+                for i in range(len(names)):
+                    arr = pa.array(list(columns[i]), type=locked[i])
+                    if locked[i] is None and not pa.types.is_null(arr.type):
+                        locked[i] = arr.type
+                    arrays.append(arr)
+                yield pa.RecordBatch.from_arrays(arrays, names=names)
+        except (pa.ArrowInvalid, pa.ArrowTypeError) as exc:
+            raise ReadError(f"vertica read_arrow: Arrow conversion failed: {exc}") from exc
+        except ReadError:
+            raise
+        except Exception as exc:
+            raise ReadError(f"vertica read_arrow failed: {exc}") from exc
+        finally:
+            cur.close()
+
+    def write_arrow(
+        self,
+        batches: Iterable[pa.RecordBatch],
+        *,
+        table: str | None = None,
+        mode: str = "append",
+        key_columns: list[str] | None = None,
+        pre_sql: str | None = None,
+        batch_size: int = 1_000,
+        **options: Any,
+    ) -> int:
+        """Bulk write Arrow RecordBatches via multi-row ``executemany``.
+
+        Same transactional semantics as ``write`` (``pre_sql`` runs first
+        inside the transaction; ``overwrite`` issues ``DELETE FROM``).
+        Supports ``append`` / ``overwrite`` — upsert routes through the
+        Record path (MERGE needs per-row binds anyway).
+        """
+        if not table:
+            raise WriteError("VerticaConnector.write_arrow requires 'table'")
+        if mode not in ("append", "overwrite"):
+            raise WriteError(
+                f"write_arrow supports 'append'/'overwrite', got {mode!r} "
+                "(upsert routes through the Record path)"
+            )
+
+        it = iter(batches)
+        first = next(it, None)
+        if first is None and not pre_sql:
+            return 0
+        cur = self.connection.cursor()
+        try:
+            if pre_sql:
+                cur.execute(pre_sql)
+            if first is None:
+                self.connection.commit()
+                return 0
+            columns = list(first.schema.names)
+            if mode == "overwrite":
+                cur.execute(f"DELETE FROM {_qt(table)}")
+            col_list = ", ".join(_q(c) for c in columns)
+            placeholders = ", ".join(["%s"] * len(columns))
+            stmt = f"INSERT INTO {_qt(table)} ({col_list}) VALUES ({placeholders})"
+            count = 0
+            for batch in chain([first], it):
+                if list(batch.schema.names) != columns:
+                    try:
+                        batch = batch.select(columns)
+                    except KeyError as exc:
+                        raise WriteError(
+                            f"write_arrow: batch schema drifted from first batch: {exc}"
+                        ) from exc
+                rows = batch.to_pylist()
+                for start in range(0, len(rows), batch_size):
+                    slice_ = rows[start : start + batch_size]
+                    cur.executemany(stmt, [tuple(r.get(c) for c in columns) for r in slice_])
+                    count += len(slice_)
+            self.connection.commit()
+            return count
+        except WriteError:
+            self.connection.rollback()
+            raise
+        except Exception as exc:
+            self.connection.rollback()
+            raise WriteError(f"vertica write_arrow failed: {exc}") from exc
+        finally:
+            cur.close()
+
     # ---------- BatchSink ---------------------------------------------------
 
     def write(
@@ -334,7 +481,7 @@ class VerticaConnector(BatchSource, BatchSink):
             raise WriteError("mode='upsert' requires non-empty 'key_columns'")
         if mode not in ("append", "overwrite", "upsert"):
             raise WriteError(
-                f"unknown write mode: {mode!r} " "(use 'append', 'overwrite', or 'upsert')"
+                f"unknown write mode: {mode!r} (use 'append', 'overwrite', or 'upsert')"
             )
 
         it = iter(records)
@@ -445,3 +592,46 @@ class VerticaConnector(BatchSource, BatchSink):
         # — not used at runtime because we bind per call.
         _ = params_per_row
         return count
+
+
+def _arrow_type_for_vertica(description: Any) -> Any:
+    """Map an unambiguous Vertica type code to an Arrow type.
+
+    ``description`` is one ``vertica-python`` cursor-description entry
+    (a ``Column`` namedtuple, tuple-indexable per DBAPI: ``(name,
+    type_code, display_size, internal_size, precision, scale,
+    null_ok)``). NUMERIC pins to the *declared* precision/scale — the
+    mysql DECIMAL lesson: first-chunk inference under-sizes the type as
+    soon as a later chunk carries more integer digits. Returns ``None``
+    for codes whose Python value shape the driver decides at conversion
+    time (TIMESTAMPTZ is tz-aware so pyarrow needs to see a value to pick
+    the tz; INTERVAL/TIME/UUID arrive as exotic objects) — those infer
+    from the first chunk and are then locked by the caller.
+    """
+    import pyarrow as pa
+    from vertica_python.datatypes import VerticaType
+
+    type_code = description[1]
+    if type_code == VerticaType.BOOL:
+        return pa.bool_()
+    if type_code == VerticaType.INT8:
+        return pa.int64()
+    if type_code == VerticaType.FLOAT8:
+        return pa.float64()
+    if type_code in (VerticaType.CHAR, VerticaType.VARCHAR, VerticaType.LONGVARCHAR):
+        return pa.string()
+    if type_code == VerticaType.DATE:
+        return pa.date32()
+    if type_code == VerticaType.TIMESTAMP:
+        return pa.timestamp("us")
+    if type_code in (VerticaType.BINARY, VerticaType.VARBINARY, VerticaType.LONGVARBINARY):
+        return pa.binary()
+    if type_code == VerticaType.NUMERIC:
+        precision = description[4]
+        scale = description[5]
+        if isinstance(precision, int) and isinstance(scale, int) and 1 <= precision <= 38:
+            return pa.decimal128(precision, scale)
+        if isinstance(precision, int) and isinstance(scale, int) and precision <= 76:
+            return pa.decimal256(precision, scale)
+        return None
+    return None

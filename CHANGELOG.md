@@ -36,6 +36,7 @@
 - **워커 멀티-replica 클러스터링 실증 + asset upsert 레이스 수정 (Phase P3a, 2026-06-10)**: SKIP LOCKED 큐(ADR-0021)의 "워커만 늘리면 분산" 약속을 처음으로 e2e 검증 — 3 replica 동시 claim 무중복 분배 + 실제 RunWorker 2대 공동 드레인. e2e가 발견한 실버그: 동시 run 완료 시 카탈로그 asset/edge upsert(select-then-insert)가 유니크 충돌로 run 실패 → `ON CONFLICT DO NOTHING` 원자화.
 
 ### Changed
+- **분포-기반 분할 제안 — NTILE 분위수 (2026-06-12, ADR-0095 f/u)**: `cursor-stats?windows=N`이 행 수 균등 버킷 상한(NTILE)을 반환, Backfill 다이얼로그 제안이 산술 등분 대신 이를 우선 사용(dialect 미지원 시 산술 폴백, 중복 분위수는 윈도우 degrade). skew 데이터(8+2)에서 5/5 분할 e2e 입증 — "분포 기반 자동 분할" 백로그 항목 완결(여전히 제안만, 자동 실행 없음).
 - **리니지 폴리시 2종 (2026-06-12)**: ① 자산 리니지 클릭-pin(이동은 ↗ 아이콘으로 분리 — 컬럼 리니지와 인터랙션 문법 통일) ② 컬럼 검색(매치의 전이적 경로 전체 하이라이트, 접힌 컬럼도 매치 시 노출, 매치 카운트·0건 경고).
 - **자산(테이블) 리니지도 멀티-홉 DAG (2026-06-12)**: 같은 화면의 테이블 레벨 리니지(1홉 React Flow)도 컬럼 리니지와 동일 관례로 — `GET /assets/{id}/lineage-graph?depth=N`(asset_edges 양방향 BFS, 업스트림=음수 depth 좌측/다운스트림=양수 우측, 60자산 캡+truncated 프로브) + 웹 레인 DAG(hover 전이 추적, 클릭=이동, 홉 컨트롤). live: daily_totals 중간 노드에서 -1 raw_events / +1 weekly_summary 양방향 확인. 서버 e2e 2, 스토리 3종.
 - **컬럼 리니지 멀티-홉 DAG (2026-06-12, 사용자 피드백 "보편 구현에 가깝게")**: DataHub/OpenMetadata식 카탈로그 관례로 — 서버 `GET /assets/{id}/column-lineage-graph?depth=N`(BFS 업스트림, depth 1~5 클램프 + 40자산 캡, `truncated` 신호 — 캡 너머 존재를 1쿼리 프로브) 신설(기존 1홉 endpoint 유지). 웹: 홉당 레인(루트 우측 끝), barycenter 레인 정렬(교차 감소), **전이적 hover/pin 추적**(전 홉 양방향 BFS), 업스트림 카드 비참여 컬럼 "+N개" 접기(루트는 전부 표시), 홉 컨트롤(1~5 재조회) + "더 위가 있음" 칩. live 검증: weekly_summary←daily_totals←raw_events 3-레인 실데이터. 서버 e2e 2.

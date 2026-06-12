@@ -73,3 +73,40 @@ function dedupeIncreasing<T extends string | number>(points: T[]): T[] | null {
   }
   return out.length >= 2 ? out : null;
 }
+
+/** A value provably below MIN, in MIN's own shape — the first boundary
+ *  of a suggestion (backfill windows are half-open `(from, to]`, so a
+ *  boundary equal to MIN would drop the oldest row). */
+export function nudgeBelowMin(min: unknown): string | number | null {
+  if (typeof min === "number") {
+    return Number.isInteger(min) ? min - 1 : min - Math.max(Math.abs(min), 1) / 1_000_000;
+  }
+  if (typeof min === "string") {
+    const epoch = Date.parse(min);
+    if (!Number.isFinite(epoch)) return null;
+    const dateOnly = DATE_ONLY_RE.test(min);
+    const sep = min.includes("T") ? "T" : " ";
+    const iso = new Date(epoch - (dateOnly ? 86_400_000 : 1000)).toISOString();
+    return dateOnly ? iso.slice(0, 10) : iso.slice(0, 10) + sep + iso.slice(11, 19);
+  }
+  return null;
+}
+
+/** Server-computed NTILE quantiles → boundaries (2026-06-12): each
+ *  quantile is a bucket's UPPER bound, so `[below-min, q1..qN]` yields N
+ *  half-open windows with (near-)equal row counts — skew-proof, unlike
+ *  the arithmetic fallback. Duplicate quantiles (heavy value repetition)
+ *  collapse to fewer windows instead of a server 422. */
+export function boundariesFromQuantiles(
+  min: unknown,
+  quantiles: unknown[],
+): (string | number)[] | null {
+  const lower = nudgeBelowMin(min);
+  if (lower === null) return null;
+  const points: (string | number)[] = [lower];
+  for (const q of quantiles) {
+    if (typeof q !== "string" && typeof q !== "number") return null;
+    points.push(q);
+  }
+  return dedupeIncreasing(points);
+}

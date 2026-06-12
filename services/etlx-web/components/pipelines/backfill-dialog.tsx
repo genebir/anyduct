@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ApiError, pipelinesApi, type PipelineSummary } from "@/lib/api";
-import { suggestBoundaries } from "@/lib/backfill-suggest";
+import { boundariesFromQuantiles, suggestBoundaries } from "@/lib/backfill-suggest";
 import { cn } from "@/lib/cn";
 import { useLocale } from "@/components/providers/locale-provider";
 
@@ -60,12 +60,18 @@ export function BackfillDialog({
     if (!pipeline) return;
     setSuggesting(true);
     try {
-      const stats = await pipelinesApi.cursorStats(workspaceId, pipeline.id);
+      const stats = await pipelinesApi.cursorStats(workspaceId, pipeline.id, 4);
       if (!stats.available) {
         toast.error(t("backfill.suggestUnavailable", { reason: stats.reason ?? "?" }));
         return;
       }
-      const boundaries = suggestBoundaries(stats.min_value, stats.max_value, 4);
+      // Prefer the server's NTILE quantiles (equal ROW COUNTS per window —
+      // skew-proof); fall back to the arithmetic split when the dialect
+      // couldn't answer.
+      const boundaries =
+        (stats.quantiles && stats.quantiles.length >= 2
+          ? boundariesFromQuantiles(stats.min_value, stats.quantiles)
+          : null) ?? suggestBoundaries(stats.min_value, stats.max_value, 4);
       if (!boundaries) {
         toast.error(t("backfill.suggestUnsupported"));
         return;

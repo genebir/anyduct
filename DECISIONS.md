@@ -2841,6 +2841,7 @@ L1 출시 직후 사용자가 5개 회신:
 - ⚠️ 파티션별 완전 독립 실행(embarrassingly parallel) — 집계/dedupe가 윈도우 경계를 넘는 파이프라인은 부적합(ADR-0093 Phase 3 경고 그대로).
 - ✅ web 노출(같은 날): Backfill 다이얼로그에 "분할 지점" 입력(쉼표 구분) — `[From, ...splits, To]`를 boundaries로 전송, 전부 숫자면 number로 강제 변환("9"<"10" 사전순 함정 회피), 분할 시 From/To 필수 클라이언트 검증, "{count}개 병렬 백필 큐 추가" 토스트.
 - ✅ **분할 경계 제안(같은 날 후속)**: `GET /pipelines/{pid}/cursor-stats`(MIN/MAX/COUNT, DlqPreview 패턴의 read-only 워커스레드 쿼리, cassandra 제외 — CQL 서브쿼리 없음) + 다이얼로그 "제안" 버튼이 균등 4윈도우를 **채워주기만** 함(운영자 수정·확정) — 자동 등분 기각 결정과 양립(서버는 통계만, 결정은 운영자). 제안 헬퍼: 숫자 산술(정수 보존)/ISO 날짜·일시 epoch 보간(MIN 형식 보존 — 사전순 정합), 첫 경계는 MIN 미만으로 nudge(half-open 하한이 최구행을 떨어뜨리는 footgun 방지), MAX는 원본 문자열 그대로(tz 재포맷이 최신행을 떨어뜨리는 footgun 방지), 좁은 범위는 윈도우 수 degrade(422 방지).
+- ✅ **분포-기반 제안(2026-06-12 후속)**: `cursor-stats?windows=N`이 **NTILE 분위수**(행 수 균등 버킷 상한, window-function dialect 공통 문법)를 함께 반환 — 다이얼로그 제안이 산술 등분 대신 분위수를 우선 사용(실패 시 산술 폴백). skew 데이터에서 윈도우별 행 수가 균등해짐(서버 e2e: 8+2 skew에서 5/5 분할 입증). 자동 실행은 여전히 없음 — 채워주기만, 결정은 운영자(기각 결정 유지).
 - ⚠️ Arrow `Partition`(P2a) key-range와의 결합(비-커서 분할)은 후속.
 
 ---

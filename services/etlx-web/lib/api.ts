@@ -445,8 +445,10 @@ export const pipelinesApi = {
     }),
   /** ADR-0095 f/u — MIN/MAX/COUNT over the source's cursor column.
    *  Powers the Backfill dialog's "suggest split points". Read-only. */
-  cursorStats: (workspaceId: string, id: string) =>
-    api<CursorStatsResponse>(`/workspaces/${workspaceId}/pipelines/${id}/cursor-stats`),
+  cursorStats: (workspaceId: string, id: string, windows = 0) =>
+    api<CursorStatsResponse>(
+      `/workspaces/${workspaceId}/pipelines/${id}/cursor-stats?windows=${windows}`,
+    ),
   /** Phase P3b (ADR-0095) — split one cursor range into N parallel
    *  sub-runs (one per consecutive boundary pair, half-open windows).
    *  The multi-replica worker fleet claims them concurrently. */
@@ -545,6 +547,8 @@ export interface CursorStatsResponse {
   min_value: unknown;
   max_value: unknown;
   row_count: number | null;
+  /** NTILE equal-row-count bucket upper bounds (skew-proof suggestion). */
+  quantiles: unknown[] | null;
   error: string | null;
 }
 

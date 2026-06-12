@@ -421,6 +421,7 @@ async def preview_dlq_records(
 @router.get("/{pipeline_id}/cursor-stats", response_model=CursorStatsResponse)
 async def cursor_stats(
     pipeline_id: UUID,
+    windows: int = 0,
     ctx: WorkspaceContext = _require_runner,
     session: AsyncSession = Depends(get_session),  # noqa: B008
     backend: SecretBackend = Depends(get_secret_backend_dep),  # noqa: B008
@@ -436,7 +437,8 @@ async def cursor_stats(
     pipeline, current = await _load_pipeline_and_current(
         session, workspace_id=ctx.workspace.id, pipeline_id=pipeline_id
     )
-    s = await CursorStatsService(session, backend).stats(pipeline, current)
+    windows = max(0, min(windows, 64))
+    s = await CursorStatsService(session, backend).stats(pipeline, current, windows=windows)
     return CursorStatsResponse(
         available=s.available,
         reason=s.reason,
@@ -446,6 +448,7 @@ async def cursor_stats(
         min_value=s.min_value,
         max_value=s.max_value,
         row_count=s.row_count,
+        quantiles=s.quantiles,
         error=s.error,
     )
 

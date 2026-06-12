@@ -207,3 +207,43 @@ async def test_cursor_stats_without_cursor_reports_reason(
         body = r.json()
         assert body["available"] is False
         assert body["reason"] == "no_cursor"
+
+
+async def test_cursor_stats_quantiles_are_skew_proof(session: AsyncSession, tmp_path: Path) -> None:
+    """8 rows bunched in days 01~04 + 2 stragglers on days 19~20: an
+    arithmetic split at the midpoint ("2026-05-10") puts 8 rows in one
+    window and 2 in the other. NTILE quantiles split by ROW COUNT —
+    each window gets 5."""
+    db_path = tmp_path / "skew.db"
+    conn = __import__("sqlite3").connect(str(db_path))
+    try:
+        conn.execute("CREATE TABLE raw_events (id INTEGER, created_at TEXT, value INTEGER)")
+        days = [1, 1, 2, 2, 3, 3, 4, 4, 19, 20]
+        conn.executemany(
+            "INSERT INTO raw_events VALUES (?, ?, ?)",
+            [(i, f"2026-05-{d:02d}", i) for i, d in enumerate(days, start=1)],
+        )
+        conn.execute("CREATE TABLE replicated_events (id INTEGER, created_at TEXT, value INTEGER)")
+        conn.commit()
+    finally:
+        conn.close()
+
+    app = _build_app(session)
+    async with _client(app) as client:
+        token = await _seed_user_and_login(session, client, email="qs@example.com")
+        h = {"Authorization": f"Bearer {token}"}
+        ws_id, pipe_id = await _setup_pipeline(client, h, str(db_path))
+
+        r = await client.get(
+            f"/workspaces/{ws_id}/pipelines/{pipe_id}/cursor-stats?windows=2", headers=h
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["available"] is True
+        # Bucket 1 = rows 1~5 (upper bound day 03), bucket 2 = rows 6~10
+        # (upper bound day 20) — NOT the arithmetic midpoint.
+        assert body["quantiles"] == ["2026-05-03", "2026-05-20"]
+
+        # windows 미요청이면 quantiles 없음 (기존 호출 하위호환).
+        r2 = await client.get(f"/workspaces/{ws_id}/pipelines/{pipe_id}/cursor-stats", headers=h)
+        assert r2.json()["quantiles"] is None

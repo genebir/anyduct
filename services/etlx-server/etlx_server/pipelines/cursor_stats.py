@@ -59,6 +59,11 @@ class CursorStats:
     min_value: Any = None
     max_value: Any = None
     row_count: int | None = None
+    # Distribution-based split suggestion (2026-06-12): the upper bound of
+    # each of N equal-ROW-COUNT buckets (NTILE) — the proper skew-proof
+    # boundaries the dialog offers. ``None`` when not requested or the
+    # dialect/query couldn't answer (best-effort).
+    quantiles: list[Any] | None = None
     error: str | None = None
 
 
@@ -67,7 +72,9 @@ class CursorStatsService:
         self._session = session
         self._backend = backend
 
-    async def stats(self, pipeline: Pipeline, version: PipelineVersion) -> CursorStats:
+    async def stats(
+        self, pipeline: Pipeline, version: PipelineVersion, *, windows: int = 0
+    ) -> CursorStats:
         global_vars = await WorkspaceVariableRepository(self._session).as_dict(
             workspace_id=pipeline.workspace_id
         )
@@ -154,6 +161,20 @@ class CursorStatsService:
                 cursor_column=column,
                 row_count=0,
             )
+        quantiles: list[Any] | None = None
+        if windows >= 2:
+            # Equal-row-count bucket boundaries via NTILE — portable across
+            # the window-function dialects in _STATS_SQL_TYPES. Best-effort:
+            # an old engine without NTILE just loses the suggestion.
+            ntile_stmt = (
+                f"SELECT MAX(__c) AS hi FROM ("
+                f"SELECT {column} AS __c, NTILE({int(windows)}) OVER (ORDER BY {column}) AS __b "
+                f"FROM ({source.query}) AS __q) AS __t GROUP BY __b ORDER BY MAX(__c)"
+            )
+            try:
+                quantiles = await asyncio.to_thread(self._read_column, connector, ntile_stmt)
+            except Exception:
+                quantiles = None
         return CursorStats(
             available=True,
             connection=source.connection,
@@ -162,6 +183,7 @@ class CursorStatsService:
             min_value=folded.get("lo"),
             max_value=folded.get("hi"),
             row_count=int(count),
+            quantiles=quantiles,
         )
 
     @staticmethod
@@ -174,6 +196,21 @@ class CursorStatsService:
             if task.source.cursor_column:
                 return task.source
         return None
+
+    @staticmethod
+    def _read_column(connector: BatchSource, stmt: str) -> list[Any]:
+        """All rows' first value — used for the NTILE quantile list."""
+        connector.connect()
+        try:
+            out: list[Any] = []
+            for rec in connector.read(query=stmt, chunk_size=128):
+                values = list(rec.data.values())
+                if values:
+                    out.append(values[0])
+            return out
+        finally:
+            with contextlib.suppress(Exception):
+                connector.close()
 
     @staticmethod
     def _read_one(connector: BatchSource, stmt: str) -> dict[str, Any] | None:

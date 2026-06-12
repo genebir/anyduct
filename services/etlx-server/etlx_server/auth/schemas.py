@@ -728,6 +728,10 @@ class CursorStatsResponse(BaseModel):
     min_value: Any = None
     max_value: Any = None
     row_count: int | None = None
+    # 2026-06-12 — NTILE equal-row-count bucket upper bounds (skew-proof
+    # split suggestion). None unless ``windows`` was requested and the
+    # dialect could answer.
+    quantiles: list[Any] | None = None
     error: str | None = None
 
 

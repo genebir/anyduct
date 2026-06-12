@@ -14,10 +14,19 @@ const config: TestRunnerConfig = {
     await injectAxe(page);
   },
   async postVisit(page) {
-    await checkA11y(page, "#storybook-root", {
-      detailedReport: true,
-      detailedReportOptions: { html: true },
-    });
+    // Owner-accepted exception (2026-06-12): text on the brand pink /
+    // error red stays WHITE by explicit owner choice — it measures
+    // 3.3:1 (below AA 4.5:1) and the navy alternative was reviewed and
+    // rejected on aesthetics. `.text-on-accent` carriers are excluded
+    // from the sweep; every other element still gates on AA.
+    await checkA11y(
+      page,
+      { include: [["#storybook-root"]], exclude: [[".text-on-accent"]] },
+      {
+        detailedReport: true,
+        detailedReportOptions: { html: true },
+      },
+    );
   },
 };
 

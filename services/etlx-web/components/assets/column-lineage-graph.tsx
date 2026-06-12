@@ -265,7 +265,7 @@ export function ColumnLineageGraph({
               className={cn(
                 "cursor-pointer px-2 py-0.5 text-[11px] transition-colors",
                 d === depth
-                  ? "bg-accent font-semibold text-on-accent"
+                  ? "bg-accent text-on-accent"
                   : "bg-elevated text-text-secondary hover:bg-overlay",
               )}
             >

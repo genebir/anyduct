@@ -10,6 +10,7 @@
 ## [Unreleased]
 
 ### Added
+- **accent 위 텍스트 흰색 복원 (2026-06-12, 오너 결정)**: a11y 게이트가 네이비로 바꿨던 핑크/빨강 채움 위 텍스트를 사용자 요청으로 흰색 복원(`--text-on-accent`=white — 시맨틱 토큰이라 한 곳 변경으로 전체 복원, 체크박스 마크 포함). 3.3:1 AA 미달은 **수용된 트레이드오프로 문서화**, axe 게이트는 `.text-on-accent`만 제외하고 나머지(AA 토큰 보정 등)는 전부 유지. 88/88 통과.
 - **Checkbox primitive + 파이프라인 일괄 선택 (2026-06-12, 사용자 피드백)**: 네이티브 accent-color 체크박스(다크 테마에서 이질적)를 토큰 기반 `Checkbox` primitive로 교체 — accent 채움+네이비 체크/대시 마크, hover/disabled, **indeterminate**(일부 선택 헤더 상태, 마이그레이션 헤더에도 신규 적용). 파이프라인 목록에 마이그레이션과 동일한 **일괄 선택**(전체선택/Clear→Dry run→실행→삭제 + 확인 다이얼로그, 미저장·깨진 행은 실행에서 건너뜀+카운트). Storybook 스토리, a11y 게이트 88/88 통과.
 - **`sql` 데이터셋 변환 — DuckDB in-process (Phase P1a, 2026-06-10, ADR-0093)**: 파이프라인 데이터 플레인 개편 1탄. in-flight 레코드 전체를 DuckDB 릴레이션(`input`)으로 등록하고 임의 SQL(JOIN/GROUP BY/윈도우/QUALIFY) 실행 — 행 단위 변환이 표현 못 하던 데이터셋 연산이 1급, 변환 언어가 "아는 SQL"로.
   - 코어: `DatasetTransformFn` + `is_dataset_transform` + `_run_task` 스테이지 합성(행 구간 DLQ 시맨틱 보존), 그래프 transform 노드 지원, stream 모드 명시 거부(무한 스트림엔 전체 데이터셋 없음).

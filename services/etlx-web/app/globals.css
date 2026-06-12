@@ -41,9 +41,11 @@
     --accent: 255 61 139;
     --accent-hover: 255 85 153;
     --accent-active: 255 45 124;
-    /* Text ON accent/error fills (a11y AA): white on the brand pink is
-       3.3:1 — deep navy reads 5.6:1 on pink and 6.7:1 on the error red. */
-    --text-on-accent: 10 18 40;
+    /* Text ON accent/error fills. White measures 3.3:1 on the brand
+       pink (below AA 4.5:1) — the owner reviewed the navy alternative
+       and chose to KEEP WHITE (2026-06-12); the axe gate excludes
+       `.text-on-accent` elements for exactly this accepted trade-off. */
+    --text-on-accent: 255 255 255;
 
     --success: 74 222 128;
     --warning: 251 191 36;
@@ -66,7 +68,7 @@
     /* a11y AA: the old 148 163 184 measured 2.6:1 on white. */
     --text-muted: 100 116 139;
     --text-disabled: 203 213 225;
-    --text-on-accent: 10 18 40;
+    --text-on-accent: 255 255 255;
   }
 
   html,
@@ -314,10 +316,10 @@
     background-color: rgb(var(--accent));
   }
   .checkbox:checked {
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' fill='none'%3E%3Cpath d='M2.5 6.2L5 8.7L9.5 3.5' stroke='%230A1228' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' fill='none'%3E%3Cpath d='M2.5 6.2L5 8.7L9.5 3.5' stroke='%23FFFFFF' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   }
   .checkbox:indeterminate {
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' fill='none'%3E%3Cpath d='M3 6h6' stroke='%230A1228' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E");
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' fill='none'%3E%3Cpath d='M3 6h6' stroke='%23FFFFFF' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E");
   }
   .checkbox:checked:hover:not(:disabled),
   .checkbox:indeterminate:hover:not(:disabled) {

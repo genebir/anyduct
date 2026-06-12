@@ -172,6 +172,10 @@ def _build_task(
     if len(sink_cfgs) == 1 and sink_cfgs[0].when is None:
         snk = sink_cfgs[0]
         task.sink = _sink_key(snk.connection)
+        # ADR-0094 f/u: keep the ORIGINAL connection name — ``task.sink``
+        # may be a minted dedicated-instance key (``db__sink``) and
+        # same-connection pushdown compares databases by name.
+        task.sink_connection_name = snk.connection
         task.sink_table = snk.table
         task.sink_mode = snk.mode
         task.sink_key_columns = snk.key_columns
@@ -193,6 +197,7 @@ def _build_task(
                 pre_sql=snk.model_dump().get("pre_sql"),
                 auto_create_table=bool(snk.model_dump().get("auto_create_table")),
                 auto_create_if_exists=str(snk.model_dump().get("auto_create_if_exists") or "skip"),
+                connection_name=snk.connection,
             )
             for snk in sink_cfgs
         ]

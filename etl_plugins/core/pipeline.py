@@ -292,6 +292,12 @@ class Task:
     # into cross-DB schema replication.
     sink_auto_create_table: bool = False
     sink_auto_create_if_exists: str = "skip"
+    # ADR-0094 follow-up (2026-06-12): flat-sink mirror of
+    # ``SinkSpec.connection_name`` — the ORIGINAL config connection name,
+    # kept so same-connection pushdown can compare *databases* when the
+    # builder minted a dedicated sink instance (``sink`` then holds the
+    # minted key, e.g. ``db__sink``).
+    sink_connection_name: str | None = None
     # Fan-out targets (ADR-0026). When non-empty these take precedence over the
     # flat ``sink*`` fields and the source is re-read once per sink.
     sinks: list[SinkSpec] = field(default_factory=list)
@@ -326,6 +332,7 @@ class Task:
                 pre_sql=self.sink_pre_sql,
                 auto_create_table=self.sink_auto_create_table,
                 auto_create_if_exists=self.sink_auto_create_if_exists,
+                connection_name=self.sink_connection_name,
             )
         ]
 
@@ -1743,8 +1750,17 @@ class Pipeline:
         spec, sink = sinks[0]
         if spec.when is not None or spec.mode != "append" or spec.pre_sql:
             return None
+        # Same *database*, not necessarily the same instance (2026-06-12):
+        # the builder mints a dedicated sink instance when a sink reuses the
+        # source's connection (streaming-read/write deadlock guard), which
+        # used to fail the old identity check and silently downgrade every
+        # server-built task to the Arrow path. Pushdown never reads, so
+        # executing the single INSERT on the *source* instance is safe —
+        # the graph chain (``_try_graph_pushdown``) already does this.
         # mypy sees disjoint protocols; connectors routinely implement both.
-        if cast("object", source) is not cast("object", sink):
+        same_instance = cast("object", source) is cast("object", sink)
+        same_database = (spec.connection_name or spec.name) == task.source
+        if not (same_instance or same_database):
             return None
         if not getattr(source, "supports_sql_pushdown", False):
             return None
@@ -1753,9 +1769,17 @@ class Pipeline:
         if not select_sql or not spec.table or not _PUSHDOWN_TABLE_RE.match(spec.table):
             return None
 
+        # Quote the target through the dialect's identifier rules (2026-06-12):
+        # an unquoted INSERT INTO folds case (postgres lowercases), so a
+        # case-sensitive table (created quoted, e.g. uppercase warehouse
+        # schemas) failed the moment pushdown engaged. The regex guard above
+        # still rejects splice attempts; quoting just preserves case.
+        quote = getattr(source, "quote_table", None)
+        table_sql = quote(spec.table) if callable(quote) else spec.table
+
         _module_logger.info("sql_pushdown", pipeline=self.name, task=task.name, table=spec.table)
         self._task_data_paths[task.name or "task"] = "pushdown"
-        n = source.execute_statement(f"INSERT INTO {spec.table} {select_sql}")
+        n = source.execute_statement(f"INSERT INTO {table_sql} {select_sql}")
         rows = max(0, int(n))
         return rows, rows, None
 

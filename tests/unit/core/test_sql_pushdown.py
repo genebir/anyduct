@@ -398,3 +398,70 @@ def test_pushdown_flag_typo_rejected_at_build() -> None:
 
     with pytest.raises(ConfigError, match="pushdown"):
         build_transform(TransformConfig(type="sql", query="SELECT 1", pushdown="yes"))
+
+
+# ---------- minted sink instance + identifier quoting (2026-06-12) ------
+
+
+def test_tasks_shape_minted_sink_instance_pushes_down_by_name(
+    db: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The server worker builds with ``connector_factory``, so a sink that
+    reuses the source's connection gets a DEDICATED instance — the old
+    instance-identity check then silently downgraded every server-built
+    task to the Arrow/Record path. Same *name* must be enough: the single
+    INSERT executes on the source instance (pushdown never reads, no
+    deadlock to guard)."""
+    src_conn = SQLiteConnector(database=db)
+    src_conn.connect()
+    minted = SQLiteConnector(database=db)
+    minted.connect()
+    monkeypatch.setattr(
+        SQLiteConnector, "write", lambda *a, **k: (_ for _ in ()).throw(AssertionError("write"))
+    )
+    task = _task(sink="db__sink")
+    task.sink_connection_name = "db"  # what the builder records (ADR-0094 f/u)
+    result = Pipeline(name="p", tasks=[task]).run(connectors={"db": src_conn, "db__sink": minted})
+    assert result.data_paths == {"t": "pushdown"}
+    assert _rows(db) == [(i, f"n{i}") for i in range(5)]
+    src_conn.close()
+    minted.close()
+
+
+def test_pushdown_insert_quotes_table_identifier(db: str) -> None:
+    """The INSERT must go through the dialect quoter — unquoted targets
+    fold case (postgres lowercases) and broke case-sensitive tables the
+    moment pushdown engaged. Same config must behave like the write paths,
+    which always quoted."""
+    conn = SQLiteConnector(database=db)
+    conn.connect()
+    captured: list[str] = []
+    original = SQLiteConnector.execute_statement
+
+    def spy(self: SQLiteConnector, statement: str) -> int:
+        captured.append(statement)
+        return original(self, statement)
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(SQLiteConnector, "execute_statement", spy)
+        result = Pipeline(name="p", tasks=[_task()]).run(connectors={"db": conn})
+    assert result.data_paths == {"t": "pushdown"}
+    assert any(s.startswith('INSERT INTO "dst" ') for s in captured), captured
+    conn.close()
+
+
+def test_different_database_same_shape_still_falls_back(db: str, tmp_path: Path) -> None:
+    """Name-based comparison must not over-trigger: a sink on a DIFFERENT
+    connection name keeps the local paths."""
+    other = str(tmp_path / "other.db")
+    sqlite3.connect(other).execute("CREATE TABLE dst (id INTEGER, name TEXT)").connection.commit()
+    a = SQLiteConnector(database=db)
+    b = SQLiteConnector(database=other)
+    a.connect()
+    b.connect()
+    task = _task(sink="b")
+    task.sink_connection_name = "b"
+    result = Pipeline(name="p", tasks=[task]).run(connectors={"db": a, "b": b})
+    assert result.data_paths == {"t": "records"}
+    a.close()
+    b.close()

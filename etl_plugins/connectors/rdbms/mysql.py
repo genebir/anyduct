@@ -50,6 +50,14 @@ class MySQLConnector(BatchSource, BatchSink):
     # entirely inside the database (no data movement).
     supports_sql_pushdown = True
 
+    def quote_table(self, table: str) -> str:
+        """Identifier-quoted table path for in-database statements (same-
+        connection pushdown, ADR-0094 f/u, 2026-06-12) — mirrors the write
+        path's quoting so one config behaves identically on every data
+        path (an unquoted INSERT INTO folds case and broke case-sensitive
+        tables the moment pushdown engaged)."""
+        return _table_ident(table)
+
     def __init__(
         self,
         host: str = "localhost",
@@ -188,7 +196,7 @@ class MySQLConnector(BatchSource, BatchSink):
                 self._conn.commit()
         elif if_exists not in {"skip", "drop", "error"}:
             raise WriteError(
-                f"ensure_table: unknown if_exists={if_exists!r} " "(use 'skip', 'drop', or 'error')"
+                f"ensure_table: unknown if_exists={if_exists!r} (use 'skip', 'drop', or 'error')"
             )
 
         col_names = {c.name for c in columns}

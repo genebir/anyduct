@@ -68,6 +68,14 @@ class SnowflakeConnector(BatchSource, BatchSink):
     # entirely inside the database (no data movement).
     supports_sql_pushdown = True
 
+    def quote_table(self, table: str) -> str:
+        """Identifier-quoted table path for in-database statements (same-
+        connection pushdown, ADR-0094 f/u, 2026-06-12) — mirrors the write
+        path's quoting so one config behaves identically on every data
+        path (an unquoted INSERT INTO folds case and broke case-sensitive
+        tables the moment pushdown engaged)."""
+        return _qt(table)
+
     def __init__(
         self,
         account: str = "",

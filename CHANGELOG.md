@@ -10,6 +10,7 @@
 ## [Unreleased]
 
 ### Fixed
+- **같은-커넥션 pushdown이 서버 실행에서 영구 침묵 스킵 + 비따옴표 INSERT 케이스 폴딩 (2026-06-12, ADR-0094 f/u, 실데이터 dogfood)**: ① 워커는 `connector_factory`로 sink에 전용 인스턴스를 mint(스트리밍 read/write 데드락 가드)하는데 linear/tasks pushdown의 *인스턴스 identity* 검사가 이를 항상 불통과 → 서버-빌드 파이프라인은 pushdown이 절대 발화 안 하고 Arrow로 침묵 강등. graph 체인이 이미 쓰던 **이름 기반 same-DB 판정**(`SinkSpec.connection_name`, builder가 flat/multi-sink 양 경로에 원본 커넥션명 기록)으로 교체 — 단일 INSERT는 소스 인스턴스에서 실행(읽기 없음 = 데드락 무관). ② pushdown INSERT가 비따옴표 테이블이라 발화 시 case-sensitive(대문자) 테이블이 즉시 실패 — 9개 pushdown 커넥터에 write 경로와 동일한 `quote_table()` 추가(한 config가 데이터 경로와 무관하게 동일 동작). live: 사용자 test ws 배치로그 태스크(대문자 스키마, WITH-CTE 쿼리)가 `data_paths: pushdown`으로 무이동 실행 성공. 잠금 unit 3종.
 - **quoted(대소문자 구분) 식별자 컬럼 리니지 전손실 (2026-06-12, 실데이터 dogfood 발견)**: `SELECT m."A" AS "X"` 류 quoted 식별자 쿼리에서 `alias_or_name`이 따옴표를 벗긴 이름을 `sqlglot.lineage()`에 넘겨 비따옴표 정규화(소문자화)로 lookup 미스 → **모든 leaf 소실(컬럼 행만 있고 upstream 0)**. 대문자 스키마 엔터프라이즈 DB(사용자 실데이터)의 전 쿼리가 해당. quoted 출력 식별자는 quoting 보존 SQL로 lookup. JOIN+GROUP BY 집계 마트 쿼리가 컬럼 단위 정확 귀속으로 복원(live 4-hop 체인 DM←DS←DC←vertica 검증).
 - **partial schema가 star-없는 쿼리 리니지를 오염 (2026-06-12, 동일 dogfood)**: 워커의 star 감지가 문자열 `"*" in query`라 `COUNT(*)`에 오탐 → 형제 태스크용으로 fetch한 부분 스키마가 같은 커넥션의 **star-없는 태스크 derive에도 주입** → sqlglot이 스키마에 없는 테이블 해석을 Placeholder로 강등, edge 전멸. 코어 `extract_sql_lineage`가 projection star 없는 쿼리에선 schema를 무시(star 확장이라는 문서화된 용도로 한정) + 워커 감지를 `has_projection_star()`(AST 기반, COUNT(*) 제외)로 교체. 잠금 테스트 7종(quoted 4 + schema 오염 3).
 

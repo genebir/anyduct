@@ -117,7 +117,15 @@ uv run mypy etl_plugins
 
 ## 5. 현재 단계
 
-> **최신 마일스톤 (2026-06-12 오전): 카탈로그 리니지 UI 보편화 — 사용자 피드백 "컬럼 리니지 인터페이스가 너무 구린데" → "보편 구현에 가깝게".** React Flow 둥둥 박스(컬럼별 개별 노드, 줌/팬 과잉, 추적 불가)를 DataHub/OpenMetadata 관례로 전면 교체:
+> **최신 마일스톤 (2026-06-12 오후): test ws 실데이터 파이프라인 2종 구축(사용자 요청) + ~20:00 자율런 — 실데이터 dogfood가 코어 버그 3겹 적발.**
+> - **[사용자 요청] 운영형 파이프라인 2종**: ① `DC_TO_DS_DAILY_LOAD` — BDA_DC_DB 6테이블→BDA_DS_DB task-DAG(테이블당 태스크, 테크 컬럼 재스탬프 `DATA_PRCS_DT`=적재시각/`DATA_PRCS_PRGRM_ID`, overwrite 멱등, LAM 4종 auto_create) ② `DS_TO_DM_CODE_STAT_MART` — 마트 `BDA_DM_DB.TB_BCDSTAT801` 설계(PK+14컬럼)+가공적재(JOIN/SUM CASE/ROUND/NULLIF/LENGTH/규모등급 CASE, overwrite+pre_sql DDL self-healing). 둘 다 `depends_on` 배치로그 태스크가 `TB_BCOLOG701`에 레거시 관례(PID/대상테이블/NOCS 스칼라 서브쿼리/ELPS_HR TO_CHAR) 행 적재. 2회 연속 실행으로 멱등 실증(DS 4,405·마트 722 불변, PK dup 0). **P2 auto_materialize 체이닝**(P1 성공→P2 자동, trigger_chain 정확) + P1 일배치 cron(02:00 KST).
+> - **[코어] 컬럼 리니지 2겹 버그 (dogfood 적발)**: ① quoted(대소문자 구분) 식별자 쿼리에서 `alias_or_name`이 따옴표를 벗겨 lineage() lookup이 소문자 정규화로 전 leaf 소실 → quoting 보존 lookup ② 워커 star 감지가 `"*" in query` 문자열이라 COUNT(*) 오탐 → 부분 스키마가 star-없는 형제 태스크 derive를 Placeholder로 오염 → 코어는 projection star 없으면 schema 무시 + 워커는 `has_projection_star()`(AST). live 4-hop 체인(DM←DS←DC←vertica) 컬럼 단위 정확 귀속, 잠금 unit 7.
+> - **[코어] pushdown 서버 침묵 스킵 + quoting (ADR-0094 f/u)**: 워커 connector_factory가 mint한 sink 인스턴스에 instance-identity 검사가 항상 불통과 → **서버-빌드 linear/tasks 파이프라인은 pushdown이 발화한 적 없음**(Arrow 침묵 강등). graph의 이름 기반 same-DB 판정을 tasks/linear에도(`Task.sink_connection_name`) + INSERT 타깃 dialect quoting(`quote_table()` 9커넥터 — 비따옴표는 대문자 테이블 즉시 실패, write 경로와 시맨틱 통일). live: 배치로그 태스크 `data_paths: pushdown` 무이동 실행. PG 통합 잠금(대문자+minted).
+> - **[코어] DW Arrow fast-path 확대**: vertica P2g(서버측 커서 직조립, NUMERIC 선언 precision 핀, **사용자 live vertica 실읽기 722행 `data_paths: arrow` 검증**) + mssql P2h(pymssql 거친 타입버킷 → STRING/BINARY만 핀) → **Arrow 커넥터 4종(postgres/mysql/vertica/mssql) RDBMS 라인 완성**. fake-cursor 단위 20.
+> - **[웹] Checkbox primitive 14곳 전파**(빌더/연결/마이그레이션/스케줄/센서/ERD/assets/audit — accent-color 인라인 제거) + 컬럼 리니지 `*` 의사 컬럼 "(전체 행)" 라벨. a11y 게이트 전 스토리 green, i18n 1252 패리티.
+> - **[문서] 데이터 경로 가이드**(pipelines.md — pushdown→Arrow→records 우선순위/자격/가시화) + ADR-0094 후속 노트. 검증: 코어 unit 1298 / 통합(백그라운드) / 서버 워커 it 34 / mypy·ruff·tsc clean / live 스택 매 슬라이스 재시작 검증.
+>
+> **이전 마일스톤 (2026-06-12 오전): 카탈로그 리니지 UI 보편화 — 사용자 피드백 "컬럼 리니지 인터페이스가 너무 구린데" → "보편 구현에 가깝게".** React Flow 둥둥 박스(컬럼별 개별 노드, 줌/팬 과잉, 추적 불가)를 DataHub/OpenMetadata 관례로 전면 교체:
 > - **컬럼 리니지 멀티-홉 DAG**: 서버 `GET /assets/{id}/column-lineage-graph?depth=1~5`(column_lineage_edges 업스트림 BFS, 40자산 캡, truncated 프로브) + 웹 홉당 레인(루트 우측 끝)·barycenter 정렬·**전이적 hover/pin 추적**(전 홉 양방향)·비참여 컬럼 "+N개" 접기(루트는 전부)·홉 컨트롤·"더 위가 있음" 칩.
 > - **자산(테이블) 리니지도 동일 관례**: `GET /assets/{id}/lineage-graph`(asset_edges **양방향** BFS — 업스트림 음수 depth 좌/다운스트림 양수 우, 60자산 캡) + 동일 시각 언어 레인 DAG(hover 추적, 클릭=이동). 기존 1홉 endpoint 2종은 하위호환 유지.
 > - 시각 언어 = ERD 디자이너 재사용(엔티티 카드+행 포트 베지어), 결정적 레이아웃(측정 불필요), React Flow 의존은 assets 영역에서 제거. live 검증: weekly_summary←daily_totals←raw_events 3-레인 + daily_totals 중간 노드 양방향. 서버 e2e 4, 스토리 6종 재작성, Storybook 빌드 green.

@@ -1,0 +1,90 @@
+# Task-DAG layered load with a batch-log audit row (ADR-0028 + ADR-0035).
+#
+# The pattern behind a classic enterprise "수집 → 저장 + 배치로그" job,
+# built live on 2026-06-12: N table-copy tasks run in parallel, then a
+# final task (``depends_on`` all of them) appends one audit row per
+# table into a batch-log table — counts and timestamps computed by the
+# database itself.
+#
+# Idempotency, twice:
+#   * copy tasks use ``mode: overwrite`` — TRUNCATE + load in ONE write
+#     transaction, so a re-run can never double rows;
+#   * the log task is append-only BY DESIGN (a batch log accumulates one
+#     row per execution — that's its job).
+#
+# Tech columns: the copy task's SELECT re-stamps load-time columns
+# (``loaded_at`` = now, ``loaded_by`` = this program) while passing
+# business columns through untouched — the lineage stays per-column
+# accurate because it's all plain SQL.
+#
+# Data paths (ADR-0093/0094): with everything on ONE connection the log
+# task (append, no transforms) collapses to an in-database
+# ``INSERT INTO … SELECT`` (pushdown — zero movement), and the copy
+# tasks take the Arrow bulk path. Check the run detail's "Data path"
+# chips after a run.
+#
+# Pair with ``examples/connections.example.yaml`` and run:
+#
+#     uv run etlx validate examples/task_dag_batch_log.yaml \
+#         --connections examples/connections.example.yaml
+#
+name: staging_load_with_batch_log
+mode: batch
+tasks:
+  - name: load_customers
+    source:
+      connection: pg_oltp
+      query: |
+        SELECT
+          id, name, email,                       -- business columns verbatim
+          CURRENT_TIMESTAMP AS loaded_at,        -- tech column: this load's time
+          'staging_load_v1' AS loaded_by         -- tech column: this program
+        FROM raw.customers
+    sink:
+      connection: pg_oltp
+      table: staging.customers
+      mode: overwrite          # truncate + insert, one transaction -> idempotent
+      auto_create_table: true  # first run creates the table from the query shape
+
+  - name: load_orders
+    source:
+      connection: pg_oltp
+      query: |
+        SELECT
+          id, customer_id, amount, order_day,
+          CURRENT_TIMESTAMP AS loaded_at,
+          'staging_load_v1' AS loaded_by
+        FROM raw.orders
+    sink:
+      connection: pg_oltp
+      table: staging.orders
+      mode: overwrite
+      auto_create_table: true
+
+  - name: write_batch_log
+    depends_on: [load_customers, load_orders]
+    source:
+      connection: pg_oltp
+      # One audit row per loaded table; the DB computes counts and
+      # elapsed time — no Python in the loop.
+      query: |
+        WITH s AS (
+          SELECT 'staging.customers' AS target_table,
+                 COUNT(*) AS row_count, MAX(loaded_at) AS started_at
+          FROM staging.customers
+          UNION ALL
+          SELECT 'staging.orders', COUNT(*), MAX(loaded_at)
+          FROM staging.orders
+        )
+        SELECT
+          'staging_load_v1'        AS program_id,
+          s.target_table           AS target_table,
+          CAST(s.row_count AS bigint) AS row_count,
+          s.started_at             AS started_at,
+          clock_timestamp()        AS finished_at,
+          'SUCCESS'                AS status
+        FROM s
+    sink:
+      connection: pg_oltp
+      table: ops.batch_log
+      mode: append               # a batch log accumulates one row per run

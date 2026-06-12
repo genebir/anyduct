@@ -91,3 +91,23 @@ def test_elt_pushdown_example_validates() -> None:
     assert pc.transforms[0].model_dump().get("pushdown") is True
     codes = {w.code for w in lint_pipeline(pc)}
     assert "sql_pushdown_ineligible" not in codes
+
+
+def test_task_dag_batch_log_example_validates() -> None:
+    """ADR-0028 + ADR-0035: layered load + batch-log audit row (the
+    2026-06-12 live pattern). The DAG must keep its shape — parallel
+    copy tasks (overwrite = idempotent) with the log task depending on
+    ALL of them, appending on the same connection so it stays
+    pushdown-eligible."""
+    pc = load_pipeline(EXAMPLES / "task_dag_batch_log.yaml")
+    assert pc.name == "staging_load_with_batch_log"
+    assert len(pc.tasks) == 3
+    by_name = {t.name: t for t in pc.tasks}
+    log = by_name["write_batch_log"]
+    assert set(log.depends_on) == {"load_customers", "load_orders"}
+    assert log.effective_sinks()[0].mode == "append"
+    assert log.source.connection == log.effective_sinks()[0].connection
+    for t in ("load_customers", "load_orders"):
+        sink = by_name[t].effective_sinks()[0]
+        assert sink.mode == "overwrite"
+        assert sink.auto_create_table is True

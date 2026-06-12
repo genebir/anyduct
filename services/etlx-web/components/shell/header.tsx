@@ -62,7 +62,7 @@ export function Header({
           <div className="flex items-center gap-2 rounded-md border border-border-subtle bg-elevated py-1 pl-1 pr-2">
             <span
               aria-hidden
-              className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-accent-gradient text-xs font-semibold text-white"
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-accent-gradient text-xs font-semibold text-on-accent"
             >
               {userInitial}
             </span>

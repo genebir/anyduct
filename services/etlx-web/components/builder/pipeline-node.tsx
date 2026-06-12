@@ -52,8 +52,10 @@ export function PipelineNode({ id, data }: NodeProps) {
   return (
     <div
       onClick={() => d.onSelect(id)}
-      role="button"
-      tabIndex={0}
+      // a11y (Step 10.8): no role/tabIndex here — React Flow's node
+      // wrapper is already the focusable control; doubling it made the
+      // inner action buttons "focusable descendants of a button"
+      // (axe nested-interactive).
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();

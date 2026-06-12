@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import { MockLocaleProvider, MockWorkspaceProvider } from "../../.storybook/mocks/providers";
 import { ErdDesigner } from "./erd-designer";
 
 /**
@@ -12,11 +13,15 @@ import { ErdDesigner } from "./erd-designer";
 const meta: Meta<typeof ErdDesigner> = {
   title: "ERD/ErdDesigner",
   component: ErdDesigner,
-  parameters: { layout: "fullscreen" },
+  parameters: { layout: "fullscreen", nextjs: { appDirectory: true } },
   decorators: [
     (Story) => (
       <div style={{ width: "100%", height: 640 }}>
-        <Story />
+        <MockLocaleProvider>
+          <MockWorkspaceProvider>
+            <Story />
+          </MockWorkspaceProvider>
+        </MockLocaleProvider>
       </div>
     ),
   ],

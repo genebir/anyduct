@@ -33,12 +33,17 @@
 
     --text-primary: 244 246 251;
     --text-secondary: 168 179 209;
-    --text-muted: 110 122 160;
+    /* a11y AA (Step 10.8, 2026-06-12): 4.5:1 over every dark surface —
+       the old 110 122 160 measured 3.5:1 on bg-overlay. */
+    --text-muted: 139 150 187;
     --text-disabled: 74 85 122;
 
     --accent: 255 61 139;
     --accent-hover: 255 85 153;
     --accent-active: 255 45 124;
+    /* Text ON accent/error fills (a11y AA): white on the brand pink is
+       3.3:1 — deep navy reads 5.6:1 on pink and 6.7:1 on the error red. */
+    --text-on-accent: 10 18 40;
 
     --success: 74 222 128;
     --warning: 251 191 36;
@@ -58,8 +63,10 @@
 
     --text-primary: 10 18 40;
     --text-secondary: 71 85 105;
-    --text-muted: 148 163 184;
+    /* a11y AA: the old 148 163 184 measured 2.6:1 on white. */
+    --text-muted: 100 116 139;
     --text-disabled: 203 213 225;
+    --text-on-accent: 10 18 40;
   }
 
   html,
@@ -136,6 +143,7 @@
   --color-text-secondary: rgb(var(--text-secondary));
   --color-text-muted: rgb(var(--text-muted));
   --color-text-disabled: rgb(var(--text-disabled));
+  --color-on-accent: rgb(var(--text-on-accent));
 
   --color-accent: rgb(var(--accent));
   --color-accent-hover: rgb(var(--accent-hover));

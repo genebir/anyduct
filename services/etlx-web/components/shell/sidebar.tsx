@@ -312,11 +312,13 @@ function NavRow({
         "flex items-center gap-2.5 rounded-md py-2 text-sm transition duration-200",
         nested ? "pl-9 pr-2.5" : "px-2.5",
         active
-          ? "bg-overlay font-semibold text-accent"
+          // a11y (Step 10.8): accent-hover — the base pink reads 4.2:1
+            // on bg-overlay (AA needs 4.5); the hover shade reads 6.1:1.
+            ? "bg-overlay font-semibold text-accent-hover"
           : "text-text-secondary hover:bg-overlay hover:text-text",
       )}
     >
-      <span className={cn(active ? "text-accent" : "text-text-muted", "shrink-0")}>{icon}</span>
+      <span className={cn(active ? "text-accent-hover" : "text-text-muted", "shrink-0")}>{icon}</span>
       {label}
     </Link>
   );

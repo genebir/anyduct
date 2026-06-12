@@ -23,12 +23,14 @@ export const Default: Story = {
 export const WithValue: Story = {
   args: {
     defaultValue: "orders-nightly",
+    "aria-label": "Pipeline name",
   },
 };
 
 export const Invalid: Story = {
   args: {
     defaultValue: "invalid name with spaces",
+    "aria-label": "Pipeline name",
     invalid: true,
     "aria-describedby": "input-error",
   },
@@ -45,6 +47,7 @@ export const Invalid: Story = {
 export const Disabled: Story = {
   args: {
     defaultValue: "read-only",
+    "aria-label": "Pipeline name",
     disabled: true,
   },
 };

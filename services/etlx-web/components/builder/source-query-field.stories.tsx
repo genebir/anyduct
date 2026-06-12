@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import { MockLocaleProvider } from "../../.storybook/mocks/providers";
 import { useState } from "react";
 import { SourceQueryField } from "./source-query-field";
 import { en, type Messages } from "@/lib/i18n/messages";
@@ -39,6 +40,13 @@ function Harness({ initial, connectionId }: { initial?: string; connectionId?: s
 const meta: Meta = {
   title: "Builder/SourceQueryField",
   parameters: { layout: "centered" },
+  decorators: [
+    (Story) => (
+      <MockLocaleProvider>
+        <Story />
+      </MockLocaleProvider>
+    ),
+  ],
 };
 
 export default meta;

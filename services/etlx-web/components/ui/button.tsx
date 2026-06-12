@@ -14,11 +14,11 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 
 const VARIANT_CLASSES: Record<Variant, string> = {
   primary:
-    "bg-accent-gradient text-white hover:brightness-110 active:brightness-95",
+    "bg-accent-gradient font-semibold text-on-accent hover:brightness-110 active:brightness-95",
   secondary:
     "bg-elevated text-text border border-border-subtle hover:bg-overlay",
   ghost: "bg-transparent text-text-secondary hover:bg-overlay hover:text-text",
-  destructive: "bg-error text-white hover:brightness-110",
+  destructive: "bg-error font-semibold text-on-accent hover:brightness-110",
   outline:
     "bg-transparent border border-border text-text hover:bg-overlay",
 };
@@ -54,6 +54,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
     <button
       ref={ref}
       disabled={disabled || loading}
+      aria-busy={loading || undefined}
       className={cn(
         // ``whitespace-nowrap`` prevents the row-button collapse where the
         // spinner pushed CJK labels onto two lines (user report 2026-05-26:
@@ -81,14 +82,17 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
           className="pointer-events-none absolute inset-0 inline-flex items-center justify-center"
           aria-hidden
         >
-          <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+          <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-current/40 border-t-current" />
         </span>
       ) : null}
       <span
         className={cn(
           "inline-flex items-center whitespace-nowrap",
           INNER_GAP[size],
-          loading && "invisible",
+          // a11y (Step 10.8): opacity-0 keeps the label in the
+          // accessibility tree (button-name) while hiding it visually —
+          // `invisible` removed it from screen readers too.
+          loading && "opacity-0",
         )}
       >
         {children}

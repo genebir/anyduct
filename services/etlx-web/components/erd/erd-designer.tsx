@@ -406,6 +406,7 @@ function TablePanel({
             <div className="mt-1.5 flex items-center gap-1">
               <select
                 value={c.type}
+                aria-label={t("erdDesign.columnTypeAria")}
                 onChange={(e) => setColumn(i, { type: e.target.value })}
                 className="h-7 min-w-0 flex-1 rounded-md border border-border-subtle bg-bg px-1 text-[11px] text-text"
               >
@@ -564,6 +565,7 @@ function EdgePanel({
       </label>
       <select
         value={current}
+        aria-label={t("erdEdge.cardinality")}
         onChange={(e) => {
           const opt = CARD_OPTIONS.find((o) => o.value === e.target.value);
           if (opt) onChange({ sourceCard: opt.source, targetCard: opt.target });
@@ -1654,6 +1656,7 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
         <div className="ml-auto flex items-center gap-2">
           <select
             value={dialect}
+            aria-label={t("erdDesign.dialect")}
             onChange={(e) => setDialect(e.target.value)}
             className="h-8 rounded-md border border-border-subtle bg-bg px-2 text-xs text-text"
           >

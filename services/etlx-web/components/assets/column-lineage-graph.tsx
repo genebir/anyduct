@@ -44,8 +44,8 @@ function AssetKeyLabel({ assetKey, current }: { assetKey: string; current?: bool
   const table = slash >= 0 ? assetKey.slice(slash + 1) : assetKey;
   return (
     <span className="min-w-0 truncate font-mono text-xs" title={assetKey}>
-      <span className={current ? "text-white/70" : "text-text-muted"}>{conn}</span>
-      <span className={cn("font-semibold", current ? "text-white" : "text-text")}>{table}</span>
+      <span className={current ? "text-on-accent" : "text-text-muted"}>{conn}</span>
+      <span className={cn("font-semibold", current ? "text-on-accent" : "text-text")}>{table}</span>
     </span>
   );
 }
@@ -265,7 +265,7 @@ export function ColumnLineageGraph({
               className={cn(
                 "cursor-pointer px-2 py-0.5 text-[11px] transition-colors",
                 d === depth
-                  ? "bg-accent text-white"
+                  ? "bg-accent font-semibold text-on-accent"
                   : "bg-elevated text-text-secondary hover:bg-overlay",
               )}
             >

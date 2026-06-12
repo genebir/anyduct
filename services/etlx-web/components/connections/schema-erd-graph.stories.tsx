@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import { MockLocaleProvider } from "../../.storybook/mocks/providers";
 import { SchemaErdGraph } from "./schema-erd-graph";
 
 /**
@@ -15,7 +16,9 @@ const meta: Meta<typeof SchemaErdGraph> = {
   decorators: [
     (Story) => (
       <div style={{ width: 1000, height: 640, padding: 16 }}>
-        <Story />
+        <MockLocaleProvider>
+          <Story />
+        </MockLocaleProvider>
       </div>
     ),
   ],

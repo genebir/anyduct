@@ -33,7 +33,7 @@ export default function GlobalError({
           <button
             type="button"
             onClick={reset}
-            className="mt-6 inline-flex h-9 cursor-pointer items-center rounded-lg bg-accent px-4 text-sm font-medium text-white hover:opacity-90"
+            className="mt-6 inline-flex h-9 cursor-pointer items-center rounded-lg bg-accent px-4 text-sm font-semibold text-on-accent hover:opacity-90"
           >
             Reload · 다시 시도
           </button>

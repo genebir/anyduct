@@ -36,6 +36,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { EmptyState } from "@/components/ui/empty-state";
+import { Checkbox } from "@/components/ui/checkbox";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { CronInput } from "@/components/schedules/cron-input";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -770,14 +771,14 @@ export default function MigrationsPage() {
   const allVisibleSelected =
     filteredRows.length > 0 &&
     filteredRows.every((r) => selectedIds.has(r.id));
+  const someVisibleSelected = filteredRows.some((r) => selectedIds.has(r.id));
   const selectColumn: Column<Row> = {
     key: "_select",
     className: "w-8",
     header: (
-      <input
-        type="checkbox"
-        className="h-3.5 w-3.5 cursor-pointer accent-accent"
+      <Checkbox
         checked={allVisibleSelected}
+        indeterminate={someVisibleSelected && !allVisibleSelected}
         aria-label={t("migrations.selectAllVisibleAria")}
         onChange={() => {
           if (allVisibleSelected) {
@@ -798,9 +799,7 @@ export default function MigrationsPage() {
       />
     ),
     cell: (r) => (
-      <input
-        type="checkbox"
-        className="h-3.5 w-3.5 cursor-pointer accent-accent"
+      <Checkbox
         checked={selectedIds.has(r.id)}
         onChange={() => toggleSelection(r.id)}
         onClick={(e) => e.stopPropagation()}

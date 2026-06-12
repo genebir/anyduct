@@ -32,6 +32,7 @@ import {
   useContextMenu,
 } from "@/components/ui/context-menu";
 import { EmptyState } from "@/components/ui/empty-state";
+import { Checkbox } from "@/components/ui/checkbox";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { BackfillDialog } from "@/components/pipelines/backfill-dialog";
 import {
@@ -285,6 +286,21 @@ export default function PipelinesPage() {
   );
   const [deleting, setDeleting] = useState(false);
   const [backfillRow, setBackfillRow] = useState<PipelineSummary | null>(null);
+  // Bulk multi-select (2026-06-12, user request) — mirrors the
+  // migrations surface: Clear → Dry run → Trigger → Delete.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkDryRunning, setBulkDryRunning] = useState(false);
+  const [bulkTriggering, setBulkTriggering] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+  const toggleSelection = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
   const rowMenu = useContextMenu();
   const rowMenuTargetRef = useRef<PipelineSummary | null>(null);
 
@@ -431,6 +447,73 @@ export default function PipelinesPage() {
     return [...refs].some((r) => !connNames.has(r));
   }
 
+  async function onBulkDryRun() {
+    if (!ws || selectedIds.size === 0) return;
+    setBulkDryRunning(true);
+    let ok = 0;
+    let fail = 0;
+    for (const id of selectedIds) {
+      try {
+        const res = await pipelinesApi.dryRun(ws.id, id);
+        if (res.ok) ok += 1;
+        else fail += 1;
+      } catch {
+        fail += 1;
+      }
+    }
+    setBulkDryRunning(false);
+    if (fail === 0) toast.success(t("pipelines.bulkDryRunOk", { n: ok }));
+    else toast.warning(t("pipelines.bulkDryRunPartial", { ok, fail }));
+  }
+
+  async function onBulkTrigger() {
+    if (!ws || selectedIds.size === 0) return;
+    setBulkTriggering(true);
+    let ok = 0;
+    let fail = 0;
+    let skipped = 0;
+    for (const id of selectedIds) {
+      const row = rows?.find((r) => r.id === id);
+      // Broken / never-saved rows would just fail to build — skip and say so.
+      if (!row || !row.current_version || isBroken(row)) {
+        skipped += 1;
+        continue;
+      }
+      try {
+        await pipelinesApi.trigger(ws.id, id);
+        ok += 1;
+      } catch {
+        fail += 1;
+      }
+    }
+    setBulkTriggering(false);
+    if (fail === 0 && skipped === 0) {
+      toast.success(t("pipelines.bulkRunQueued", { n: ok }));
+    } else {
+      toast.warning(t("pipelines.bulkRunPartial", { ok, fail: fail + skipped }));
+    }
+  }
+
+  async function onBulkDelete() {
+    if (!ws || selectedIds.size === 0) return;
+    setBulkDeleting(true);
+    let ok = 0;
+    let fail = 0;
+    for (const id of selectedIds) {
+      try {
+        await pipelinesApi.delete(ws.id, id);
+        ok += 1;
+      } catch {
+        fail += 1;
+      }
+    }
+    setBulkDeleting(false);
+    setSelectedIds(new Set());
+    setRows((prev) => (prev ? prev.filter((r) => !selectedIds.has(r.id)) : prev));
+    if (fail === 0) toast.success(t("pipelines.bulkDeleted", { n: ok }));
+    else toast.warning(t("pipelines.bulkDeletePartial", { ok, fail }));
+  }
+
   // Phase ADQ (2026-06-04) — pre-flight validation from the list, so an
   // operator can catch a missing connection / secret before triggering
   // (the "validate → run" order the migrations surface already uses).
@@ -567,6 +650,53 @@ export default function PipelinesPage() {
             ) : null}
           </div>
         ) : null}
+        {selectedIds.size > 0 ? (
+          <div className="flex items-center justify-between gap-3 rounded-md border border-accent/40 bg-accent/5 px-3 py-2">
+            <span className="text-xs text-text">
+              {t("pipelines.selectedCount", { n: selectedIds.size })}
+            </span>
+            <div className="flex gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setSelectedIds(new Set())}
+                disabled={bulkDryRunning || bulkTriggering || bulkDeleting}
+              >
+                {t("pipelines.clearSelection")}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                loading={bulkDryRunning}
+                disabled={bulkTriggering || bulkDeleting}
+                onClick={() => void onBulkDryRun()}
+                title={t("pipelines.dryRunSelectedHint")}
+              >
+                <ShieldCheckIcon size={14} />
+                {t("pipelines.dryRunSelected")}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                loading={bulkTriggering}
+                disabled={bulkDryRunning || bulkDeleting}
+                onClick={() => void onBulkTrigger()}
+              >
+                <PlayIcon size={14} />
+                {t("pipelines.runSelected")}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={bulkDryRunning || bulkTriggering || bulkDeleting}
+                onClick={() => setConfirmBulkDelete(true)}
+              >
+                <Trash2Icon size={14} />
+                {t("pipelines.deleteSelected")}
+              </Button>
+            </div>
+          </div>
+        ) : null}
         <Card>
           {visibleRows === null ? (
             <div className="px-4 py-4"><TableSkeleton /></div>
@@ -579,6 +709,45 @@ export default function PipelinesPage() {
           ) : (
             <DataTable
               columns={[
+                {
+                  key: "_select",
+                  className: "w-8",
+                  header: (
+                    <Checkbox
+                      checked={
+                        (filteredRows?.length ?? 0) > 0 &&
+                        (filteredRows ?? []).every((r) => selectedIds.has(r.id))
+                      }
+                      indeterminate={
+                        (filteredRows ?? []).some((r) => selectedIds.has(r.id)) &&
+                        !(filteredRows ?? []).every((r) => selectedIds.has(r.id))
+                      }
+                      aria-label={t("pipelines.selectAllVisibleAria")}
+                      onChange={() => {
+                        const visible = filteredRows ?? [];
+                        const all =
+                          visible.length > 0 &&
+                          visible.every((r) => selectedIds.has(r.id));
+                        setSelectedIds((prev) => {
+                          const next = new Set(prev);
+                          for (const r of visible) {
+                            if (all) next.delete(r.id);
+                            else next.add(r.id);
+                          }
+                          return next;
+                        });
+                      }}
+                    />
+                  ),
+                  cell: (row) => (
+                    <Checkbox
+                      checked={selectedIds.has(row.id)}
+                      onChange={() => toggleSelection(row.id)}
+                      onClick={(e) => e.stopPropagation()}
+                      aria-label={t("pipelines.selectRowAria", { name: row.name })}
+                    />
+                  ),
+                },
                 ...buildColumns(t, lastRunByPipeline, connNames),
                 {
                   key: "actions",
@@ -684,6 +853,19 @@ export default function PipelinesPage() {
         </Card>
       </main>
 
+      <ConfirmDialog
+        open={confirmBulkDelete}
+        title={t("pipelines.bulkDeleteTitle", { n: selectedIds.size })}
+        description={t("pipelines.bulkDeleteDesc")}
+        confirmLabel={t("common.delete")}
+        destructive
+        loading={bulkDeleting}
+        onConfirm={() => {
+          setConfirmBulkDelete(false);
+          void onBulkDelete();
+        }}
+        onCancel={() => setConfirmBulkDelete(false)}
+      />
       <ConfirmDialog
         open={pendingDelete !== null}
         title={

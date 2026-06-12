@@ -175,6 +175,9 @@ export default function PipelineEditorPage() {
   // pending.
   const [savedGraphIndex, setSavedGraphIndex] = useState<number | null>(null);
   const [metaDirty, setMetaDirty] = useState(false);
+  // Task-DAG config loaded — the builder can't edit it; render a notice
+  // instead of an empty (and silently destructive-on-save) canvas.
+  const [tasksShape, setTasksShape] = useState(false);
   // Phase Q (2026-05-28): backfill dialog state. Same dialog the
   // pipelines list page uses — re-mounting it here lets the user
   // backfill without going back to the list. Disabled below when the
@@ -209,7 +212,16 @@ export default function PipelineEditorPage() {
         // ``setInitial`` resets the undo stack so the load itself is
         // never an undo target — the first thing the user can undo is
         // their first edit, not the network fetch.
-        if (isGraphConfig(cfg)) {
+        // Task-DAG (``tasks`` + ``depends_on``) configs are control-flow,
+        // not a dataflow graph — the builder can't represent them, and
+        // deserialize() would fall to a BLANK canvas whose save silently
+        // REPLACES the whole pipeline. Safe-exit instead (the mirror of
+        // the migration form's non-migration-shape guard).
+        const taskList = (cfg as { tasks?: unknown[] } | null)?.tasks;
+        if (cfg && !isGraphConfig(cfg) && Array.isArray(taskList) && taskList.length > 0) {
+          setTasksShape(true);
+          history.setInitial(blankGraph());
+        } else if (isGraphConfig(cfg)) {
           history.setInitial(deserializeGraph(cfg, conns));
         } else if (cfg) {
           history.setInitial(linearToGraph(deserialize(cfg, conns)));
@@ -449,6 +461,27 @@ export default function PipelineEditorPage() {
       onChangeTriggers={updateTriggers}
     />
   );
+
+  if (tasksShape) {
+    return (
+      <>
+        <Header
+          title={pipeline?.name ?? t("builder.title")}
+          subtitle={ws?.name ?? ""}
+        />
+        <div className="mx-auto mt-16 max-w-lg rounded-xl border border-border-subtle bg-surface p-8 text-center shadow-sm">
+          <h2 className="text-base font-semibold text-text">{t("builder.tasksShapeTitle")}</h2>
+          <p className="mt-3 text-sm text-text-secondary">{t("builder.tasksShapeDesc")}</p>
+          <Link
+            href={`/w/${slug}/pipelines`}
+            className="mt-6 inline-flex h-9 cursor-pointer items-center rounded-lg bg-accent px-4 text-sm font-semibold text-on-accent hover:opacity-90"
+          >
+            {t("builder.tasksShapeBack")}
+          </Link>
+        </div>
+      </>
+    );
+  }
 
   return (
     <>

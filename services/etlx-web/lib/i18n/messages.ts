@@ -1379,6 +1379,10 @@ export const en = {
   // 2026-06-12 — ERD-style column lineage redesign.
   "assets.clHint": "Hover a column to trace its path · click to pin",
   "assets.clWholeTable": "(all rows)",
+  "builder.tasksShapeTitle": "This pipeline uses a task DAG",
+  "builder.tasksShapeDesc":
+    "It was defined as orchestrated tasks (tasks + depends_on), which the visual builder can't represent. Edit it via the API or YAML — opening it here would replace the whole configuration with an empty canvas.",
+  "builder.tasksShapeBack": "Back to pipelines",
   "assets.clDepth": "Hops",
   "assets.clSearch": "Find column…",
   "assets.clSearchCount": "{count} matched",
@@ -2876,6 +2880,10 @@ export const ko: Messages = {
   // 2026-06-12 — ERD풍 컬럼 리니지 재설계.
   "assets.clHint": "컬럼에 마우스를 올리면 경로 추적 · 클릭하면 고정",
   "assets.clWholeTable": "(전체 행)",
+  "builder.tasksShapeTitle": "이 파이프라인은 태스크 DAG 구성입니다",
+  "builder.tasksShapeDesc":
+    "tasks + depends_on 으로 정의된 오케스트레이션 구성이라 비주얼 빌더로 표현할 수 없습니다. API 또는 YAML로 편집하세요 — 여기서 열어 저장하면 전체 구성이 빈 캔버스로 대체됩니다.",
+  "builder.tasksShapeBack": "파이프라인 목록으로",
   "assets.clDepth": "홉",
   "assets.clSearch": "컬럼 검색…",
   "assets.clSearchCount": "{count}개 일치",

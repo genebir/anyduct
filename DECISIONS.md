@@ -2821,6 +2821,8 @@ L1 출시 직후 사용자가 5개 회신:
 - ⚠️ 푸시다운 SQL의 dialect 검증은 사용자 몫(실행 시 DB 에러로 표면화). dry-run은 연결성만 확인.
 - ✅ web 빌더 노출: transform:sql 오퍼레이터에 "Run inside the database (pushdown)" boolean 토글(help가 동일-커넥션/유일-변환/append 조건 + dialect 주의 설명). 빌더 graph shape 그대로 동작(`_try_graph_pushdown`).
 
+**후속 (2026-06-12, 실데이터 dogfood)**: ① graph에만 있던 이름 기반 same-DB 판정을 **linear/tasks shape에도 적용** — 서버 워커는 `connector_factory`로 sink에 전용 인스턴스를 mint하므로 인스턴스 identity 검사는 서버-빌드 파이프라인에서 항상 불통과였고, pushdown이 발화한 적 없이 Arrow로 침묵 강등되고 있었다(같은 커넥션 이름 = 같은 DB; builder가 `Task.sink_connection_name`/`SinkSpec.connection_name`에 원본 이름 기록, INSERT는 소스 인스턴스에서 실행 — pushdown은 읽지 않으므로 데드락 무관). ② pushdown INSERT의 타깃 테이블을 **dialect quoting**(`quote_table()`, 9개 pushdown 커넥터) — 비따옴표 INSERT는 case-sensitive(대문자) 테이블에서 발화 즉시 실패했고, write 경로(Record/Arrow)는 항상 quoting하므로 "한 config = 경로 무관 동일 시맨틱"(침묵 폴백 설계의 전제)이 깨져 있었다. live: 대문자 스키마 + WITH-CTE 배치로그 태스크가 `data_paths: pushdown`으로 무이동 실행.
+
 ---
 
 ## ADR-0095: 파티션 분할 실행 — partitioned backfill로 단일-run scale-out

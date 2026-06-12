@@ -27,6 +27,7 @@ import {
 } from "@/lib/filter-expr";
 import { cn } from "@/lib/cn";
 import { useLocale } from "@/components/providers/locale-provider";
+import { RequiredMark } from "@/components/ui/required-mark";
 import type { Messages } from "@/lib/i18n/messages";
 
 type Translate = (key: keyof Messages, vars?: Record<string, string | number>) => string;
@@ -392,20 +393,12 @@ function FieldEditor({
     : "";
   return (
     <Wrapper className={`flex flex-col gap-1.5 ${requiredEmptyOutline}`}>
-      <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-text-secondary">
+      {/* 2026-06-12 user request: the "Required" text chip reads as
+          clutter — a tiny red asterisk at the label's top-right instead
+          (the empty-required red border below still does the shouting). */}
+      <span className="flex items-center gap-0.5 text-[11px] font-semibold uppercase tracking-wider text-text-secondary">
         {field.label}
-        {field.required ? (
-          <span
-            className={
-              showRequired
-                ? "inline-flex h-4 items-center rounded-sm bg-warning/15 px-1 text-[10px] font-semibold uppercase text-warning"
-                : "inline-flex h-4 items-center rounded-sm bg-overlay px-1 text-[10px] font-semibold uppercase text-text-muted"
-            }
-            title={t("builder.required")}
-          >
-            {t("builder.required")}
-          </span>
-        ) : null}
+        {field.required ? <RequiredMark /> : null}
       </span>
       <FieldInput
         field={field}

@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/cn";
+import { RequiredMark } from "@/components/ui/required-mark";
 import {
   ApiError,
   connectionsApi,
@@ -89,7 +90,7 @@ function CreateForm({ workspaceId, onSaved, onCancel }: ConnectionFormProps) {
         description={t("connForm.newDesc")}
       />
       <form onSubmit={onSubmit} className="grid gap-4 md:grid-cols-2">
-        <FieldRow label={t("connForm.name")} className="md:col-span-2">
+        <FieldRow label={t("connForm.name")} required className="md:col-span-2">
           <Input
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -97,7 +98,7 @@ function CreateForm({ workspaceId, onSaved, onCancel }: ConnectionFormProps) {
             required
           />
         </FieldRow>
-        <FieldRow label={t("connForm.type")} className="md:col-span-2">
+        <FieldRow label={t("connForm.type")} required className="md:col-span-2">
           <ConnectorTypeRadio value={type} onChange={changeType} />
         </FieldRow>
         {schema.fields.map((field) => (
@@ -105,6 +106,7 @@ function CreateForm({ workspaceId, onSaved, onCancel }: ConnectionFormProps) {
             key={field.key}
             label={field.label}
             help={field.help}
+            required={field.required}
             className={fieldSpan(field)}
           >
             <FieldInput
@@ -199,18 +201,21 @@ function EditForm({
 function FieldRow({
   label,
   help,
+  required,
   className,
   children,
 }: {
   label: string;
   help?: string;
+  required?: boolean;
   className?: string;
   children: React.ReactNode;
 }) {
   return (
     <label className={cn("flex flex-col gap-1.5", className)}>
-      <span className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
+      <span className="flex items-center gap-0.5 text-xs font-semibold uppercase tracking-wider text-text-secondary">
         {label}
+        {required ? <RequiredMark /> : null}
       </span>
       {children}
       {help ? <span className="text-[11px] text-text-muted">{help}</span> : null}

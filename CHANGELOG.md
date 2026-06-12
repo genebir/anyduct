@@ -11,6 +11,7 @@
 
 ### Added
 - **accent 위 텍스트 흰색 복원 (2026-06-12, 오너 결정)**: a11y 게이트가 네이비로 바꿨던 핑크/빨강 채움 위 텍스트를 사용자 요청으로 흰색 복원(`--text-on-accent`=white — 시맨틱 토큰이라 한 곳 변경으로 전체 복원, 체크박스 마크 포함). 3.3:1 AA 미달은 **수용된 트레이드오프로 문서화**, axe 게이트는 `.text-on-accent`만 제외하고 나머지(AA 토큰 보정 등)는 전부 유지. 88/88 통과.
+- **필수 필드 별표 마커 (2026-06-12, 사용자 요청)**: 빌더 속성 패널의 "필수" 텍스트 칩을 라벨 우상단의 작은 빨간 아스터리스크(`RequiredMark` primitive — tooltip/aria로 의미 유지)로 교체. 표기가 아예 없던 연결 폼(이름/유형/커넥터 필드)에도 적용. 빈 필수 필드의 빨간 보더 강조는 그대로. 스토리 포함, a11y 게이트 89/89.
 - **커넥터 벤더 브랜드 아이콘 (2026-06-12, 사용자 요청)**: 빌더 팔레트/캔버스 노드의 source/sink 아이콘을 simple-icons 브랜드 로고로 — Postgres/MySQL/SQLite/Snowflake/BigQuery/ClickHouse/Cassandra/MongoDB/Redis/Kafka/RabbitMQ/NATS 12종(24 operator). lucide 시그니처 호환 래퍼라 사용처 무변경. AWS 계열·Vertica·SQL Server는 simple-icons에서 상표 정책으로 제거돼 lucide 폴백 유지.
 - **Checkbox primitive + 파이프라인 일괄 선택 (2026-06-12, 사용자 피드백)**: 네이티브 accent-color 체크박스(다크 테마에서 이질적)를 토큰 기반 `Checkbox` primitive로 교체 — accent 채움+네이비 체크/대시 마크, hover/disabled, **indeterminate**(일부 선택 헤더 상태, 마이그레이션 헤더에도 신규 적용). 파이프라인 목록에 마이그레이션과 동일한 **일괄 선택**(전체선택/Clear→Dry run→실행→삭제 + 확인 다이얼로그, 미저장·깨진 행은 실행에서 건너뜀+카운트). Storybook 스토리, a11y 게이트 88/88 통과.
 - **`sql` 데이터셋 변환 — DuckDB in-process (Phase P1a, 2026-06-10, ADR-0093)**: 파이프라인 데이터 플레인 개편 1탄. in-flight 레코드 전체를 DuckDB 릴레이션(`input`)으로 등록하고 임의 SQL(JOIN/GROUP BY/윈도우/QUALIFY) 실행 — 행 단위 변환이 표현 못 하던 데이터셋 연산이 1급, 변환 언어가 "아는 SQL"로.

@@ -397,7 +397,7 @@ export function MigrationForm({
                 ))}
               </select>
               {errors.sourceConnection ? (
-                <span className="text-xs text-error">
+                <span className="sr-only">
                   {t("migrations.errRequired")}
                 </span>
               ) : null}
@@ -456,7 +456,7 @@ export function MigrationForm({
                   ))}
                 </select>
                 {errors.sourceTable ? (
-                  <span className="text-xs text-error">
+                  <span className="sr-only">
                     {t("migrations.errRequired")}
                   </span>
                 ) : null}
@@ -507,7 +507,7 @@ export function MigrationForm({
                     ))}
                   </select>
                   {errors.sourceSchema ? (
-                    <span className="text-xs text-error">
+                    <span className="sr-only">
                       {t("migrations.errRequired")}
                     </span>
                   ) : null}
@@ -635,7 +635,7 @@ export function MigrationForm({
                 ))}
               </select>
               {errors.sinkConnection ? (
-                <span className="text-xs text-error">
+                <span className="sr-only">
                   {t("migrations.errRequired")}
                 </span>
               ) : null}
@@ -656,7 +656,7 @@ export function MigrationForm({
                   {t("migrations.destTableHelp")}
                 </span>
                 {errors.sinkTable ? (
-                  <span className="text-xs text-error">
+                  <span className="sr-only">
                     {t("migrations.errRequired")}
                   </span>
                 ) : null}
@@ -676,7 +676,7 @@ export function MigrationForm({
                   {t("migrations.destSchemaHelp")}
                 </span>
                 {errors.sinkSchema ? (
-                  <span className="text-xs text-error">
+                  <span className="sr-only">
                     {t("migrations.errRequired")}
                   </span>
                 ) : null}
@@ -747,7 +747,7 @@ export function MigrationForm({
               </span>
             ) : null}
             {errors.cursorColumn ? (
-              <span className="text-xs text-error">
+              <span className="sr-only">
                 {t("migrations.errRequired")}
               </span>
             ) : null}
@@ -777,7 +777,7 @@ export function MigrationForm({
               </span>
             ) : null}
             {errors.keyColumns ? (
-              <span className="text-xs text-error">
+              <span className="sr-only">
                 {t("migrations.errRequired")}
               </span>
             ) : null}

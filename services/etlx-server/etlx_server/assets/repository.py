@@ -410,5 +410,78 @@ class AssetRepository:
             truncated,
         )
 
+    async def asset_lineage_graph(
+        self, *, asset_id: UUID, max_depth: int, max_assets: int = 60
+    ) -> tuple[dict[UUID, tuple[Asset, int]], list[tuple[UUID, UUID]], bool]:
+        """Multi-hop TABLE-level lineage subgraph, both directions
+        (2026-06-12). BFS over ``asset_edges`` from ``asset_id``:
+        upstream hops get NEGATIVE depths (rendered left of the root),
+        downstream hops positive. Capped at ``max_assets`` total;
+        ``truncated`` is true when the cap cut the walk or more hops
+        exist beyond ``max_depth`` in either direction.
+        """
+        root = await self._session.get(Asset, asset_id)
+        if root is None:
+            return {}, [], False
+        depths: dict[UUID, tuple[Asset, int]] = {asset_id: (root, 0)}
+        edges: set[tuple[UUID, UUID]] = set()
+        truncated = False
+
+        async def walk(direction: int) -> None:
+            """direction -1 = upstream (follow edges backwards), +1 = downstream."""
+            nonlocal truncated
+            frontier: set[UUID] = {asset_id}
+            for hop in range(1, max_depth + 1):
+                if not frontier:
+                    return
+                if direction < 0:
+                    stmt = (
+                        select(AssetEdge.upstream_asset_id, AssetEdge.downstream_asset_id, Asset)
+                        .join(Asset, Asset.id == AssetEdge.upstream_asset_id)
+                        .where(AssetEdge.downstream_asset_id.in_(frontier))
+                    )
+                else:
+                    stmt = (
+                        select(AssetEdge.upstream_asset_id, AssetEdge.downstream_asset_id, Asset)
+                        .join(Asset, Asset.id == AssetEdge.downstream_asset_id)
+                        .where(AssetEdge.upstream_asset_id.in_(frontier))
+                    )
+                rows = await self._session.execute(stmt)
+                next_frontier: set[UUID] = set()
+                for up_id, down_id, neighbor in rows.all():
+                    new_id = up_id if direction < 0 else down_id
+                    if new_id not in depths:
+                        if len(depths) >= max_assets:
+                            truncated = True
+                            continue
+                        depths[new_id] = (neighbor, direction * hop)
+                        next_frontier.add(new_id)
+                    edges.add((up_id, down_id))
+                frontier = next_frontier
+            if frontier:
+                # Depth cap hit with unexplored assets — anything beyond?
+                if direction < 0:
+                    probe_stmt = (
+                        select(AssetEdge.id)
+                        .where(AssetEdge.downstream_asset_id.in_(frontier))
+                        .limit(1)
+                    )
+                else:
+                    probe_stmt = (
+                        select(AssetEdge.id)
+                        .where(AssetEdge.upstream_asset_id.in_(frontier))
+                        .limit(1)
+                    )
+                probe = await self._session.execute(probe_stmt)
+                if probe.first() is not None:
+                    truncated = True
+
+        await walk(-1)
+        await walk(+1)
+        # Keep only edges whose BOTH ends made it into the subgraph (an
+        # edge to a cap-dropped asset would dangle).
+        kept = [(u, d) for u, d in edges if u in depths and d in depths]
+        return depths, kept, truncated
+
 
 __all__ = ["AssetRepository", "ColumnEdge", "ColumnLineage", "ColumnRef"]

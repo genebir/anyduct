@@ -277,6 +277,33 @@ class AssetColumnEntry(BaseModel):
     upstreams: list[ColumnUpstreamRef]
 
 
+class LineageGraphAssetEntry(BaseModel):
+    """One asset card in the multi-hop TABLE-level lineage graph
+    (2026-06-12). ``depth`` 0 = the asset being viewed; negative =
+    upstream hops (rendered left), positive = downstream (right)."""
+
+    id: UUID
+    asset_key: str
+    kind: str | None = None
+    depth: int
+
+
+class LineageGraphEdgeEntry(BaseModel):
+    from_asset_id: UUID
+    to_asset_id: UUID
+
+
+class AssetLineageGraphResponse(BaseModel):
+    """Multi-hop table-level lineage, both directions."""
+
+    id: UUID
+    asset_key: str
+    max_depth: int
+    truncated: bool
+    assets: list[LineageGraphAssetEntry]
+    edges: list[LineageGraphEdgeEntry]
+
+
 class ColumnGraphAssetEntry(BaseModel):
     """One asset card in the multi-hop column-lineage graph (2026-06-12).
     ``depth`` 0 = the asset being viewed; 1 = direct upstream; …"""

@@ -24,6 +24,7 @@ from etlx_server.auth.schemas import (
     AssetColumnEntry,
     AssetColumnLineageGraphResponse,
     AssetColumnLineageResponse,
+    AssetLineageGraphResponse,
     AssetLineageResponse,
     AssetMaterializationEntry,
     AssetRef,
@@ -31,6 +32,8 @@ from etlx_server.auth.schemas import (
     ColumnGraphAssetEntry,
     ColumnGraphEdgeEntry,
     ColumnUpstreamRef,
+    LineageGraphAssetEntry,
+    LineageGraphEdgeEntry,
 )
 from etlx_server.auth.workspace_context import WorkspaceContext, require_workspace_role
 from etlx_server.db.enums import WorkspaceRole
@@ -123,6 +126,39 @@ async def asset_column_lineage(
         asset_key=asset.asset_key,
         opaque=asset.column_lineage_opaque,
         columns=entries,
+    )
+
+
+@router.get("/{asset_id}/lineage-graph", response_model=AssetLineageGraphResponse)
+async def asset_lineage_graph(
+    asset_id: UUID,
+    depth: int = 3,
+    ctx: WorkspaceContext = _require_viewer,
+    session: AsyncSession = Depends(get_session),  # noqa: B008
+) -> AssetLineageGraphResponse:
+    """Multi-hop TABLE-level lineage, both directions (2026-06-12).
+
+    BFS over ``asset_edges`` up to ``depth`` hops each way (clamped to
+    [1, 5]), at most 60 assets. Upstream hops carry negative depths
+    (rendered left of the root), downstream positive — the conventional
+    catalog lineage DAG. Supersedes the 1-hop ``/lineage`` for the
+    detail view; that endpoint stays for compatibility.
+    """
+    depth = max(1, min(depth, 5))
+    asset = await _resolve_or_404(session, workspace_id=ctx.workspace.id, asset_id=asset_id)
+    assets, edges, truncated = await AssetRepository(session).asset_lineage_graph(
+        asset_id=asset.id, max_depth=depth
+    )
+    return AssetLineageGraphResponse(
+        id=asset.id,
+        asset_key=asset.asset_key,
+        max_depth=depth,
+        truncated=truncated,
+        assets=[
+            LineageGraphAssetEntry(id=aid, asset_key=a.asset_key, kind=a.kind, depth=d)
+            for aid, (a, d) in sorted(assets.items(), key=lambda kv: (kv[1][1], kv[1][0].asset_key))
+        ],
+        edges=[LineageGraphEdgeEntry(from_asset_id=u, to_asset_id=d) for u, d in edges],
     )
 
 

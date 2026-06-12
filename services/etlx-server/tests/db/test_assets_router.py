@@ -379,3 +379,55 @@ async def test_column_lineage_graph_depth_cap_reports_truncated(session: AsyncSe
         assert body["truncated"] is True
         assert {a["asset_key"] for a in body["assets"]} == {"wh/mart", "wh/staging"}
         assert len(body["edges"]) == 2
+
+
+# --------------- multi-hop TABLE-level lineage graph (2026-06-12) -----------
+
+
+async def test_lineage_graph_walks_both_directions(session: AsyncSession) -> None:
+    """From the MIDDLE of raw → staging → mart: upstream raw at depth -1,
+    downstream mart at +1 — the conventional centered lineage DAG."""
+    owner = await _seed_user(session, email="alg-owner@example.com")
+    ws = await _seed_ws(session, slug="alg-1", user=owner, role=WorkspaceRole.VIEWER)
+    await _seed_two_hop_column_lineage(session, ws.id)
+    app = _build_app(session)
+    async with _client(app) as client:
+        token = await _login(client, email=owner.email)
+        h = {"Authorization": f"Bearer {token}"}
+        ls = await client.get(f"/workspaces/{ws.id}/assets", headers=h)
+        stg = next(r for r in ls.json() if r["asset_key"] == "wh/staging")
+
+        resp = await client.get(
+            f"/workspaces/{ws.id}/assets/{stg['id']}/lineage-graph?depth=3", headers=h
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["truncated"] is False
+        depth_by_key = {a["asset_key"]: a["depth"] for a in body["assets"]}
+        assert depth_by_key == {"wh/staging": 0, "wh/raw": -1, "wh/mart": 1}
+        key_by_id = {a["id"]: a["asset_key"] for a in body["assets"]}
+        edges = {
+            (key_by_id[e["from_asset_id"]], key_by_id[e["to_asset_id"]]) for e in body["edges"]
+        }
+        assert edges == {("wh/raw", "wh/staging"), ("wh/staging", "wh/mart")}
+
+
+async def test_lineage_graph_depth_cap_reports_truncated(session: AsyncSession) -> None:
+    """From mart with depth=1: staging visible, raw beyond → truncated."""
+    owner = await _seed_user(session, email="alg-cap@example.com")
+    ws = await _seed_ws(session, slug="alg-2", user=owner, role=WorkspaceRole.VIEWER)
+    mart_key = await _seed_two_hop_column_lineage(session, ws.id)
+    app = _build_app(session)
+    async with _client(app) as client:
+        token = await _login(client, email=owner.email)
+        h = {"Authorization": f"Bearer {token}"}
+        ls = await client.get(f"/workspaces/{ws.id}/assets", headers=h)
+        mart = next(r for r in ls.json() if r["asset_key"] == mart_key)
+
+        resp = await client.get(
+            f"/workspaces/{ws.id}/assets/{mart['id']}/lineage-graph?depth=1", headers=h
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["truncated"] is True
+        assert {a["asset_key"] for a in body["assets"]} == {"wh/mart", "wh/staging"}

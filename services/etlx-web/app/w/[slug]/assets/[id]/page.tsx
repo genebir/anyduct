@@ -13,7 +13,7 @@ import {
   ApiError,
   assetsApi,
   type AssetColumnLineageGraphResponse,
-  type AssetLineageResponse,
+  type AssetLineageGraphResponse,
   type AssetMaterializationEntry,
 } from "@/lib/api";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
@@ -25,7 +25,8 @@ export default function AssetDetailPage() {
   const ws = useWorkspaceFromSlug(slug);
   const router = useRouter();
   const { t } = useLocale();
-  const [lineage, setLineage] = useState<AssetLineageResponse | null>(null);
+  const [lineage, setLineage] = useState<AssetLineageGraphResponse | null>(null);
+  const [assetDepth, setAssetDepth] = useState(3);
   const [mats, setMats] = useState<AssetMaterializationEntry[] | null>(null);
   const [columnLineage, setColumnLineage] =
     useState<AssetColumnLineageGraphResponse | null>(null);
@@ -36,7 +37,7 @@ export default function AssetDetailPage() {
     if (!ws) return;
     let cancelled = false;
     Promise.all([
-      assetsApi.lineage(ws.id, id),
+      assetsApi.lineageGraph(ws.id, id, assetDepth),
       assetsApi.materializations(ws.id, id),
       assetsApi.columnLineageGraph(ws.id, id, lineageDepth),
     ])
@@ -53,7 +54,7 @@ export default function AssetDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [ws, id, t, lineageDepth]);
+  }, [ws, id, t, lineageDepth, assetDepth]);
 
   return (
     <>
@@ -87,12 +88,17 @@ export default function AssetDetailPage() {
         ) : (
           <>
             <Card className="p-0">
-              <LineageGraph
-                current={{ id: lineage.id, asset_key: lineage.asset_key }}
-                upstream={lineage.upstream}
-                downstream={lineage.downstream}
-                onSelect={(assetId) => router.push(`/w/${slug}/assets/${assetId}`)}
-              />
+              <div className="border-b border-border-subtle px-4 py-3 text-sm font-semibold text-text">
+                {t("assets.lineage")}
+              </div>
+              <div className="p-2">
+                <LineageGraph
+                  graph={lineage}
+                  depth={assetDepth}
+                  onDepthChange={setAssetDepth}
+                  onSelect={(assetId) => router.push(`/w/${slug}/assets/${assetId}`)}
+                />
+              </div>
             </Card>
 
             <Card className="p-0">

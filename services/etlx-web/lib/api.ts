@@ -683,6 +683,23 @@ export interface AssetRef {
   kind: string | null;
 }
 
+/** Multi-hop TABLE-level lineage (2026-06-12). depth<0 = upstream. */
+export interface LineageGraphAssetEntry {
+  id: string;
+  asset_key: string;
+  kind: string | null;
+  depth: number;
+}
+
+export interface AssetLineageGraphResponse {
+  id: string;
+  asset_key: string;
+  max_depth: number;
+  truncated: boolean;
+  assets: LineageGraphAssetEntry[];
+  edges: { from_asset_id: string; to_asset_id: string }[];
+}
+
 export interface AssetLineageResponse {
   id: string;
   asset_key: string;
@@ -836,6 +853,10 @@ export const assetsApi = {
   materializations: (workspaceId: string, assetId: string) =>
     api<AssetMaterializationEntry[]>(
       `/workspaces/${workspaceId}/assets/${assetId}/materializations`,
+    ),
+  lineageGraph: (workspaceId: string, assetId: string, depth = 3) =>
+    api<AssetLineageGraphResponse>(
+      `/workspaces/${workspaceId}/assets/${assetId}/lineage-graph?depth=${depth}`,
     ),
   columnLineageGraph: (workspaceId: string, assetId: string, depth = 3) =>
     api<AssetColumnLineageGraphResponse>(

@@ -109,7 +109,9 @@ function buildColumns(
           <span className="inline-flex items-center gap-1">
             <span
               className={cn(
-                "inline-flex items-center gap-1 rounded-sm border px-1.5 py-0.5 text-[11px] font-medium",
+                // whitespace-nowrap: without it a narrow cell wraps the CJK
+                // label one character per line (user report 2026-06-12).
+                "inline-flex items-center gap-1 whitespace-nowrap rounded-sm border px-1.5 py-0.5 text-[11px] font-medium",
                 stream
                   ? "border-info/40 bg-info/10 text-info"
                   : "border-border-subtle bg-overlay text-text-secondary",

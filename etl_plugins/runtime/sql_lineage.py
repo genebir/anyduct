@@ -87,6 +87,16 @@ def extract_sql_lineage(
     if not isinstance(body, exp.Select | exp.Union):
         return None
 
+    # The schema exists solely to expand ``*`` projections. For star-less
+    # queries it must NOT reach sqlglot: a partial schema (the worker only
+    # fetches tables referenced by star queries) makes the resolver drop
+    # every column of a table it doesn't know to an unresolvable
+    # Placeholder — a live task-DAG pipeline lost ALL of its column edges
+    # this way because a sibling task's ``COUNT(*)`` triggered the schema
+    # fetch (2026-06-12).
+    if schema is not None and not _has_projection_star(parsed):
+        schema = None
+
     # Optionally qualify ``*`` projections so they show up in
     # ``select.expressions`` with real column names.
     work_sql = query
@@ -136,13 +146,64 @@ def extract_sql_lineage(
             # the expression's SQL as ``name``. We still record it under that
             # synthetic name so the column count matches the output.
             col_name = proj.sql()
+        # Quoted (case-sensitive) output identifiers must keep their quoting
+        # for the lookup: ``alias_or_name`` strips it, and ``lineage()`` then
+        # normalizes the bare name as an *unquoted* identifier — for
+        # ``SELECT m."A" AS "X"`` the lookup becomes ``x`` and misses, losing
+        # every leaf (2026-06-12, found on a live uppercase-schema pipeline).
+        lookup = _quoted_lookup_name(proj, dialect) or col_name
         try:
-            node = _sqlglot_lineage(col_name, sql=work_sql, dialect=dialect, schema=schema)
+            node = _sqlglot_lineage(lookup, sql=work_sql, dialect=dialect, schema=schema)
         except Exception:
             result[col_name] = []
             continue
         result[col_name] = _collect_leaves(node, alias_to_table)
     return result
+
+
+def _has_projection_star(root: exp.Expression) -> bool:
+    """True when any SELECT scope (outer, subquery, UNION branch) projects a
+    bare ``*`` / ``t.*``. ``COUNT(*)`` does NOT count — its star is a
+    function argument, needs no schema to trace, and treating it as a star
+    query poisons resolution with partial schemas (see caller)."""
+    for sel in root.find_all(exp.Select):
+        for proj in sel.expressions:
+            if isinstance(proj, exp.Star) or (
+                isinstance(proj, exp.Column) and isinstance(proj.this, exp.Star)
+            ):
+                return True
+    return False
+
+
+def has_projection_star(query: str, *, dialect: str | None = None) -> bool:
+    """Public probe: does ``query`` project ``*`` anywhere? Used by the
+    service worker to decide whether a schema fetch is worth it — the old
+    ``"*" in query`` string match false-positived on ``COUNT(*)`` and
+    dragged partial schemas into star-less derivations. Unparseable input
+    returns False (no schema will help it anyway)."""
+    try:
+        parsed = sqlglot.parse_one(query, dialect=dialect)
+    except Exception:
+        return False
+    if parsed is None or not isinstance(parsed, exp.Expression):
+        return False
+    return _has_projection_star(parsed)
+
+
+def _quoted_lookup_name(proj: exp.Expression, dialect: str | None) -> str | None:
+    """Quote-preserving identifier for the ``sqlglot.lineage`` lookup, or
+    ``None`` when the output identifier is unquoted (keep the plain-name
+    path — quoting an originally-unquoted name would flip its case
+    semantics the other way)."""
+    ident: exp.Expression | None = None
+    if isinstance(proj, exp.Alias):
+        ident = proj.args.get("alias")
+    elif isinstance(proj, exp.Column):
+        ident = proj.this
+    if isinstance(ident, exp.Identifier) and ident.args.get("quoted"):
+        # str() pin: the hook-env mypy (no sqlglot stubs) sees ``.sql()`` as Any.
+        return str(ident.sql(dialect=dialect))
+    return None
 
 
 def _collect_leaves(

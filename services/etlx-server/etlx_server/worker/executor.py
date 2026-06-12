@@ -621,7 +621,10 @@ class RunExecutor:
         """
         from collections import defaultdict
 
-        from etl_plugins.runtime.sql_lineage import extract_referenced_tables
+        from etl_plugins.runtime.sql_lineage import (
+            extract_referenced_tables,
+            has_projection_star,
+        )
         from etlx_server.connections.inspect import (
             ConnectionInspector,
             InspectionUnsupportedError,
@@ -637,7 +640,11 @@ class RunExecutor:
             connection = source.get("connection")
             if not isinstance(query, str) or not isinstance(connection, str):
                 return
-            if "*" not in query:
+            # Projection stars only — the old ``"*" in query`` string match
+            # false-positived on ``COUNT(*)``, fetching schemas that then
+            # poisoned the star-less siblings' derivation (2026-06-12; the
+            # core now also ignores schemas for star-less queries).
+            if "*" not in query or not has_projection_star(query):
                 return
             for tbl in extract_referenced_tables(query):
                 needs[connection].add(tbl)

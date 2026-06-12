@@ -9,6 +9,10 @@
 
 ## [Unreleased]
 
+### Fixed
+- **quoted(대소문자 구분) 식별자 컬럼 리니지 전손실 (2026-06-12, 실데이터 dogfood 발견)**: `SELECT m."A" AS "X"` 류 quoted 식별자 쿼리에서 `alias_or_name`이 따옴표를 벗긴 이름을 `sqlglot.lineage()`에 넘겨 비따옴표 정규화(소문자화)로 lookup 미스 → **모든 leaf 소실(컬럼 행만 있고 upstream 0)**. 대문자 스키마 엔터프라이즈 DB(사용자 실데이터)의 전 쿼리가 해당. quoted 출력 식별자는 quoting 보존 SQL로 lookup. JOIN+GROUP BY 집계 마트 쿼리가 컬럼 단위 정확 귀속으로 복원(live 4-hop 체인 DM←DS←DC←vertica 검증).
+- **partial schema가 star-없는 쿼리 리니지를 오염 (2026-06-12, 동일 dogfood)**: 워커의 star 감지가 문자열 `"*" in query`라 `COUNT(*)`에 오탐 → 형제 태스크용으로 fetch한 부분 스키마가 같은 커넥션의 **star-없는 태스크 derive에도 주입** → sqlglot이 스키마에 없는 테이블 해석을 Placeholder로 강등, edge 전멸. 코어 `extract_sql_lineage`가 projection star 없는 쿼리에선 schema를 무시(star 확장이라는 문서화된 용도로 한정) + 워커 감지를 `has_projection_star()`(AST 기반, COUNT(*) 제외)로 교체. 잠금 테스트 7종(quoted 4 + schema 오염 3).
+
 ### Added
 - **accent 위 텍스트 흰색 복원 (2026-06-12, 오너 결정)**: a11y 게이트가 네이비로 바꿨던 핑크/빨강 채움 위 텍스트를 사용자 요청으로 흰색 복원(`--text-on-accent`=white — 시맨틱 토큰이라 한 곳 변경으로 전체 복원, 체크박스 마크 포함). 3.3:1 AA 미달은 **수용된 트레이드오프로 문서화**, axe 게이트는 `.text-on-accent`만 제외하고 나머지(AA 토큰 보정 등)는 전부 유지. 88/88 통과.
 - **필수 필드 별표 마커 (2026-06-12, 사용자 요청)**: 빌더 속성 패널의 "필수" 텍스트 칩을 라벨 우상단의 작은 빨간 아스터리스크(`RequiredMark` primitive — tooltip/aria로 의미 유지, inline/flex 라벨 양쪽 대응)로 교체. **전 폼 일관 적용**: 연결 폼(이름/유형/커넥터 필드) · 마이그레이션 폼(이름/소스·대상 연결/테이블/스키마/커서·키 컬럼) · 스케줄 폼(이름/cron) · 워크스페이스 생성·설정(이름/slug) · 멤버 추가(이메일) · 변수(이름). 빈 필수 필드의 빨간 보더 강조는 그대로. 스토리 포함, a11y 게이트 89/89.

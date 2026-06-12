@@ -43,6 +43,20 @@ export function extractConnectionNames(
   // Fan-in / fan-out arrays.
   if (Array.isArray(config.sources)) config.sources.forEach(add);
   if (Array.isArray(config.sinks)) config.sinks.forEach(add);
+  // Task-DAG shape (ADR-0028) — each task is the single-task shape plus
+  // a name. Without this branch a tasks pipeline's connections all read
+  // as "unused" and the delete warning goes silent (2026-06-12, found
+  // dogfooding the live task-DAG pipelines).
+  if (Array.isArray(config.tasks)) {
+    for (const task of config.tasks) {
+      if (!task || typeof task !== "object") continue;
+      const tk = task as Record<string, unknown>;
+      add(tk.source);
+      add(tk.sink);
+      if (Array.isArray(tk.sinks)) tk.sinks.forEach(add);
+      add(tk.dlq);
+    }
+  }
   // DLQ target (both linear and graph) — a dead-letter sink is a real
   // connection reference; a connection used *only* as a DLQ target
   // would otherwise read as "unused" and be deleted out from under a

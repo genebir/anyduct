@@ -90,6 +90,42 @@ Supported events: `pre_run`, `on_task_start`, `on_task_end`,
 `on_error`, `post_run`. Hooks are called synchronously, in registration
 order, after the runtime emits its standard metrics.
 
+## Data paths — pushdown / Arrow / records (ADR-0093/0094)
+
+The runtime picks the cheapest data path per task, automatically, in
+this order:
+
+1. **SQL pushdown (no data movement)** — when the source and sink are
+   the *same connection* and the task is a plain `source → sink` append
+   with no transforms, the whole task collapses to one
+   `INSERT INTO <table> <select>` executed inside the database. Also
+   available explicitly as an ELT transform:
+   `{type: sql, pushdown: true}` runs your SQL *in the warehouse*
+   (dbt-style) instead of locally. Ineligible configs fall back
+   silently — the `sql_pushdown_ineligible` lint explains why in
+   dry-run.
+2. **Arrow bulk interchange** — when source and sink both implement the
+   Arrow fast-path and the task has no transforms, a single sink, and
+   `append`/`overwrite` mode, data moves as columnar
+   `pyarrow.RecordBatch`es, skipping the per-row `Record` layer
+   entirely (PG→PG 500k rows measured 3.4× faster). Supported
+   connectors: **postgres** (COPY-based), **mysql**, **vertica**,
+   **mssql** (server-side cursor + columnar assembly). `upsert`, `when`
+   routing, fan-out, and transforms route back to the Record path.
+3. **Records** — the default row-at-a-time path. Everything supports
+   it; transforms, DLQ routing, and `when` predicates live here.
+
+Builder (graph-shape) pipelines get the same treatment: a trivial
+`source → sink` two-node chain is routed through the linear fast-path
+helpers.
+
+Which path a run actually took is recorded per task in
+`RunResult.data_paths` (`pushdown` / `arrow` / `records` / `graph`) and
+shown as a chip on the run detail page — no guessing.
+
+If `pyarrow` isn't installed the Arrow path is skipped (clean fallback,
+no error). Install any extra that pulls it (e.g. `[duckdb]`, `[s3]`).
+
 ## YAML alternative
 
 Anything you can build in code maps to YAML — the CLI loads it

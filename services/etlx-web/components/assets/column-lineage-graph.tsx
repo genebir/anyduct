@@ -398,7 +398,10 @@ export function ColumnLineageGraph({
                       style={{ height: ROW_H }}
                     >
                       <span className="truncate" title={row.name}>
-                        {row.name}
+                        {/* "*" is the aggregate-fallback pseudo column —
+                            COUNT(*) depends on the whole table, not one
+                            column. Render it as a readable label. */}
+                        {row.name === "*" ? t("assets.clWholeTable") : row.name}
                       </span>
                     </div>
                   );

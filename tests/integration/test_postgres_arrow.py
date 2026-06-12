@@ -356,3 +356,54 @@ class TestSqlPushdown:
                 with conn.cursor() as cur:
                     cur.execute(f"DROP TABLE IF EXISTS {dst_table}")
                 conn.commit()
+
+
+class TestPushdownCaseSensitiveAndMintedSink:
+    """ADR-0094 follow-up (2026-06-12, live-data find): pushdown must
+    (a) engage by connection NAME when the sink is a minted dedicated
+    instance (the server worker's connector_factory), and (b) quote the
+    target so case-sensitive (quoted-uppercase) tables survive the
+    in-database INSERT — postgres folds unquoted identifiers to lower."""
+
+    def test_minted_sink_uppercase_table_pushes_down(
+        self,
+        apg: PostgresConnector,
+        typed_table: str,
+        pg_conn_params: dict[str, Any],
+        pg_raw_kwargs: dict[str, Any],
+    ) -> None:
+        dst = f"ETL_PUSH_UP_{uuid4().hex[:8].upper()}"
+        with psycopg.connect(**pg_raw_kwargs) as conn:
+            with conn.cursor() as cur:
+                cur.execute(f'CREATE TABLE "{dst}" ("ID" BIGINT, "LABEL" TEXT)')
+            conn.commit()
+        minted = PostgresConnector(**pg_conn_params)
+        minted.connect()
+        try:
+            apg.write_arrow(
+                iter([_batch([{"id": i, "label": f"L{i}"} for i in range(10)])]),
+                table=typed_table,
+            )
+            task = Task(
+                name="push",
+                source="db",
+                sink="db__sink",  # minted key, as the worker builds it
+                query=f'SELECT id AS "ID", label AS "LABEL" FROM {typed_table}',
+                sink_table=dst,
+            )
+            task.sink_connection_name = "db"  # original name (builder records it)
+            result = Pipeline(name="push-up", tasks=[task]).run(
+                connectors={"db": apg, "db__sink": minted}
+            )
+            assert result.data_paths == {"push": "pushdown"}
+            assert result.records_written == 10
+            with psycopg.connect(**pg_raw_kwargs) as conn, conn.cursor() as cur:
+                cur.execute(f'SELECT COUNT(*), MAX("LABEL") FROM "{dst}"')
+                row = cur.fetchone()
+                assert row is not None and row[0] == 10 and row[1] == "L9"
+        finally:
+            minted.close()
+            with psycopg.connect(**pg_raw_kwargs) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(f'DROP TABLE IF EXISTS "{dst}"')
+                conn.commit()

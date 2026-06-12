@@ -22,17 +22,21 @@ SQL-capable migration targets form a 10×10 cross-DB matrix.
 
 ### RDBMS / Data Warehouse (batch, migration targets)
 
-| Connector | Extra | Migration target | Notes |
-|-----------|-------|:---:|-------|
-| PostgreSQL | `[postgres]` | ✅ | |
-| MySQL / MariaDB | `[mysql]` | ✅ | |
-| SQLite | — (stdlib) | ✅ | type affinity |
-| Vertica | `[vertica]` | ✅ | analytical column-store |
-| SQL Server / Azure SQL | `[mssql]` | ✅ | `NVARCHAR(MAX)`, `BIT`, `DATETIME2` |
-| Snowflake | `[snowflake]` | ✅ | `NUMBER`, `VARIANT`, `TIMESTAMP_TZ` |
-| BigQuery | `[bigquery]` | ✅ | backtick quoting, PK `NOT ENFORCED`, multi-row DML |
-| Redshift | `[redshift]` | ✅ | `SUPER`, `VARBYTE`; MERGE upsert (2023+) |
-| ClickHouse | `[clickhouse]` | ✅ | `MergeTree` engine; **no row-level upsert** |
+"Arrow" marks the bulk fast-path (`read_arrow`/`write_arrow`, ADR-0093) —
+eligible transform-less pipelines bypass the per-row Record plane (see
+[Data paths](pipelines.md#data-paths--pushdown--arrow--records-adr-00930094)).
+
+| Connector | Extra | Migration target | Arrow | Notes |
+|-----------|-------|:---:|:---:|-------|
+| PostgreSQL | `[postgres]` | ✅ | ✅ | COPY-based Arrow path |
+| MySQL / MariaDB | `[mysql]` | ✅ | ✅ | server-side cursor Arrow path |
+| SQLite | — (stdlib) | ✅ | — | type affinity |
+| Vertica | `[vertica]` | ✅ | ✅ | analytical column-store |
+| SQL Server / Azure SQL | `[mssql]` | ✅ | ✅ | `NVARCHAR(MAX)`, `BIT`, `DATETIME2` |
+| Snowflake | `[snowflake]` | ✅ | — | `NUMBER`, `VARIANT`, `TIMESTAMP_TZ` |
+| BigQuery | `[bigquery]` | ✅ | — | backtick quoting, PK `NOT ENFORCED`, multi-row DML |
+| Redshift | `[redshift]` | ✅ | — | `SUPER`, `VARBYTE`; MERGE upsert (2023+) |
+| ClickHouse | `[clickhouse]` | ✅ | — | `MergeTree` engine; **no row-level upsert** |
 
 ### NoSQL
 

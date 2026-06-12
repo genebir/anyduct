@@ -36,6 +36,7 @@
 - **워커 멀티-replica 클러스터링 실증 + asset upsert 레이스 수정 (Phase P3a, 2026-06-10)**: SKIP LOCKED 큐(ADR-0021)의 "워커만 늘리면 분산" 약속을 처음으로 e2e 검증 — 3 replica 동시 claim 무중복 분배 + 실제 RunWorker 2대 공동 드레인. e2e가 발견한 실버그: 동시 run 완료 시 카탈로그 asset/edge upsert(select-then-insert)가 유니크 충돌로 run 실패 → `ON CONFLICT DO NOTHING` 원자화.
 
 ### Changed
+- **컬럼 리니지 UI 재설계 (2026-06-12, 사용자 피드백)**: React Flow 캔버스(컬럼별 박스가 둥둥 + 줌/팬/미니맵 + 추적 불가)를 ERD 시각 언어로 교체 — 업스트림 자산=엔티티 카드(헤더 클릭→자산 이동), 현재 자산=우측 카드, 행 포트에서 나오는 베지어 엣지, **hover=경로 하이라이트+나머지 dim, 클릭=고정**, 상수 컬럼 "const" 배지, 스크롤 자연 흐름(캔버스 조작 제거). 결정적 레이아웃이라 측정 불필요. Storybook 스토리 갱신+현실 케이스 추가.
 - **ERD 자동정렬 전면 재작성 — 가시성 최적화 (Phase ALB, 2026-06-10, ADR-0092)**: 레이아웃이 렌더러의 선 기하(접점 분배/직선 스냅/장애물 회피)를 픽셀-정확히 예측하며 노드 크기·접점·선 경로·배치를 함께 최적화.
   - 신규 `lib/erd-edge-geometry.ts`(렌더러·레이아웃 공유 순수 기하) + 노드 lineHeight 고정으로 auto 높이 공식화(fontScale 반영).
   - dagre 2-pass(실측 면별 접점 수 → 허브 크기/랭크 갭 보정) → 접점 정렬 스위프(후보-시프트 스코어링 + 가중 PAVA) → 직선 레스큐(그리디 힐클라임) → 채널 배정(세로 구간 분리, 개선 시에만 centerRatio 영속).

@@ -1356,6 +1356,13 @@ export const en = {
   "assets.matDeltaTitle": "Change in rows written vs the previous materialization",
   // column lineage (J3)
   "assets.columnLineage": "Column lineage",
+  // 2026-06-12 — ERD-style column lineage redesign.
+  "assets.clHint": "Hover a column to trace its path · click to pin",
+  "assets.clThisAsset": "This asset",
+  "assets.clOpenAsset": "Open {key}",
+  "assets.clNoUpstream": "const",
+  "assets.clNoUpstreamHint":
+    "No traceable upstream — a literal/constant expression, or the analyser couldn't attribute it.",
   "assets.columnLineageEmpty": "No column-level lineage recorded yet.",
   "assets.columnLineageOpaqueTitle": "Column lineage is opaque",
   "assets.columnLineageOpaqueDesc":
@@ -2815,6 +2822,13 @@ export const ko: Messages = {
   "assets.matDeltaTitle": "이전 materialization 대비 기록 행 수 변화",
   // 컬럼 리니지 (J3)
   "assets.columnLineage": "컬럼 리니지",
+  // 2026-06-12 — ERD풍 컬럼 리니지 재설계.
+  "assets.clHint": "컬럼에 마우스를 올리면 경로 추적 · 클릭하면 고정",
+  "assets.clThisAsset": "이 자산",
+  "assets.clOpenAsset": "{key} 열기",
+  "assets.clNoUpstream": "상수",
+  "assets.clNoUpstreamHint":
+    "추적 가능한 업스트림이 없습니다 — 리터럴/상수 식이거나 분석기가 귀속하지 못한 컬럼입니다.",
   "assets.columnLineageEmpty": "아직 컬럼 단위 리니지가 기록되지 않았습니다.",
   "assets.columnLineageOpaqueTitle": "컬럼 리니지가 불투명합니다",
   "assets.columnLineageOpaqueDesc":

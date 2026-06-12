@@ -3,10 +3,10 @@ import { MockLocaleProvider } from "../../.storybook/mocks/providers";
 import { ColumnLineageGraph } from "./column-lineage-graph";
 
 /**
- * Read-only column-level lineage view (ADR-0041 J3). Left column = upstream
- * columns grouped by their source asset, right column = the current asset's
- * columns (alphabetical). Edges connect each downstream column to its
- * upstream column(s). Reuses @xyflow/react.
+ * Column-level lineage view (ADR-0041 J3; ERD-style redesign 2026-06-12).
+ * Upstream assets render as entity cards on the left, the current asset
+ * as one card on the right; row-port béziers connect them. Hover a row
+ * to trace its path (everything else dims); click pins the highlight.
  */
 
 const meta: Meta<typeof ColumnLineageGraph> = {
@@ -80,4 +80,33 @@ export const AllOpaqueColumns: Story = {
 /** Empty fallback — no successful run has materialized columns yet. */
 export const NoColumns: Story = {
   args: { columns: [] },
+};
+
+/** A realistic multi-source rollup: three upstream assets, a dozen
+ *  downstream columns, several joins and one constant — the case the
+ *  old canvas turned into confetti. */
+export const RealisticRollup: Story = {
+  args: {
+    columns: [
+      { name: "order_id", upstreams: [{ asset_id: "o", asset_key: "pg/orders", column: "id" }] },
+      { name: "customer_id", upstreams: [
+        { asset_id: "o", asset_key: "pg/orders", column: "customer_id" },
+        { asset_id: "c", asset_key: "my/customers", column: "customer_id" },
+      ] },
+      { name: "region", upstreams: [{ asset_id: "c", asset_key: "my/customers", column: "region" }] },
+      { name: "segment", upstreams: [{ asset_id: "c", asset_key: "my/customers", column: "segment" }] },
+      { name: "amount", upstreams: [{ asset_id: "o", asset_key: "pg/orders", column: "amount" }] },
+      { name: "discount", upstreams: [
+        { asset_id: "o", asset_key: "pg/orders", column: "amount" },
+        { asset_id: "p", asset_key: "pg/promotions", column: "rate" },
+      ] },
+      { name: "promo_code", upstreams: [{ asset_id: "p", asset_key: "pg/promotions", column: "code" }] },
+      { name: "currency", upstreams: [] },
+      { name: "loaded_at", upstreams: [] },
+      { name: "net_revenue", upstreams: [
+        { asset_id: "o", asset_key: "pg/orders", column: "amount" },
+        { asset_id: "p", asset_key: "pg/promotions", column: "rate" },
+      ] },
+    ],
+  },
 };

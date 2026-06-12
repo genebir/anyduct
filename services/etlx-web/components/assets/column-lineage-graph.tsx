@@ -78,6 +78,12 @@ export function ColumnLineageGraph({
   const [hovered, setHovered] = useState<RowKey | null>(null);
   const [pinned, setPinned] = useState<RowKey | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  // Column search (2026-06-12): matches light up with their FULL
+  // transitive trace (same visual as hover/pin); hover/pin take
+  // precedence while active. Matches hidden behind the "+N more"
+  // collapse are revealed so a hit can never hide.
+  const [search, setSearch] = useState("");
+  const query = search.trim().toLowerCase();
 
   const model = useMemo(() => {
     const maxLane = Math.max(0, ...graph.assets.map((a) => a.depth));
@@ -100,7 +106,11 @@ export function ColumnLineageGraph({
     for (const a of graph.assets) {
       const linkSet = linked.get(a.id) ?? new Set<string>();
       const showAll = a.depth === 0 || expanded.has(a.id);
-      const rows = showAll ? a.columns : a.columns.filter((c) => linkSet.has(c));
+      const rows = showAll
+        ? a.columns
+        : a.columns.filter(
+            (c) => linkSet.has(c) || (query !== "" && c.toLowerCase().includes(query)),
+          );
       visibleRows.set(a.id, { rows, hidden: a.columns.length - rows.length });
     }
     const cardHeight = (assetId: string) => {
@@ -179,7 +189,36 @@ export function ColumnLineageGraph({
       link(e.to, e.from);
     }
     return { cards, edges, adjacency, height, width, maxLane };
-  }, [graph, expanded]);
+  }, [graph, expanded, query]);
+
+  // Search highlight: union of every match's transitive closure.
+  const searchSet = useMemo(() => {
+    if (query === "") return null;
+    const seen = new Set<RowKey>();
+    const queue: RowKey[] = [];
+    for (const card of model.cards) {
+      for (const row of card.rows) {
+        if (row.name.toLowerCase().includes(query)) {
+          const key = rowKey(card.assetId, row.name);
+          if (!seen.has(key)) {
+            seen.add(key);
+            queue.push(key);
+          }
+        }
+      }
+    }
+    const matches = seen.size;
+    while (queue.length) {
+      const cur = queue.pop()!;
+      for (const next of model.adjacency.get(cur) ?? []) {
+        if (!seen.has(next)) {
+          seen.add(next);
+          queue.push(next);
+        }
+      }
+    }
+    return { set: seen, matches };
+  }, [query, model.cards, model.adjacency]);
 
   const active = pinned ?? hovered;
   const activeSet = useMemo(() => {
@@ -200,8 +239,9 @@ export function ColumnLineageGraph({
     return seen;
   }, [active, model.adjacency]);
 
-  const isLit = (key: RowKey) => activeSet !== null && activeSet.has(key);
-  const isDim = (key: RowKey) => activeSet !== null && !activeSet.has(key);
+  const effectiveSet = activeSet ?? searchSet?.set ?? null;
+  const isLit = (key: RowKey) => effectiveSet !== null && effectiveSet.has(key);
+  const isDim = (key: RowKey) => effectiveSet !== null && !effectiveSet.has(key);
 
   const rowProps = (key: RowKey) => ({
     onMouseEnter: () => setHovered(key),
@@ -241,6 +281,23 @@ export function ColumnLineageGraph({
             {t("assets.clTruncated")}
           </span>
         ) : null}
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder={t("assets.clSearch")}
+          aria-label={t("assets.clSearch")}
+          className="h-6 w-44 rounded-md border border-border-subtle bg-elevated px-2 font-mono text-[11px] text-text placeholder:text-text-muted focus:border-accent focus:outline-none"
+        />
+        {searchSet !== null ? (
+          <span
+            className={cn(
+              "text-[11px]",
+              searchSet.matches === 0 ? "text-warning" : "text-text-muted",
+            )}
+          >
+            {t("assets.clSearchCount", { count: String(searchSet.matches) })}
+          </span>
+        ) : null}
         <span className="ml-auto text-[11px] text-text-muted">{t("assets.clHint")}</span>
       </div>
       <div
@@ -257,8 +314,8 @@ export function ColumnLineageGraph({
             aria-hidden="true"
           >
             {model.edges.map((e) => {
-              const lit = activeSet !== null && isLit(e.from) && isLit(e.to);
-              const dim = activeSet !== null && !lit;
+              const lit = effectiveSet !== null && isLit(e.from) && isLit(e.to);
+              const dim = effectiveSet !== null && !lit;
               const bend = Math.max(40, (e.x2 - e.x1) / 2);
               return (
                 <g key={e.id}>

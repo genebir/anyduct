@@ -1359,6 +1359,8 @@ export const en = {
   // 2026-06-12 — ERD-style column lineage redesign.
   "assets.clHint": "Hover a column to trace its path · click to pin",
   "assets.clDepth": "Hops",
+  "assets.clSearch": "Find column…",
+  "assets.clSearchCount": "{count} matched",
   "assets.lgHint": "Hover an asset to trace its path · click to pin · ↗ to open",
   "assets.lgPinHint": "Click to pin this trace; click again or click the background to clear.",
   "assets.clTruncated": "more upstream",
@@ -2833,6 +2835,8 @@ export const ko: Messages = {
   // 2026-06-12 — ERD풍 컬럼 리니지 재설계.
   "assets.clHint": "컬럼에 마우스를 올리면 경로 추적 · 클릭하면 고정",
   "assets.clDepth": "홉",
+  "assets.clSearch": "컬럼 검색…",
+  "assets.clSearchCount": "{count}개 일치",
   "assets.lgHint": "자산에 마우스를 올리면 경로 추적 · 클릭하면 고정 · ↗로 이동",
   "assets.lgPinHint": "클릭하면 이 경로를 고정합니다. 다시 클릭하거나 배경을 클릭하면 해제됩니다.",
   "assets.clTruncated": "더 위가 있음",

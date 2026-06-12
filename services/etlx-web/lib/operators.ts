@@ -25,9 +25,7 @@ import {
   FilterIcon,
   GitMergeIcon,
   GlobeIcon,
-  HardDriveIcon,
   LayersIcon,
-  LeafIcon,
   RadioTowerIcon,
   ReplaceIcon,
   ShieldCheckIcon,
@@ -204,6 +202,20 @@ export function operatorAllowedForMode(
  *  been translated yet still render (just untranslated) — no crash,
  *  no empty card.
  */
+import {
+  BigqueryIcon,
+  CassandraIcon,
+  ClickhouseIcon,
+  KafkaIcon,
+  MongodbIcon,
+  MysqlIcon,
+  NatsIcon,
+  PostgresIcon,
+  RabbitmqIcon,
+  RedisIcon,
+  SnowflakeIcon,
+  SqliteIcon,
+} from "@/components/builder/connector-brand-icon";
 import type { Messages } from "@/lib/i18n/messages";
 
 type Translate = (key: keyof Messages, vars?: Record<string, string | number>) => string;
@@ -239,7 +251,7 @@ const SOURCES: OperatorSpec[] = [
     connectorType: "postgres",
     label: "Postgres",
     description: "Read rows from a PostgreSQL table via a SQL query.",
-    icon: DatabaseIcon,
+    icon: PostgresIcon,
     accent: "#6366F1",
     fields: [
       { key: "connection", label: "Connection", kind: "connection", required: true },
@@ -259,7 +271,7 @@ const SOURCES: OperatorSpec[] = [
     connectorType: "mysql",
     label: "MySQL",
     description: "Read rows from a MySQL table via a SQL query.",
-    icon: DatabaseIcon,
+    icon: MysqlIcon,
     accent: "#06B6D4",
     fields: [
       { key: "connection", label: "Connection", kind: "connection", required: true },
@@ -274,7 +286,7 @@ const SOURCES: OperatorSpec[] = [
     connectorType: "sqlite",
     label: "SQLite",
     description: "Read rows from a local SQLite database.",
-    icon: HardDriveIcon,
+    icon: SqliteIcon,
     accent: "#10B981",
     fields: [
       { key: "connection", label: "Connection", kind: "connection", required: true },
@@ -321,7 +333,7 @@ const SOURCES: OperatorSpec[] = [
     connectorType: "snowflake",
     label: "Snowflake",
     description: "Read rows from a Snowflake table / view via a SQL query.",
-    icon: DatabaseIcon,
+    icon: SnowflakeIcon,
     accent: "#29B5E8",
     fields: [
       { key: "connection", label: "Connection", kind: "connection", required: true },
@@ -337,7 +349,7 @@ const SOURCES: OperatorSpec[] = [
     connectorType: "bigquery",
     label: "BigQuery",
     description: "Read rows from a BigQuery table / view via GoogleSQL.",
-    icon: DatabaseIcon,
+    icon: BigqueryIcon,
     accent: "#4285F4",
     fields: [
       { key: "connection", label: "Connection", kind: "connection", required: true },
@@ -369,7 +381,7 @@ const SOURCES: OperatorSpec[] = [
     connectorType: "clickhouse",
     label: "ClickHouse",
     description: "Read rows from a ClickHouse table via a SQL query.",
-    icon: DatabaseIcon,
+    icon: ClickhouseIcon,
     accent: "#FFCC01",
     fields: [
       { key: "connection", label: "Connection", kind: "connection", required: true },
@@ -385,7 +397,7 @@ const SOURCES: OperatorSpec[] = [
     connectorType: "cassandra",
     label: "Cassandra",
     description: "Read rows from a Cassandra table via a CQL query.",
-    icon: DatabaseIcon,
+    icon: CassandraIcon,
     accent: "#1287B1",
     fields: [
       { key: "connection", label: "Connection", kind: "connection", required: true },
@@ -420,7 +432,7 @@ const SOURCES: OperatorSpec[] = [
     connectorType: "mongodb",
     label: "MongoDB",
     description: "Read documents from a MongoDB collection (with filter / sort / projection).",
-    icon: LeafIcon,
+    icon: MongodbIcon,
     accent: "#22C55E",
     fields: [
       { key: "connection", label: "Connection", kind: "connection", required: true },
@@ -483,7 +495,7 @@ const SOURCES: OperatorSpec[] = [
     connectorType: "kafka",
     label: "Kafka topic",
     description: "Stream-source records from a Kafka topic (use a stream-mode pipeline).",
-    icon: RadioTowerIcon,
+    icon: KafkaIcon,
     accent: "#EC4899",
     streaming: true,
     fields: [
@@ -532,7 +544,7 @@ const SOURCES: OperatorSpec[] = [
     connectorType: "nats",
     label: "NATS JetStream",
     description: "Stream-source messages from a NATS JetStream subject (durable pull, ack on commit).",
-    icon: RadioTowerIcon,
+    icon: NatsIcon,
     accent: "#EC4899",
     streaming: true,
     fields: [
@@ -548,7 +560,7 @@ const SOURCES: OperatorSpec[] = [
     connectorType: "rabbitmq",
     label: "RabbitMQ queue",
     description: "Stream-source messages from a RabbitMQ queue (ack on commit).",
-    icon: RadioTowerIcon,
+    icon: RabbitmqIcon,
     accent: "#EC4899",
     streaming: true,
     fields: [
@@ -563,7 +575,7 @@ const SOURCES: OperatorSpec[] = [
     connectorType: "redis",
     label: "Redis stream",
     description: "Stream-source entries from a Redis Stream via a consumer group (XACK on commit).",
-    icon: RadioTowerIcon,
+    icon: RedisIcon,
     accent: "#EC4899",
     streaming: true,
     fields: [
@@ -987,7 +999,7 @@ const SINKS: OperatorSpec[] = [
     connectorType: "postgres",
     label: "Postgres",
     description: "Write records into a PostgreSQL table.",
-    icon: DatabaseIcon,
+    icon: PostgresIcon,
     accent: "#4ADE80",
     fields: [
       { key: "connection", label: "Connection", kind: "connection", required: true },
@@ -1042,7 +1054,7 @@ const SINKS: OperatorSpec[] = [
     connectorType: "mysql",
     label: "MySQL",
     description: "Write records into a MySQL table.",
-    icon: DatabaseIcon,
+    icon: MysqlIcon,
     accent: "#4ADE80",
     fields: [
       { key: "connection", label: "Connection", kind: "connection", required: true },
@@ -1092,7 +1104,7 @@ const SINKS: OperatorSpec[] = [
     connectorType: "sqlite",
     label: "SQLite",
     description: "Write records into a local SQLite database.",
-    icon: HardDriveIcon,
+    icon: SqliteIcon,
     accent: "#4ADE80",
     fields: [
       { key: "connection", label: "Connection", kind: "connection", required: true },
@@ -1257,7 +1269,7 @@ const SINKS: OperatorSpec[] = [
     connectorType: "snowflake",
     label: "Snowflake",
     description: "Write records into a Snowflake table.",
-    icon: DatabaseIcon,
+    icon: SnowflakeIcon,
     accent: "#29B5E8",
     fields: [
       { key: "connection", label: "Connection", kind: "connection", required: true },
@@ -1312,7 +1324,7 @@ const SINKS: OperatorSpec[] = [
     connectorType: "bigquery",
     label: "BigQuery",
     description: "Write records into a BigQuery table.",
-    icon: DatabaseIcon,
+    icon: BigqueryIcon,
     accent: "#4285F4",
     fields: [
       { key: "connection", label: "Connection", kind: "connection", required: true },
@@ -1424,7 +1436,7 @@ const SINKS: OperatorSpec[] = [
     connectorType: "clickhouse",
     label: "ClickHouse",
     description: "Write records into a ClickHouse MergeTree table.",
-    icon: DatabaseIcon,
+    icon: ClickhouseIcon,
     accent: "#FFCC01",
     fields: [
       { key: "connection", label: "Connection", kind: "connection", required: true },
@@ -1479,7 +1491,7 @@ const SINKS: OperatorSpec[] = [
     connectorType: "cassandra",
     label: "Cassandra",
     description: "Write rows into a Cassandra table (INSERT replaces by primary key).",
-    icon: DatabaseIcon,
+    icon: CassandraIcon,
     accent: "#1287B1",
     fields: [
       { key: "connection", label: "Connection", kind: "connection", required: true },
@@ -1555,7 +1567,7 @@ const SINKS: OperatorSpec[] = [
     connectorType: "mongodb",
     label: "MongoDB",
     description: "Write documents into a MongoDB collection (append / overwrite / upsert).",
-    icon: LeafIcon,
+    icon: MongodbIcon,
     accent: "#4ADE80",
     fields: [
       { key: "connection", label: "Connection", kind: "connection", required: true },
@@ -1610,7 +1622,7 @@ const SINKS: OperatorSpec[] = [
     connectorType: "kafka",
     label: "Kafka topic",
     description: "Stream-sink records to a Kafka topic.",
-    icon: RadioTowerIcon,
+    icon: KafkaIcon,
     accent: "#4ADE80",
     streaming: true,
     fields: [
@@ -1634,7 +1646,7 @@ const SINKS: OperatorSpec[] = [
     connectorType: "nats",
     label: "NATS JetStream",
     description: "Stream-sink messages to a NATS JetStream subject.",
-    icon: RadioTowerIcon,
+    icon: NatsIcon,
     accent: "#4ADE80",
     streaming: true,
     fields: [
@@ -1649,7 +1661,7 @@ const SINKS: OperatorSpec[] = [
     connectorType: "rabbitmq",
     label: "RabbitMQ queue",
     description: "Stream-sink messages to a RabbitMQ queue (persistent publish).",
-    icon: RadioTowerIcon,
+    icon: RabbitmqIcon,
     accent: "#4ADE80",
     streaming: true,
     fields: [
@@ -1664,7 +1676,7 @@ const SINKS: OperatorSpec[] = [
     connectorType: "redis",
     label: "Redis stream",
     description: "Stream-sink entries to a Redis Stream (XADD).",
-    icon: RadioTowerIcon,
+    icon: RedisIcon,
     accent: "#4ADE80",
     streaming: true,
     fields: [

@@ -16,6 +16,7 @@ import {
 } from "@/lib/api";
 import { useLocale } from "@/components/providers/locale-provider";
 import type { Messages } from "@/lib/i18n/messages";
+import { Checkbox } from "@/components/ui/checkbox";
 
 type Translate = (key: keyof Messages, vars?: Record<string, string | number>) => string;
 
@@ -103,11 +104,10 @@ export function ScheduleCreateForm({
         </FieldRow>
         <FieldRow label={t("common.active")} className="md:col-span-2">
           <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-text">
-            <input
-              type="checkbox"
+            <Checkbox
+
               checked={active}
               onChange={(e) => setActive(e.target.checked)}
-              className="h-4 w-4 accent-[rgb(var(--accent))]"
             />
             {t("schedForm.activeDesc")}
           </label>

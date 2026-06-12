@@ -92,6 +92,7 @@ import { strToU8, zipSync } from "fflate";
 import { erdApi } from "@/lib/api";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import type { Messages } from "@/lib/i18n/messages";
+import { Checkbox } from "@/components/ui/checkbox";
 
 type Menu =
   | { x: number; y: number; kind: "pane" }
@@ -2013,8 +2014,8 @@ export function ErdDesigner({ slug, docId }: { slug: string; docId: string }) {
               <span className="text-sm font-semibold text-text">{t("erdDesign.sqlTitle", { dialect })}</span>
               <div className="flex items-center gap-3">
                 <label className="flex cursor-pointer items-center gap-1.5 text-xs text-text-secondary">
-                  <input
-                    type="checkbox"
+                  <Checkbox
+
                     checked={sqlComments}
                     onChange={(e) => {
                       setSqlComments(e.target.checked);

@@ -16,6 +16,7 @@ import { useCurrentUser } from "@/components/providers/auth-provider";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import { useLocale } from "@/components/providers/locale-provider";
 import { cn } from "@/lib/cn";
+import { Checkbox } from "@/components/ui/checkbox";
 
 const RESOURCE_TYPES = [
   "",
@@ -248,15 +249,14 @@ export default function AuditPage() {
               {/* Phase AFN (2026-06-04) — scope to the signed-in user's
                   own actions via the actor_user_id param. */}
               <label className="flex items-center gap-2 pb-2 text-sm text-text-secondary">
-                <input
-                  type="checkbox"
+                <Checkbox
+
                   checked={mineOnly}
                   disabled={!currentUser}
                   onChange={(e) => {
                     setMineOnly(e.target.checked);
                     setOffset(0);
                   }}
-                  className="h-4 w-4 rounded border-border-subtle"
                 />
                 {t("audit.mineOnly")}
               </label>

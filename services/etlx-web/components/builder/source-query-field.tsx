@@ -6,6 +6,7 @@ import { useTables, groupBySchema } from "./table-picker";
 import { useColumns } from "./columns-field";
 import { CodeEditor } from "./code-editor";
 import type { Messages } from "@/lib/i18n/messages";
+import { Checkbox } from "@/components/ui/checkbox";
 
 type Translate = (key: keyof Messages, vars?: Record<string, string | number>) => string;
 
@@ -264,8 +265,8 @@ function VisualBuilder({
                       key={col.name}
                       className="flex cursor-pointer items-center gap-2 rounded-sm px-1.5 py-1 text-xs text-text-secondary transition duration-150 hover:bg-overlay"
                     >
-                      <input
-                        type="checkbox"
+                      <Checkbox
+
                         checked={checked}
                         onChange={() =>
                           onColumns(
@@ -274,7 +275,6 @@ function VisualBuilder({
                               : [...columns, col.name],
                           )
                         }
-                        className="accent-[rgb(var(--accent))]"
                       />
                       <span className="font-mono">{col.name}</span>
                       {col.type ? (

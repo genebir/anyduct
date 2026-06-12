@@ -45,6 +45,7 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import { useLocale } from "@/components/providers/locale-provider";
 import type { Messages } from "@/lib/i18n/messages";
+import { Checkbox } from "@/components/ui/checkbox";
 
 type Translate = (key: keyof Messages, vars?: Record<string, string | number>) => string;
 
@@ -846,11 +847,10 @@ function SensorForm({
       </div>
 
       <label className="inline-flex items-center gap-2 text-sm text-text-secondary">
-        <input
-          type="checkbox"
+        <Checkbox
+
           checked={values.isActive}
           onChange={(e) => update("isActive", e.target.checked)}
-          className="h-4 w-4 accent-[rgb(var(--accent))]"
         />
         {t("sensors.fieldActive")}
       </label>

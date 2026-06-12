@@ -9,6 +9,7 @@ import type { ConnectionSummary, PipelineSummary } from "@/lib/api";
 import type { DlqSettings, RetrySettings } from "@/lib/pipeline-config";
 import { useLocale } from "@/components/providers/locale-provider";
 import { type VarType, inferType } from "@/lib/variable-types";
+import { Checkbox } from "@/components/ui/checkbox";
 
 /**
  * Pipeline-level settings — retry policy + DLQ routing.
@@ -486,11 +487,10 @@ function Section({
       <header className="flex items-center justify-between gap-2">
         <h3 className="text-sm font-semibold text-text">{title}</h3>
         <label className="inline-flex items-center gap-2 text-xs text-text-secondary">
-          <input
-            type="checkbox"
+          <Checkbox
+
             checked={enabled}
             onChange={(e) => onToggle(e.target.checked)}
-            className="h-4 w-4 accent-[rgb(var(--accent))]"
           />
           {enableLabel}
         </label>

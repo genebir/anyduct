@@ -16,6 +16,7 @@ import { relativeTime, absoluteTime } from "@/lib/format-time";
 import { useWorkspaceFromSlug } from "@/lib/workspace-context";
 import { useLocale } from "@/components/providers/locale-provider";
 import type { Messages } from "@/lib/i18n/messages";
+import { Checkbox } from "@/components/ui/checkbox";
 
 type Translate = (key: keyof Messages, vars?: Record<string, string | number>) => string;
 
@@ -197,11 +198,10 @@ export default function AssetsPage() {
             </select>
             {/* Phase AFT — opaque-only toggle (no column lineage). */}
             <label className="flex items-center gap-2 pb-2 text-sm text-text-secondary">
-              <input
-                type="checkbox"
+              <Checkbox
+
                 checked={opaqueOnly}
                 onChange={(e) => setOpaqueOnly(e.target.checked)}
-                className="h-4 w-4 rounded border-border-subtle"
               />
               {t("assets.filterOpaqueOnly")}
             </label>

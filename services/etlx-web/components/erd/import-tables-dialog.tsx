@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { connectionsApi, type ConnectionSummary } from "@/lib/api";
 import { rawTablesToDesign, type ErdDesign, type ImportTable } from "@/lib/erd-design";
 import { useLocale } from "@/components/providers/locale-provider";
+import { Checkbox } from "@/components/ui/checkbox";
 
 export function ImportTablesDialog({
   workspaceId,
@@ -138,8 +139,8 @@ export function ImportTablesDialog({
             ) : (
               <>
                 <label className="flex items-center gap-2 text-xs text-text-secondary">
-                  <input
-                    type="checkbox"
+                  <Checkbox
+
                     checked={allSelected}
                     onChange={() =>
                       setSelected((s) => {
@@ -155,7 +156,7 @@ export function ImportTablesDialog({
                 <div className="flex max-h-64 flex-col gap-0.5 overflow-auto rounded-md border border-border-subtle p-1">
                   {filtered.map((tb) => (
                     <label key={tb} className="flex items-center gap-2 rounded px-1.5 py-1 hover:bg-overlay">
-                      <input type="checkbox" checked={selected.has(tb)} onChange={() => toggle(tb)} />
+                      <Checkbox  checked={selected.has(tb)} onChange={() => toggle(tb)} />
                       <span className="truncate font-mono text-xs text-text">{tb}</span>
                     </label>
                   ))}

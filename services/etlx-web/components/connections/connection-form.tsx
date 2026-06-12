@@ -20,6 +20,7 @@ import {
   type ConnectorField,
 } from "@/lib/connector-schemas";
 import { useLocale } from "@/components/providers/locale-provider";
+import { Checkbox } from "@/components/ui/checkbox";
 
 type FieldValue = string | number | boolean | undefined;
 
@@ -272,11 +273,10 @@ function FieldInput({
           : false;
     return (
       <label className="flex cursor-pointer items-center gap-2 text-sm text-text">
-        <input
-          type="checkbox"
+        <Checkbox
+
           checked={checked}
           onChange={(e) => onChange(e.target.checked)}
-          className="h-4 w-4 cursor-pointer accent-accent"
         />
         <span className="select-none text-text-secondary">
           {checked ? "Enabled" : "Disabled"}

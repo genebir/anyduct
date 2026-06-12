@@ -29,6 +29,7 @@ import { cn } from "@/lib/cn";
 import { useLocale } from "@/components/providers/locale-provider";
 import { RequiredMark } from "@/components/ui/required-mark";
 import type { Messages } from "@/lib/i18n/messages";
+import { Checkbox } from "@/components/ui/checkbox";
 
 type Translate = (key: keyof Messages, vars?: Record<string, string | number>) => string;
 
@@ -558,11 +559,10 @@ function FieldInput({
       typeof value === "boolean" ? value : Boolean(field.defaultValue);
     return (
       <label className="flex cursor-pointer items-center gap-2 text-sm text-text">
-        <input
-          type="checkbox"
+        <Checkbox
+
           checked={checked}
           onChange={(e) => onChange(e.target.checked || undefined)}
-          className="h-4 w-4 cursor-pointer accent-accent"
         />
         <span className="select-none">{field.label}</span>
       </label>

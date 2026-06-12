@@ -5,6 +5,7 @@ import { PlusIcon, XIcon } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { connectionsApi } from "@/lib/api";
 import type { Messages } from "@/lib/i18n/messages";
+import { Checkbox } from "@/components/ui/checkbox";
 
 type Translate = (key: keyof Messages, vars?: Record<string, string | number>) => string;
 
@@ -116,11 +117,10 @@ export function ColumnsField({
               key={col.name}
               className="flex cursor-pointer items-center gap-2 rounded-sm px-1.5 py-1 text-xs text-text-secondary transition duration-150 hover:bg-overlay"
             >
-              <input
-                type="checkbox"
+              <Checkbox
+
                 checked={selected.includes(col.name)}
                 onChange={() => toggle(col.name)}
-                className="accent-[rgb(var(--accent))]"
               />
               <span className="font-mono">{col.name}</span>
               {col.type ? (

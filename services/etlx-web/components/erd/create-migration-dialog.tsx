@@ -25,6 +25,7 @@ import {
   type MigrationStrategy,
 } from "@/lib/migration-config";
 import { useLocale } from "@/components/providers/locale-provider";
+import { Checkbox } from "@/components/ui/checkbox";
 
 /** Append cursor from ERD columns: conventional *_at first, then the Korean
  *  standard audit timestamps (MDFCN_DT 수정일시 > REG_DT 등록일시 > *_DT). */
@@ -194,8 +195,8 @@ export function CreateMigrationDialog({
                 r.blocked ? "opacity-50" : "cursor-pointer hover:bg-overlay/50"
               }`}
             >
-              <input
-                type="checkbox"
+              <Checkbox
+
                 checked={selected.has(r.tb.id) && !r.blocked}
                 disabled={r.blocked}
                 onChange={() => toggle(r.tb.id)}

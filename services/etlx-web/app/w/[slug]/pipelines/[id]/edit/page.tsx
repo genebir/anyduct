@@ -48,6 +48,7 @@ import { useGraphHistory, useGraphHistoryShortcuts } from "@/lib/use-graph-histo
 import { useLocale } from "@/components/providers/locale-provider";
 import { ShortcutsDialog } from "@/components/builder/shortcuts-dialog";
 import type { Messages } from "@/lib/i18n/messages";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   blankGraph,
   deserialize,
@@ -518,14 +519,13 @@ export default function PipelineEditorPage() {
               className="flex items-center gap-1.5 text-xs text-text-secondary"
               title={t("autoMat.help")}
             >
-              <input
-                type="checkbox"
+              <Checkbox
+
                 checked={autoMaterialize}
                 onChange={(e) => {
                   setAutoMaterialize(e.target.checked);
                   setMetaDirty(true);
                 }}
-                className="accent-[rgb(var(--accent))]"
               />
               <span className="text-text-muted">{t("autoMat.label")}</span>
             </label>

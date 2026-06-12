@@ -35,6 +35,7 @@ import {
   validateMigrationForm,
 } from "@/lib/migration-config";
 import { translateType } from "@/lib/cross-db-type-mapping";
+import { Checkbox } from "@/components/ui/checkbox";
 
 interface Props {
   workspaceId: string;
@@ -570,9 +571,8 @@ export function MigrationForm({
                           return (
                             <li key={qualified}>
                               <label className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-xs hover:bg-overlay">
-                                <input
-                                  type="checkbox"
-                                  className="h-3.5 w-3.5 cursor-pointer accent-accent"
+                                <Checkbox
+
                                   checked={checked}
                                   onChange={() => toggleTable(qualified)}
                                   disabled={disabled}

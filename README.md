@@ -3,6 +3,8 @@
 > Backend-agnostic, orchestrator-agnostic **Python ETL plugin library**.
 > 모든 데이터 소스/싱크(RDBMS, NoSQL, DW, Stream, Object Storage)에 대해 통일된 인터페이스를 제공하고, 어떤 오케스트레이터(Airflow / Dagster / Prefect / 사내 워크플로우) 위에서도 그대로 재사용할 수 있다.
 
+🌐 **[랜딩 페이지 (소개 사이트)](https://genebir.github.io/ETL/)** — 다른 ETL과의 차이점을 한눈에.
+
 [![CI Core](https://github.com/genebir/ETL/actions/workflows/ci-core.yml/badge.svg)](https://github.com/genebir/ETL/actions/workflows/ci-core.yml)
 [![CI Server](https://github.com/genebir/ETL/actions/workflows/ci-server.yml/badge.svg)](https://github.com/genebir/ETL/actions/workflows/ci-server.yml)
 [![CI Web](https://github.com/genebir/ETL/actions/workflows/ci-web.yml/badge.svg)](https://github.com/genebir/ETL/actions/workflows/ci-web.yml)

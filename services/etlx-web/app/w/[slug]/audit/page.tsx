@@ -389,10 +389,28 @@ function AuditRow({
   const expandable = hasDiff || hasMeta;
   return (
     <li>
-      <button
-        type="button"
-        onClick={onToggle}
-        className="grid w-full grid-cols-[auto_140px_180px_1fr_180px] items-center gap-3 px-2 py-3 text-left transition duration-150 hover:bg-overlay"
+      {/* Row is a div, not a native button: it contains the resource_id
+          filter button (below), and a button element may not nest another
+          button (invalid HTML + React hydration error). role/tabIndex/
+          onKeyDown keep the whole-row expand toggle keyboard-accessible;
+          a non-expandable row is a plain, non-interactive div. */}
+      <div
+        role={expandable ? "button" : undefined}
+        tabIndex={expandable ? 0 : undefined}
+        onClick={expandable ? onToggle : undefined}
+        onKeyDown={
+          expandable
+            ? (e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onToggle();
+                }
+              }
+            : undefined
+        }
+        className={`grid w-full grid-cols-[auto_140px_180px_1fr_180px] items-center gap-3 px-2 py-3 text-left transition duration-150 ${
+          expandable ? "cursor-pointer hover:bg-overlay" : ""
+        }`}
       >
         <span className="text-text-muted">
           {expandable ? (
@@ -448,7 +466,7 @@ function AuditRow({
               : `${row.actor_user_id.slice(0, 8)}…`
             : systemLabel}
         </span>
-      </button>
+      </div>
       {open && expandable ? (
         <div className="px-8 pb-4">
           {hasMeta ? (

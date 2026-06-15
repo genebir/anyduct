@@ -2,171 +2,219 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>etlx — 어떤 데이터베이스든, 어떤 오케스트레이터 위에서든</title>
 <meta name="description" content="Backend-agnostic · Orchestrator-agnostic 오픈소스 Python ETL. 코드도 노코드도, 무이동 데이터 경로와 자동 컬럼 리니지까지. 당신의 인프라 안에서." />
 <meta property="og:title" content="etlx — 데이터 파이프라인 플랫폼" />
 <meta property="og:description" content="하나의 인터페이스로 20여 종 시스템을 연결. 오픈소스 · 셀프호스팅 · 자동 리니지 · 무이동 ELT." />
 <meta property="og:type" content="website" />
+<meta name="theme-color" content="#000000" />
+<!-- 애플산돌고딕(Apple SD Gothic Neo)을 1순위로, 비-애플 환경엔 Pretendard로 동일한 룩 -->
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" />
 <style>
   :root{
-    --ink:#1d1d1f;        /* Apple near-black */
-    --ink-2:#6e6e73;      /* secondary */
-    --ink-3:#86868b;      /* tertiary */
-    --bg:#ffffff;
-    --bg-2:#f5f5f7;       /* Apple light gray */
-    --line:#d2d2d7;
-    --blue:#0071e3;       /* Apple action blue */
-    --blue-ink:#06c;
-    --blue-dark:#2997ff;  /* on dark */
-    --radius:18px;
-    --maxw:980px;
-    --font:-apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display","Segoe UI",
-           "Helvetica Neue","Apple SD Gothic Neo","Malgun Gothic",Roboto,Arial,sans-serif;
+    --ink:#1d1d1f; --ink-2:#6e6e73; --ink-3:#86868b;
+    --bg:#fff; --bg-2:#f5f5f7; --line:#d2d2d7;
+    --blue:#0071e3; --blue-ink:#06c; --blue-dark:#2997ff;
+    --radius:20px; --maxw:980px;
+    /* 화려한 애플 시스템 컬러 그라데이션 (Apple Intelligence 톤) */
+    --grad:linear-gradient(110deg,#0a84ff 0%,#5e5ce6 30%,#bf5af2 62%,#ff375f 100%);
+    --grad-soft:linear-gradient(120deg,#0a84ff,#bf5af2);
+    --font:"Apple SD Gothic Neo","Pretendard Variable",Pretendard,-apple-system,
+           BlinkMacSystemFont,"SF Pro Text","SF Pro Display","Segoe UI",
+           "Helvetica Neue","Malgun Gothic",Roboto,Arial,sans-serif;
   }
   *{box-sizing:border-box;}
   html{scroll-behavior:smooth;-webkit-text-size-adjust:100%;}
-  body{
-    margin:0;font-family:var(--font);color:var(--ink);background:var(--bg);
-    line-height:1.47;letter-spacing:-0.01em;
-    -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
-  }
+  body{margin:0;font-family:var(--font);color:var(--ink);background:var(--bg);
+    line-height:1.47;letter-spacing:-0.01em;overflow-x:hidden;
+    -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;}
   a{color:var(--blue-ink);text-decoration:none;}
   a:hover{text-decoration:underline;}
   .wrap{max-width:var(--maxw);margin:0 auto;padding:0 22px;}
-  .narrow{max-width:760px;margin-left:auto;margin-right:auto;}
+
+  /* gradient text util (화려한 그라데이션 텍스트) */
+  .grad{
+    background:var(--grad);background-size:220% auto;
+    -webkit-background-clip:text;background-clip:text;
+    color:transparent;-webkit-text-fill-color:transparent;
+    animation:gradMove 8s linear infinite;
+  }
+  @keyframes gradMove{to{background-position:220% center;}}
 
   /* ---------- Nav (frosted glass) ---------- */
-  header.nav{
-    position:sticky;top:0;z-index:50;height:48px;
+  header.nav{position:sticky;top:0;z-index:50;height:48px;
     background:rgba(255,255,255,.72);backdrop-filter:saturate(180%) blur(20px);
     -webkit-backdrop-filter:saturate(180%) blur(20px);
-    border-bottom:1px solid rgba(0,0,0,.08);
-  }
+    border-bottom:1px solid rgba(0,0,0,0);transition:border-color .3s,background .3s;}
+  header.nav.scrolled{border-bottom-color:rgba(0,0,0,.1);}
   .nav .wrap{height:100%;display:flex;align-items:center;gap:26px;}
-  .nav .brand{font-weight:600;font-size:18px;letter-spacing:-0.02em;color:var(--ink);}
+  .nav .brand{font-weight:700;font-size:19px;letter-spacing:-0.02em;}
   .nav nav{display:flex;gap:24px;margin-left:auto;}
-  .nav nav a{color:var(--ink);font-size:13px;opacity:.85;}
+  .nav nav a{color:var(--ink);font-size:13px;opacity:.82;transition:opacity .2s;}
   .nav nav a:hover{opacity:1;text-decoration:none;}
-  @media (max-width:680px){ .nav nav a:not(.cta){display:none;} }
+  @media (max-width:680px){.nav nav a:not(.cta){display:none;}}
 
   /* ---------- Buttons ---------- */
-  .btn{display:inline-block;border-radius:980px;padding:11px 22px;font-size:15px;
-       font-weight:500;line-height:1;transition:opacity .2s,background .2s;}
-  .btn-primary{background:var(--blue);color:#fff;}
-  .btn-primary:hover{background:#0077ED;text-decoration:none;}
+  .btn{display:inline-block;border-radius:980px;padding:12px 24px;font-size:16px;
+    font-weight:600;line-height:1;transition:transform .25s cubic-bezier(.2,.7,.2,1),
+    box-shadow .25s,filter .25s;will-change:transform;}
+  .btn-primary{color:#fff;background:var(--grad-soft);background-size:160% auto;
+    box-shadow:0 8px 24px rgba(94,92,230,.32);}
+  .btn-primary:hover{transform:translateY(-2px) scale(1.015);filter:brightness(1.06);
+    box-shadow:0 14px 34px rgba(94,92,230,.42);text-decoration:none;}
   .btn-ghost{color:var(--blue-ink);}
   .btn-ghost:hover{text-decoration:underline;}
-  .btn-lg{padding:13px 28px;font-size:17px;}
+  .btn-lg{padding:14px 30px;font-size:17px;}
 
   /* ---------- Hero ---------- */
-  .hero{text-align:center;padding:96px 0 64px;}
-  .eyebrow{color:var(--blue-ink);font-weight:600;font-size:19px;letter-spacing:0;margin:0 0 12px;}
-  h1.title{
-    font-size:clamp(40px,7vw,80px);line-height:1.04;font-weight:600;
-    letter-spacing:-0.025em;margin:0 0 10px;
-  }
-  .hero .sub{font-size:clamp(19px,2.4vw,26px);color:var(--ink-2);font-weight:400;
-    margin:18px auto 0;max-width:680px;line-height:1.32;}
-  .hero .actions{margin-top:34px;display:flex;gap:18px;justify-content:center;flex-wrap:wrap;}
-  .hero .actions a{font-size:19px;}
-  .hero .actions .btn{font-size:17px;}
+  .hero{position:relative;text-align:center;padding:108px 0 76px;overflow:hidden;}
+  .blob{position:absolute;border-radius:50%;filter:blur(70px);z-index:0;pointer-events:none;
+    opacity:.55;will-change:transform;}
+  .b1{width:520px;height:520px;top:-160px;left:-120px;
+    background:radial-gradient(circle at 30% 30%,#0a84ff,transparent 70%);animation:float1 16s ease-in-out infinite;}
+  .b2{width:480px;height:480px;top:-80px;right:-140px;
+    background:radial-gradient(circle at 70% 30%,#bf5af2,transparent 70%);animation:float2 19s ease-in-out infinite;}
+  .b3{width:420px;height:420px;top:120px;left:40%;
+    background:radial-gradient(circle at 50% 50%,#ff375f,transparent 70%);opacity:.35;animation:float3 22s ease-in-out infinite;}
+  @keyframes float1{50%{transform:translate(60px,40px) scale(1.1);}}
+  @keyframes float2{50%{transform:translate(-50px,50px) scale(1.08);}}
+  @keyframes float3{50%{transform:translate(30px,-40px) scale(1.12);}}
+  .hero .wrap{position:relative;z-index:1;}
+  .eyebrow{font-weight:700;font-size:19px;margin:0 0 14px;}
+  h1.title{font-size:clamp(42px,7.2vw,84px);line-height:1.03;font-weight:700;
+    letter-spacing:-0.03em;margin:0;}
+  .hero .sub{font-size:clamp(19px,2.4vw,27px);color:var(--ink-2);font-weight:500;
+    margin:22px auto 0;max-width:680px;line-height:1.34;}
+  .hero .actions{margin-top:36px;display:flex;gap:18px;justify-content:center;flex-wrap:wrap;align-items:center;}
+  .hero .actions .btn-ghost{font-size:18px;}
 
-  /* ---------- Section scaffolding ---------- */
-  section{padding:92px 0;}
+  /* ---------- Sections ---------- */
+  section{padding:96px 0;position:relative;}
   section.alt{background:var(--bg-2);}
-  section.dark{background:#000;color:#f5f5f7;}
-  section.dark .lead,section.dark .k-sub{color:#a1a1a6;}
-  section.dark .card{background:#1d1d1f;border-color:#333;}
+  section.dark{background:#000;color:#f5f5f7;overflow:hidden;}
+  section.dark .lead{color:#a1a1a6;}
+  section.dark .card,section.dark .diff,section.dark .face{background:#1c1c1e;border-color:#2c2c2e;}
   section.dark h2,section.dark h3{color:#f5f5f7;}
-  .kicker{color:var(--blue-ink);font-weight:600;font-size:15px;margin:0 0 10px;
-    text-align:center;letter-spacing:0;}
-  section.dark .kicker{color:var(--blue-dark);}
-  h2.head{font-size:clamp(30px,4.6vw,48px);line-height:1.08;font-weight:600;
-    letter-spacing:-0.02em;margin:0 0 14px;text-align:center;}
+  .kicker{font-weight:700;font-size:15px;margin:0 0 10px;text-align:center;}
+  h2.head{font-size:clamp(31px,4.8vw,50px);line-height:1.07;font-weight:700;
+    letter-spacing:-0.025em;margin:0 0 14px;text-align:center;}
   .lead{font-size:clamp(17px,2vw,21px);color:var(--ink-2);text-align:center;
-    max-width:640px;margin:0 auto 8px;line-height:1.4;}
+    max-width:660px;margin:0 auto;line-height:1.42;}
 
-  /* ---------- Differentiator rows ---------- */
-  .diffs{margin-top:56px;display:grid;gap:26px;}
-  .diff{display:grid;grid-template-columns:46px 1fr;gap:20px;align-items:start;
-    padding:26px;border-radius:var(--radius);background:var(--bg);
-    border:1px solid var(--line);}
-  section.dark .diff{background:#1d1d1f;border-color:#333;}
-  .diff .num{font-size:21px;font-weight:600;color:var(--blue-ink);line-height:1.3;}
-  section.dark .diff .num{color:var(--blue-dark);}
-  .diff h3{margin:0 0 7px;font-size:22px;font-weight:600;letter-spacing:-0.015em;}
-  .diff p{margin:0;color:var(--ink-2);font-size:16px;line-height:1.5;}
+  /* ---------- Reveal on scroll ---------- */
+  [data-reveal]{opacity:0;transform:translateY(30px);
+    transition:opacity .8s cubic-bezier(.2,.7,.2,1),transform .8s cubic-bezier(.2,.7,.2,1);}
+  [data-reveal].in{opacity:1;transform:none;}
+
+  /* ---------- Differentiators ---------- */
+  .diffs{margin-top:58px;display:grid;gap:22px;}
+  .diff{display:grid;grid-template-columns:auto 1fr;gap:22px;align-items:start;
+    padding:30px;border-radius:var(--radius);background:var(--bg);border:1px solid var(--line);
+    transition:transform .35s cubic-bezier(.2,.7,.2,1),box-shadow .35s,border-color .35s;}
+  .diff:hover{transform:translateY(-4px);box-shadow:0 22px 50px rgba(0,0,0,.10);border-color:#c7c7cc;}
+  section.dark .diff:hover{box-shadow:0 22px 50px rgba(0,0,0,.5);border-color:#3a3a3c;}
+  .diff .num{font-size:30px;font-weight:800;line-height:1;letter-spacing:-0.02em;}
+  .diff h3{margin:0 0 8px;font-size:23px;font-weight:700;letter-spacing:-0.02em;}
+  .diff p{margin:0;color:var(--ink-2);font-size:16px;line-height:1.55;}
   section.dark .diff p{color:#a1a1a6;}
-  .diff .vs{display:inline-block;margin-top:10px;font-size:13.5px;color:var(--ink-3);
-    background:var(--bg-2);border-radius:8px;padding:6px 11px;line-height:1.4;}
+  .diff .vs{display:inline-block;margin-top:12px;font-size:13.5px;color:var(--ink-3);
+    background:var(--bg-2);border-radius:9px;padding:7px 12px;line-height:1.4;}
   section.dark .diff .vs{background:#000;color:#86868b;}
 
   /* ---------- Feature grid ---------- */
-  .grid{margin-top:52px;display:grid;grid-template-columns:repeat(3,1fr);gap:22px;}
-  @media (max-width:820px){ .grid{grid-template-columns:1fr 1fr;} }
-  @media (max-width:540px){ .grid{grid-template-columns:1fr;} }
-  .card{background:var(--bg);border:1px solid var(--line);border-radius:var(--radius);
-    padding:26px;}
-  .card .ic{width:34px;height:34px;border-radius:9px;background:var(--bg-2);
-    display:flex;align-items:center;justify-content:center;font-size:18px;margin-bottom:14px;}
-  .card h3{margin:0 0 6px;font-size:18px;font-weight:600;letter-spacing:-0.01em;}
+  .grid{margin-top:54px;display:grid;grid-template-columns:repeat(3,1fr);gap:20px;}
+  @media (max-width:820px){.grid{grid-template-columns:1fr 1fr;}}
+  @media (max-width:520px){.grid{grid-template-columns:1fr;}}
+  .card{background:var(--bg);border:1px solid var(--line);border-radius:var(--radius);padding:28px;
+    transition:transform .35s cubic-bezier(.2,.7,.2,1),box-shadow .35s,border-color .35s;}
+  .card:hover{transform:translateY(-5px);box-shadow:0 22px 48px rgba(0,0,0,.10);border-color:#c7c7cc;}
+  .card .ic{width:46px;height:46px;border-radius:13px;background:var(--grad);
+    display:flex;align-items:center;justify-content:center;margin-bottom:16px;
+    box-shadow:0 8px 20px rgba(94,92,230,.28);}
+  .card .ic svg{width:23px;height:23px;}
+  .card h3{margin:0 0 7px;font-size:18px;font-weight:700;letter-spacing:-0.01em;}
   .card p{margin:0;color:var(--ink-2);font-size:14.5px;line-height:1.5;}
 
-  /* ---------- Two faces (split) ---------- */
-  .split{margin-top:52px;display:grid;grid-template-columns:1fr 1fr;gap:24px;}
-  @media (max-width:760px){ .split{grid-template-columns:1fr;} }
-  .face{border-radius:var(--radius);padding:32px;border:1px solid var(--line);background:var(--bg);}
-  .face h3{margin:0 0 4px;font-size:24px;font-weight:600;letter-spacing:-0.015em;}
-  .face .who{color:var(--blue-ink);font-weight:600;font-size:14px;margin:0 0 14px;}
-  .face ul{margin:0;padding-left:18px;color:var(--ink-2);font-size:15px;line-height:1.65;}
+  /* ---------- Two faces ---------- */
+  .split{margin-top:54px;display:grid;grid-template-columns:1fr 1fr;gap:22px;}
+  @media (max-width:760px){.split{grid-template-columns:1fr;}}
+  .face{border-radius:var(--radius);padding:34px;border:1px solid var(--line);background:var(--bg);
+    transition:transform .35s cubic-bezier(.2,.7,.2,1),box-shadow .35s;}
+  .face:hover{transform:translateY(-4px);box-shadow:0 22px 50px rgba(0,0,0,.10);}
+  .face h3{margin:0 0 4px;font-size:25px;font-weight:700;letter-spacing:-0.02em;}
+  .face .who{font-weight:700;font-size:14px;margin:0 0 16px;}
+  .face ul{margin:0;padding-left:18px;color:var(--ink-2);font-size:15px;line-height:1.7;}
 
-  /* ---------- Code showcase ---------- */
-  .code{margin:48px auto 0;max-width:760px;border-radius:var(--radius);overflow:hidden;
-    border:1px solid #2a2a2c;background:#1d1d1f;box-shadow:0 30px 60px rgba(0,0,0,.18);}
-  .code .bar{display:flex;gap:7px;padding:13px 16px;background:#161617;border-bottom:1px solid #2a2a2c;}
-  .code .bar i{width:11px;height:11px;border-radius:50%;display:inline-block;}
-  .code pre{margin:0;padding:22px 24px;overflow:auto;}
+  /* ---------- Code ---------- */
+  .code{margin:50px auto 0;max-width:760px;border-radius:var(--radius);overflow:hidden;
+    border:1px solid #2a2a2c;background:#1d1d1f;box-shadow:0 40px 80px rgba(0,0,0,.22);}
+  .code .bar{display:flex;gap:8px;padding:14px 16px;background:#161617;border-bottom:1px solid #2a2a2c;}
+  .code .bar i{width:12px;height:12px;border-radius:50%;display:inline-block;}
+  .code pre{margin:0;padding:24px;overflow:auto;}
   .code code{font-family:"SF Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
     font-size:13.5px;line-height:1.65;color:#e6e6e6;white-space:pre;}
-  .code .c{color:#7d8590;} .code .k{color:#ff7ab2;} .code .s{color:#a5d6ff;} .code .n{color:#f0883e;}
-  .cap{text-align:center;color:var(--ink-3);font-size:13.5px;margin-top:14px;}
+  .code .c{color:#7d8590;}.code .k{color:#ff7ab2;}.code .s{color:#a5d6ff;}.code .n{color:#f0883e;}
+  .cap{text-align:center;color:var(--ink-3);font-size:13.5px;margin-top:16px;}
+  section.dark .cap{color:#86868b;}
 
-  /* ---------- Comparison table ---------- */
-  .cmp{margin-top:48px;border-radius:var(--radius);overflow:hidden;border:1px solid var(--line);
-    background:var(--bg);}
+  /* ---------- Comparison ---------- */
+  .cmp{margin-top:50px;border-radius:var(--radius);overflow:hidden;border:1px solid var(--line);background:var(--bg);
+    box-shadow:0 18px 44px rgba(0,0,0,.06);}
   table{width:100%;border-collapse:collapse;}
-  th,td{padding:15px 16px;text-align:left;font-size:14.5px;border-bottom:1px solid var(--line);
-    vertical-align:top;}
-  thead th{background:var(--bg-2);font-weight:600;font-size:13px;color:var(--ink-2);}
+  th,td{padding:15px 16px;text-align:left;font-size:14.5px;border-bottom:1px solid var(--line);vertical-align:top;}
+  thead th{background:var(--bg-2);font-weight:700;font-size:13px;color:var(--ink-2);}
   th.feat{width:30%;}
-  td .y{color:#1a7f37;font-weight:600;} td .n{color:var(--ink-3);}
+  td .y{font-weight:800;background:var(--grad-soft);-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;}
+  td .n{color:var(--ink-3);}
+  tbody tr{transition:background .2s;}
+  tbody tr:hover{background:#fafafc;}
   tbody tr:last-child td{border-bottom:none;}
-  .cmp-col-etlx{background:rgba(0,113,227,.05);}
+  .cmp-col-etlx{background:rgba(94,92,230,.06);}
   caption{caption-side:bottom;color:var(--ink-3);font-size:12.5px;padding:14px 16px;text-align:left;}
+  .cmp-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+  @media (max-width:620px){ table{min-width:560px;} }
 
-  /* ---------- Connectors marquee ---------- */
-  .conns{margin-top:40px;display:flex;flex-wrap:wrap;gap:10px;justify-content:center;}
+  /* ---------- Connectors ---------- */
+  .conns{margin-top:42px;display:flex;flex-wrap:wrap;gap:10px;justify-content:center;}
   .pill{border:1px solid var(--line);border-radius:980px;padding:8px 16px;font-size:14px;
-    color:var(--ink-2);background:var(--bg);}
-  section.dark .pill{border-color:#333;background:#1d1d1f;color:#a1a1a6;}
+    color:var(--ink-2);background:var(--bg);transition:transform .25s,border-color .25s,color .25s;}
+  .pill:hover{transform:translateY(-2px) scale(1.04);border-color:#bf5af2;color:var(--ink);}
 
   /* ---------- Final CTA ---------- */
-  .cta-final{text-align:center;}
-  .cta-final h2{font-size:clamp(30px,4.6vw,48px);font-weight:600;letter-spacing:-0.02em;margin:0 0 14px;}
-  .cta-final .actions{margin-top:28px;display:flex;gap:18px;justify-content:center;flex-wrap:wrap;}
+  .dark .blob{opacity:.4;}
+  .cta-final{text-align:center;position:relative;z-index:1;}
+  .cta-final .actions{margin-top:30px;display:flex;gap:18px;justify-content:center;flex-wrap:wrap;align-items:center;}
 
   /* ---------- Footer ---------- */
-  footer{background:var(--bg-2);color:var(--ink-3);font-size:12.5px;padding:34px 0;}
+  footer{background:var(--bg-2);color:var(--ink-3);font-size:12.5px;padding:36px 0;}
   footer .wrap{display:flex;flex-wrap:wrap;gap:16px;align-items:center;justify-content:space-between;}
   footer a{color:var(--ink-2);}
 
-  @media (prefers-reduced-motion:reduce){ html{scroll-behavior:auto;} *{transition:none!important;} }
+  /* ---------- Mobile polish ---------- */
+  @media (max-width:520px){
+    section{padding:68px 0;}
+    .hero{padding:80px 0 56px;}
+    .diff{padding:24px;gap:16px;}
+    .diff .num{font-size:24px;}
+    .card,.face{padding:24px;}
+    .code pre{padding:18px;}
+    .code code{font-size:12px;}
+  }
+
+  /* ---------- Reduced motion ---------- */
+  @media (prefers-reduced-motion:reduce){
+    html{scroll-behavior:auto;}
+    *,*::before,*::after{animation:none!important;transition:none!important;}
+    [data-reveal]{opacity:1!important;transform:none!important;}
+    .grad,td .y{-webkit-text-fill-color:initial;color:#5e5ce6;background:none;}
+  }
 </style>
 </head>
 <body>
 
-<header class="nav">
+<header class="nav" id="nav">
   <div class="wrap">
     <span class="brand">etlx</span>
     <nav aria-label="주요">
@@ -182,12 +230,13 @@
 <main>
   <!-- HERO -->
   <section class="hero" aria-labelledby="h1">
+    <span class="blob b1"></span><span class="blob b2"></span><span class="blob b3"></span>
     <div class="wrap">
-      <p class="eyebrow">오픈소스 데이터 파이프라인 플랫폼</p>
-      <h1 class="title" id="h1">어떤 데이터든.<br/>당신의 방식대로.</h1>
-      <p class="sub">20여 종의 데이터베이스·웨어하우스·스트림을 하나의 인터페이스로.
+      <p class="eyebrow grad" data-reveal>오픈소스 데이터 파이프라인 플랫폼</p>
+      <h1 class="title" id="h1" data-reveal>어떤 데이터든.<br/><span class="grad">당신의 방식대로.</span></h1>
+      <p class="sub" data-reveal>20여 종의 데이터베이스·웨어하우스·스트림을 하나의 인터페이스로.
         코드로든 노코드로든, 당신의 인프라 안에서.</p>
-      <div class="actions">
+      <div class="actions" data-reveal>
         <a class="btn btn-primary btn-lg" href="#start">시작하기</a>
         <a class="btn-ghost btn-lg" href="#different">무엇이 다른가요 ›</a>
       </div>
@@ -197,14 +246,13 @@
   <!-- DIFFERENTIATORS -->
   <section id="different" class="alt" aria-labelledby="diff-h">
     <div class="wrap">
-      <p class="kicker">왜 etlx인가</p>
-      <h2 class="head" id="diff-h">다른 ETL과 무엇이 다른가</h2>
-      <p class="lead">Fivetran 같은 SaaS, dbt 같은 변환 전용 도구, Airflow 같은 오케스트레이터 —
+      <p class="kicker grad" data-reveal>왜 etlx인가</p>
+      <h2 class="head" data-reveal id="diff-h">다른 ETL과 무엇이 다른가</h2>
+      <p class="lead" data-reveal>Fivetran 같은 SaaS, dbt 같은 변환 전용 도구, Airflow 같은 오케스트레이터 —
         각자 한 조각을 잘합니다. etlx는 그 경계를 없앱니다.</p>
-
       <div class="diffs">
-        <div class="diff">
-          <div class="num">01</div>
+        <div class="diff" data-reveal>
+          <div class="num grad">01</div>
           <div>
             <h3>종속이 없습니다 (Agnostic)</h3>
             <p>특정 DB에도, 특정 오케스트레이터에도 묶이지 않는 순수 Python 코어.
@@ -212,9 +260,8 @@
             <span class="vs">대비 — 대부분의 SaaS ETL은 자사 플랫폼에, dbt는 SQL 변환에 묶입니다.</span>
           </div>
         </div>
-
-        <div class="diff">
-          <div class="num">02</div>
+        <div class="diff" data-reveal>
+          <div class="num grad">02</div>
           <div>
             <h3>서비스는 선택입니다 (Service-optional)</h3>
             <p>코어 라이브러리는 웹 서비스를 전혀 모릅니다 — 단방향 의존.
@@ -222,9 +269,8 @@
             <span class="vs">대비 — 웹 콘솔과 엔진이 한 덩어리라, 콘솔 없이는 못 쓰는 도구가 많습니다.</span>
           </div>
         </div>
-
-        <div class="diff">
-          <div class="num">03</div>
+        <div class="diff" data-reveal>
+          <div class="num grad">03</div>
           <div>
             <h3>가장 싼 길을 알아서 고릅니다 (무이동 ELT)</h3>
             <p>소스와 싱크가 같은 DB면 <b>데이터를 옮기지 않고</b> DB 안에서 한 문장으로 처리(푸시다운).
@@ -233,9 +279,8 @@
             <span class="vs">대비 — 늘 행 단위로 옮기거나, 항상 한 가지 방식만 강제하는 엔진과 다릅니다.</span>
           </div>
         </div>
-
-        <div class="diff">
-          <div class="num">04</div>
+        <div class="diff" data-reveal>
+          <div class="num grad">04</div>
           <div>
             <h3>리니지가 공짜입니다 (Zero-config)</h3>
             <p>실행만 하면 테이블·컬럼 단위 데이터 계보가 자동으로 그려집니다.
@@ -244,9 +289,8 @@
             <span class="vs">대비 — 별도 카탈로그 도구를 붙이거나 수동으로 매핑해야 하는 경우가 흔합니다.</span>
           </div>
         </div>
-
-        <div class="diff">
-          <div class="num">05</div>
+        <div class="diff" data-reveal>
+          <div class="num grad">05</div>
           <div>
             <h3>당신의 데이터는 당신의 인프라에 (오픈소스·셀프호스팅)</h3>
             <p>Apache 2.0 오픈소스. Docker Compose 한 줄 또는 Helm으로 당신의 서버·클러스터에 올립니다.
@@ -261,30 +305,30 @@
   <!-- FEATURES -->
   <section id="features" aria-labelledby="feat-h">
     <div class="wrap">
-      <p class="kicker">한눈에</p>
-      <h2 class="head" id="feat-h">필요한 건 다 들어 있습니다</h2>
-      <p class="lead">수집부터 변환, 적재, 자동화, 모니터링, 계보까지 — 하나의 플랫폼에서.</p>
+      <p class="kicker grad" data-reveal>한눈에</p>
+      <h2 class="head" data-reveal id="feat-h">필요한 건 다 들어 있습니다</h2>
+      <p class="lead" data-reveal>수집부터 변환, 적재, 자동화, 모니터링, 계보까지 — 하나의 플랫폼에서.</p>
       <div class="grid">
-        <div class="card"><div class="ic">🔌</div><h3>커넥터 20여 종</h3>
+        <div class="card" data-reveal><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="24" height="24" aria-hidden="true"><path d="M12 22v-5"/><path d="M9 8V2"/><path d="M15 8V2"/><path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z"/></svg></div><h3>커넥터 20여 종</h3>
           <p>RDBMS·DW·NoSQL·스트리밍·오브젝트 스토리지를 동일한 컨트랙트로. 새 커넥터도 쉽게 확장.</p></div>
-        <div class="card"><div class="ic">⚡</div><h3>자동 데이터 경로</h3>
+        <div class="card" data-reveal><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="24" height="24" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></div><h3>자동 데이터 경로</h3>
           <p>푸시다운(무이동) · Arrow 벌크 · 행 단위를 작업마다 자동 선택. PG→PG 실측 약 3.4배.</p></div>
-        <div class="card"><div class="ic">🧬</div><h3>컬럼 리니지</h3>
+        <div class="card" data-reveal><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="24" height="24" aria-hidden="true"><line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg></div><h3>컬럼 리니지</h3>
           <p>설정 없이 테이블·컬럼 계보 자동 생성. OpenLineage 내보내기로 표준 카탈로그 연동.</p></div>
-        <div class="card"><div class="ic">🧩</div><h3>코드 & 노코드</h3>
+        <div class="card" data-reveal><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="24" height="24" aria-hidden="true"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg></div><h3>코드 & 노코드</h3>
           <p>YAML·Python으로, 또는 브라우저 비주얼 빌더로. 같은 엔진, 같은 결과.</p></div>
-        <div class="card"><div class="ic">🛡️</div><h3>멱등성 & DLQ</h3>
+        <div class="card" data-reveal><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="24" height="24" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"/></svg></div><h3>멱등성 & DLQ</h3>
           <p>두 번 돌려도 안전한 적재(덮어쓰기·병합). 실패한 행만 격리하고 전체는 살립니다.</p></div>
-        <div class="card"><div class="ic">⏱️</div><h3>스케줄 · 센서</h3>
+        <div class="card" data-reveal><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="24" height="24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div><h3>스케줄 · 센서</h3>
           <p>cron 정시 실행, 상류 도착·신선도 기반 자동 트리거. 자산 기반 오케스트레이션.</p></div>
-        <div class="card"><div class="ic">📈</div><h3>수평 확장</h3>
+        <div class="card" data-reveal><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="24" height="24" aria-hidden="true"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg></div><h3>수평 확장</h3>
           <p>PostgreSQL 큐(SKIP LOCKED) 멀티-워커. 대용량은 범위 분할로 병렬 백필.</p></div>
-        <div class="card"><div class="ic">🔭</div><h3>모니터링</h3>
+        <div class="card" data-reveal><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="24" height="24" aria-hidden="true"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></div><h3>모니터링</h3>
           <p>실행·로그·실패 분류·데이터 경로 가시화 + Grafana 대시보드 템플릿.</p></div>
-        <div class="card"><div class="ic">🚀</div><h3>어디에나 배포</h3>
+        <div class="card" data-reveal><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="24" height="24" aria-hidden="true"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg></div><h3>어디에나 배포</h3>
           <p>Docker Compose · Helm(쿠버네티스). 워커·스케줄러·센서 모두 멀티-replica 안전.</p></div>
       </div>
-      <div class="conns" aria-label="지원 커넥터">
+      <div class="conns" aria-label="지원 커넥터" data-reveal>
         <span class="pill">PostgreSQL</span><span class="pill">MySQL</span><span class="pill">SQLite</span>
         <span class="pill">Snowflake</span><span class="pill">BigQuery</span><span class="pill">Redshift</span>
         <span class="pill">ClickHouse</span><span class="pill">Vertica</span><span class="pill">SQL Server</span>
@@ -299,13 +343,13 @@
   <!-- TWO FACES -->
   <section id="faces" class="alt" aria-labelledby="faces-h">
     <div class="wrap">
-      <p class="kicker">두 가지 모습</p>
-      <h2 class="head" id="faces-h">팀의 모두를 위해</h2>
-      <p class="lead">한 엔진, 두 가지 사용법. 비개발자도 개발자도 같은 파이프라인을 다룹니다.</p>
+      <p class="kicker grad" data-reveal>두 가지 모습</p>
+      <h2 class="head" data-reveal id="faces-h">팀의 모두를 위해</h2>
+      <p class="lead" data-reveal>한 엔진, 두 가지 사용법. 비개발자도 개발자도 같은 파이프라인을 다룹니다.</p>
       <div class="split">
-        <div class="face">
+        <div class="face" data-reveal>
           <h3>웹 UI</h3>
-          <p class="who">운영자 · 분석가</p>
+          <p class="who grad">운영자 · 분석가</p>
           <ul>
             <li>브라우저에서 연결 등록 + 즉시 연결 테스트</li>
             <li>드래그 앤 드롭 비주얼 파이프라인 빌더</li>
@@ -313,9 +357,9 @@
             <li>데이터 계보 카탈로그 · ERD 디자이너</li>
           </ul>
         </div>
-        <div class="face">
+        <div class="face" data-reveal>
           <h3>라이브러리 · CLI</h3>
-          <p class="who">데이터 엔지니어</p>
+          <p class="who grad">데이터 엔지니어</p>
           <ul>
             <li>YAML 또는 Python으로 파이프라인 정의</li>
             <li>etlx CLI · Airflow / Dagster / Prefect 어댑터</li>
@@ -324,29 +368,29 @@
           </ul>
         </div>
       </div>
-
-      <div class="code" role="img" aria-label="YAML 파이프라인 예시">
+      <div class="code" role="img" aria-label="YAML 파이프라인 예시" data-reveal>
         <div class="bar"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div>
-        <pre><code><span class="c"># orders_to_dw.yaml — 소스 → 변환 → 싱크</span>
+        <pre><code><span class="c"># orders_to_dw.yaml — source to transform to sink</span>
 <span class="k">name:</span> orders_to_dw
 <span class="k">source:</span> { connection: pg_prod, query: <span class="s">"SELECT * FROM orders"</span> }
 <span class="k">transforms:</span>
   - { type: rename, mapping: { user_id: customer_id } }
   - { type: <span class="n">sql</span>, query: <span class="s">"SELECT * FROM input WHERE total > 0"</span>, pushdown: <span class="n">true</span> }
 <span class="k">sink:</span> { connection: warehouse, table: analytics.orders,
-        mode: <span class="n">upsert</span>, key_columns: [order_id] }   <span class="c"># 멱등</span></code></pre>
+        mode: <span class="n">upsert</span>, key_columns: [order_id] }   <span class="c"># idempotent</span></code></pre>
       </div>
-      <p class="cap">같은 정의를 CLI로 실행하거나, 웹 빌더로 그리거나 — 결과는 동일합니다.</p>
+      <p class="cap" data-reveal>같은 정의를 CLI로 실행하거나, 웹 빌더로 그리거나 — 결과는 동일합니다.</p>
     </div>
   </section>
 
   <!-- COMPARISON -->
   <section aria-labelledby="cmp-h">
     <div class="wrap">
-      <p class="kicker">정직한 비교</p>
-      <h2 class="head" id="cmp-h">어디에 서 있나</h2>
-      <p class="lead">한 범주의 도구가 아니라, 여러 범주의 장점을 하나로 모읍니다.</p>
-      <div class="cmp">
+      <p class="kicker grad" data-reveal>정직한 비교</p>
+      <h2 class="head" data-reveal id="cmp-h">어디에 서 있나</h2>
+      <p class="lead" data-reveal>한 범주의 도구가 아니라, 여러 범주의 장점을 하나로 모읍니다.</p>
+      <div class="cmp" data-reveal>
+        <div class="cmp-scroll">
         <table>
           <caption>일반화된 비교입니다. 각 제품은 버전·플랜에 따라 다를 수 있습니다.</caption>
           <thead>
@@ -368,30 +412,32 @@
             <tr><td>스트리밍 + 배치 통합</td><td class="cmp-col-etlx"><span class="y">●</span> 예</td><td><span class="n">부분</span></td><td><span class="n">배치</span></td><td><span class="n">배치 중심</span></td></tr>
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   </section>
 
   <!-- GET STARTED -->
   <section id="start" class="dark" aria-labelledby="start-h">
+    <span class="blob b2" style="top:-200px;right:-180px;"></span>
     <div class="wrap">
-      <p class="kicker">시작하기</p>
-      <h2 class="head" id="start-h">몇 분이면 충분합니다</h2>
-      <p class="lead">저장소를 받고 동기화하면 끝. 필요한 커넥터만 골라 설치하세요.</p>
-      <div class="code" style="box-shadow:0 30px 60px rgba(0,0,0,.5)">
+      <p class="kicker grad" data-reveal>시작하기</p>
+      <h2 class="head" data-reveal id="start-h">몇 분이면 충분합니다</h2>
+      <p class="lead" data-reveal>저장소를 받고 동기화하면 끝. 필요한 커넥터만 골라 설치하세요.</p>
+      <div class="code" data-reveal style="box-shadow:0 40px 80px rgba(0,0,0,.5)">
         <div class="bar"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div>
-        <pre><code><span class="c"># 1) 받기</span>
+        <pre><code><span class="c"># 1) clone</span>
 git clone https://github.com/genebir/ETL && cd ETL
 uv sync
 
-<span class="c"># 2) 필요한 커넥터만</span>
+<span class="c"># 2) only the connectors you need</span>
 pip install <span class="s">'etl-plugins[postgres]'</span>
-pip install <span class="s">'etl-plugins[duckdb]'</span>   <span class="c"># SQL 변환 + Arrow</span>
+pip install <span class="s">'etl-plugins[duckdb]'</span>   <span class="c"># SQL transform + Arrow</span>
 
-<span class="c"># 3) 실행</span>
+<span class="c"># 3) run</span>
 uv run etlx run configs/pipelines/my.yaml --connections configs/connections.yaml</code></pre>
       </div>
-      <div class="cta-final" style="margin-top:40px">
+      <div class="cta-final" data-reveal style="margin-top:42px">
         <div class="actions">
           <a class="btn btn-primary btn-lg" href="https://github.com/genebir/ETL" rel="noopener">GitHub에서 보기 ↗</a>
           <a class="btn-ghost btn-lg" href="https://github.com/genebir/ETL#readme" style="color:var(--blue-dark)" rel="noopener">문서 읽기 ›</a>
@@ -411,6 +457,38 @@ uv run etlx run configs/pipelines/my.yaml --connections configs/connections.yaml
     </span>
   </div>
 </footer>
+
+<script>
+  // 스크롤 진입 시 부드러운 등장(스태거). reduced-motion이면 즉시 표시.
+  (function () {
+    var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var items = document.querySelectorAll('[data-reveal]');
+    if (reduce || !('IntersectionObserver' in window)) {
+      items.forEach(function (el) { el.classList.add('in'); });
+      return;
+    }
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (e.isIntersecting) {
+          var sibs = Array.prototype.slice.call(e.target.parentElement.children).filter(function (c) {
+            return c.hasAttribute('data-reveal');
+          });
+          var idx = Math.max(0, sibs.indexOf(e.target));
+          e.target.style.transitionDelay = Math.min(idx * 70, 350) + 'ms';
+          e.target.classList.add('in');
+          io.unobserve(e.target);
+        }
+      });
+    }, { threshold: 0.12, rootMargin: '0px 0px -8% 0px' });
+    items.forEach(function (el) { io.observe(el); });
+
+    // 내비 스크롤 시 헤어라인
+    var nav = document.getElementById('nav');
+    var onScroll = function () { nav.classList.toggle('scrolled', window.scrollY > 8); };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+  })();
+</script>
 
 </body>
 </html>

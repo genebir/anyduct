@@ -1002,6 +1002,17 @@ function Summary({
         )
       : [];
   const uniquePaths = [...new Set(dataPaths.map(([, p]) => p))];
+  // Per-path task list — a multi-task run (task DAG) can mix paths
+  // (e.g. copy tasks on Arrow, an append log task pushed down). The
+  // summary chips collapse to distinct path TYPES; this maps each type
+  // back to the tasks that took it so the chip tooltip can answer "which
+  // task?" without expanding the whole DAG (2026-06-15).
+  const tasksByPath = new Map<string, string[]>();
+  for (const [task, p] of dataPaths) {
+    const bucket = tasksByPath.get(p);
+    if (bucket) bucket.push(task);
+    else tasksByPath.set(p, [task]);
+  }
   const pathLabel = (p: string) =>
     p === "pushdown"
       ? t("runDetail.pathPushdown")
@@ -1155,18 +1166,32 @@ function Summary({
           label={t("runDetail.dataPath")}
           value={
             <span className="inline-flex flex-wrap items-center gap-1.5" title={t("runDetail.dataPathHint")}>
-              {uniquePaths.map((p) => (
-                <span
-                  key={p}
-                  className={`rounded px-1.5 py-0.5 text-xs ${
-                    p === "pushdown" || p === "arrow"
-                      ? "bg-accent/10 text-accent"
-                      : "bg-overlay text-text-secondary"
-                  }`}
-                >
-                  {pathLabel(p)}
-                </span>
-              ))}
+              {uniquePaths.map((p) => {
+                const tasks = tasksByPath.get(p) ?? [];
+                // Tooltip lists the tasks that took this path — for a
+                // single-task run it's just the one task; for a DAG it
+                // answers "which task is on Arrow vs records?".
+                const chipTitle =
+                  tasks.length > 1
+                    ? t("runDetail.dataPathTasks", { tasks: tasks.join(", ") })
+                    : tasks[0];
+                return (
+                  <span
+                    key={p}
+                    title={chipTitle}
+                    className={`rounded px-1.5 py-0.5 text-xs ${
+                      p === "pushdown" || p === "arrow"
+                        ? "bg-accent/10 text-accent"
+                        : "bg-overlay text-text-secondary"
+                    }`}
+                  >
+                    {pathLabel(p)}
+                    {tasks.length > 1 ? (
+                      <span className="ml-1 opacity-70">×{tasks.length}</span>
+                    ) : null}
+                  </span>
+                );
+              })}
             </span>
           }
         />

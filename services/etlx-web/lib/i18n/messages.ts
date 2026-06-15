@@ -1244,6 +1244,7 @@ export const en = {
   "runDetail.dataPath": "Data path",
   "runDetail.dataPathHint":
     "How the rows moved. In-database pushdown never moves them; Arrow bulk skips the row-by-row plane entirely.",
+  "runDetail.dataPathTasks": "Tasks: {tasks}",
   "runDetail.pathPushdown": "In-database (pushdown)",
   "runDetail.pathArrow": "Arrow bulk",
   "runDetail.pathRecords": "Row-by-row",
@@ -2746,6 +2747,7 @@ export const ko: Messages = {
   "runDetail.dataPath": "데이터 경로",
   "runDetail.dataPathHint":
     "행이 이동한 방식. DB 내부 푸시다운은 아예 이동이 없고, Arrow 벌크는 행 단위 처리를 통째로 건너뜁니다.",
+  "runDetail.dataPathTasks": "태스크: {tasks}",
   "runDetail.pathPushdown": "DB 내부 (푸시다운)",
   "runDetail.pathArrow": "Arrow 벌크",
   "runDetail.pathRecords": "행 단위",

@@ -3,8 +3,19 @@ extends: default
 
 # Helm templates are Go templates, not plain YAML — yamllint can't parse
 # {{ ... }} actions. values.yaml / Chart.yaml are still linted.
+#
+# Build / dependency dirs are excluded too: CI runs ``yamllint .`` over the
+# whole tree, which (after ``uv sync`` / ``pnpm install``) includes
+# third-party YAML in .venv and node_modules — e.g. mkdocs-material's
+# social-card templates trip the braces rule. pre-commit never saw these
+# (it only passes git-tracked files), which is why they only surfaced in CI.
 ignore: |
   services/charts/*/templates/
+  .venv/
+  node_modules/
+  site/
+  storybook-static/
+  .next/
 
 rules:
   line-length:

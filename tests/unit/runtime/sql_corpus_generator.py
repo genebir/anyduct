@@ -250,7 +250,7 @@ def gen_inner_join(rng: Random) -> GeneratedQuery:
         out = f"r_{c}"
         projections.append(f"b.{c} AS {out}")
         expected[out] = {(t2, c)}
-    sql = f"SELECT {', '.join(projections)} FROM {t1} a " f"JOIN {t2} b ON a.id = b.id"
+    sql = f"SELECT {', '.join(projections)} FROM {t1} a JOIN {t2} b ON a.id = b.id"
     return GeneratedQuery(sql, expected, "inner_join")
 
 
@@ -262,9 +262,7 @@ def gen_left_join_coalesce(rng: Random) -> GeneratedQuery:
         t2 = _tbl(rng)
     c1, c2 = _unique_cols(rng, 2)
     out = "merged"
-    sql = (
-        f"SELECT COALESCE(a.{c1}, b.{c2}) AS {out} " f"FROM {t1} a LEFT JOIN {t2} b ON a.id = b.id"
-    )
+    sql = f"SELECT COALESCE(a.{c1}, b.{c2}) AS {out} FROM {t1} a LEFT JOIN {t2} b ON a.id = b.id"
     expected: dict[str, set[tuple[str, str]]] = {
         out: {(t1, c1), (t2, c2)},
     }

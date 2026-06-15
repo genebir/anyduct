@@ -45,7 +45,7 @@ def _matches(
     actual_sets = {k: set(v) for k, v in actual.items()}
     if set(actual_sets.keys()) != set(expected.keys()):
         return False, (
-            f"output columns differ: expected={sorted(expected)} " f"actual={sorted(actual_sets)}"
+            f"output columns differ: expected={sorted(expected)} actual={sorted(actual_sets)}"
         )
     for col, want in expected.items():
         got = actual_sets[col]

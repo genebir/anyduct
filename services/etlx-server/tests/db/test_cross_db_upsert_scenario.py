@@ -105,9 +105,9 @@ async def test_aac1_upsert_with_auto_create_merges_across_runs(
         session, workspace_id=ws.id, pipeline_id=p.id, pipeline_version_id=pv.id
     )
     day1 = await _drain_one(session, "aac1-day1")
-    assert (
-        day1.status == RunStatus.SUCCEEDED
-    ), f"day-1 failed: {day1.error_class}: {day1.error_message}"
+    assert day1.status == RunStatus.SUCCEEDED, (
+        f"day-1 failed: {day1.error_class}: {day1.error_message}"
+    )
 
     out1 = sqlite3.connect(str(dst_path))
     try:
@@ -125,9 +125,9 @@ async def test_aac1_upsert_with_auto_create_merges_across_runs(
         session, workspace_id=ws.id, pipeline_id=p.id, pipeline_version_id=pv.id
     )
     day2 = await _drain_one(session, "aac1-day2")
-    assert (
-        day2.status == RunStatus.SUCCEEDED
-    ), f"day-2 failed: {day2.error_class}: {day2.error_message}"
+    assert day2.status == RunStatus.SUCCEEDED, (
+        f"day-2 failed: {day2.error_class}: {day2.error_message}"
+    )
 
     out2 = sqlite3.connect(str(dst_path))
     try:

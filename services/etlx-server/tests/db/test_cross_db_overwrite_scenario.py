@@ -109,9 +109,9 @@ async def test_aad1_overwrite_with_auto_create_is_idempotent(
         session, workspace_id=ws.id, pipeline_id=p.id, pipeline_version_id=pv.id
     )
     pass1 = await _drain_one(session, "aad1-p1")
-    assert (
-        pass1.status == RunStatus.SUCCEEDED
-    ), f"pass-1 failed: {pass1.error_class}: {pass1.error_message}"
+    assert pass1.status == RunStatus.SUCCEEDED, (
+        f"pass-1 failed: {pass1.error_class}: {pass1.error_message}"
+    )
 
     out1 = sqlite3.connect(str(dst_path))
     try:
@@ -127,9 +127,9 @@ async def test_aad1_overwrite_with_auto_create_is_idempotent(
         session, workspace_id=ws.id, pipeline_id=p.id, pipeline_version_id=pv.id
     )
     pass2 = await _drain_one(session, "aad1-p2")
-    assert (
-        pass2.status == RunStatus.SUCCEEDED
-    ), f"pass-2 failed: {pass2.error_class}: {pass2.error_message}"
+    assert pass2.status == RunStatus.SUCCEEDED, (
+        f"pass-2 failed: {pass2.error_class}: {pass2.error_message}"
+    )
 
     out2 = sqlite3.connect(str(dst_path))
     try:

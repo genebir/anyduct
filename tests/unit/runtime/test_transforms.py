@@ -305,7 +305,7 @@ def test_custom_python_applies_inline_transform() -> None:
 
 
 def test_custom_python_returning_none_filters_record() -> None:
-    code = "def transform(record):\n" "    return None if record.data.get('drop') else record\n"
+    code = "def transform(record):\n    return None if record.data.get('drop') else record\n"
     fn = build_transform(TransformConfig.model_validate({"type": "custom_python", "code": code}))
     assert fn(Record(data={"drop": True})) is None
     assert fn(Record(data={"keep": 1})) is not None

@@ -80,7 +80,7 @@ async def test_sql_transform_column_lineage_inferred_over_rest(
                         {
                             "type": "sql",
                             "query": (
-                                "SELECT region, SUM(amount) AS total " "FROM input GROUP BY region"
+                                "SELECT region, SUM(amount) AS total FROM input GROUP BY region"
                             ),
                         }
                     ],

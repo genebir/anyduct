@@ -535,9 +535,9 @@ async def test_recorder_flushes_periodically_when_interval_set(
                     .scalars()
                     .all()
                 )
-            assert any(
-                log.message == "mid-run" for log in mid_logs
-            ), "periodic drain should land logs before __aexit__"
+            assert any(log.message == "mid-run" for log in mid_logs), (
+                "periodic drain should land logs before __aexit__"
+            )
     finally:
         # Strip everything we committed so later tests in the session
         # don't see leftover state.

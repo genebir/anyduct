@@ -214,7 +214,7 @@ async def test_pp2_source_gains_join_dimension_adds_input_asset_and_edge(
         "source": {
             "connection": "src",
             "query": (
-                "SELECT r.id, r.value, c.country " "FROM raw r JOIN dim_country c ON c.id = r.id"
+                "SELECT r.id, r.value, c.country FROM raw r JOIN dim_country c ON c.id = r.id"
             ),
         },
         "sink": {"connection": "dst", "table": "joined", "mode": "append"},

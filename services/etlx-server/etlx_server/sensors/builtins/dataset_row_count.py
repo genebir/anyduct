@@ -137,7 +137,7 @@ class DatasetRowCountSensor(SensorBase):
             return SensorResult(
                 triggered=False,
                 message=(
-                    f"dataset_row_count: connection {self._connection_id} " "not found in workspace"
+                    f"dataset_row_count: connection {self._connection_id} not found in workspace"
                 ),
                 metadata={
                     "connection_id": str(self._connection_id),
@@ -174,7 +174,7 @@ class DatasetRowCountSensor(SensorBase):
             return SensorResult(
                 triggered=False,
                 message=(
-                    f"dataset_row_count: failed to build connector for " f"{connection.name!r}: {e}"
+                    f"dataset_row_count: failed to build connector for {connection.name!r}: {e}"
                 ),
                 metadata={
                     "connection_id": str(self._connection_id),

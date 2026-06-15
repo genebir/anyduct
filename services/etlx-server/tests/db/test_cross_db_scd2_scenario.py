@@ -71,9 +71,7 @@ async def test_xx1_transform_chain_then_auto_create_sink_table(
     dst_path = tmp_path / "dst.db"
     raw = sqlite3.connect(str(src_path))
     try:
-        raw.execute(
-            "CREATE TABLE raw_customers (" "id INTEGER, name TEXT, country TEXT, tier TEXT)"
-        )
+        raw.execute("CREATE TABLE raw_customers (id INTEGER, name TEXT, country TEXT, tier TEXT)")
         raw.executemany(
             "INSERT INTO raw_customers VALUES (?, ?, ?, ?)",
             [(1, "alice", "KR", "gold"), (2, "bob", "US", "silver")],

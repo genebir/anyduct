@@ -217,9 +217,7 @@ def test_derive_lineage_cte_registers_only_base_tables() -> None:
             "name": "p",
             "source": {
                 "connection": "wh",
-                "query": (
-                    "WITH a AS (SELECT * FROM raw), " "b AS (SELECT * FROM a) " "SELECT * FROM b"
-                ),
+                "query": ("WITH a AS (SELECT * FROM raw), b AS (SELECT * FROM a) SELECT * FROM b"),
             },
             "sink": {"connection": "wh", "table": "out", "mode": "append"},
         }

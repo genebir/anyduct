@@ -331,7 +331,7 @@ async def test_scenario_c_aggregation_chain_raw_daily_monthly(
         "source": {
             "connection": "src",
             "query": (
-                "SELECT day, region, SUM(amount) AS total " "FROM raw_sales GROUP BY day, region"
+                "SELECT day, region, SUM(amount) AS total FROM raw_sales GROUP BY day, region"
             ),
         },
         "sink": {"connection": "dst", "table": "daily_sales", "mode": "append"},
@@ -623,7 +623,7 @@ async def test_scenario_f_failed_transform_does_not_pollute_catalog(
                 "type": "custom_python",
                 # Deliberate raise — exercise the worker's failure path.
                 "code": (
-                    "def transform(record):\n" "    raise ValueError('intentional test failure')\n"
+                    "def transform(record):\n    raise ValueError('intentional test failure')\n"
                 ),
             }
         ],

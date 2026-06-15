@@ -250,9 +250,9 @@ async def test_hh2_catalog_rows_are_workspace_scoped(session: AsyncSession, tmp_
     a_id_by_key = {a.asset_key: a.id for a in a_assets}
     b_id_by_key = {a.asset_key: a.id for a in b_assets}
     for key in ("src/raw", "dst/staging"):
-        assert (
-            a_id_by_key[key] != b_id_by_key[key]
-        ), f"asset row for {key} was shared across workspaces"
+        assert a_id_by_key[key] != b_id_by_key[key], (
+            f"asset row for {key} was shared across workspaces"
+        )
 
     # Upstream lookup respects the row identity: A's staging is upstream
     # of A's raw only, never B's.

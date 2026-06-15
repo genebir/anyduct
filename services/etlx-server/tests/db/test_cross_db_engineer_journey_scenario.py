@@ -180,9 +180,7 @@ async def test_ww1_engineer_ships_cross_db_pipeline_via_rest_with_auto_create(
                 "config": {
                     "source": {
                         "connection": "src",
-                        "query": (
-                            "SELECT id, amount, created_at, payload, customer " "FROM orders"
-                        ),
+                        "query": ("SELECT id, amount, created_at, payload, customer FROM orders"),
                     },
                     "sink": {
                         "connection": "dst",

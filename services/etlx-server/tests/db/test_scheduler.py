@@ -503,9 +503,9 @@ async def test_skip_locked_hides_schedule_from_concurrent_loader(
             # because the row is locked by A's open transaction.
             async with isolated_factory() as session_b:
                 schedules_b = await _load_due_schedules(session_b)
-                assert (
-                    schedules_b == []
-                ), f"replica B should skip the row locked by A (got {[x.id for x in schedules_b]})"
+                assert schedules_b == [], (
+                    f"replica B should skip the row locked by A (got {[x.id for x in schedules_b]})"
+                )
             # A's commit releases the lock — a *subsequent* load on a fresh
             # connection sees the row again.
             await session_a.commit()

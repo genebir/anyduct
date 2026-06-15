@@ -607,9 +607,9 @@ async def test_node_level_runs_independent_branches_in_different_threads(
     )
     # The proof: the two branches' probes ran in distinct threads (3 records
     # per probe x 2 branches -> 6 thread ids; at least 2 distinct values).
-    assert (
-        len(set(_test_thread_ids)) >= 2
-    ), f"expected ≥2 distinct thread ids, got {sorted(set(_test_thread_ids))}"
+    assert len(set(_test_thread_ids)) >= 2, (
+        f"expected ≥2 distinct thread ids, got {sorted(set(_test_thread_ids))}"
+    )
 
 
 async def test_node_level_live_updates_started_before_finished(
@@ -825,9 +825,9 @@ async def test_executor_python_rename_via_explicit_column_mapping(
     assert out_asset.column_lineage_opaque is False
     cols, upstream_map = await repo.column_lineage_for_asset(asset_id=out_asset.id)
     by_name = {c.name: c for c in cols}
-    assert {"id", "display_name"} == set(
-        by_name
-    ), "replace-mode lineage: only the columns the user declared show up"
+    assert {"id", "display_name"} == set(by_name), (
+        "replace-mode lineage: only the columns the user declared show up"
+    )
     # ``display_name`` traces to ``seed.name`` thanks to the explicit
     # mapping — schema-passthrough alone would have lost this.
     display_ups = [

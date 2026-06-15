@@ -289,9 +289,9 @@ async def test_complex_ecommerce_workflow_full_catalog(
     # Phase Z (SELECT * schema inject) + Phase AA (passthrough fallback)
     # promise that every sink we can read schemas for becomes traceable.
     for k in must_have_dst:
-        assert (
-            assets[k].column_lineage_opaque is False
-        ), f"sink {k} is still marked opaque despite Phase Z/AA"
+        assert assets[k].column_lineage_opaque is False, (
+            f"sink {k} is still marked opaque despite Phase Z/AA"
+        )
 
     # ---- (d) Column lineage rows + upstream attribution -------------
     async def _col_upstreams(asset_key: str) -> dict[str, set[tuple[str, str]]]:
@@ -327,9 +327,9 @@ async def test_complex_ecommerce_workflow_full_catalog(
     s3_cols = await _col_upstreams("dst/report_customer_tier")
     assert ("src/mart_top_orders", "customer_id") in s3_cols["customer_id"]
     assert ("src/mart_top_orders", "top_amount") in s3_cols["top_amount"]
-    assert (
-        s3_cols.get("tier") == set()
-    ), f"tier should exist with no upstream, got {s3_cols.get('tier')!r}"
+    assert s3_cols.get("tier") == set(), (
+        f"tier should exist with no upstream, got {s3_cols.get('tier')!r}"
+    )
 
     # Stage 4 — SELECT * resolved through the sqlite SchemaInspector.
     s4_cols = await _col_upstreams("dst/products_clone")

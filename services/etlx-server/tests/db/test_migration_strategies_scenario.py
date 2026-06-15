@@ -291,9 +291,9 @@ async def test_aao3_live_mirror_upserts_with_pk(session: AsyncSession, tmp_path:
         session, workspace_id=ws.id, pipeline_id=p.id, pipeline_version_id=pv.id
     )
     day1 = await _drain_one(session, "aao3-d1")
-    assert (
-        day1.status == RunStatus.SUCCEEDED
-    ), f"day-1 failed: {day1.error_class}: {day1.error_message}"
+    assert day1.status == RunStatus.SUCCEEDED, (
+        f"day-1 failed: {day1.error_class}: {day1.error_message}"
+    )
 
     # Day 2 — Alice updated, Carol joined.
     raw = sqlite3.connect(str(src_path))
@@ -310,9 +310,9 @@ async def test_aao3_live_mirror_upserts_with_pk(session: AsyncSession, tmp_path:
         session, workspace_id=ws.id, pipeline_id=p.id, pipeline_version_id=pv.id
     )
     day2 = await _drain_one(session, "aao3-d2")
-    assert (
-        day2.status == RunStatus.SUCCEEDED
-    ), f"day-2 failed: {day2.error_class}: {day2.error_message}"
+    assert day2.status == RunStatus.SUCCEEDED, (
+        f"day-2 failed: {day2.error_class}: {day2.error_message}"
+    )
 
     out = sqlite3.connect(str(dst_path))
     try:

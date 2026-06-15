@@ -484,7 +484,7 @@ def test_graph_multi_source_join_then_sql_transform() -> None:
                         "transform": {
                             "type": "sql",
                             "query": (
-                                "SELECT region, SUM(amount) AS total " "FROM input GROUP BY region"
+                                "SELECT region, SUM(amount) AS total FROM input GROUP BY region"
                             ),
                         },
                     },

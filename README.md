@@ -111,7 +111,7 @@ dlq:   { connection: dlq_sink, table: failed_orders }
 ```
 
 ```bash
-uv run etlx list-connectors                              # postgres, mysql, sqlite, s3, kafka
+uv run etlx list-connectors                              # 설치된 extra의 커넥터 목록 (20종 중)
 uv run etlx validate  configs/pipelines/orders_to_dw.yaml  --connections configs/connections.yaml
 uv run etlx test-connection --all                         --connections configs/connections.yaml
 uv run etlx run       configs/pipelines/orders_to_dw.yaml --connections configs/connections.yaml
@@ -205,23 +205,35 @@ run_etl_pipeline_flow("configs/pipelines/orders_to_dw.yaml", "configs/connection
 
 ## 아키텍처 개요
 
+상하 단방향 의존 — 위 층이 아래 층을 import할 뿐 그 반대는 금지. **서비스 층(`services/`)이 통째로 사라져도 코어 라이브러리는 그대로 동작한다.**
+
 ```
-Orchestrator Adapters  (Airflow / Dagster / Prefect / etlx CLI)   ← ✅ Steps 3.1, 4
+┌─ 서비스 패키지 (services/) ─────────────────────────────┐
+│  Web UI (Next.js)        빌더 / 카탈로그 / 모니터링 / ERD │
+│        ↑                                                  │
+│  REST API (FastAPI)      인증·RBAC·워크스페이스·감사       │
+│        ↑                                                  │
+│  Metadata + Execution    PG run-큐(SKIP LOCKED) 워커 /    │
+│                          스케줄러 / 센서 / 시크릿 백엔드   │
+└──────────────────── 서비스 / 코어 경계 (단방향) ─────────┘
         ↑
-Pipeline Runtime       (YAML builder / transforms / arun_stream /
-                        retry / DLQ / auto-metrics)               ← ✅ Step 3
+Orchestrator Adapters  (Airflow / Dagster / Prefect / etlx CLI)
         ↑
-Pipeline Core          (Pipeline / Task / Context / Hooks)        ← ✅ Step 1.4
+Pipeline Runtime       (YAML builder / transforms / 데이터플레인:
+                        DuckDB sql · Arrow · pushdown / retry / DLQ)
         ↑
-Connector Abstraction  (BatchSource/Sink, StreamSource/Sink)      ← ✅ Step 1.4
+Pipeline Core          (Pipeline / Task / Graph DAG / Context / Hooks)
         ↑
-Connectors (plugins)   (postgres, mysql, sqlite, s3, kafka, ...)  ← ✅ Steps 2 + 5.1
+Connector Abstraction  (BatchSource/Sink, StreamSource/Sink, Record)
+        ↑
+Connectors (plugins)   (postgres · mysql · vertica · snowflake · mongodb
+                        · kafka · s3 · … 20종)
         ↑
 Foundation             (Config / Secrets / Logging / Metrics
-                        / Tracing / Retry / Chunk / async_io)     ← ✅ Steps 1.5–1.7
+                        / Tracing / Retry / Chunk / async_io)
 ```
 
-상세 다이어그램은 [`SPEC.md`](./SPEC.md) §2.
+상세 다이어그램은 [`SPEC.md`](./SPEC.md) §2, 디렉토리 규약은 [`CLAUDE.md`](./CLAUDE.md) §3.
 
 ---
 

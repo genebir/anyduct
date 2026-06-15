@@ -1,8 +1,8 @@
 {
-  "uid": "etlx-pipelines",
-  "title": "etlx — pipeline operations",
+  "uid": "anyduct-pipelines",
+  "title": "anyduct — pipeline operations",
   "tags": [
-    "etlx",
+    "anyduct",
     "etl-plugins"
   ],
   "timezone": "browser",

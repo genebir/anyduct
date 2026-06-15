@@ -31,7 +31,7 @@ Failure mode: emission is **best-effort** — any HTTP error, connection
 failure, or bad endpoint is caught + logged as a structlog warning and
 swallowed. A lineage hiccup must never flip a successful run to failed,
 mirroring the posture of the existing service-side persistence
-(:class:`etlx_server.assets.repository.AssetRepository.persist_run_lineage`).
+(:class:`anyduct_server.assets.repository.AssetRepository.persist_run_lineage`).
 
 Column lineage (J1/J2/J3) ships as the standard OL ``columnLineage``
 dataset facet (ADR-0041 K5b) when the event carries it — the

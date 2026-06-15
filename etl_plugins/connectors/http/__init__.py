@@ -11,7 +11,7 @@ The connector is registered as ``http`` so configs can reference it:
       acme-api:
         type: http
         base_url: https://api.acme.example.com
-        auth_token: ${SECRET:etlx/.../auth_token}
+        auth_token: ${SECRET:anyduct/.../auth_token}
         timeout_seconds: 10.0
 """
 

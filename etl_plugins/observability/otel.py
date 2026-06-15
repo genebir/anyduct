@@ -11,7 +11,7 @@ Typical wiring at process startup::
     from etl_plugins.observability.otel import configure_otel
 
     configure_otel(
-        service_name="etlx-worker",
+        service_name="anyduct-worker",
         otlp_endpoint="http://otel-collector:4317",
     )
 

@@ -27,10 +27,10 @@
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  Web UI (services/etlx-web, Next.js)            ← Step 10│
+│  Web UI (services/anyduct-web, Next.js)            ← Step 10│
 │  파이프라인 빌더 · 스케줄 · 모니터링 · 연결 관리          │
 ├─────────────────────────────────────────────────────────┤
-│  REST API (services/etlx-server, FastAPI)       ← Step 8 │
+│  REST API (services/anyduct-server, FastAPI)       ← Step 8 │
 │  Auth / RBAC / Audit / CRUD / Test-connection           │
 ├─────────────────────────────────────────────────────────┤
 │  Metadata Store (PostgreSQL + Alembic)          ← Step 7 │
@@ -71,7 +71,7 @@
 └─────────────────────────────────────────────────────────┘
 ```
 
-상하 단방향 의존: 위 층은 아래 층을 import해도 되지만, 아래 층은 위 층을 **절대** import하지 않는다. 즉 `etl_plugins/*`는 `services/etlx-server/*`나 `services/etlx-web/*`를 모른다. 서비스 패키지가 통째로 사라져도 코어 라이브러리는 그대로 동작해야 한다.
+상하 단방향 의존: 위 층은 아래 층을 import해도 되지만, 아래 층은 위 층을 **절대** import하지 않는다. 즉 `etl_plugins/*`는 `services/anyduct-server/*`나 `services/anyduct-web/*`를 모른다. 서비스 패키지가 통째로 사라져도 코어 라이브러리는 그대로 동작해야 한다.
 
 ---
 
@@ -125,7 +125,7 @@ etl-plugins/                          # 리포 루트 (모노레포)
 ├── services/                         # ─── 서비스 패키지 (Steps 7~11, 별도 pyproject.toml)
 │   ├── anyduct-server/                  # FastAPI 백엔드
 │   │   ├── pyproject.toml            # etl-plugins(코어)에 의존, 코어는 이걸 모름
-│   │   ├── etlx_server/
+│   │   ├── anyduct_server/
 │   │   │   ├── __init__.py
 │   │   │   ├── main.py               # FastAPI app
 │   │   │   ├── api/                  # /connections, /pipelines, /runs, /schedules, /auth
@@ -161,8 +161,8 @@ etl-plugins/                          # 리포 루트 (모노레포)
 
 **중요한 의존 규칙**:
 - `etl_plugins/`는 `services/`를 `import` 금지.
-- `services/etlx-server/`는 `etl_plugins`(PyPI 패키지로)를 의존성으로 install.
-- `services/etlx-web/`는 백엔드와 HTTP로만 통신. Python 코어 직접 호출 금지.
+- `services/anyduct-server/`는 `etl_plugins`(PyPI 패키지로)를 의존성으로 install.
+- `services/anyduct-web/`는 백엔드와 HTTP로만 통신. Python 코어 직접 호출 금지.
 
 ---
 
@@ -561,10 +561,10 @@ anyduct --log-format console run ...
 
 ### 8.5 서비스 패키지 격리 원칙 (서비스화 이후)
 
-`services/etlx-server`와 `services/etlx-web`이 추가되어도 다음 원칙을 강제한다:
+`services/anyduct-server`와 `services/anyduct-web`이 추가되어도 다음 원칙을 강제한다:
 
 1. **단방향 의존**: 서비스 → 코어만 허용. 코어 → 서비스 금지. CI에서 import-graph 검사로 자동 검증.
-2. **별도 pyproject.toml**: `services/etlx-server/pyproject.toml`이 `etl-plugins`을 의존성으로 install. 모노레포지만 패키지 경계는 명확.
+2. **별도 pyproject.toml**: `services/anyduct-server/pyproject.toml`이 `etl-plugins`을 의존성으로 install. 모노레포지만 패키지 경계는 명확.
 3. **독립 실행 가능**: 서비스 없이도 `anyduct` CLI / orchestrator adapter / 라이브러리 import만으로 모든 ETL 기능 사용 가능해야 함.
 4. **CI 분리**: 코어 CI는 서비스 dep 설치 없이 통과. 서비스 CI는 별도 잡으로 분리.
 5. **버전 호환**: 서비스가 의존하는 코어 버전은 `etl-plugins>=X.Y,<X+1`로 SemVer 명시. 코어 breaking change는 major 버전 bump.
@@ -678,7 +678,7 @@ anyduct version
 
 ### Step 7 — Service Foundation (Metadata + Secret + YAML 양방향)
 - 7.0 기술 스택 결정 ADR (FastAPI / Postgres / Alembic / Dagster vs Prefect vs 자체)
-- 7.1 `services/etlx-server/` 모노레포 패키지 스캐폴딩 (별도 pyproject)
+- 7.1 `services/anyduct-server/` 모노레포 패키지 스캐폴딩 (별도 pyproject)
 - 7.2 메타데이터 DB 스키마: `workspaces`, `users`, `connections`, `pipelines`, `pipeline_versions`, `schedules`, `runs`, `run_logs`, `audit_log`
 - 7.3 Alembic 마이그레이션
 - 7.4 YAML ↔ DB 양방향 변환 (`anyduct import`, `anyduct export` CLI 확장)
@@ -705,7 +705,7 @@ anyduct version
 > 디자인 시스템 단일 진실은 `DESIGN.md`. 토큰 외 임의 값 사용 금지.
 
 - 10.0 디자인 토큰 구현
-  - `services/etlx-web/styles/globals.css` (CSS variables, DESIGN.md §11.1)
+  - `services/anyduct-web/styles/globals.css` (CSS variables, DESIGN.md §11.1)
   - `tailwind.config.ts` (DESIGN.md §11.2)
   - 폰트 self-host (Inter Variable + Pretendard Variable + JetBrains Mono)
   - Storybook 초기화 + 토큰 검증 stories

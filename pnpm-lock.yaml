@@ -6,7 +6,7 @@ settings:
 
 importers:
 
-  services/etlx-web:
+  services/anyduct-web:
     dependencies:
       '@dagrejs/dagre':
         specifier: ^3.0.0

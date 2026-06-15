@@ -29,7 +29,7 @@
 - [x] **오케스트레이터 어댑터** — Airflow / Dagster / Prefect (PEP 562 lazy) + `anyduct` CLI.
 - [x] **관측성** — structlog + OTel trace + Prometheus exporter.
 
-**② 서비스 패키지 (`services/etlx-server` FastAPI + `services/etlx-web` Next.js)** — 비개발자도 쓰는 웹 UI ETL 서비스
+**② 서비스 패키지 (`services/anyduct-server` FastAPI + `services/anyduct-web` Next.js)** — 비개발자도 쓰는 웹 UI ETL 서비스
 - [x] **API + 실행 엔진** — OIDC/로컬 인증 + RBAC + 워크스페이스 격리 + 감사 로그. PostgreSQL run-큐(SKIP LOCKED) 멀티-replica 워커 + cron 스케줄러 + 센서 프레임워크.
 - [x] **웹 UI** — 비주얼 파이프라인 빌더(React Flow) + 연결/스케줄/마이그레이션 관리 + run 모니터링 + 카탈로그/리니지 그래프 + ERD 디자이너.
 - [x] **배포** — `docker-compose.prod.yml` + Helm 차트(kind 실배포 검증) + Grafana 대시보드.

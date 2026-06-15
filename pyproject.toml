@@ -119,7 +119,7 @@ packages = ["etl_plugins"]
 # Service packages live under `services/` with their own pyproject.toml and
 # resolve `etl-plugins` (this package) via the workspace mechanism.
 [tool.uv.workspace]
-members = ["services/etlx-server"]
+members = ["services/anyduct-server"]
 
 # === uv (PEP 735 dependency-groups) ===
 [dependency-groups]
@@ -163,7 +163,7 @@ dev = [
     # Prometheus exporter (Step 6.2). Mirrors the [observability] extra so
     # `uv run pytest` can exercise the prometheus_port path.
     "opentelemetry-exporter-prometheus>=0.46b0",
-    # services/etlx-server 테스트용 (workspace 통합 dev)
+    # services/anyduct-server 테스트용 (workspace 통합 dev)
     "httpx>=0.27",              # FastAPI TestClient
 ]
 

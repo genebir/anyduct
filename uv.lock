@@ -11,8 +11,8 @@ resolution-markers = [
 
 [manifest]
 members = [
+    "anyduct-server",
     "etl-plugins",
-    "etlx-server",
 ]
 
 [[package]]
@@ -157,6 +157,50 @@ sdist = { url = "https://files.pythonhosted.org/packages/33/5f/2cdf6f7aca3b20d3f
 wheels = [
     { url = "https://files.pythonhosted.org/packages/89/03/a851e84fcbb85214dc637b6378121ef9a0dd61b4c65264675d8a5c9b1ae7/antlr4_python3_runtime-4.13.2-py3-none-any.whl", hash = "sha256:fe3835eb8d33daece0e799090eda89719dbccee7aa39ef94eed3818cafa5a7e8", size = 144462, upload-time = "2024-08-03T19:00:11.134Z" },
 ]
+
+[[package]]
+name = "anyduct-server"
+version = "0.0.0"
+source = { editable = "services/anyduct-server" }
+dependencies = [
+    { name = "alembic" },
+    { name = "asyncpg" },
+    { name = "authlib" },
+    { name = "bcrypt" },
+    { name = "croniter" },
+    { name = "email-validator" },
+    { name = "etl-plugins" },
+    { name = "fastapi" },
+    { name = "pydantic-settings" },
+    { name = "pyjwt", extra = ["crypto"] },
+    { name = "sqlalchemy" },
+    { name = "typer" },
+    { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.optional-dependencies]
+connectors = [
+    { name = "etl-plugins", extra = ["duckdb", "dynamodb", "kafka", "kinesis", "mongodb", "mysql", "nats", "postgres", "rabbitmq", "redis", "s3", "sqs"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "alembic", specifier = ">=1.13" },
+    { name = "asyncpg", specifier = ">=0.29" },
+    { name = "authlib", specifier = ">=1.3" },
+    { name = "bcrypt", specifier = ">=4.2" },
+    { name = "croniter", specifier = ">=2.0" },
+    { name = "email-validator", specifier = ">=2.2" },
+    { name = "etl-plugins", editable = "." },
+    { name = "etl-plugins", extras = ["postgres", "mysql", "duckdb", "s3", "kafka", "mongodb", "redis", "sqs", "kinesis", "dynamodb", "rabbitmq", "nats"], marker = "extra == 'connectors'", editable = "." },
+    { name = "fastapi", specifier = ">=0.115" },
+    { name = "pydantic-settings", specifier = ">=2.5" },
+    { name = "pyjwt", extras = ["crypto"], specifier = ">=2.9" },
+    { name = "sqlalchemy", specifier = ">=2.0" },
+    { name = "typer", specifier = ">=0.12" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
+]
+provides-extras = ["connectors"]
 
 [[package]]
 name = "anyio"
@@ -1719,50 +1763,6 @@ dev = [
     { name = "vertica-python", specifier = ">=1.4" },
     { name = "yamllint", specifier = ">=1.35" },
 ]
-
-[[package]]
-name = "etlx-server"
-version = "0.0.0"
-source = { editable = "services/etlx-server" }
-dependencies = [
-    { name = "alembic" },
-    { name = "asyncpg" },
-    { name = "authlib" },
-    { name = "bcrypt" },
-    { name = "croniter" },
-    { name = "email-validator" },
-    { name = "etl-plugins" },
-    { name = "fastapi" },
-    { name = "pydantic-settings" },
-    { name = "pyjwt", extra = ["crypto"] },
-    { name = "sqlalchemy" },
-    { name = "typer" },
-    { name = "uvicorn", extra = ["standard"] },
-]
-
-[package.optional-dependencies]
-connectors = [
-    { name = "etl-plugins", extra = ["duckdb", "dynamodb", "kafka", "kinesis", "mongodb", "mysql", "nats", "postgres", "rabbitmq", "redis", "s3", "sqs"] },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "alembic", specifier = ">=1.13" },
-    { name = "asyncpg", specifier = ">=0.29" },
-    { name = "authlib", specifier = ">=1.3" },
-    { name = "bcrypt", specifier = ">=4.2" },
-    { name = "croniter", specifier = ">=2.0" },
-    { name = "email-validator", specifier = ">=2.2" },
-    { name = "etl-plugins", editable = "." },
-    { name = "etl-plugins", extras = ["postgres", "mysql", "duckdb", "s3", "kafka", "mongodb", "redis", "sqs", "kinesis", "dynamodb", "rabbitmq", "nats"], marker = "extra == 'connectors'", editable = "." },
-    { name = "fastapi", specifier = ">=0.115" },
-    { name = "pydantic-settings", specifier = ">=2.5" },
-    { name = "pyjwt", extras = ["crypto"], specifier = ">=2.9" },
-    { name = "sqlalchemy", specifier = ">=2.0" },
-    { name = "typer", specifier = ">=0.12" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
-]
-provides-extras = ["connectors"]
 
 [[package]]
 name = "exceptiongroup"

@@ -143,7 +143,7 @@ def test_get_unknown_still_raises_after_fallback_attempt() -> None:
 
 
 def test_list_connectors_includes_builtins_on_stale_metadata() -> None:
-    """``etlx list-connectors`` should be exhaustive even when the
+    """``anyduct list-connectors`` should be exhaustive even when the
     installed metadata doesn't list every built-in (e.g. the operator
     edited pyproject but hasn't reinstalled yet)."""
     _simulate_stale_metadata(

@@ -7,7 +7,7 @@ containers, see [Quickstart](getting-started/quickstart.md).
 
 The reference deployment is `services/docker-compose.prod.yml` — every
 container, env var, and dependency edge listed here is exercised by that
-file. The Helm chart (`services/charts/etlx`, see the Kubernetes section)
+file. The Helm chart (`services/charts/anyduct`, see the Kubernetes section)
 deploys the same topology.
 
 ## Topology
@@ -30,8 +30,8 @@ deploys the same topology.
 └─────────┘   └────────────────────┘  └──────────────────────┘
 ```
 
-Five process types share one image (`etlx-server:prod`); they differ only
-in `command`. The web image (`etlx-web:prod`) is standalone — no Node
+Five process types share one image (`anyduct-server:prod`); they differ only
+in `command`. The web image (`anyduct-web:prod`) is standalone — no Node
 modules at runtime, just `node server.js`.
 
 ## Images
@@ -39,11 +39,11 @@ modules at runtime, just `node server.js`.
 ### `anyduct-server`
 
 ```bash
-docker build -f services/etlx-server/Dockerfile -t anyduct-server:<tag> .
+docker build -f services/anyduct-server/Dockerfile -t anyduct-server:<tag> .
 ```
 
 * Build context = repo root (the uv workspace needs `etl_plugins/` +
-  `services/etlx-server/`).
+  `services/anyduct-server/`).
 * Multi-stage: `python:3.11-slim` + uv → resolves the lockfile into
   `/app/.venv`; final image runs as UID 10001 with `tini` as PID 1.
 * `CMD` defaults to uvicorn. Override for workers (see below).
@@ -53,7 +53,7 @@ docker build -f services/etlx-server/Dockerfile -t anyduct-server:<tag> .
 ### `anyduct-web`
 
 ```bash
-docker build -f services/etlx-web/Dockerfile \
+docker build -f services/anyduct-web/Dockerfile \
     --build-arg NEXT_PUBLIC_API_URL=https://api.example.com \
     -t anyduct-web:<tag> .
 ```
@@ -234,12 +234,12 @@ produces skew on gappy ids or bursty time ranges).
 
 ## Kubernetes (Helm)
 
-`services/charts/etlx` deploys the same topology (verified end-to-end on
+`services/charts/anyduct` deploys the same topology (verified end-to-end on
 a kind cluster: install → migrate hook → all pods Ready → login →
 pipeline run SUCCEEDED through a k8s worker):
 
 ```bash
-helm install anyduct services/charts/etlx \
+helm install anyduct services/charts/anyduct \
   --set-file jwt.privateKeyPem=.run/jwt_private.pem \
   --set-file jwt.publicKeyPem=.run/jwt_public.pem
 ```

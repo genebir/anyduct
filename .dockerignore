@@ -53,8 +53,8 @@ tests
 
 # --- The other service's source (excluded per-image via the explicit
 #     COPY allowlist in each Dockerfile, but kept out of the context too) ---
-# Server Dockerfile only copies etl_plugins/ + services/etlx-server/.
-# Web Dockerfile only copies services/etlx-web/ + pnpm workspace files.
+# Server Dockerfile only copies etl_plugins/ + services/anyduct-server/.
+# Web Dockerfile only copies services/anyduct-web/ + pnpm workspace files.
 
 # --- Docker / compose files don't need to ship inside the image ---
 **/Dockerfile*

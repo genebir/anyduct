@@ -63,7 +63,7 @@ of the run.
 |---------|--------|----------|------------------|
 | `InMemoryCursorState` | `etl_plugins.core.cursor` | no | single process |
 | `FileCursorState(path)` | `etl_plugins.core.cursor` | JSON file | single host |
-| `DbCursorState(engine, *, workspace_id=…)` | `etlx_server.cursors` (service layer) | Postgres `cursors` table | multi-replica |
+| `DbCursorState(engine, *, workspace_id=…)` | `anyduct_server.cursors` (service layer) | Postgres `cursors` table | multi-replica |
 
 The DB backend uses a dedicated sync psycopg engine (not the async one
 the FastAPI app holds) because asyncpg pools are bound to their
@@ -87,7 +87,7 @@ ISO-8601 lexicographic order matches chronological order.
 ### DB-backed (service layer)
 
 ```python
-from etlx_server.cursors import DbCursorState
+from anyduct_server.cursors import DbCursorState
 
 state = DbCursorState.from_url(
     "postgresql+asyncpg://anyduct:…@db/anyduct",   # async URL is fine; suffix is swapped

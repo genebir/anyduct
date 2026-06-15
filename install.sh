@@ -13,10 +13,10 @@
 #
 # 무엇을 하는가:
 #   1. uv (없으면 설치)
-#   2. uv sync --all-packages       # 코어 + services/etlx-server 의존성
+#   2. uv sync --all-packages       # 코어 + services/anyduct-server 의존성
 #   3. .env (없으면 .env.example에서 복사)
 #   4. pre-commit hook (가능한 경우)
-#   5. pnpm install                  # services/etlx-web (Node ≥22 필요)
+#   5. pnpm install                  # services/anyduct-web (Node ≥22 필요)
 #   6. docker compose up -d          # postgres / kafka / minio / redis
 #   7. Postgres 준비 대기 + alembic upgrade head
 #   8. 개발용 JWT RSA 키페어 생성 (.run/keys/, 이미 있으면 건너뜀)
@@ -99,9 +99,9 @@ else
 fi
 
 # =============================================================================
-# 2. Python 의존성 동기화 (코어 + services/etlx-server)
+# 2. Python 의존성 동기화 (코어 + services/anyduct-server)
 # =============================================================================
-log_info "uv sync --all-packages (core + services/etlx-server)"
+log_info "uv sync --all-packages (core + services/anyduct-server)"
 uv sync --all-packages
 log_ok "python deps synced"
 
@@ -129,22 +129,22 @@ else
 fi
 
 # =============================================================================
-# 5. services/etlx-web — pnpm install
+# 5. services/anyduct-web — pnpm install
 # =============================================================================
 if [ "$SKIP_WEB" -eq 1 ]; then
     log_skip "--skip-web: pnpm install"
 elif command -v pnpm >/dev/null 2>&1 && command -v node >/dev/null 2>&1; then
     NODE_MAJOR=$(node -p "process.versions.node.split('.')[0]" 2>/dev/null || echo 0)
     if [ "$NODE_MAJOR" -ge 22 ]; then
-        log_info "pnpm install --frozen-lockfile (etlx-web)"
+        log_info "pnpm install --frozen-lockfile (anyduct-web)"
         pnpm install --frozen-lockfile
         log_ok "web deps installed"
     else
-        log_warn "Node $NODE_MAJOR < 22 — etlx-web needs Node 22+. Skipping pnpm install."
+        log_warn "Node $NODE_MAJOR < 22 — anyduct-web needs Node 22+. Skipping pnpm install."
         log_warn "  nvm install 22 && ./install.sh"
     fi
 else
-    log_skip "node/pnpm missing — etlx-web skipped"
+    log_skip "node/pnpm missing — anyduct-web skipped"
     log_skip "  install: nvm install 22 && corepack enable && corepack prepare pnpm@9 --activate"
 fi
 
@@ -202,7 +202,7 @@ if [ "$DOCKER_OK" -eq 1 ]; then
         # Literal dev defaults from .env.example — not real credentials.
         _DEV_DB_URL="${DATABASE_URL:-postgresql+asyncpg://etl:etl@127.0.0.1:${_PG_PORT}/etl_dev}"  # pragma: allowlist secret
         if (
-            cd services/etlx-server
+            cd services/anyduct-server
             DATABASE_URL="$_DEV_DB_URL" uv run alembic upgrade head
         ); then
             log_ok "metadata schema is at head"
@@ -237,9 +237,9 @@ else
         openssl rsa -in "$PRIV_KEY" -pubout -out "$PUB_KEY" 2>/dev/null
     else
         # Fallback: use the python helper bundled with the server.
-        uv run --package etlx-server python - <<PY
+        uv run --package anyduct-server python - <<PY
 from pathlib import Path
-from etlx_server.auth.jwt_service import generate_rsa_keypair_pem
+from anyduct_server.auth.jwt_service import generate_rsa_keypair_pem
 priv, pub = generate_rsa_keypair_pem(bits=2048)
 Path("$PRIV_KEY").write_bytes(priv)
 Path("$PUB_KEY").write_bytes(pub)
@@ -257,12 +257,12 @@ cat <<EOF
 ${C_GREEN}install complete.${C_RESET}
 
 Next steps:
-  ${C_BLUE}./start.sh${C_RESET}             # start etlx-server + etlx-web in background
+  ${C_BLUE}./start.sh${C_RESET}             # start anyduct-server + anyduct-web in background
   ${C_BLUE}./stop.sh${C_RESET}              # stop them (add --all to also stop docker)
   ${C_BLUE}make help${C_RESET}              # other Make targets
 
 Quick sanity check:
   ${C_DIM}uv run pytest -m "not it"${C_RESET}                       # core unit tests
-  ${C_DIM}uv run pytest services/etlx-server/tests${C_RESET}        # server tests
+  ${C_DIM}uv run pytest services/anyduct-server/tests${C_RESET}        # server tests
 
 EOF

@@ -7,7 +7,7 @@
 
 ## 1. Prerequisites
 
-이 저장소는 **모노레포** 입니다 (ADR-0017 / ADR-0022). 코어 라이브러리만 만지는 경우는 (1)~(4)면 충분하고, 서비스(`services/etlx-server`, `services/etlx-web`)까지 만지려면 (5)(6)도 필요합니다.
+이 저장소는 **모노레포** 입니다 (ADR-0017 / ADR-0022). 코어 라이브러리만 만지는 경우는 (1)~(4)면 충분하고, 서비스(`services/anyduct-server`, `services/anyduct-web`)까지 만지려면 (5)(6)도 필요합니다.
 
 | 항목 | 버전 / 비고 |
 |---|---|
@@ -16,8 +16,8 @@
 | (2) `uv` | **유일한 Python 패키지 매니저**. `pip`/`poetry`/`conda` 혼용 금지 |
 | (3) Docker | dev 컨테이너 + 통합 테스트(testcontainers) |
 | (4) Git | 2.30+ |
-| (5) Node.js | **22+** (services/etlx-web). `nvm install 22` 권장 |
-| (6) pnpm | **9+** (services/etlx-web). `npm i -g pnpm@9` 또는 `corepack enable && corepack prepare pnpm@9 --activate` |
+| (5) Node.js | **22+** (services/anyduct-web). `nvm install 22` 권장 |
+| (6) pnpm | **9+** (services/anyduct-web). `npm i -g pnpm@9` 또는 `corepack enable && corepack prepare pnpm@9 --activate` |
 | `make` | 표준 타깃 실행용 (선택) |
 
 설치 안내:
@@ -25,7 +25,7 @@
 # uv
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Node + pnpm (services/etlx-web 만 만질 때 필요)
+# Node + pnpm (services/anyduct-web 만 만질 때 필요)
 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/master/install.sh | bash
 nvm install 22
 npm i -g pnpm@9
@@ -43,12 +43,12 @@ cd ETL
 
 `scripts/bootstrap.sh`가 하는 일 (현재 구현):
 1. `uv` 설치 확인 (없으면 설치)
-2. **`uv sync --all-packages`** — 코어 + `services/etlx-server` workspace member 의존성 일괄 설치
+2. **`uv sync --all-packages`** — 코어 + `services/anyduct-server` workspace member 의존성 일괄 설치
 3. `.env.example` → `.env` 복사 (이미 있으면 스킵)
 4. `uv run pre-commit install`
 5. `.secrets.baseline` 없으면 생성
 6. **`uv run lint-imports`** — 단방향 의존 검증 (ADR-0017/0022, `.importlinter`)
-7. Node ≥22 + pnpm 설치돼 있으면 **`pnpm install --frozen-lockfile`** (services/etlx-web 의존성)
+7. Node ≥22 + pnpm 설치돼 있으면 **`pnpm install --frozen-lockfile`** (services/anyduct-web 의존성)
 8. Docker 있으면 `docker compose -f docker/docker-compose.dev.yml up -d` (코어 통합 테스트용 인프라)
 
 ---
@@ -67,7 +67,7 @@ cd ETL
 
 ```bash
 # 의존성 (workspace 전체)
-uv sync --all-packages               # 락파일 기준, 코어 + services/etlx-server
+uv sync --all-packages               # 락파일 기준, 코어 + services/anyduct-server
 uv add <pkg>                         # 코어에 의존성 추가
 uv lock --upgrade                    # 락파일 갱신
 
@@ -88,25 +88,25 @@ uv run anyduct list-connectors
 uv run anyduct --log-format console --log-level DEBUG run ...
 ```
 
-### 4.2 services/etlx-server (FastAPI, Step 7~)
+### 4.2 services/anyduct-server (FastAPI, Step 7~)
 
 ```bash
 uv sync --all-packages                                            # 코어와 함께 sync
-uv run --package etlx-server uvicorn etlx_server.main:app --reload --port 8000
-uv run pytest services/etlx-server/tests                          # placeholder 2 tests
+uv run --package anyduct-server uvicorn anyduct_server.main:app --reload --port 8000
+uv run pytest services/anyduct-server/tests                          # placeholder 2 tests
 curl localhost:8000/health   # {"status":"ok"}
 curl localhost:8000/version  # {"server":"0.0.0","core":"0.0.1"}
 ```
 
 > Step 7.2부터 `alembic upgrade head` 등이 추가됩니다.
 
-### 4.3 services/etlx-web (Next.js, Step 10)
+### 4.3 services/anyduct-web (Next.js, Step 10)
 
 ```bash
 pnpm install --frozen-lockfile                                    # 모노레포 루트에서
-pnpm --filter @etlx/web dev                                       # http://localhost:3000
-pnpm --filter @etlx/web typecheck
-pnpm --filter @etlx/web build
+pnpm --filter @anyduct/web dev                                       # http://localhost:3000
+pnpm --filter @anyduct/web typecheck
+pnpm --filter @anyduct/web build
 ```
 
 ### 4.4 로컬 dev 인프라

@@ -1,4 +1,4 @@
-"""``etlx`` CLI smoke tests via Typer's CliRunner."""
+"""``anyduct`` CLI smoke tests via Typer's CliRunner."""
 
 from __future__ import annotations
 

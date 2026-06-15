@@ -1,0 +1,57 @@
+[project]
+name = "anyduct-server"
+version = "0.0.0"
+description = "etl-plugins service — FastAPI backend (Steps 7~9, 11)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+authors = [{ name = "duarl" }]
+
+# 코어 라이브러리 의존 — uv workspace 안에서는 path dep로 작동 (아래 [tool.uv.sources] 참조).
+# 외부 install 시점에는 PyPI version 으로 핀 (~=0.X.Y 같은 범위). 첫 PyPI 릴리스 전이므로 ">=0".
+dependencies = [
+    "etl-plugins>=0",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "pydantic-settings>=2.5",  # Settings class (Step 8.1)
+    "sqlalchemy>=2.0",        # ADR-0020 async ORM
+    "asyncpg>=0.29",          # ADR-0020 async PG driver
+    "alembic>=1.13",          # ADR-0020 migrations
+    "authlib>=1.3",           # ADR-0023 OIDC
+    "bcrypt>=4.2",            # ADR-0023 local auth fallback (passlib dropped — incompatible w/ bcrypt 4.x)
+    "pyjwt[crypto]>=2.9",     # ADR-0023 JWT (crypto extras for RS256)
+    "email-validator>=2.2",   # Pydantic EmailStr support (Step 8.2a)
+    "croniter>=2.0",          # cron schedule evaluation
+    "typer>=0.12",            # anyduct-server admin CLI (Step 7.3)
+]
+
+[project.optional-dependencies]
+# Data-plane connector drivers for the PRODUCTION image (Step 11,
+# 2026-06-12). The dev environment gets every driver via the workspace's
+# dev-dependencies, which hid a real gap: `uv sync --no-dev --package
+# anyduct-server` (the Dockerfile) shipped ZERO connector extras — a deployed
+# worker couldn't run even a postgres pipeline (RegistryError at build).
+# This set is the pure-python / lightweight tier; heavy or C-extension
+# drivers (cassandra, mssql/vertica, cloud DWs) stay opt-in via a custom
+# image layer (see docs/deployment.md).
+connectors = [
+    "etl-plugins[postgres,mysql,duckdb,s3,kafka,mongodb,redis,sqs,kinesis,dynamodb,rabbitmq,nats]",
+]
+
+[project.scripts]
+# Admin CLI for the metadata DB (Step 7.3). Stays on the service side so the
+# core ``anyduct`` CLI in etl_plugins.cli remains DB-agnostic (ADR-0017).
+# Command renamed to ``anyduct-server``; the import package stays ``anyduct_server``
+# (internal module rename is a separate change).
+anyduct-server = "anyduct_server.cli:app"
+
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["anyduct_server"]
+
+# In the uv workspace, resolve etl-plugins from the repo root rather than PyPI.
+[tool.uv.sources]
+etl-plugins = { workspace = true }

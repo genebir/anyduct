@@ -37,7 +37,7 @@ from etl_plugins.observability.tracing import (
 @pytest.fixture
 def otel() -> Iterator[OTelHandle]:
     """A per-test InMemory OTel backend. Tear down + reset to NoOp after."""
-    handle = configure_otel(service_name="etlx-unit-test", in_memory=True)
+    handle = configure_otel(service_name="anyduct-unit-test", in_memory=True)
     yield handle
     handle.shutdown()
     reset_metrics()
@@ -80,36 +80,36 @@ def test_reset_restores_noop_backends(otel: OTelHandle) -> None:
 
 
 def test_counter_add_emits_to_otel_reader(otel: OTelHandle) -> None:
-    counter = get_metrics().counter("etlx.records.read", description="rows", unit="1")
+    counter = get_metrics().counter("anyduct.records.read", description="rows", unit="1")
     counter.add(3, {"pipeline": "p1"})
     counter.add(2, {"pipeline": "p1"})
 
     assert otel.metric_reader is not None
     data = otel.metric_reader.get_metrics_data()
     metrics_named = _flatten_metrics(data)
-    assert "etlx.records.read" in metrics_named
+    assert "anyduct.records.read" in metrics_named
     total = sum(
         point.value
-        for point in metrics_named["etlx.records.read"]
+        for point in metrics_named["anyduct.records.read"]
         if dict(point.attributes) == {"pipeline": "p1"}
     )
     assert total == 5
 
 
 def test_counter_caches_instrument_by_name(otel: OTelHandle) -> None:
-    a = get_metrics().counter("etlx.errors")
-    b = get_metrics().counter("etlx.errors")
+    a = get_metrics().counter("anyduct.errors")
+    b = get_metrics().counter("anyduct.errors")
     assert a is b  # same OTelCounter wrapper
 
 
 def test_counter_accepts_no_attributes(otel: OTelHandle) -> None:
-    counter = get_metrics().counter("etlx.no-attrs")
+    counter = get_metrics().counter("anyduct.no-attrs")
     counter.add(7)
     data = otel.metric_reader.get_metrics_data() if otel.metric_reader else None
     assert data is not None
     metrics_named = _flatten_metrics(data)
-    assert "etlx.no-attrs" in metrics_named
-    points = metrics_named["etlx.no-attrs"]
+    assert "anyduct.no-attrs" in metrics_named
+    points = metrics_named["anyduct.no-attrs"]
     assert sum(p.value for p in points) == 7
 
 
@@ -117,16 +117,16 @@ def test_counter_accepts_no_attributes(otel: OTelHandle) -> None:
 
 
 def test_histogram_record_emits_to_otel_reader(otel: OTelHandle) -> None:
-    hist = get_metrics().histogram("etlx.duration", unit="s")
+    hist = get_metrics().histogram("anyduct.duration", unit="s")
     for v in (0.1, 0.2, 0.3):
         hist.record(v, {"task": "extract"})
 
     assert otel.metric_reader is not None
     data = otel.metric_reader.get_metrics_data()
     metrics_named = _flatten_metrics(data)
-    assert "etlx.duration" in metrics_named
+    assert "anyduct.duration" in metrics_named
     # OTel histogram data points carry ``count`` and ``sum``.
-    points = metrics_named["etlx.duration"]
+    points = metrics_named["anyduct.duration"]
     matching = [p for p in points if dict(p.attributes) == {"task": "extract"}]
     assert matching
     assert matching[0].count == 3
@@ -134,8 +134,8 @@ def test_histogram_record_emits_to_otel_reader(otel: OTelHandle) -> None:
 
 
 def test_histogram_caches_instrument_by_name(otel: OTelHandle) -> None:
-    a = get_metrics().histogram("etlx.lat")
-    b = get_metrics().histogram("etlx.lat")
+    a = get_metrics().histogram("anyduct.lat")
+    b = get_metrics().histogram("anyduct.lat")
     assert a is b
 
 
@@ -177,12 +177,12 @@ def test_span_records_exception_on_exit(otel: OTelHandle) -> None:
 
 
 def test_otel_counter_wrapper_is_a_counter(otel: OTelHandle) -> None:
-    c = get_metrics().counter("etlx.test")
+    c = get_metrics().counter("anyduct.test")
     assert isinstance(c, OTelCounter)
 
 
 def test_otel_histogram_wrapper_is_a_histogram(otel: OTelHandle) -> None:
-    h = get_metrics().histogram("etlx.test-hist")
+    h = get_metrics().histogram("anyduct.test-hist")
     assert isinstance(h, OTelHistogram)
 
 
@@ -349,7 +349,7 @@ def otel_prom() -> Iterator[tuple[OTelHandle, int]]:
     rapid-fire test runs."""
     port = _free_port()
     handle = configure_otel(
-        service_name="etlx-prom-test",
+        service_name="anyduct-prom-test",
         prometheus_port=port,
         prometheus_addr="127.0.0.1",
     )
@@ -375,7 +375,7 @@ def test_prometheus_scrape_exposes_emitted_counter(
     otel_prom: tuple[OTelHandle, int],
 ) -> None:
     handle, port = otel_prom
-    counter = get_metrics().counter("etlx.records.read", description="rows", unit="1")
+    counter = get_metrics().counter("anyduct.records.read", description="rows", unit="1")
     counter.add(4, {"pipeline": "p1"})
     counter.add(7, {"pipeline": "p1"})
     # Force-collect so the reader pushes into prometheus_client REGISTRY.
@@ -383,10 +383,10 @@ def test_prometheus_scrape_exposes_emitted_counter(
     handle.prometheus_reader.collect()
 
     body = _scrape(port)
-    # Prometheus normalizes "." to "_". A counter named etlx.records.read
-    # becomes etlx_records_read_total (the exporter appends `_total` for
+    # Prometheus normalizes "." to "_". A counter named anyduct.records.read
+    # becomes anyduct_records_read_total (the exporter appends `_total` for
     # OTel monotonic counters per OpenMetrics convention).
-    assert "etlx_records_read" in body
+    assert "anyduct_records_read" in body
     # The 11 records (4 + 7) should sum into a single labeled series.
     assert 'pipeline="p1"' in body
     assert "11" in body  # sum across both adds
@@ -419,15 +419,15 @@ def test_prometheus_coexists_with_in_memory() -> None:
         assert handle.metric_reader is not None
         assert handle.prometheus_reader is not None
 
-        counter = get_metrics().counter("etlx.coexist")
+        counter = get_metrics().counter("anyduct.coexist")
         counter.add(3)
 
         # Both surfaces see the emit.
         in_mem = _flatten_metrics(handle.metric_reader.get_metrics_data())
-        assert "etlx.coexist" in in_mem
+        assert "anyduct.coexist" in in_mem
         handle.prometheus_reader.collect()
         body = _scrape(port)
-        assert "etlx_coexist" in body
+        assert "anyduct_coexist" in body
     finally:
         handle.shutdown()
         reset_metrics()

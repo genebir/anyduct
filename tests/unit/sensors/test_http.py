@@ -110,13 +110,13 @@ def test_method_and_headers_forwarded() -> None:
     HttpSensor(
         url="http://example.test/x",
         method="post",
-        headers={"X-Probe": "etlx"},
+        headers={"X-Probe": "anyduct"},
         client=httpx.Client(transport=t),
     ).check()
     assert len(t.requests) == 1
     req = t.requests[0]
     assert req.method == "POST"
-    assert req.headers["x-probe"] == "etlx"
+    assert req.headers["x-probe"] == "anyduct"
 
 
 # ---- builder dispatch ------------------------------------------------------

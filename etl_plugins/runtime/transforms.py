@@ -510,7 +510,7 @@ def _build_sql(config: TransformConfig) -> DatasetTransformFn:
         # File-backed database in a throwaway directory: base-table pages
         # evict to disk under memory pressure, so the dataset may exceed
         # RAM (an in-memory DuckDB can spill operators but not tables).
-        with tempfile.TemporaryDirectory(prefix="etlx-sql-") as tmpdir:
+        with tempfile.TemporaryDirectory(prefix="anyduct-sql-") as tmpdir:
             con = duckdb.connect(os.path.join(tmpdir, "work.duckdb"))
             try:
                 if memory_limit is not None:

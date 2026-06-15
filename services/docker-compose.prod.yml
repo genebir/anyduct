@@ -8,15 +8,15 @@
 # Bring up:
 #
 #     # 1) generate JWT keypair if you haven't already
-#     etlx admin gen-jwt-keys --out-dir .run
+#     anyduct admin gen-jwt-keys --out-dir .run
 #     # 2) export keys + DB url for compose's env interpolation
 #     export AUTH_JWT_PRIVATE_KEY_PEM="$(cat .run/jwt_private.pem)"
 #     export AUTH_JWT_PUBLIC_KEY_PEM="$(cat .run/jwt_public.pem)"
-#     # 3) build + start (etlx-migrate runs once, others wait for it)
+#     # 3) build + start (anyduct-migrate runs once, others wait for it)
 #     docker compose -f services/docker-compose.prod.yml up -d --build
 #     # 4) seed the first admin user
-#     docker compose -f services/docker-compose.prod.yml exec etlx-server \
-#         etlx-server admin create-user --email you@example.com --name You \
+#     docker compose -f services/docker-compose.prod.yml exec anyduct-server \
+#         anyduct-server admin create-user --email you@example.com --name You \
 #                                       --superadmin
 #
 # Stop: `docker compose -f services/docker-compose.prod.yml down`
@@ -26,128 +26,128 @@
 # workspace + pnpm workspace need files outside `services/`.
 
 x-server-env: &server-env
-  DATABASE_URL: postgresql+asyncpg://etlx:etlx@metadata-db:5432/etlx
+  DATABASE_URL: postgresql+asyncpg://anyduct:anyduct@metadata-db:5432/anyduct
   AUTH_JWT_PRIVATE_KEY_PEM: ${AUTH_JWT_PRIVATE_KEY_PEM:?must export AUTH_JWT_PRIVATE_KEY_PEM (see top of file)}
   AUTH_JWT_PUBLIC_KEY_PEM: ${AUTH_JWT_PUBLIC_KEY_PEM:?must export AUTH_JWT_PUBLIC_KEY_PEM}
-  AUTH_JWT_ISSUER: ${AUTH_JWT_ISSUER:-etlx-server}
-  AUTH_JWT_AUDIENCE: ${AUTH_JWT_AUDIENCE:-etlx}
+  AUTH_JWT_ISSUER: ${AUTH_JWT_ISSUER:-anyduct-server}
+  AUTH_JWT_AUDIENCE: ${AUTH_JWT_AUDIENCE:-anyduct}
   # Pydantic-settings v2 parses list[str] env vars as JSON. Wrap the value
   # in JSON brackets — a comma-separated list would raise SettingsError.
   CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:3000"]}
   SECRET_BACKEND: ${SECRET_BACKEND:-env}
   ENVIRONMENT: ${ENVIRONMENT:-production}
-  SERVICE_NAME: etlx-server
+  SERVICE_NAME: anyduct-server
 
 x-server-build: &server-build
   build:
     context: ..
-    dockerfile: services/etlx-server/Dockerfile
-  image: etlx-server:prod
+    dockerfile: services/anyduct-server/Dockerfile
+  image: anyduct-server:prod
 
 services:
-  # Default: vanilla postgres. `etlx-migrate` will apply the schema on
-  # first boot. Swap by setting `ETLX_DB_IMAGE=etlx-postgres:dev` (or
+  # Default: vanilla postgres. `anyduct-migrate` will apply the schema on
+  # first boot. Swap by setting `ANYDUCT_DB_IMAGE=anyduct-postgres:dev` (or
   # `:demo` for sample data) — that image ships with the schema already
   # baked in via /docker-entrypoint-initdb.d, so migrate is a no-op on
   # a fresh volume.
   metadata-db:
-    image: ${ETLX_DB_IMAGE:-postgres:16-alpine}
+    image: ${ANYDUCT_DB_IMAGE:-postgres:16-alpine}
     environment:
-      POSTGRES_USER: etlx
-      POSTGRES_PASSWORD: etlx        # pragma: allowlist secret
-      POSTGRES_DB: etlx
+      POSTGRES_USER: anyduct
+      POSTGRES_PASSWORD: anyduct        # pragma: allowlist secret
+      POSTGRES_DB: anyduct
     volumes:
       - metadata_pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U etlx -d etlx"]
+      test: ["CMD-SHELL", "pg_isready -U anyduct -d anyduct"]
       interval: 5s
       timeout: 3s
       retries: 10
     restart: unless-stopped
 
   # One-shot job: applies pending Alembic revisions, then exits 0. Other
-  # services use `depends_on: { etlx-migrate: { condition: service_completed_successfully } }`
+  # services use `depends_on: { anyduct-migrate: { condition: service_completed_successfully } }`
   # so they don't race the schema. k8s equivalent: an init-container.
-  etlx-migrate:
+  anyduct-migrate:
     <<: *server-build
     depends_on:
       metadata-db:
         condition: service_healthy
     environment: *server-env
-    command: ["etlx-server", "db", "upgrade", "head"]
+    command: ["anyduct-server", "db", "upgrade", "head"]
     restart: "no"
 
-  etlx-server:
+  anyduct-server:
     <<: *server-build
     depends_on:
-      etlx-migrate:
+      anyduct-migrate:
         condition: service_completed_successfully
     environment: *server-env
     ports:
-      - "${ETLX_SERVER_PORT:-8000}:8000"
+      - "${ANYDUCT_SERVER_PORT:-8000}:8000"
     restart: unless-stopped
 
-  etlx-worker:
+  anyduct-worker:
     <<: *server-build
     depends_on:
-      etlx-migrate:
+      anyduct-migrate:
         condition: service_completed_successfully
     environment: *server-env
-    command: ["etlx-server", "worker", "run", "--log-flush-interval", "2.0"]
+    command: ["anyduct-server", "worker", "run", "--log-flush-interval", "2.0"]
     healthcheck:
       # Workers don't expose HTTP — disable the image's /ready probe.
       disable: true
     restart: unless-stopped
 
-  etlx-scheduler:
+  anyduct-scheduler:
     <<: *server-build
     depends_on:
-      etlx-migrate:
+      anyduct-migrate:
         condition: service_completed_successfully
     environment: *server-env
-    command: ["etlx-server", "scheduler", "run"]
+    command: ["anyduct-server", "scheduler", "run"]
     healthcheck:
       disable: true
     restart: unless-stopped
 
-  etlx-reaper:
+  anyduct-reaper:
     <<: *server-build
     depends_on:
-      etlx-migrate:
+      anyduct-migrate:
         condition: service_completed_successfully
     environment: *server-env
-    command: ["etlx-server", "reaper", "run"]
+    command: ["anyduct-server", "reaper", "run"]
     healthcheck:
       disable: true
     restart: unless-stopped
 
-  etlx-stream-worker:
+  anyduct-stream-worker:
     <<: *server-build
     depends_on:
-      etlx-migrate:
+      anyduct-migrate:
         condition: service_completed_successfully
     environment: *server-env
-    command: ["etlx-server", "stream-worker", "run"]
+    command: ["anyduct-server", "stream-worker", "run"]
     healthcheck:
       disable: true
     restart: unless-stopped
     profiles: ["stream"]   # opt-in: only start when explicitly enabled
 
-  etlx-web:
+  anyduct-web:
     build:
       context: ..
-      dockerfile: services/etlx-web/Dockerfile
+      dockerfile: services/anyduct-web/Dockerfile
       args:
         # NEXT_PUBLIC_* is inlined at build time. The default points at the
-        # etlx-server published port on the docker host (compose's internal
+        # anyduct-server published port on the docker host (compose's internal
         # DNS isn't reachable from the user's browser).
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
-    image: etlx-web:prod
+    image: anyduct-web:prod
     depends_on:
-      etlx-server:
+      anyduct-server:
         condition: service_healthy
     ports:
-      - "${ETLX_WEB_PORT:-3000}:3000"
+      - "${ANYDUCT_WEB_PORT:-3000}:3000"
     restart: unless-stopped
 
 volumes:

@@ -1,14 +1,14 @@
-"""``etlx`` command-line interface (Typer based).
+"""``anyduct`` command-line interface (Typer based).
 
 Available subcommands (Step 3.1 MVP):
 
-    etlx version
-    etlx list-connectors
-    etlx validate <pipeline.yaml> [--connections <path>]
-    etlx run <pipeline.yaml> [--connections <path>] [--env-file <path>]
-    etlx test-connection <name> --connections <path>
+    anyduct version
+    anyduct list-connectors
+    anyduct validate <pipeline.yaml> [--connections <path>]
+    anyduct run <pipeline.yaml> [--connections <path>] [--env-file <path>]
+    anyduct test-connection <name> --connections <path>
 
-``etlx run-stream`` and ``etlx schema`` will come in Step 3.2+ with stream
+``anyduct run-stream`` and ``anyduct schema`` will come in Step 3.2+ with stream
 runtime and connector schema introspection.
 """
 
@@ -32,7 +32,7 @@ from etl_plugins.runtime.builder import build_connectors
 from etl_plugins.runtime.runner import arun_stream_pipeline_yaml, run_pipeline_yaml
 
 app = typer.Typer(
-    name="etlx",
+    name="anyduct",
     help="ETL Plugins CLI — run YAML pipelines, validate config, inspect connectors.",
     no_args_is_help=True,
 )
@@ -246,7 +246,7 @@ def test_connection(
         raise typer.Exit(code=1)
 
 
-def main() -> None:  # pragma: no cover - exercised via the etlx entry point
+def main() -> None:  # pragma: no cover - exercised via the anyduct entry point
     app()
 
 

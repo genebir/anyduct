@@ -37,7 +37,7 @@ with source, sink:
   traces, retry / DLQ wired into every `Pipeline.run`.
 * **Orchestrator adapters** (Airflow / Dagster / Prefect) — keep your
   scheduling story, change the data layer underneath.
-* **Optional service layer** (`services/etlx-server` + `services/etlx-web`)
+* **Optional service layer** (`services/anyduct-server` + `services/anyduct-web`)
   for teams who want a web UI, RBAC, audit log, and a managed worker
   queue — bolted on top of the same core, never required.
 

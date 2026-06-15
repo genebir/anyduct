@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# start.sh — etlx-server + etlx-web 백그라운드 기동 (idempotent)
+# start.sh — anyduct-server + anyduct-web 백그라운드 기동 (idempotent)
 #
 # Linux / macOS / WSL2 / Git Bash 어디서나 동작합니다. 이미 실행 중인 프로세스는
 # 다시 띄우지 않고 상태만 보고합니다.
@@ -20,10 +20,10 @@
 # 무엇을 하는가:
 #   1. docker compose up -d              (--no-docker 면 생략)
 #   2. alembic upgrade head              (--no-migrate / --no-docker 면 생략)
-#   3. uvicorn etlx_server.main:app      (백그라운드, PID/log: .run/)
-#   4. etlx-server worker run            (백그라운드, --no-worker 면 생략)
-#   5. etlx-server reaper run            (백그라운드, --no-worker 면 생략)
-#   6. pnpm --filter @etlx/web dev       (백그라운드, --no-web 이면 생략)
+#   3. uvicorn anyduct_server.main:app      (백그라운드, PID/log: .run/)
+#   4. anyduct-server worker run            (백그라운드, --no-worker 면 생략)
+#   5. anyduct-server reaper run            (백그라운드, --no-worker 면 생략)
+#   6. pnpm --filter @anyduct/web dev       (백그라운드, --no-web 이면 생략)
 #   7. /health + 웹 포트가 응답할 때까지 polling
 #
 # Postgres 포트는 LOCAL_PG_PORT(기본 55432, docker-compose.dev.yml 기본값)를 따른다.
@@ -31,8 +31,8 @@
 # 시크릿을 server·worker가 동일하게 해석한다.
 #
 # 상태/로그:
-#   .run/etlx-server.pid      .run/logs/etlx-server.log
-#   .run/etlx-web.pid         .run/logs/etlx-web.log
+#   .run/anyduct-server.pid      .run/logs/anyduct-server.log
+#   .run/anyduct-web.pid         .run/logs/anyduct-web.log
 # =============================================================================
 set -euo pipefail
 
@@ -82,22 +82,22 @@ fi
 RUN_DIR=".run"
 LOG_DIR="$RUN_DIR/logs"
 KEY_DIR="$RUN_DIR/keys"
-SERVER_PID="$RUN_DIR/etlx-server.pid"
-WEB_PID="$RUN_DIR/etlx-web.pid"
-WORKER_PID="$RUN_DIR/etlx-worker.pid"
-REAPER_PID="$RUN_DIR/etlx-reaper.pid"
-SCHEDULER_PID="$RUN_DIR/etlx-scheduler.pid"
-SENSOR_SCHEDULER_PID="$RUN_DIR/etlx-sensor-scheduler.pid"
-SERVER_LOG="$LOG_DIR/etlx-server.log"
-WEB_LOG="$LOG_DIR/etlx-web.log"
-WORKER_LOG="$LOG_DIR/etlx-worker.log"
-REAPER_LOG="$LOG_DIR/etlx-reaper.log"
-SCHEDULER_LOG="$LOG_DIR/etlx-scheduler.log"
-SENSOR_SCHEDULER_LOG="$LOG_DIR/etlx-sensor-scheduler.log"
+SERVER_PID="$RUN_DIR/anyduct-server.pid"
+WEB_PID="$RUN_DIR/anyduct-web.pid"
+WORKER_PID="$RUN_DIR/anyduct-worker.pid"
+REAPER_PID="$RUN_DIR/anyduct-reaper.pid"
+SCHEDULER_PID="$RUN_DIR/anyduct-scheduler.pid"
+SENSOR_SCHEDULER_PID="$RUN_DIR/anyduct-sensor-scheduler.pid"
+SERVER_LOG="$LOG_DIR/anyduct-server.log"
+WEB_LOG="$LOG_DIR/anyduct-web.log"
+WORKER_LOG="$LOG_DIR/anyduct-worker.log"
+REAPER_LOG="$LOG_DIR/anyduct-reaper.log"
+SCHEDULER_LOG="$LOG_DIR/anyduct-scheduler.log"
+SENSOR_SCHEDULER_LOG="$LOG_DIR/anyduct-sensor-scheduler.log"
 
-SERVER_HOST="${ETLX_SERVER_HOST:-127.0.0.1}"
-SERVER_PORT="${ETLX_SERVER_PORT:-8000}"
-WEB_PORT="${ETLX_WEB_PORT:-3000}"
+SERVER_HOST="${ANYDUCT_SERVER_HOST:-127.0.0.1}"
+SERVER_PORT="${ANYDUCT_SERVER_PORT:-8000}"
+WEB_PORT="${ANYDUCT_WEB_PORT:-3000}"
 
 # Postgres host port — matches docker-compose.dev.yml's ${LOCAL_PG_PORT:-55432}.
 PG_PORT="${LOCAL_PG_PORT:-55432}"
@@ -211,7 +211,7 @@ if [ "$RUN_MIGRATE" -eq 1 ]; then
         # Non-fatal — continue even if auth/port conflicts surface. Uses the
         # same DATABASE_URL the server + worker will use, so all three agree.
         if (
-            cd services/etlx-server
+            cd services/anyduct-server
             uv run alembic upgrade head
         ) >/dev/null 2>&1; then
             log_ok "metadata schema at head"
@@ -227,7 +227,7 @@ else
 fi
 
 # =============================================================================
-# 3. JWT keypair from install.sh (used by etlx-server)
+# 3. JWT keypair from install.sh (used by anyduct-server)
 # =============================================================================
 JWT_PRIVATE="$KEY_DIR/jwt-private.pem"
 JWT_PUBLIC="$KEY_DIR/jwt-public.pem"
@@ -247,29 +247,29 @@ else
 fi
 
 # =============================================================================
-# 4. etlx-server (uvicorn) — idempotent start
+# 4. anyduct-server (uvicorn) — idempotent start
 # =============================================================================
 if is_running "$SERVER_PID"; then
-    log_skip "etlx-server already running (pid=$(cat "$SERVER_PID"))"
+    log_skip "anyduct-server already running (pid=$(cat "$SERVER_PID"))"
 else
-    log_info "starting etlx-server on $SERVER_HOST:$SERVER_PORT (log: $SERVER_LOG)"
-    # Production-like: no --reload. Use `uv run --package etlx-server` so it
+    log_info "starting anyduct-server on $SERVER_HOST:$SERVER_PORT (log: $SERVER_LOG)"
+    # Production-like: no --reload. Use `uv run --package anyduct-server` so it
     # resolves against the workspace member's venv. DATABASE_URL +
     # SECRET_BACKEND were exported above (shared with migration + worker).
     spawn_background "$SERVER_PID" "$SERVER_LOG" \
-        uv run --package etlx-server uvicorn etlx_server.main:app \
+        uv run --package anyduct-server uvicorn anyduct_server.main:app \
             --host "$SERVER_HOST" --port "$SERVER_PORT"
-    log_ok "etlx-server spawned (pid=$(cat "$SERVER_PID"))"
-    if ! wait_for_http "http://$SERVER_HOST:$SERVER_PORT/health" 30 "etlx-server"; then
+    log_ok "anyduct-server spawned (pid=$(cat "$SERVER_PID"))"
+    if ! wait_for_http "http://$SERVER_HOST:$SERVER_PORT/health" 30 "anyduct-server"; then
         log_error "tail of $SERVER_LOG:"
         tail -n 30 "$SERVER_LOG" 1>&2 || true
         exit 1
     fi
-    log_ok "etlx-server is healthy"
+    log_ok "anyduct-server is healthy"
 fi
 
 # =============================================================================
-# 5. etlx-server worker + reaper — idempotent start
+# 5. anyduct-server worker + reaper — idempotent start
 #    The worker executes claimed runs; the reaper fails out stuck/zombie runs.
 #    Both inherit DATABASE_URL + SECRET_BACKEND exported above, and run only
 #    after migrations so they never hit a missing table.
@@ -278,62 +278,62 @@ if [ "$START_WORKER" -eq 0 ]; then
     log_skip "--no-worker"
 else
     if is_running "$WORKER_PID"; then
-        log_skip "etlx-worker already running (pid=$(cat "$WORKER_PID"))"
+        log_skip "anyduct-worker already running (pid=$(cat "$WORKER_PID"))"
     else
-        log_info "starting etlx-worker (log: $WORKER_LOG)"
+        log_info "starting anyduct-worker (log: $WORKER_LOG)"
         spawn_background "$WORKER_PID" "$WORKER_LOG" \
-            uv run --package etlx-server anyduct-server worker run --log-flush-interval 2.0
-        log_ok "etlx-worker spawned (pid=$(cat "$WORKER_PID"))"
+            uv run --package anyduct-server anyduct-server worker run --log-flush-interval 2.0
+        log_ok "anyduct-worker spawned (pid=$(cat "$WORKER_PID"))"
     fi
     if is_running "$REAPER_PID"; then
-        log_skip "etlx-reaper already running (pid=$(cat "$REAPER_PID"))"
+        log_skip "anyduct-reaper already running (pid=$(cat "$REAPER_PID"))"
     else
-        log_info "starting etlx-reaper (log: $REAPER_LOG)"
+        log_info "starting anyduct-reaper (log: $REAPER_LOG)"
         spawn_background "$REAPER_PID" "$REAPER_LOG" \
-            uv run --package etlx-server anyduct-server reaper run
-        log_ok "etlx-reaper spawned (pid=$(cat "$REAPER_PID"))"
+            uv run --package anyduct-server anyduct-server reaper run
+        log_ok "anyduct-reaper spawned (pid=$(cat "$REAPER_PID"))"
     fi
     # Scheduler: fires cron schedules + freshness-based re-runs (ADR-0038).
     if is_running "$SCHEDULER_PID"; then
-        log_skip "etlx-scheduler already running (pid=$(cat "$SCHEDULER_PID"))"
+        log_skip "anyduct-scheduler already running (pid=$(cat "$SCHEDULER_PID"))"
     else
-        log_info "starting etlx-scheduler (log: $SCHEDULER_LOG)"
+        log_info "starting anyduct-scheduler (log: $SCHEDULER_LOG)"
         spawn_background "$SCHEDULER_PID" "$SCHEDULER_LOG" \
-            uv run --package etlx-server anyduct-server scheduler run
-        log_ok "etlx-scheduler spawned (pid=$(cat "$SCHEDULER_PID"))"
+            uv run --package anyduct-server anyduct-server scheduler run
+        log_ok "anyduct-scheduler spawned (pid=$(cat "$SCHEDULER_PID"))"
     fi
     # Sensor scheduler: polls active sensors (HTTP / file / asset freshness),
     # enqueues PENDING runs on trigger (ADR-0041 K3b).
     if is_running "$SENSOR_SCHEDULER_PID"; then
-        log_skip "etlx-sensor-scheduler already running (pid=$(cat "$SENSOR_SCHEDULER_PID"))"
+        log_skip "anyduct-sensor-scheduler already running (pid=$(cat "$SENSOR_SCHEDULER_PID"))"
     else
-        log_info "starting etlx-sensor-scheduler (log: $SENSOR_SCHEDULER_LOG)"
+        log_info "starting anyduct-sensor-scheduler (log: $SENSOR_SCHEDULER_LOG)"
         spawn_background "$SENSOR_SCHEDULER_PID" "$SENSOR_SCHEDULER_LOG" \
-            uv run --package etlx-server anyduct-server sensor-scheduler run
-        log_ok "etlx-sensor-scheduler spawned (pid=$(cat "$SENSOR_SCHEDULER_PID"))"
+            uv run --package anyduct-server anyduct-server sensor-scheduler run
+        log_ok "anyduct-sensor-scheduler spawned (pid=$(cat "$SENSOR_SCHEDULER_PID"))"
     fi
 fi
 
 # =============================================================================
-# 6. etlx-web (Next.js dev) — idempotent start
+# 6. anyduct-web (Next.js dev) — idempotent start
 # =============================================================================
 if [ "$START_WEB" -eq 0 ]; then
     log_skip "--no-web"
 elif is_running "$WEB_PID"; then
-    log_skip "etlx-web already running (pid=$(cat "$WEB_PID"))"
+    log_skip "anyduct-web already running (pid=$(cat "$WEB_PID"))"
 elif ! command -v pnpm >/dev/null 2>&1; then
-    log_warn "pnpm not on PATH — etlx-web skipped (run ./install.sh first)"
+    log_warn "pnpm not on PATH — anyduct-web skipped (run ./install.sh first)"
 else
-    log_info "starting etlx-web on port $WEB_PORT (log: $WEB_LOG)"
+    log_info "starting anyduct-web on port $WEB_PORT (log: $WEB_LOG)"
     spawn_background "$WEB_PID" "$WEB_LOG" \
-        pnpm --filter @etlx/web dev --port "$WEB_PORT"
-    log_ok "etlx-web spawned (pid=$(cat "$WEB_PID"))"
+        pnpm --filter @anyduct/web dev --port "$WEB_PORT"
+    log_ok "anyduct-web spawned (pid=$(cat "$WEB_PID"))"
     # Next.js boot can take a while on cold start (>30s sometimes).
-    if ! wait_for_http "http://127.0.0.1:$WEB_PORT/" 90 "etlx-web"; then
-        log_warn "etlx-web did not become responsive in 90s — check $WEB_LOG"
+    if ! wait_for_http "http://127.0.0.1:$WEB_PORT/" 90 "anyduct-web"; then
+        log_warn "anyduct-web did not become responsive in 90s — check $WEB_LOG"
         # Don't exit; partial-up is acceptable.
     else
-        log_ok "etlx-web is responding"
+        log_ok "anyduct-web is responding"
     fi
 fi
 
@@ -344,17 +344,17 @@ cat <<EOF
 
 ${C_GREEN}stack is up.${C_RESET}
 
-  etlx-server   http://$SERVER_HOST:$SERVER_PORT      ${C_DIM}(/docs, /health, /version)${C_RESET}
+  anyduct-server   http://$SERVER_HOST:$SERVER_PORT      ${C_DIM}(/docs, /health, /version)${C_RESET}
 EOF
 if [ "$START_WORKER" -eq 1 ]; then
-    echo "  etlx-worker   ${C_DIM}(executes runs)${C_RESET}        etlx-reaper ${C_DIM}(fails out zombies)${C_RESET}"
+    echo "  anyduct-worker   ${C_DIM}(executes runs)${C_RESET}        anyduct-reaper ${C_DIM}(fails out zombies)${C_RESET}"
 fi
 if [ "$START_WEB" -eq 1 ]; then
-    echo "  etlx-web      http://127.0.0.1:$WEB_PORT          ${C_DIM}(Next.js dev)${C_RESET}"
+    echo "  anyduct-web      http://127.0.0.1:$WEB_PORT          ${C_DIM}(Next.js dev)${C_RESET}"
 fi
 cat <<EOF
 
-  logs:    tail -f .run/logs/etlx-server.log .run/logs/etlx-worker.log
+  logs:    tail -f .run/logs/anyduct-server.log .run/logs/anyduct-worker.log
   stop:    ./stop.sh            (--all to also stop docker compose)
 
 EOF

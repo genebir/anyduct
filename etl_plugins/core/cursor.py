@@ -18,7 +18,7 @@ Two pieces in this module:
     host. Writes are atomic (temp file + ``os.replace``) so a crash
     mid-write can't corrupt the state.
 
-The DB-backed implementation lives in ``services/etlx-server`` so the
+The DB-backed implementation lives in ``services/anyduct-server`` so the
 core stays orchestrator-agnostic (the runs table doubles as cursor
 storage there).
 
@@ -122,7 +122,7 @@ class InMemoryCursorState(CursorState):
 
     Not durable: process exit drops state. For persistence across runs use
     :class:`FileCursorState` or the metadata-DB implementation in
-    ``services/etlx-server``.
+    ``services/anyduct-server``.
     """
 
     def __init__(self, initial: dict[str, Cursor] | None = None) -> None:

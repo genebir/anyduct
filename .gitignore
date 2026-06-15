@@ -59,7 +59,7 @@ logs/
 .cache/
 tmp/
 
-# --- Node / Next.js (services/etlx-web) ---
+# --- Node / Next.js (services/anyduct-web) ---
 node_modules/
 .next/
 out/
@@ -68,7 +68,7 @@ next-env.d.ts
 *.tsbuildinfo
 .pnpm-store/
 
-# --- Storybook (services/etlx-web) ---
+# --- Storybook (services/anyduct-web) ---
 storybook-static/
 
 # --- mkdocs (Step 6.4) ---

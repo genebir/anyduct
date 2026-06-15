@@ -508,15 +508,15 @@
   Steps 1–4 + Step 5.1까지 완료된 시점에 "UI로 파이프라인·스케줄을 시각적으로 만들고 모니터링하는 ETL 서비스"를 얹고 싶다는 요구가 생겼다. 세 가지 선택지:
   1. **하지 않는다** — 현재처럼 CLI + YAML + git만 사용. orchestrator UI(Airflow/Dagster/Prefect)와 Grafana로 모니터링 위임.
   2. **코어에 합쳐서 만든다** — `etl_plugins`에 FastAPI 서버 + 프론트 묶어 단일 패키지.
-  3. **별도 패키지로 만든다** — `etl_plugins`(라이브러리) + `services/etlx-server`(FastAPI) + `services/etlx-web`(Next.js)을 모노레포의 별도 패키지로.
+  3. **별도 패키지로 만든다** — `etl_plugins`(라이브러리) + `services/anyduct-server`(FastAPI) + `services/anyduct-web`(Next.js)을 모노레포의 별도 패키지로.
 
   비개발자(분석가/기획자/운영팀)가 직접 파이프라인을 만들고 모니터링하길 원하고, 파이프라인이 수십 개를 넘어가면 YAML + git만으로는 가시성이 떨어진다 — 1번은 장기적으로 부적합. 2번은 코어의 "라이브러리로서의 가치"(orchestrator-agnostic, Service-layer optional)를 손상시킨다.
 
 - **Decision**:
   1. **3번(별도 패키지) 채택.** 모노레포 구조로 다음 세 패키지를 둔다:
      - `etl_plugins/` — PyPI 배포 가능한 코어 라이브러리. 자체 pyproject.toml. Steps 1~6.
-     - `services/etlx-server/` — FastAPI 백엔드. 자체 pyproject.toml. 코어를 `etl-plugins>=X.Y,<X+1`로 의존.
-     - `services/etlx-web/` — Next.js + TypeScript 프론트엔드. 자체 package.json. 백엔드와 HTTP REST로만 통신.
+     - `services/anyduct-server/` — FastAPI 백엔드. 자체 pyproject.toml. 코어를 `etl-plugins>=X.Y,<X+1`로 의존.
+     - `services/anyduct-web/` — Next.js + TypeScript 프론트엔드. 자체 package.json. 백엔드와 HTTP REST로만 통신.
   2. **단방향 의존 강제.** `etl_plugins/*` 어디서도 `services/*`를 import 금지. CI의 import-graph 검사가 자동 검증.
   3. **CI 분리.** `ci-core.yml` + `ci-server.yml` + `ci-web.yml`.
   4. **서비스 단계는 Steps 7~11**로 ROADMAP에 추가.
@@ -602,7 +602,7 @@
 - **Date**: 2026-05-14
 - **Status**: Accepted
 - **Context**:
-  `services/etlx-server`(Step 7~8)는 다음 요건을 동시에 만족해야 한다:
+  `services/anyduct-server`(Step 7~8)는 다음 요건을 동시에 만족해야 한다:
   - **OpenAPI 자동 생성** — `anyduct-web`이 type-safe API client를 자동 생성(openapi-typescript)할 수 있어야 함
   - **Pydantic 통합** — 코어의 `etl_plugins.config.models.ConnectionConfig` / `PipelineConfig`를 그대로 REST body로 재사용
   - **async 네이티브** — SQLAlchemy 2.x async + 외부 시크릿 백엔드(Vault) + Kafka commit hook 등 IO-bound
@@ -637,7 +637,7 @@
 - **Date**: 2026-05-14
 - **Status**: Accepted
 - **Context**:
-  `services/etlx-server`가 관리할 도메인:
+  `services/anyduct-server`가 관리할 도메인:
   - `workspaces`, `users`, `roles`, `memberships`, `connections` (config_json + secret_refs), `pipelines`, `pipeline_versions` (이력), `schedules`, `runs`, `run_logs`, `run_metrics`, `audit_log`
   특성:
   - JSON-shaped config가 핵심(코어의 PipelineConfig dump 통째). 부분 인덱싱·검색 필요.
@@ -652,7 +652,7 @@
      - **advisory lock + `SELECT FOR UPDATE SKIP LOCKED`**가 Step 9 워커 큐의 기반(외부 큐 의존 회피, ADR-0021과 짝).
      - 코어의 통합 테스트에 이미 `testcontainers[postgres]` 사용 — 인프라 학습·운영 재활용.
   2. **SQLAlchemy 2.x async + `asyncpg`** — FastAPI(ADR-0019)와 자연스러운 짝.
-  3. **Alembic** 마이그레이션 — `services/etlx-server/alembic/`. 초기 마이그레이션은 `alembic revision --autogenerate`로 시작.
+  3. **Alembic** 마이그레이션 — `services/anyduct-server/alembic/`. 초기 마이그레이션은 `alembic revision --autogenerate`로 시작.
   4. **워크스페이스 격리**는 모든 도메인 테이블의 `workspace_id` 외래키 + 쿼리 시 자동 필터. 응용 레벨로 보장 (RLS는 첫 릴리스 범위 밖).
   5. UUID PK (uuid7 권장 — 시간순 정렬 + 인덱스 친화). `created_at` / `updated_at` 자동 stamping.
   6. 시크릿은 **절대 DB에 평문 저장 금지** (ADR-0017 §6). `connections.config_json`에는 `${SECRET_REF}` 형태 placeholder만 보관. 실제 값은 backend(Vault / AWS SM / GCP SM, ADR-0017).
@@ -691,7 +691,7 @@
 - **Decision**:
   1. **자체 실행기 채택**. 핵심 컴포넌트:
      - **`runs` 테이블** = 큐 역할도 겸함. 상태: `pending` → `running` → `succeeded`/`failed`/`cancelled`.
-     - **워커 프로세스 풀** — `services/etlx-server/etlx_server/workers/batch_worker.py`. 루프:
+     - **워커 프로세스 풀** — `services/anyduct-server/anyduct_server/workers/batch_worker.py`. 루프:
        ```
        SELECT ... FROM runs
        WHERE status='pending' AND scheduled_at <= now()
@@ -731,7 +731,7 @@
 
 - **Operating envelope, exit ramp, PoC gates**:
   1. **Operating envelope** (목표 부하): ~50 runs/sec, ~10k runs/day, p95 enqueue→start < 2s, 동시 워커 ~50. 그 너머는 broker 전환 검토.
-  2. **Exit ramp** — 미래에 broker로 옮길 때를 위한 격리: 워커가 큐를 폴링하는 코드는 `etlx_server/workers/queue.py` 한 파일에 격리 (interface = `claim_next() / heartbeat() / complete() / fail()`). 큐 백엔드 교체 = 이 한 파일 + Alembic 마이그레이션 한 번. `runs` 테이블의 도메인 컬럼(workspace_id / pipeline_id / status / started_at / finished_at)은 백엔드와 무관하게 유지.
+  2. **Exit ramp** — 미래에 broker로 옮길 때를 위한 격리: 워커가 큐를 폴링하는 코드는 `anyduct_server/workers/queue.py` 한 파일에 격리 (interface = `claim_next() / heartbeat() / complete() / fail()`). 큐 백엔드 교체 = 이 한 파일 + Alembic 마이그레이션 한 번. `runs` 테이블의 도메인 컬럼(workspace_id / pipeline_id / status / started_at / finished_at)은 백엔드와 무관하게 유지.
   3. **PoC 합격 기준** (Step 9.1 — 통과 못 하면 본 ADR을 supersede하고 Celery+Redis 또는 Temporal 재검토):
      - 50 동시 워커 + 1000 enqueued runs 부하에서 deadlock·zombie 없이 모두 종료
      - p95 enqueue→start latency < 2s
@@ -749,8 +749,8 @@
 - **Context**:
   ADR-0017에서 세 패키지 분리를 결정했다:
   - `etl_plugins/` (코어, Python)
-  - `services/etlx-server/` (FastAPI, Python)
-  - `services/etlx-web/` (Next.js, TypeScript)
+  - `services/anyduct-server/` (FastAPI, Python)
+  - `services/anyduct-web/` (Next.js, TypeScript)
   실현 방법 선택지: 단일 pyproject + 서브패키지 / uv workspace + pnpm workspace / Bazel·Pants 등 거대 빌드 시스템 / 분리된 repo 3개.
 
 - **Decision**:
@@ -762,18 +762,18 @@
      ├── services/
      │   ├── anyduct-server/
      │   │   ├── pyproject.toml        # uv workspace member, deps: etl-plugins~=0.X
-     │   │   └── etlx_server/
+     │   │   └── anyduct_server/
      │   ├── anyduct-web/
      │   │   └── package.json          # pnpm workspace member
      │   └── docker-compose.services.yml
      ├── pnpm-workspace.yaml           # 서비스 web만 포함
      └── tests/                        # 코어 테스트
      ```
-  2. **uv workspace** (`[tool.uv.workspace] members = ["services/etlx-server"]`) — server는 코어를 path dep로 개발 시 사용, 릴리스 후엔 PyPI version으로 핀.
+  2. **uv workspace** (`[tool.uv.workspace] members = ["services/anyduct-server"]`) — server는 코어를 path dep로 개발 시 사용, 릴리스 후엔 PyPI version으로 핀.
   3. **CI 3 분리**:
      - `.github/workflows/ci-core.yml` — `pyproject.toml`(root) / `etl_plugins/` / `tests/` 변경 시 트리거. unit + integration + lint + mypy + build.
-     - `.github/workflows/ci-server.yml` — `services/etlx-server/` 변경 시. 코어 wheel을 install 후 server 테스트.
-     - `.github/workflows/ci-web.yml` — `services/etlx-web/` 변경 시. pnpm install + typecheck + test + Storybook build + Chromatic.
+     - `.github/workflows/ci-server.yml` — `services/anyduct-server/` 변경 시. 코어 wheel을 install 후 server 테스트.
+     - `.github/workflows/ci-web.yml` — `services/anyduct-web/` 변경 시. pnpm install + typecheck + test + Storybook build + Chromatic.
      `paths:` 필터로 cross-package 트리거 회피.
   4. **import-graph 검사** — `ci-core.yml`에 [`import-linter`](https://github.com/seddonym/import-linter) step. 규칙:
      - `etl_plugins` 패키지는 `services` import 금지.
@@ -909,7 +909,7 @@
   사용자가 UI 전체 개편을 요청하며 두 가지를 명시했다: ① "한글, 영어 선택해서 볼 수 있도록", ② "디자인을 Arc Browser 느낌으로, 특히 폰트는 Apple 산돌고딕(SD Gothic Neo) 느낌의 폰트로". 기존 DESIGN.md(ADR-0018)는 Sans를 `Inter Variable`(Latin) + `Pretendard Variable`(Korean)로 정의했으나, 실제 코드(`globals.css`)는 Inter를 선두로 두고 있어 한국어 화면에서 시스템 폰트로 떨어졌다. 또한 i18n 메커니즘은 전무했다.
 - **Decision**:
   1. **Sans 1순위를 `Pretendard Variable`로 확정** — 한국어 우선 가변 폰트로 Apple SD Gothic Neo의 느낌을 웹에서 재현하고, Latin/Hangul을 한 폰트로 일관 처리. Inter는 폴백으로만 유지. `globals.css` `@font-face`(woff2-variations, weight 45 920) + `body`/`@theme --font-sans` 체인 선두 교체.
-  2. **폰트 self-host** — `services/etlx-web/public/fonts/PretendardVariable.woff2`. CDN 의존 금지(프로덕션 컨테이너 런타임 외부 의존 0). 빌드시 jsdelivr `npm/pretendard@1.3.9`에서 1회 받아 리포에 포함.
+  2. **폰트 self-host** — `services/anyduct-web/public/fonts/PretendardVariable.woff2`. CDN 의존 금지(프로덕션 컨테이너 런타임 외부 의존 0). 빌드시 jsdelivr `npm/pretendard@1.3.9`에서 1회 받아 리포에 포함.
   3. **i18n는 라이브러리 없이 자체 구현** — `lib/i18n/messages.ts`(typed flat dictionary, `en`이 SSOT이고 `ko: Messages`가 미러 → 키 누락은 TS 컴파일 에러) + `LocaleProvider`/`useLocale()` Context + `t(key, vars?)` `{name}` 보간. 2개 언어 UI에 next-intl 등 풀 i18n 라이브러리는 과함 — 번들 가볍게 유지.
   4. **언어 설정은 localStorage(`anyduct.locale`) 영속 + 초기값은 `navigator.language` 추정(en→en, 그 외 ko), 기본 ko**. Header에 토글 버튼.
 - **Consequences**:
@@ -1609,7 +1609,7 @@ L1 출시 직후 사용자가 5개 회신:
 **Context**: 사용자 요청 *"테스트를 중점적으로 해서 항상 샘플 데이터를 생성해서 기능이 정상적인지 좀 깊게 테스트"*. Phase BB의 4-stage e-commerce는 headline shapes를 한 번 통과시켰지만, 실전 warehouse가 매일 쓰는 다양한 패턴(SCD/Fan-out/Aggregation chain/Self-join/Schema evolution)에서 모든 Phase X/Z/AA/CC 메커니즘이 정상 동작하는지 깊게 확인 필요.
 
 **Decision**:
-1. **`services/etlx-server/tests/db/test_extended_workflow_scenarios.py`(신규)** — 실전 warehouse 패턴 5종 e2e:
+1. **`services/anyduct-server/tests/db/test_extended_workflow_scenarios.py`(신규)** — 실전 warehouse 패턴 5종 e2e:
    - **Scenario A: SCD Type 2 dimension** — `customers_history`에 `effective_from`(alias→raw col) + `effective_to`/`is_current`(리터럴) 추가. literal 컬럼이 정확히 empty upstream으로 catalog에 표시되는지 검증.
    - **Scenario B: Fan-out by status** — `raw_orders` → `confirmed_orders` + `cancelled_orders` 두 sink로 `when` 술어 routing(ADR-0027). 양쪽 sink 모두 asset edge + per-column lineage 정확.
    - **Scenario C: Aggregation chain** — 3-stage `raw_sales` → `daily_sales` → `monthly_sales`. `SUM(amount)` GROUP BY가 정확히 base table column에 attribute. CTE 거치지 않고 직접 GROUP BY인 경우도 정확.
@@ -1677,7 +1677,7 @@ L1 출시 직후 사용자가 5개 회신:
 3. **실패가 chain을 차단?** A 실패 → B 큐에 안 들어감 → catalog dirty 안 됨?
 
 **Decision**:
-1. **`services/etlx-server/tests/db/test_auto_materialize_scenarios.py`(신규)**: 3 시나리오 e2e:
+1. **`services/anyduct-server/tests/db/test_auto_materialize_scenarios.py`(신규)**: 3 시나리오 e2e:
    - **GG1 — Happy chain (A → B)**: A가 `staging` 작성, B(`auto_materialize: true`)가 `staging` 읽고 `mart` 작성. `_drain_pending_runs` helper로 큐를 끝까지 비움. 검증: A + B 각각 1 run, B의 `result_json.triggered_by_run = A.id`, catalog에 raw → staging → mart edge 전체 형성.
    - **GG2 — Fan-out (A → B + C)**: B/C 둘 다 같은 `dst/shared`를 source로 + 둘 다 `auto_materialize`. 검증: 1 A run + 2 자동 consumer run. 둘 다 trigger_by_run stamped, catalog의 `dst/shared` downstream에 mart_b + mart_c 모두 있음.
    - **GG3 — Failure blocks chain**: A의 `custom_python`이 raise → A fails. 검증: 1 A run(fails), B는 0 runs, sink/mart 비어 있음, catalog에 `dst/staging`/`dst/mart` 둘 다 없음(Phase FF의 시나리오 F와 일관).
@@ -1890,7 +1890,7 @@ L1 출시 직후 사용자가 5개 회신:
 - ✅ **Phase GG/LL과 보완**: asset-axis(GG) + cycle 차단(LL) + time-axis(NN)이 모두 sample-data로 검증된 auto-materialize family.
 - ✅ DB 마이그레이션 0. 신규 e2e만.
 - ⚠ **External wall-clock에 일부 의존**: `_tick_freshness`가 `now`를 받지만 `Asset.last_materialized_at` write는 worker가 자체 `datetime.now()` 사용. Drain 후 refresh 확인할 때 `refreshed.last_materialized_at >= now` 검증 — millisecond 정밀도 의존.
-- ⚠ **Sensors 모듈(`etlx_server.sensors.builtins.asset_freshness`) 별도 검증 미포함**: 그것도 ADR-0038 family이지만 별도 메커니즘(K3 sensor framework). 향후 슬라이스에서 sensor e2e 추가 가능.
+- ⚠ **Sensors 모듈(`anyduct_server.sensors.builtins.asset_freshness`) 별도 검증 미포함**: 그것도 ADR-0038 family이지만 별도 메커니즘(K3 sensor framework). 향후 슬라이스에서 sensor e2e 추가 가능.
 
 **검증**: 코어 unit 738 unchanged. 서버 it 457→459(+2 NN1/NN2). mypy 코어 61 + 서버 100 OK. ruff clean. DB 마이그레이션 0.
 
@@ -2381,7 +2381,7 @@ L1 출시 직후 사용자가 5개 회신:
 
 **Decision**:
 1. **`GET /workspaces/{ws}/pipelines/{pid}/dlq/records?limit=N`** (Viewer+, read-only, audit 없음). `limit`은 서버에서 `[1, 200]`로 클램프(기본 50).
-2. **`etlx_server/pipelines/dlq_preview.py` `DlqPreviewService`** — dry-run의 connection 해석 헬퍼(`load_connections_by_name` / `resolve_placeholders` / `build_connector` + `WorkspaceVariableRepository.as_dict`)를 재사용해 현재 버전의 `dlq` config를 해석한다. DLQ sink가 `BatchSource`이면(모든 RDBMS 커넥터) 최대 N행을 읽어 raw record 리스트를 반환.
+2. **`anyduct_server/pipelines/dlq_preview.py` `DlqPreviewService`** — dry-run의 connection 해석 헬퍼(`load_connections_by_name` / `resolve_placeholders` / `build_connector` + `WorkspaceVariableRepository.as_dict`)를 재사용해 현재 버전의 `dlq` config를 해석한다. DLQ sink가 `BatchSource`이면(모든 RDBMS 커넥터) 최대 N행을 읽어 raw record 리스트를 반환.
 3. **동기 bounded 읽기**: `connect()` → `read(query=…, chunk_size=limit)`를 `asyncio.to_thread`에서 열고/닫는다. `dry_run.py`의 worker-path 주의는 **source 샘플링**(긴 트랜잭션/스트림)에 대한 것 — DLQ는 작은 단방향 테이블이고 `LIMIT`으로 bounded이므로 동기 읽기가 적절. 스트림/트랜잭션-heavy 경로가 **아니다**.
 4. **dialect-aware preview query**: MSSQL은 `SELECT TOP n *`, 나머지(sqlite/postgres/mysql/vertica)는 `SELECT * … LIMIT n`. 이 dialect 지식은 **서버에 둔다**(코어를 서비스 편의로 바꾸지 않는다 — 코어 격리 규칙).
 5. **방어**: 테이블명을 `^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$`로 제한(`unsafe_table` 거부). 값은 워크스페이스 자체 config에서 오지만 SELECT에 splice하므로 defense-in-depth.
@@ -2855,7 +2855,7 @@ L1 출시 직후 사용자가 5개 회신:
 **Context**: Step 11 잔여 항목. compose prod가 레퍼런스 토폴로지(5 프로세스 1 이미지 + web + 메타DB)였고, k8s는 deployment.md의 단편 안내뿐. P3a/P3c로 멀티-replica 운영이 입증·문서화된 상태라 차트는 직역에 가깝다.
 
 **Decision**:
-- **`services/charts/etlx`**: 옵션 내장 Postgres(StatefulSet, dev 전용 — 프로덕션은 `externalDatabase.url`+`postgresql.enabled=false`), Alembic migrate **Job을 `post-install,pre-upgrade` hook**으로(첫 설치는 DB 기동을 backoff 재시도로 흡수, 업그레이드는 새 pod 롤 전에 스키마 선행), server(liveness `/health`/readiness `/ready`), **worker `replicas` 기본 2**(SKIP LOCKED — 처리량 스케일 축), scheduler/reaper/stream-worker 각 1(멀티-replica 안전하지만 HA 용도), web 토글. JWT는 `existingSecret` 또는 PEM 값 주입. vault/prometheus는 차트 범위 밖(외부 권장 + extraEnv 훅).
+- **`services/charts/anyduct`**: 옵션 내장 Postgres(StatefulSet, dev 전용 — 프로덕션은 `externalDatabase.url`+`postgresql.enabled=false`), Alembic migrate **Job을 `post-install,pre-upgrade` hook**으로(첫 설치는 DB 기동을 backoff 재시도로 흡수, 업그레이드는 새 pod 롤 전에 스키마 선행), server(liveness `/health`/readiness `/ready`), **worker `replicas` 기본 2**(SKIP LOCKED — 처리량 스케일 축), scheduler/reaper/stream-worker 각 1(멀티-replica 안전하지만 HA 용도), web 토글. JWT는 `existingSecret` 또는 PEM 값 주입. vault/prometheus는 차트 범위 밖(외부 권장 + extraEnv 훅).
 - **검증(kind 실배포)**: install → 8 pod Ready(web 포함, 서버 readiness=DB ping) → `admin create-user` → login → **파이프라인 trigger → k8s worker가 run SUCCEEDED(Arrow fast-path)** → web 200까지 전 사이클.
 - **검증이 발견한 실결함 — prod 이미지 커넥터 0**: 서버 패키지는 `etl-plugins` base만 의존하고 dev 환경은 dev-deps가 전 드라이버를 깔아줘서 가려짐 — `uv sync --no-dev`(Dockerfile)로 빌드된 prod 이미지는 **postgres 파이프라인조차 RegistryError로 실패**. `anyduct-server[connectors]` extras 신설(경량/순수파이썬 티어: postgres·mysql·duckdb·s3·kafka·mongodb·redis·sqs·kinesis·dynamodb·rabbitmq·nats) + Dockerfile `--extra connectors`. 무겁거나 C-ext인 드라이버(cassandra/mssql/vertica/클라우드 DW)는 커스텀 이미지 레이어로 opt-in(문서화).
 - **운영 교훈(검증 중 실측)**: 이미지 교체는 **`helm upgrade`로** — `kubectl rollout restart`만 하면 migrate hook이 안 돌아 새 코드가 스키마를 앞섬(UndefinedColumn 실제 발생). NOTES/문서에 명시.

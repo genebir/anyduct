@@ -1,7 +1,7 @@
 ---
 name: CI Server
 
-# services/etlx-server (FastAPI) — Step 7.1 placeholder + 이후 슬라이스에서
+# services/anyduct-server (FastAPI) — Step 7.1 placeholder + 이후 슬라이스에서
 # DB schema, auth, CRUD가 추가되면 점진적으로 잡 추가. 코어 변경에는 트리거
 # 안 됨 (path filter). ADR-0022.
 
@@ -9,14 +9,14 @@ on:
   push:
     branches: [main]
     paths:
-      - "services/etlx-server/**"
+      - "services/anyduct-server/**"
       - "pyproject.toml"
       - "uv.lock"
       - ".github/workflows/ci-server.yml"
   pull_request:
     branches: [main]
     paths:
-      - "services/etlx-server/**"
+      - "services/anyduct-server/**"
       - "pyproject.toml"
       - "uv.lock"
       - ".github/workflows/ci-server.yml"
@@ -31,7 +31,7 @@ env:
 
 jobs:
   test:
-    name: Lint + Unit (etlx-server)
+    name: Lint + Unit (anyduct-server)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -48,18 +48,18 @@ jobs:
         with:
           python-version-file: .python-version
 
-      # uv workspace이므로 root sync로 코어 + etlx-server 모두 설치된다.
+      # uv workspace이므로 root sync로 코어 + anyduct-server 모두 설치된다.
       - name: Sync deps (workspace)
         run: uv sync --frozen
 
       - name: Ruff lint (server)
-        run: uv run ruff check services/etlx-server --output-format=github
+        run: uv run ruff check services/anyduct-server --output-format=github
 
       - name: Ruff format check (server)
-        run: uv run ruff format --check services/etlx-server
+        run: uv run ruff format --check services/anyduct-server
 
-      - name: Pytest (etlx-server placeholder)
-        working-directory: services/etlx-server
+      - name: Pytest (anyduct-server placeholder)
+        working-directory: services/anyduct-server
         run: |
           uv run pytest -ra || EXIT=$?
           # placeholder 단계에서 테스트가 0개여도 통과 처리

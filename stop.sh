@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# stop.sh — etlx-server + etlx-web 정리 종료 (idempotent)
+# stop.sh — anyduct-server + anyduct-web 정리 종료 (idempotent)
 #
 # Linux / macOS / WSL2 / Git Bash 어디서나 동작합니다. 이미 죽어있거나 PID
 # 파일이 없으면 그냥 "not running"으로 보고하고 종료합니다 (실패 아님).
@@ -53,12 +53,12 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 cd "$SCRIPT_DIR"
 
 RUN_DIR=".run"
-SERVER_PID="$RUN_DIR/etlx-server.pid"
-WEB_PID="$RUN_DIR/etlx-web.pid"
-WORKER_PID="$RUN_DIR/etlx-worker.pid"
-REAPER_PID="$RUN_DIR/etlx-reaper.pid"
-SCHEDULER_PID="$RUN_DIR/etlx-scheduler.pid"
-SENSOR_SCHEDULER_PID="$RUN_DIR/etlx-sensor-scheduler.pid"
+SERVER_PID="$RUN_DIR/anyduct-server.pid"
+WEB_PID="$RUN_DIR/anyduct-web.pid"
+WORKER_PID="$RUN_DIR/anyduct-worker.pid"
+REAPER_PID="$RUN_DIR/anyduct-reaper.pid"
+SCHEDULER_PID="$RUN_DIR/anyduct-scheduler.pid"
+SENSOR_SCHEDULER_PID="$RUN_DIR/anyduct-sensor-scheduler.pid"
 
 # ----- helpers ---------------------------------------------------------------
 stop_pid_file() {
@@ -108,29 +108,29 @@ stop_pid_file() {
 }
 
 # =============================================================================
-# 1. etlx-web first (it depends on etlx-server in dev)
+# 1. anyduct-web first (it depends on anyduct-server in dev)
 # =============================================================================
 if [ "$STOP_WEB" -eq 1 ]; then
-    stop_pid_file "etlx-web" "$WEB_PID"
+    stop_pid_file "anyduct-web" "$WEB_PID"
 else
     log_skip "--no-web"
 fi
 
 # =============================================================================
-# 2. etlx-server worker + reaper (stopped alongside the server)
+# 2. anyduct-server worker + reaper (stopped alongside the server)
 # =============================================================================
 if [ "$STOP_SERVER" -eq 1 ]; then
-    stop_pid_file "etlx-worker" "$WORKER_PID"
-    stop_pid_file "etlx-reaper" "$REAPER_PID"
-    stop_pid_file "etlx-scheduler" "$SCHEDULER_PID"
-    stop_pid_file "etlx-sensor-scheduler" "$SENSOR_SCHEDULER_PID"
+    stop_pid_file "anyduct-worker" "$WORKER_PID"
+    stop_pid_file "anyduct-reaper" "$REAPER_PID"
+    stop_pid_file "anyduct-scheduler" "$SCHEDULER_PID"
+    stop_pid_file "anyduct-sensor-scheduler" "$SENSOR_SCHEDULER_PID"
 fi
 
 # =============================================================================
-# 3. etlx-server
+# 3. anyduct-server
 # =============================================================================
 if [ "$STOP_SERVER" -eq 1 ]; then
-    stop_pid_file "etlx-server" "$SERVER_PID"
+    stop_pid_file "anyduct-server" "$SERVER_PID"
 else
     log_skip "--no-server"
 fi

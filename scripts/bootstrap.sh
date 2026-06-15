@@ -6,8 +6,8 @@
 # 이 스크립트가 끝나면 다음이 모두 가능해야 한다:
 #   - 코어 라이브러리:    uv run pytest -m "not it"
 #   - 코어 통합 테스트:    uv run pytest -m it           (Docker 필요)
-#   - services/etlx-server: uv run --package etlx-server uvicorn etlx_server.main:app
-#   - services/etlx-web:    pnpm --filter @etlx/web dev
+#   - services/anyduct-server: uv run --package anyduct-server uvicorn anyduct_server.main:app
+#   - services/anyduct-web:    pnpm --filter @anyduct/web dev
 #   - 의존 검증:          uv run lint-imports
 #
 # Prerequisites (없으면 안내만 하고 계속):
@@ -25,8 +25,8 @@ if ! command -v uv >/dev/null 2>&1; then
     echo "    uv 설치 완료. 새 셸에서 PATH에 ~/.local/bin 이 포함되는지 확인하세요."
 fi
 
-# --- 2. Python deps + workspace members (코어 + services/etlx-server) ---
-echo "==> uv sync --all-packages (코어 + services/etlx-server)"
+# --- 2. Python deps + workspace members (코어 + services/anyduct-server) ---
+echo "==> uv sync --all-packages (코어 + services/anyduct-server)"
 uv sync --all-packages
 
 # --- 3. .env 생성 (이미 있으면 보존) ---
@@ -51,18 +51,18 @@ fi
 echo "==> lint-imports (단방향 의존 검증)"
 uv run lint-imports
 
-# --- 7. services/etlx-web — Node + pnpm + 의존성 ---
+# --- 7. services/anyduct-web — Node + pnpm + 의존성 ---
 if command -v pnpm >/dev/null 2>&1 && command -v node >/dev/null 2>&1; then
     NODE_MAJOR=$(node -p "process.versions.node.split('.')[0]")
     if [ "${NODE_MAJOR}" -ge 22 ]; then
-        echo "==> pnpm install (services/etlx-web, frozen lockfile)"
+        echo "==> pnpm install (services/anyduct-web, frozen lockfile)"
         pnpm install --frozen-lockfile
     else
-        echo "==> Node ${NODE_MAJOR} detected — services/etlx-web requires >=22. Skipping pnpm install."
+        echo "==> Node ${NODE_MAJOR} detected — services/anyduct-web requires >=22. Skipping pnpm install."
         echo "    nvm install 22 후 './scripts/bootstrap.sh'를 다시 실행하세요."
     fi
 else
-    echo "==> Node / pnpm 미설치 — services/etlx-web 작업은 다음 명령 후:"
+    echo "==> Node / pnpm 미설치 — services/anyduct-web 작업은 다음 명령 후:"
     echo "    nvm install 22 && npm i -g pnpm@9 && ./scripts/bootstrap.sh"
 fi
 
@@ -85,7 +85,7 @@ cat <<'EOF'
 
 코어 / 서비스 빠르게 실행해 보기:
   uv run pytest -m "not it"                                       # 코어 unit
-  uv run pytest services/etlx-server/tests                        # server placeholder unit
-  uv run --package etlx-server uvicorn etlx_server.main:app --reload
-  pnpm --filter @etlx/web dev                                     # http://localhost:3000
+  uv run pytest services/anyduct-server/tests                        # server placeholder unit
+  uv run --package anyduct-server uvicorn anyduct_server.main:app --reload
+  pnpm --filter @anyduct/web dev                                     # http://localhost:3000
 EOF

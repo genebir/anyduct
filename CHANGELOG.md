@@ -30,8 +30,8 @@
 - **same-connection SQL 푸시다운 (Phase P2c, 2026-06-10, ADR-0093)**: 소스=싱크 커넥션이면 태스크가 DB 안 `INSERT INTO…SELECT` 한 문장으로 — 데이터가 와이어/Python을 전혀 안 거침(가장 싼 데이터 경로 = 무이동). RDBMS 5+DW 4 커넥터 opt-in, plain 식별자 가드(splice 방지), 부적격은 Arrow/Record 경로 자동 폴백.
 - **postgres Arrow fast-path — Record 플레인 우회 벌크 경로 (Phase P2b, 2026-06-10, ADR-0093)**: `read_arrow`(COPY TO csv→pyarrow 스트리밍, OID 타입 프로브, Partition 슬라이스) + `write_arrow`(pyarrow 벡터 CSV→COPY FROM). 런타임이 변환 없는 단일-sink append/overwrite 파이프라인을 자동으로 벌크 직통 처리. **PG→PG 500k행 3.4×**(63.5만 vs 18.7만 rows/s). NULL vs '' CSV trap 보존 검증, 파티션 무중복 커버 검증.
 - **graph join/aggregate 컬럼 리니지 (2026-06-12)**: graph 컬럼 리니지 워커를 선형-한정 v1 → 토폴로지 워크로 일반화. `join`(fan-in)=양 입력 컬럼 합집합(공유 키는 양쪽 upstream union — P1c 멀티소스 JOIN의 카탈로그가 opaque→정확), `aggregate`=group 키+집계 출력으로 재성형(**v1이 aggregate 노드를 조용히 건너뛰어 집계 전 컬럼셋을 emit하던 부정확 수정**), sql 변환 노드=sqlglot 추론. opaque 폴백은 노드 단위로 하류 전파.
-- **Helm 차트 + prod 이미지 커넥터 수정 (Step 11, 2026-06-12, ADR-0096)**: `services/charts/etlx` — 내장 PG(dev)/migrate hook Job/server probes/worker replicas/web 토글, **kind 실배포로 install→login→run SUCCEEDED(Arrow) 전 사이클 검증**. 검증이 발견한 실결함: prod 이미지가 커넥터 extras 0(dev-deps가 가림) → `etlx-server[connectors]`(경량 12종) + Dockerfile `--extra connectors`. 운영 교훈 문서화: 이미지 교체는 `helm upgrade`(rollout restart는 migrate hook 미실행 → UndefinedColumn 실측).
-- **Grafana 대시보드 템플릿 (Step 11, 2026-06-12)**: `services/grafana/etlx-pipelines-dashboard.json` — 처리량/duration p50·p95/runs·min/errors+DLQ/stream lag 5패널, 메트릭 이름은 exporter 실측, live Grafana 13 import 검증. observability 가이드에 사용법.
+- **Helm 차트 + prod 이미지 커넥터 수정 (Step 11, 2026-06-12, ADR-0096)**: `services/charts/anyduct` — 내장 PG(dev)/migrate hook Job/server probes/worker replicas/web 토글, **kind 실배포로 install→login→run SUCCEEDED(Arrow) 전 사이클 검증**. 검증이 발견한 실결함: prod 이미지가 커넥터 extras 0(dev-deps가 가림) → `anyduct-server[connectors]`(경량 12종) + Dockerfile `--extra connectors`. 운영 교훈 문서화: 이미지 교체는 `helm upgrade`(rollout restart는 migrate hook 미실행 → UndefinedColumn 실측).
+- **Grafana 대시보드 템플릿 (Step 11, 2026-06-12)**: `services/grafana/anyduct-pipelines-dashboard.json` — 처리량/duration p50·p95/runs·min/errors+DLQ/stream lag 5패널, 메트릭 이름은 exporter 실측, live Grafana 13 import 검증. observability 가이드에 사용법.
 - **멀티 테넌시 100-workspace 부담 테스트 (Step 11, 2026-06-12)**: 동일 connection명/테이블/asset_key의 100 테넌트가 한 큐 공유 → 드레인 후 ws별 격리 무결(run/데이터/카탈로그). 실측 4.2s/100 run.
 - **Skeleton shimmer (Step 10.7, 2026-06-12)**: `Skeleton`/`TableSkeleton` primitive(+Storybook, DESIGN §6.2 — bg-elevated→bg-overlay 1.5s, reduced-motion 정적) — 9개 목록 페이지의 "Loading…" 텍스트를 교체, 행 폭 가변. → 10.7(빈 상태/에러/로딩) 전 항목 완료.
 - **전역 error boundary + 404 (Step 10.7, 2026-06-12)**: `app/error.tsx`(프로바이더 내부 — i18n 친화 카드+재시도), `app/global-error.tsx`(루트 레이아웃 사망 케이스 — 이중언어 정적), `app/not-found.tsx`(404+CTA). 런타임 에러가 백지로 끝나지 않음.
@@ -214,7 +214,7 @@
 
 - **`ConnectorRegistry` 빌트인 fallback — stale `entry_points` 대응 (Phase AAQ post-mortem)** — 사용자가 새 커넥터(vertica) 사용 시 `RegistryError: Connector 'vertica' not registered. Available: ['http','kafka','mongodb','mysql','postgres','s3','sqlite']` 발생. 원인: 실행 중인 dev 서버 프로세스가 pyproject.toml 변경 *전*에 시작 → 옛 `entry_points.txt` 메타데이터 기반으로 vertica/mssql 보이지 않음.
   - **방어 코드**: `_BUILTIN_MODULES` 매핑 + `_load_builtin(name)` — entry_points로 못 찾으면 module path로 직접 import 시도 (decorator가 등록). 외부 플러그인은 entry_points 유지(기존 동작 동일).
-  - **`list_connectors`**도 빌트인 전체 로드 — `etlx list-connectors` 가 stale install에서도 exhaustive.
+  - **`list_connectors`**도 빌트인 전체 로드 — `anyduct list-connectors` 가 stale install에서도 exhaustive.
   - 알려지지 않은 이름은 여전히 명확한 `RegistryError`로 실패 (typo 가려주지 않음).
   - 5 신규 unit (stale 시뮬레이션, vertica/mssql fallback, 미지 이름 실패, list_connectors exhaustive).
 
@@ -289,7 +289,7 @@
   - `cross_db_snapshot.yaml`: `auto_create_if_exists: drop` + `mode: overwrite` — 일일 schema-drift-tolerant 재구축.
   - `cross_db_upsert.yaml`: `mode: upsert` + `key_columns: [id]` + `auto_create_table: true` — PRIMARY KEY 자동 emit으로 live cache 패턴.
   - 헤더 코멘트에 ADR-0071/0072 운영 trade-off 명시(snapshot은 삭제도 반영 / upsert는 deleted row linger).
-  - `etlx validate` 둘 다 직접 검증: ✓ pass.
+  - `anyduct validate` 둘 다 직접 검증: ✓ pass.
   - lock-in test 2개 추가(코어 unit 810→812).
 
 ### Changed
@@ -314,7 +314,7 @@
   - 사용자 promise: AAA→AAH의 cross-DB 기능을 가장 짧은 path로 다음 사용자에게 노출.
   - 검증: web tsc clean. 코어/서버 변화 0.
 
-- **`examples/cross_db_migration.yaml` + 동반 `connections.example.yaml` (Phase AAH)** — Phases AAA→AAG의 cross-DB migration 기능을 한 페이지 분량의 카피·페이스트 가능한 사용자용 문서 + 회귀 가드. `auto_create_table` + `auto_create_if_exists` 코멘트 가이드, `etlx validate` 명령 사용법. 신규 unit `test_example_yaml_loads.py` — 예제 YAML이 향후 config-schema 변경에 드리프트 안 하도록 lock-in. 코어 unit 804→805(+1). ruff clean.
+- **`examples/cross_db_migration.yaml` + 동반 `connections.example.yaml` (Phase AAH)** — Phases AAA→AAG의 cross-DB migration 기능을 한 페이지 분량의 카피·페이스트 가능한 사용자용 문서 + 회귀 가드. `auto_create_table` + `auto_create_if_exists` 코멘트 가이드, `anyduct validate` 명령 사용법. 신규 unit `test_example_yaml_loads.py` — 예제 YAML이 향후 config-schema 변경에 드리프트 안 하도록 lock-in. 코어 unit 804→805(+1). ruff clean.
 
 ### Changed
 - **`SinkConfig.auto_create_if_exists`를 `Literal["skip","drop","error"]`로 좁힘 (Phase AAG)** — typos(`"DROP"`/`"replace"`/`"Skip"`)가 config-load 시점에서 즉시 422로 거부됨. 기존엔 plain str 받아 들어가 connector 깊은 곳의 if_exists branch에서 "unknown" 메시지로만 실패해 운영자 디버그 비용 큼. 2 신규 unit(canonical 3종 accept + typo 3종 reject). 코어 unit 802→804(+2). mypy/ruff clean. backward-compat 완전(기존 값 그대로).
@@ -619,7 +619,7 @@
   - **검증**: 신규 시각 컴포넌트 0 (`Button` + 평범한 `<select>` 사용 → DESIGN 토큰 안전, Storybook 불요). 웹 tsc clean. 서버/코어 변화 0.
 
 - **DatasetRowCountSensor (Phase R, K3 framework 5번째 빌트인)** [ADR-0041 R] — 데이터 품질 게이트의 destination-side: assertion transform(K1)이 in-flight 검사라면 row_count는 *결과 테이블* 폴링.
-  - **`etlx_server/sensors/builtins/dataset_row_count.py`**: `DatasetRowCountSensor`. config `connection_id` (BatchSource 지원 connector 필수) + `table` + `min_rows` / `max_rows` (둘 중 하나 필수) + `where` (optional SQL fragment).
+  - **`anyduct_server/sensors/builtins/dataset_row_count.py`**: `DatasetRowCountSensor`. config `connection_id` (BatchSource 지원 connector 필수) + `table` + `min_rows` / `max_rows` (둘 중 하나 필수) + `where` (optional SQL fragment).
   - **빌드 검증**: min/max 둘 다 None → ConfigError(절대 fire 안 함), min>max → ConfigError, bool int trap 거부, 음수 거부.
   - **쿼리**: `SELECT COUNT(*) AS n FROM <table> [WHERE <where>]` — connector.read() 첫 record 추출(driver별 column case 대응), connect/close 본인 소유, `asyncio.to_thread`로 이벤트 루프 비차단.
   - **Soft-fail 6분기**: missing_context / connection_not_found / secret_resolution_failed / connector_build_failed / wrong_connection_type / query_failed — 모두 metadata에 error_class.
@@ -696,9 +696,9 @@
   - **검증**: 웹 tsc clean. 코어/서버 변화 0. 신규 시각 컴포넌트 1개(ShortcutsDialog) — Storybook 별 슬라이스(DESIGN.md 토큰 100% 재사용, 임의값 0). ADR-0042로 두 페르소나 audit + sweet-spot 결정 기록.
 
 - **FileLandedSensor (K3 sensor framework 네 번째 빌트인, external-axis: S3 object polling)** [ADR-0041 K3f] — K3d(asset-axis pull "is stale?")·K3e(asset-axis push "upstream delivered?")는 카탈로그 내부 이벤트만 봤지만, K3f는 **외부 시스템(S3/MinIO)의 이벤트**에 react. Airflow `S3KeySensor` 패턴을 워크스페이스 `Connection` 시크릿 인프라 위에 구현. **이제 sensor 3축 완료**: asset-pull(freshness) / asset-push(arrival) / external(landed).
-  - **`etlx_server/sensors/context.py`**: 4번째 ContextVar `sensor_secret_backend` 추가. K3d~K3e의 ContextVar 패턴 자연 확장 — connection-referencing sensor(file_landed, 향후 dataset_row_count)가 워커처럼 `${SECRET:<path>}` 풀이 가능.
+  - **`anyduct_server/sensors/context.py`**: 4번째 ContextVar `sensor_secret_backend` 추가. K3d~K3e의 ContextVar 패턴 자연 확장 — connection-referencing sensor(file_landed, 향후 dataset_row_count)가 워커처럼 `${SECRET:<path>}` 풀이 가능.
   - **CLI `sensor-scheduler run`**: `--secret-backend` + `--secret-file-path` 옵션 추가 (worker CLI와 동일, SECRET_BACKEND env fallback로 API 서버 설정과 자동 매칭). 시크릿 미사용 deployment는 `env`(기본) 그대로.
-  - **`etlx_server/sensors/builtins/file_landed.py`**: `FileLandedSensor`. config `connection_id`(필수 UUID, workspace 내 type='s3' Connection 참조) + `prefix`(필수, 빈 문자열 허용) + `pattern`(기본 `*`, fnmatch glob) + `min_size_bytes`(기본 0). Connection lookup → `resolve_placeholders`로 시크릿 풀이 → `S3Connector(**resolved)`로 boto3 client 빌드 → `list_objects_v2` paginator를 `asyncio.to_thread` → basename fnmatch + size + `LastModified > last_triggered_at` 필터링.
+  - **`anyduct_server/sensors/builtins/file_landed.py`**: `FileLandedSensor`. config `connection_id`(필수 UUID, workspace 내 type='s3' Connection 참조) + `prefix`(필수, 빈 문자열 허용) + `pattern`(기본 `*`, fnmatch glob) + `min_size_bytes`(기본 0). Connection lookup → `resolve_placeholders`로 시크릿 풀이 → `S3Connector(**resolved)`로 boto3 client 빌드 → `list_objects_v2` paginator를 `asyncio.to_thread` → basename fnmatch + size + `LastModified > last_triggered_at` 필터링.
   - **Dedupe via `last_triggered_at`** (K3e 패턴 재사용): 같은 파일 landing이 매 tick 반복 트리거되는 함정 방지. 첫 fire(last_triggered_at=None) 시 cutoff 없음 → 기존 파일도 트리거(bootstrap 모드).
   - **Soft-fail 5분기**: missing context / connection not found / wrong type (s3 외) / secret resolution failure / S3 call raised — 모두 metadata에 `error_class` 명시. **Scheduler crash 절대 발생 안 함**.
   - **Hard config error는 build time**: prefix/pattern/min_size_bytes/connection_id UUID 검증 → POST /sensors에서 4xx 명확.
@@ -708,7 +708,7 @@
   - **K3 sensor framework v1 종료**: 코어(K3a) + 서비스(K3b) + 웹(K3c) + 4 builtins(K3d/e/f) — Airflow의 "wait-for-the-world-to-be-ready" 패턴이 풀스택 + 3축으로 완성.
 
 - **LineageArrivalSensor (K3 sensor framework 세 번째 빌트인, asset-axis event-driven DAG)** [ADR-0041 K3e] — K3d(asset_freshness, consumer-side pull "is this stale?")의 producer-side dual: **"upstream이 materialise되면 fire"**. Airflow의 ExternalTaskSensor + Dagster의 asset-of-asset 의존성 패턴을 카탈로그 위에서 구현 — consumer pipeline이 스케줄 없이 upstream materialisation 이벤트에 react. 변수→센서→오케스트레이션의 다음 한 발.
-  - **`etlx_server/sensors/builtins/lineage_arrival.py`**: `LineageArrivalSensor`. config `upstream_asset_keys: list[str]`(필수 non-empty, 자동 dedupe) + `window_minutes: int`(필수 양수, bool 거부) + `require_all: bool`(기본 true; true=AND(graph join), false=OR(fan-out)).
+  - **`anyduct_server/sensors/builtins/lineage_arrival.py`**: `LineageArrivalSensor`. config `upstream_asset_keys: list[str]`(필수 non-empty, 자동 dedupe) + `window_minutes: int`(필수 양수, bool 거부) + `require_all: bool`(기본 true; true=AND(graph join), false=OR(fan-out)).
   - **De-dupe via `last_triggered_at`**: 코어 `use_sensor_context`에 3번째 ContextVar (`sensor_last_triggered_at`) 추가. since 컷오프 = `max(window_threshold, last_triggered_at)` — 같은 materialisation 이벤트가 window 안에 머무는 동안 매 tick 반복 트리거되는 함정 방지 (예: window=60m, last_fire 5m 전 → cutoff 5m 전). scheduler tick + REST `/check` 둘 다 sensor row의 last_triggered_at 전달 → "Check now"가 production tick과 동일 결과.
   - **결과 분류 3-tier**: **arrived**(catalog 내 + since 이후 materialised) / **stale**(catalog 내 but 오래됨) / **missing**(asset_key 카탈로그에 아예 없음). consumer 디버그 시 "어느 upstream이 안 와서 안 fired됐는지" 즉시 식별 — '센서가 quiet하다'에서 멈추지 않고 정확히 누가 책임인지 metadata로 노출.
   - **Web `SENSOR_TYPES`**: `lineage_arrival` 옵션 추가, sample config hint(`{"upstream_asset_keys": [...], "window_minutes": 60, "require_all": true}`)를 JSON 필드 아래 노출. SENSOR_TYPES는 이제 3종(http/asset_freshness/lineage_arrival).
@@ -717,10 +717,10 @@
 
 - **AssetFreshnessSensor (K3 sensor framework 첫 서비스측 빌트인) + 코어 async-bridge** [ADR-0041 K3d] — 그동안 K3 sensor framework는 K3a 코어(ABC + http) + K3b 서비스(persist + tick + REST) + K3c 웹 UI까지 닫혀 있었지만 빌트인 sensor는 `http`(pure network) 하나뿐이었다. 이번 슬라이스는 **카탈로그에 적힌 자산이 stale해지면 fire하는 asset-axis sensor**를 추가 — 코어 sensor API가 서비스 DB 접근을 깔끔하게 수용하도록 확장.
   - **`etl_plugins/core/sensor.py`**: `SensorBase`에 optional `async def check_async()` 추가. 기본 구현은 `asyncio.to_thread(self.check)`로 위임 → 기존 sync 빌트인(HttpSensor) 회귀 0. 서비스측 async 빌트인은 `check_async`만 override. 스케줄러/REST 모두 항상 `await instance.check_async()` 호출 → dispatcher 한 갈래.
-  - **`etlx_server/sensors/context.py`** (신규): `sensor_session_factory` + `sensor_workspace_id` ContextVar + `use_sensor_context(session_factory, workspace_id)` async ctx mgr. PEP 567에 따라 await + `asyncio.to_thread` 경계를 가로질러 전파되므로 sync 빌트인도 동일 ContextVar 상태를 본다. 사용처 한 곳, contract 한 곳.
-  - **`etlx_server/sensors/builtins/asset_freshness.py`** (신규): `AssetFreshnessSensor`. config `asset_key`(필수 string, 비어있으면 ConfigError) + `max_age_minutes`(필수 양수 int, **bool 거부** — `isinstance(True, int) is True` 함정 방지). check_async 분기 3종: ① **never_materialised**: 해당 asset_key가 카탈로그 미존재 → triggered=True + `reason="never_materialised"`(bootstrap 의도적 트리거, 다운스트림 첫 materialization 유도). ② **stale**: `now - last_materialized_at > max_age_minutes` → triggered=True + `reason="stale"` + `age_minutes/last_materialized_at` metadata. ③ **fresh**: 미트리거 + 동일 metadata. **ADR-0038의 pipeline-axis `freshness_sla_minutes`의 asset-axis dual** — producer pipeline마다 SLA를 박지 않고 consumer 측에서 "이 자산이 30분 안에 fresh해야 한다"고 선언.
+  - **`anyduct_server/sensors/context.py`** (신규): `sensor_session_factory` + `sensor_workspace_id` ContextVar + `use_sensor_context(session_factory, workspace_id)` async ctx mgr. PEP 567에 따라 await + `asyncio.to_thread` 경계를 가로질러 전파되므로 sync 빌트인도 동일 ContextVar 상태를 본다. 사용처 한 곳, contract 한 곳.
+  - **`anyduct_server/sensors/builtins/asset_freshness.py`** (신규): `AssetFreshnessSensor`. config `asset_key`(필수 string, 비어있으면 ConfigError) + `max_age_minutes`(필수 양수 int, **bool 거부** — `isinstance(True, int) is True` 함정 방지). check_async 분기 3종: ① **never_materialised**: 해당 asset_key가 카탈로그 미존재 → triggered=True + `reason="never_materialised"`(bootstrap 의도적 트리거, 다운스트림 첫 materialization 유도). ② **stale**: `now - last_materialized_at > max_age_minutes` → triggered=True + `reason="stale"` + `age_minutes/last_materialized_at` metadata. ③ **fresh**: 미트리거 + 동일 metadata. **ADR-0038의 pipeline-axis `freshness_sla_minutes`의 asset-axis dual** — producer pipeline마다 SLA를 박지 않고 consumer 측에서 "이 자산이 30분 안에 fresh해야 한다"고 선언.
   - **SensorScheduler `_run_check` + REST `/check`** 모두 `use_sensor_context` 경유로 통일. "Check now" 버튼 결과가 production tick과 동일.
-  - **CLI `sensor-scheduler run` + sensors router**: `import etlx_server.sensors.builtins` side-effect import 추가(http와 동일 패턴). 첫 호출이 어디서 들어와도 dispatch 가능.
+  - **CLI `sensor-scheduler run` + sensors router**: `import anyduct_server.sensors.builtins` side-effect import 추가(http와 동일 패턴). 첫 호출이 어디서 들어와도 dispatch 가능.
   - **웹 `SENSOR_TYPES`**: `asset_freshness` 옵션 추가 + 타입별 sample config hint(`{"asset_key": "postgres://prod/main/users", "max_age_minutes": 30}`)를 JSON 필드 아래 노출 → 운영자가 docs 보지 않고도 shape 인지. i18n `sensors.configExamplePrefix` en/ko 추가, `fieldConfigHelp` 문구를 sample-driven으로 일반화.
   - **검증**: 5 신규 it(builder validation / never-materialised / fresh quiet / scheduler end-to-end stale → PENDING run + sensor_result on result_json / missing-context soft-fail). 코어 sensor unit 19 green(check_async 기본 bridge 검증). 서버 sensor it 17(12→17) green. 웹 tsc clean. **다음 빌트인 후보**: file-landed via S3, lineage-arrival, dataset-row-count.
 
@@ -742,21 +742,21 @@
     1. 사이드바 Sensors → "New sensor"
     2. 이름 `wait-for-upstream`, 타입 http, config `{"url":"https://upstream/healthz","contains":"ready"}`, target=원하는 파이프라인, poll 30s
     3. 저장 후 list의 "지금 확인" 버튼으로 즉시 검증 → toast로 결과
-    4. `etlx-server sensor-scheduler run`이 백그라운드 폴링 시작
+    4. `anyduct-server sensor-scheduler run`이 백그라운드 폴링 시작
   - **→ Phase K의 sensor framework 완료**(K3a 코어 + K3b 서비스+REST + K3c 웹 UI). Airflow의 hallmark "wait-for-the-world-to-be-ready" 패턴이 코어→서비스→UI 풀스택으로 구현됨.
   - **남은 K**: 추가 빌트인 sensor(file-landed via S3 / asset-freshness via 카탈로그) / K4 graph 백필 / 운영 강화(샌드박스·로그 redaction·Monaco self-host).
 - **Sensor 서비스 영속화 + tick + REST — K3b** [ADR-0041 K3b] — K3a 코어 ABC를 서비스가 비로소 폴링·트리거 가능. 외부 이벤트(HTTP healthz, file landed, asset freshness 등)가 데이터 파이프라인 트리거의 1급 시민이 됨.
   - **Alembic 0008 `sensors` 테이블**: id/workspace_id/name/type/config_json(JSONB)/target_pipeline_id(SET NULL — pipeline 삭제 시 sensor 히스토리 보존 + scheduler skip+log)/poll_interval_seconds(default 60)/is_active/last_check_at/last_triggered_at/last_result_json + UNIQUE(workspace_id, name) + active-only partial index on (last_check_at) WHERE is_active=true(tick 쿼리 비용 감소).
   - **ORM `Sensor`** + **`SensorRepository`** (CRUD + `record_check` for tick + `_UNSET` sentinel으로 PATCH의 omitted-vs-explicit-null 구분 — `target_pipeline_id=null` = orphan 의도, 미지정 = unchanged). 도메인 예외: `SensorNameTakenError` → 409, `UnknownSensorTypeError` → 422.
   - **`SensorScheduler`** tick(K2 패턴 재사용): active 센서 `FOR UPDATE SKIP LOCKED`로 multi-replica 안전(동시 tick 두 replica가 disjoint partition 처리, 한 sensor 중복 fire 0). Python에서 poll_interval gate(5s 플로어로 typo 보호), `asyncio.to_thread`로 sync `check()` 호출(이벤트 루프 비차단). triggered → target pipeline의 current version에 PENDING Run enqueue + `result_json`에 `{triggered_by: "sensor", sensor_id, sensor_name, sensor_result}` stamp → 다운스트림 pipeline이 무엇이 fired인지 즉시 인지. `last_check_at` 매 폴링, `last_triggered_at`만 fire 시 갱신, `last_result_json`은 항상 캐시(operator가 manual re-check 없이 디버그 가능).
-  - **CLI `etlx-server sensor-scheduler run`**: scheduler/stream-worker 패턴 미러, `--tick-interval`(기본 5s) + `--log-level` + 시작 시 `etl_plugins.sensors` import로 빌트인 register side-effect.
+  - **CLI `anyduct-server sensor-scheduler run`**: scheduler/stream-worker 패턴 미러, `--tick-interval`(기본 5s) + `--log-level` + 시작 시 `etl_plugins.sensors` import로 빌트인 register side-effect.
   - **REST 6 엔드포인트** (`/workspaces/{ws}/sensors` prefix): GET list (Viewer+) / POST create (Editor+) / GET get (Viewer+) / PATCH update (Editor+) / DELETE (Editor+) / POST `/check` (Viewer+, manual one-shot — trigger run enqueue 안 함, "did I configure right?" debug용). create/update 시 `build_sensor`로 즉시 config 검증(invalid → 422 + session rollback, **절대 unrunnable row 안 남김**). 모든 mutation은 audit pairing(`sensor.create`/`sensor.update`/`sensor.delete`).
   - **테스트** (12 신규 it): repo 3(round trip / duplicate name 409 / unknown type 422) + scheduler 4(triggered → 1 PENDING run + `last_triggered_at` 갱신 / quiet check no enqueue / **SKIP LOCKED multi-replica `asyncio.gather` 정확히 1 fire** / poll_interval 내라면 skip) + REST 5(CRUD happy / unknown type 422 / invalid config 422 + DB 비어 있음 검증 / non-member 403 / manual `/check` 결과 반환 + run enqueue 안 함 검증).
   - **검증**: 서버 it 324 green, mypy 94/ruff OK. 코어 회귀 영향 0.
   - **사용 흐름**:
     ```bash
     # 1. CLI: 센서 스케줄러 start
-    etlx-server sensor-scheduler run --tick-interval 5
+    anyduct-server sensor-scheduler run --tick-interval 5
 
     # 2. REST: 외부 healthz가 200 + body에 "ready" 보이면 ETL 파이프라인 트리거
     POST /workspaces/{ws}/sensors
@@ -820,12 +820,12 @@
     export OPENLINEAGE_URL=http://marquez:5000
     export OPENLINEAGE_NAMESPACE=prod-warehouse  # optional, default 'etl-plugins'
     export OPENLINEAGE_API_KEY=sk-...            # optional bearer
-    etlx-server worker run
+    anyduct-server worker run
     # 모든 run 의 START/COMPLETE/FAIL 이 Marquez 로 POST 됨
     ```
   - **다음 후보**: K5b 컬럼 lineage facet | K3 sensor framework | K4 graph 백필 | 운영 강화(샌드박스·로그 redaction·Monaco self-host).
 - **Multi-replica stream worker 락 — K2b** [ADR-0041 K2b] — **Production HA 완성**. K2가 batch scheduler 단계를 안전하게 했다면 K2b는 stream worker 단계까지 닫음. 이제 batch + stream 모두 active-active 다중 replica 가능.
-  - **`etlx_server/worker/stream.py` `_start_schedule`**: 두 단계 가드.
+  - **`anyduct_server/worker/stream.py` `_start_schedule`**: 두 단계 가드.
     - ① **`FOR UPDATE SKIP LOCKED`로 schedule row 락** — replica A의 `_start_schedule`이 진행 중이면 동시에 들어온 replica B의 select가 즉시 None 반환 → spawn 안 함.
     - ② **post-lock "RUNNING run 이미 존재" 재확인** — A가 commit하고 lock 해제한 직후 들어온 B는 lock 자체는 잡지만, 활성 `RUNNING` Run row(A가 막 insert)를 보고 peer 소유 신호로 해석 → skip. 이게 두 단계 가드가 필요한 이유: 첫 번째는 동시-진입 차단, 두 번째는 순차-진입 차단.
   - **Failover**: 소유 replica process crash 시 RUNNING Run row의 heartbeat 가 stale → `ZombieReaper`(Step 9.3b)가 FAILED로 flip → 그 schedule이 자유로워져 다음 tick에서 살아남은 replica가 자연스럽게 인수. 진정한 HA — single replica failure가 stream pipeline outage 안 일으킴.
@@ -833,9 +833,9 @@
   - **테스트** (2 신규):
     - `test_two_stream_workers_spawn_one_run_for_same_schedule` — 두 `StreamWorker` 인스턴스의 `_start_schedule`을 `asyncio.gather`로 동시 호출, 정확히 한 개의 RUNNING run 검증. 후속 호출도 reject(post-lock 가드).
     - `test_stream_worker_skips_when_peer_holds_running_run` — peer의 RUNNING run을 pre-seed해놓고 다른 worker의 `_start_schedule` 호출 → None 반환 + 신규 row 없음 검증.
-  - **검증**: stream worker it 8/8 green(6 기존 + 2 신규), scheduler + worker-lifecycle 회귀 48/48 통과, mypy(89)/ruff OK. **batch + stream 모두 HA로 K2 묶음 완료** — 이제 `etlx-server scheduler run --replicas N`(가상의 운영 구성)으로 active-active 배포 가능. **다음 후보**: K3 sensor framework / K4 graph 백필 / K5 OpenLineage / 운영(샌드박스·로그 redaction·Monaco self-host).
+  - **검증**: stream worker it 8/8 green(6 기존 + 2 신규), scheduler + worker-lifecycle 회귀 48/48 통과, mypy(89)/ruff OK. **batch + stream 모두 HA로 K2 묶음 완료** — 이제 `anyduct-server scheduler run --replicas N`(가상의 운영 구성)으로 active-active 배포 가능. **다음 후보**: K3 sensor framework / K4 graph 백필 / K5 OpenLineage / 운영(샌드박스·로그 redaction·Monaco self-host).
 - **Multi-replica scheduler 락 — K2** [ADR-0041 K2] — 스케줄러 SPOF 해소. 그 동안 batch scheduler는 single-replica 가정 — 프로세스가 죽으면 모든 cron firing 멈춤(real outage). 이제 두 replica가 active-active로 안전.
-  - **`etlx_server/scheduler/scheduler.py`**: `_load_due_schedules`에 SQLAlchemy `with_for_update(skip_locked=True)` 추가 → 두 replica가 `tick_once()`를 동시 호출해도 schedule row가 한 replica의 트랜잭션에 락걸려 다른 replica는 빈 set을 받음. 락은 caller의 트랜잭션 commit/close 시 해제. 한 tick 내에서 disjoint partition으로 처리되고, 다른 replica의 다음 tick에서 같은 schedule을 재발견하더라도 첫 fire가 이미 cron 베이스를 미래로 밀어뒀으므로 중복 fire 없음(no-catchup 정책 + 베이스 = `MAX(runs.scheduled_at)`).
+  - **`anyduct_server/scheduler/scheduler.py`**: `_load_due_schedules`에 SQLAlchemy `with_for_update(skip_locked=True)` 추가 → 두 replica가 `tick_once()`를 동시 호출해도 schedule row가 한 replica의 트랜잭션에 락걸려 다른 replica는 빈 set을 받음. 락은 caller의 트랜잭션 commit/close 시 해제. 한 tick 내에서 disjoint partition으로 처리되고, 다른 replica의 다음 tick에서 같은 schedule을 재발견하더라도 첫 fire가 이미 cron 베이스를 미래로 밀어뒀으므로 중복 fire 없음(no-catchup 정책 + 베이스 = `MAX(runs.scheduled_at)`).
   - **테스트** (2 신규 it):
     - `test_skip_locked_hides_schedule_from_concurrent_loader` — **deterministic**: A의 txn 보유 중 B의 `_load_due_schedules` 빈 결과 확인, A commit 후 C가 row 재발견. event-loop scheduling 의존 0.
     - `test_two_parallel_ticks_fire_due_schedule_at_most_once` — **e2e**: `asyncio.gather`로 두 `Scheduler` 인스턴스 동시 `tick_once`, 정확히 1 PENDING run 검증.
@@ -848,7 +848,7 @@
     - `pointer-events`(pointerdown/move/up/cancel) 사용 — 마우스/터치/펜 공통, `setPointerCapture`로 드래그 중 캔버스 벗어나도 추적 유지.
     - **clamp 380~880px** (Monaco 편안한 폭 ~ 캔버스가 너무 좁아지지 않는 한계). 기본 520px(이전 drawer 너비와 동일).
     - 드래그 중 `document.body.style.cursor = "col-resize"` + `userSelect = "none"`으로 글로벌 cursor 일관성 + 텍스트 선택 방지, pointerup 시 복원.
-  - **localStorage 영속**: `etlx.builder.drawerWidth` key. `_readStoredWidth()` helper가 SSR/private 모드/quota/NaN 모두 안전 fallback → 어떤 환경에서도 기본값으로 떨어지지 않고 깨지지 않음.
+  - **localStorage 영속**: `anyduct.builder.drawerWidth` key. `_readStoredWidth()` helper가 SSR/private 모드/quota/NaN 모두 안전 fallback → 어떤 환경에서도 기본값으로 떨어지지 않고 깨지지 않음.
   - **i18n**: `builder.resizeDrawer` 신규 key("Drag to resize the properties panel" / "드래그해서 속성 패널 너비 조절") — aria-label + title.
   - **검증**: 웹 tsc green. PropertiesPanel API 변화 없음(외부 caller는 무영향).
 - **빌더 노드 편집 drawer (사용자 제안)** — 사용자가 *"노드를 선택했을 때 모달형태로 띄우는 형태로 바꾸는 건 어떨까?"* 라고 제안. 옵션(full modal / drawer / 현재 + Expand) 중 **drawer**를 선택(권장안). 핵심 통증은 "320×320 PropertiesPanel이 Monaco/columns/mapping/JSON 필드에 너무 좁다"였는데, 그 통증만 외과적으로 해결.
@@ -911,7 +911,7 @@
 ### Removed
 - **Spark 실행 백엔드 + ExecutionBackend 추상화 전면 제거** [ADR-0040, supersedes ADR-0031/0032] — 오케스트레이션 축([[ultimate-vision]]: Airflow + Dagster) 집중을 위해 분산 컴퓨트 경로를 걷어내고 실행 모델을 **로컬 인프로세스 단일 경로**(linear / task-DAG / dataflow graph)로 단순화.
   - 코어: `etl_plugins/runtime/spark/`(backend.py/predicate.py) + `runtime/backends.py`(`ExecutionBackend` ABC·레지스트리·`LocalBackend`·`run_config`) 삭제. `PipelineConfig.engine` 필드 제거 — 단 `extra="forbid"` 호환 위해 `model_validator(mode="before")`로 저장된 config의 legacy `engine` 키를 흘려보냄(값 무시).
-  - 서비스: 워커 `engine` 분기·`_run_spark`·`spark_master`·`--spark-master` 제거, `Dockerfile.worker` 삭제, `docker-compose.prod.yml`의 `etlx-spark-worker`(--profile spark) 제거, `[spark]` extra(양 pyproject) + pyspark mypy override 제거.
+  - 서비스: 워커 `engine` 분기·`_run_spark`·`spark_master`·`--spark-master` 제거, `Dockerfile.worker` 삭제, `docker-compose.prod.yml`의 `anyduct-spark-worker`(--profile spark) 제거, `[spark]` extra(양 pyproject) + pyspark mypy override 제거.
   - 웹: 빌더 엔진 select·Spark 경고 배너·`isSparkUnsupported`·`Engine` 타입·`engine` emit·목록 Spark 배지·i18n `engine.*` 제거.
   - 미구현이던 P3.4b(외부 클러스터 submit)도 함께 폐기. 재도입 필요 시 새 ADR. 과거 구현은 git 히스토리 + ADR-0031/0032 참조. 테스트: 코어 `test_spark_backend.py`/`test_backends.py` + 서버 spark e2e 삭제.
 
@@ -976,7 +976,7 @@
   - 서버 14 worker + spark gated 통과, mypy strict 76 OK, ruff OK.
   - 남은 것: P3.4b 외부 클러스터 잡 submit(thin worker, spark-submit/Databricks) — 실 클러스터 필요.
 - **빌더 UI 엔진 선택 (P3.5)** [ADR-0031] — 빌더 헤더에 엔진 select(Local/Spark). `PipelineConfigJson.engine` + `serialize`/`serializeGraph`가 spark일 때 `engine` emit, 로드 시 복원. `isSparkUnsupported`(현재 `python` transform)로 Spark에서 못 도는 노드를 상단 경고 배너로 표시(엔진=spark일 때). i18n `engine.*`(en/ko). 웹 typecheck OK.
-- **Spark 워커 배포 이미지 + 문서** [ADR-0031/0032] — `services/etlx-server/Dockerfile.worker`(기존 server 이미지 + OpenJDK17 JRE + `[spark]` extra). pyspark가 Spark jar를 포함해 시스템 의존성은 JRE 하나; JDBC 드라이버는 `spark.jars.packages` 자동 fetch(최소 설정). etlx-server `[project.optional-dependencies] spark`. `docker-compose.prod.yml`에 `etlx-spark-worker`(`--profile spark`, 기본 `local[*]`, `--spark-master`로 클러스터). `DEVELOPMENT.md §10`에 빌드/실행/시크릿/제약/air-gapped 정리. ⚠️ 이미지 빌드는 이 환경에서 미검증(설계/문서).
+- **Spark 워커 배포 이미지 + 문서** [ADR-0031/0032] — `services/anyduct-server/Dockerfile.worker`(기존 server 이미지 + OpenJDK17 JRE + `[spark]` extra). pyspark가 Spark jar를 포함해 시스템 의존성은 JRE 하나; JDBC 드라이버는 `spark.jars.packages` 자동 fetch(최소 설정). anyduct-server `[project.optional-dependencies] spark`. `docker-compose.prod.yml`에 `anyduct-spark-worker`(`--profile spark`, 기본 `local[*]`, `--spark-master`로 클러스터). `DEVELOPMENT.md §10`에 빌드/실행/시크릿/제약/air-gapped 정리. ⚠️ 이미지 빌드는 이 환경에서 미검증(설계/문서).
 - **Dataflow DAG — 레코드 단위 그래프 실행 + 어느 노드에서나 분기 (P2.1+P2.2)** [ADR-0030] — "자유 순서 + 모든 작업에서 분기".
   - 코어: `PipelineConfig.graph`(세 번째 상호배타 shape) = `GraphNodeConfig`(source/transform/sink) + `GraphEdgeConfig`(from_node/to_node/`when`). 검증: 단일 source, 비-source 노드 incoming edge 1개(tree, fan-in 미지원), sink≥1, id 유일. `Task.graph_nodes/graph_edges` + `_run_graph_task`(sink별 source 재읽기 + source→sink 유일 경로 재생, edge `when`으로 분기). batch 전용, cursor/stream 미지원. public export `GraphConfig`/`GraphNode`/`GraphEdge`.
   - 서버: `referenced_connection_names`가 graph 노드 순회. config_json 자동 round-trip. 워커가 graph task 그대로 실행(sqlite 분기 e2e 검증).
@@ -987,14 +987,14 @@
   - 실행 방식: `_run_task`가 **sink별로 source를 재읽기**(버퍼링 안 함 → 무한/대용량 스트림에서도 메모리 bound). `records_read`/`new_cursor`는 첫 패스만 카운트, `cursor_to` 상한 필터는 매 패스 적용, `records_written`은 합산. 단일-sink는 기존 플랫 `Task.sink*` 경로 그대로 — 관측 동작 무변경.
   - stream fan-out은 범위 외: `build_pipeline`이 `mode=="stream" and len(sinks)>1`이면 `ConfigError`, `_arun_stream_task`도 다중 sink면 `TaskError`.
   - 서버: `referenced_connection_names`가 모든 sink를 포함(dry-run/worker 공통). config는 `PipelineConfig.model_validate`/`model_dump`로 자동 round-trip.
-  - etlx-web 빌더: sink를 여러 개 추가 가능(source만 dedup·replace), canvas는 spine(source→transforms)에서 sinks가 수직으로 fan-out되는 레이아웃 + branch edge, sink는 ≥2일 때만 삭제 가능, FlowSummary가 분기 그룹 표시. `serialize`/`deserialize`가 `sink`(단수)↔`sinks`(복수) 양방향.
-  - 테스트: 코어 +12 unit(fan-out 7 + builder/config 5), 서버 +2 it(fan-out round-trip + sink/sinks 동시 지정 422). 코어 459 unit / 서버 258 db 전부 green, mypy strict(코어 45 + 서버 75) OK, etlx-web typecheck OK.
+  - anyduct-web 빌더: sink를 여러 개 추가 가능(source만 dedup·replace), canvas는 spine(source→transforms)에서 sinks가 수직으로 fan-out되는 레이아웃 + branch edge, sink는 ≥2일 때만 삭제 가능, FlowSummary가 분기 그룹 표시. `serialize`/`deserialize`가 `sink`(단수)↔`sinks`(복수) 양방향.
+  - 테스트: 코어 +12 unit(fan-out 7 + builder/config 5), 서버 +2 it(fan-out round-trip + sink/sinks 동시 지정 422). 코어 459 unit / 서버 258 db 전부 green, mypy strict(코어 45 + 서버 75) OK, anyduct-web typecheck OK.
 - **조건부 라우팅 — sink별 `when` 술어 (BranchPythonOperator류)** [Step 10.4 / ADR-0027] — 레코드 값에 따라 후행 sink가 분기.
   - 코어: `SinkConfig.when` + `SinkSpec.when`. filter transform과 동일한 샌드박스 `eval`(`{"__builtins__": {}}`, `data`/`metadata`)로 transform *후* 레코드 평가. `_run_task`에 **first-match(switch)** 라우팅 — 처음 truthy인 conditional sink로만 가고, 매칭 없으면 `when` 없는 default sink(들)로. `when`이 하나도 없으면 순수 fan-out(ADR-0026)으로 동작(하위 호환).
   - `build_pipeline`: `when` 구문을 빌드 시점에 `compile` 검증(dry-run 조기 실패), 단일 sink라도 `when`이 있으면 `sinks[]` 경로 사용, `when`은 connector write 옵션에서 제외. stream + `when`은 `ConfigError`(batch 전용).
   - 서버: 코드 변경 없음 — `when`은 `PipelineConfig` validate/dump로 자동 round-trip, 라우팅은 연결을 추가하지 않음.
-  - etlx-web: batch sink(postgres/mysql/sqlite/mongodb/s3)에 "Routing condition" 필드 추가(no-code filter 빌더 `kind:"filter"` 재사용 → 빈 값은 omit). FlowSummary가 조건 있는 sink에 "if <조건>" 힌트. Kafka(stream)는 제외.
-  - 테스트: 코어 +10 unit(routing 6 + builder 4). 코어 469 unit green, mypy strict 45 OK, 서버 pipelines/yaml/scenario 39 it green, etlx-web typecheck OK.
+  - anyduct-web: batch sink(postgres/mysql/sqlite/mongodb/s3)에 "Routing condition" 필드 추가(no-code filter 빌더 `kind:"filter"` 재사용 → 빈 값은 omit). FlowSummary가 조건 있는 sink에 "if <조건>" 힌트. Kafka(stream)는 제외.
+  - 테스트: 코어 +10 unit(routing 6 + builder 4). 코어 469 unit green, mypy strict 45 OK, 서버 pipelines/yaml/scenario 39 it green, anyduct-web typecheck OK.
 - **Task-orchestration DAG — 의존성 + 위상 실행 (Airflow류, P1.1+P1.2)** [Step 10.4-DAG / ADR-0028] — "1:1 선형 말고 Airflow DAG처럼"의 1단계.
   - 코어 P1.1: `Task.depends_on` + `Pipeline._ordered_tasks()` 위상 정렬(Kahn, ready 집합은 원래 리스트 순서로 안정 tie-break) + 사이클/미존재 의존/자기 의존/중복·공백 task 이름 검증(`PipelineError`). `depends_on`이 하나도 없으면 기존 순차 순서 그대로(하위 호환). batch 전용·단일 스레드 순차.
   - 코어 P1.2: `TaskConfig`(name/source/transforms/sink·sinks/depends_on) 신설 + `PipelineConfig.tasks` — 단일-task shape(top-level source/sink)와 상호배타, `effective_tasks()`로 정규화(단일 shape는 1-원소 TaskConfig로 승격). `build_pipeline`이 task별 `_build_task` + 의존성 참조 검증 + 빌드 시점 `_ordered_tasks()`로 사이클 조기 검출. stream 다중-task DAG는 `ConfigError`.
@@ -1015,7 +1015,7 @@
   - **버그 수정**: 빌더 로드 시 `getTriggers`가 `Promise.all`에 묶여 있어, `0003` 미적용 등으로 실패하면 파이프라인 목록까지 비어 "다른 파이프라인 없음"으로 보이던 문제 — triggers 로드를 best-effort로 분리(실패해도 목록/캔버스는 정상 로드).
 - **신규 transform operator 4종 + 카테고리 팔레트** [Step 10.x] — Airflow류 빌딩블록 확장.
   - 코어 `runtime/transforms.py`에 `select`(컬럼 유지)/`drop`(컬럼 제거)/`add_constant`(상수 컬럼)/`dedupe`(key_columns 중복 제거, run 내 stateful) 등록. 모두 `build_transform` 디스패치로 워커에서 실행됨. +7 unit(코어 502 green).
-  - etlx-web `operators.ts`에 4종 operator 추가 + `operatorCategory()`/`OPERATOR_KIND_GROUPS`(kind→category 그룹). 팔레트(`Palette`)를 **검색창 + kind별 → 카테고리별 접기/펼치기** 로 재작성(Databases/NoSQL/Object storage/Streaming/HTTP·API/Columns/Rows/Code). 검색 시 자동 펼침. i18n `builder.searchOperators`/`builder.noOperatorMatch`.
+  - anyduct-web `operators.ts`에 4종 operator 추가 + `operatorCategory()`/`OPERATOR_KIND_GROUPS`(kind→category 그룹). 팔레트(`Palette`)를 **검색창 + kind별 → 카테고리별 접기/펼치기** 로 재작성(Databases/NoSQL/Object storage/Streaming/HTTP·API/Columns/Rows/Code). 검색 시 자동 펼침. i18n `builder.searchOperators`/`builder.noOperatorMatch`.
 
 ## [0.1.0] - 2026-05-19
 
@@ -1044,7 +1044,7 @@ suite + mkdocs site.
   - 9 new pages under `docs/`:
     - `index.md` — overview code example, "What you get", design principles.
     - `getting-started/install.md` — connector / orchestrator / observability / secret-backend extras matrix, `scripts/bootstrap.sh` dev install.
-    - `getting-started/quickstart.md` — 5-minute install → connections.yaml → pipeline.yaml → `etlx run` → programmatic alternative.
+    - `getting-started/quickstart.md` — 5-minute install → connections.yaml → pipeline.yaml → `anyduct run` → programmatic alternative.
     - `guides/connectors.md` — `BatchSource` / `BatchSink` / `StreamSource` / `StreamSink` ABC table, built-in catalog table, "adding your own" example with `@ConnectorRegistry.register("my-thing")`, reserved option-name conventions.
     - `guides/pipelines.md` — `Pipeline` / `Task` fluent API, `RunResult` fields, stream mode + `arun_stream`, `RetryConfig` / `DlqConfig`, hook events (`pre_run` / `on_task_start` / `on_task_end` / `on_error` / `post_run`), YAML alternative.
     - `guides/cursors.md` — Step 6.1 walkthrough: full resumable sync example, semantics matrix (exclusive `cursor_from` / inclusive `cursor_to`), state backend table (InMemory / File / DbCursorState), `BatchSource.read_since` four invariants, what this *doesn't* cover yet (lineage / multi-column / stream offsets).
@@ -1056,7 +1056,7 @@ suite + mkdocs site.
   - Cumulative: docs-only slice, test counts unchanged at 909 project-wide.
 - **DB-backed `CursorState`** [Step 6.1] — closes the cursor abstraction in the service layer so incremental syncs are durable across worker restarts without a sidecar JSON file.
   - New `cursors` metadata table — composite PK `(workspace_id, name)`, `cursor_value: JSONB` (so any `CursorValue` round-trips without a type-discriminator column), `ON DELETE CASCADE` from `workspaces`. Alembic migration `0002_cursors` (`alembic upgrade head` from existing deployments).
-  - New `etlx_server.cursors` package:
+  - New `anyduct_server.cursors` package:
     - `CursorRepository` — async (asyncpg, same `AsyncSession` lifecycle as the rest of the service). `get` / `list_for_workspace` / `upsert` (via Postgres `INSERT … ON CONFLICT DO UPDATE RETURNING`) / `delete`. Mutations stay in the caller's transaction so a worker can pair the watermark write with its Run row commit.
     - `DbCursorState` — sync, implements the core `etl_plugins.core.cursor.CursorState` ABC. Uses a dedicated **psycopg v3 sync engine** (separate from the FastAPI app's asyncpg engine) — asyncpg pools are bound to their creating event loop, so calling sync code that internally re-enters asyncio fails with "Future attached to a different loop". A sync engine has no such constraint and can be driven from any thread, which matches the production worker pattern where Pipeline.run is pushed onto `asyncio.to_thread`.
     - `DbCursorState.from_url(url, *, workspace_id)` swaps the `+asyncpg` driver suffix for `+psycopg` so callers can reuse the same `DATABASE_URL` env var the FastAPI app uses.
@@ -1077,7 +1077,7 @@ suite + mkdocs site.
   - Exceptions on either span are recorded as events (record_exception); the `success` attr on `pipeline.run` flips to False when the loop unwinds.
   - 4 new tests added to `test_otel.py`: full run + task spans with attrs; transform error attaches exception event on both spans and flips success; cursored run stamps cursor_from / cursor_to; NoOp tracer path (no `configure_otel` call) doesn't crash.
 - **OpenTelemetry observability adapters** [Step 6.2] — second concrete `Metrics` + `Tracer` backend after NoOp.
-  - `etl_plugins/observability/otel.py` ships `OTelCounter` / `OTelHistogram` / `OTelMetrics` (caches instruments by name so repeated `counter("etlx.records.read")` doesn't leak SDK identifiers) + `OTelSpan` / `OTelTracer`. The SDK is **lazy-imported** inside `configure_otel(...)` so a plain `pip install etl-plugins` (no `[observability]` extra) never pulls OpenTelemetry.
+  - `etl_plugins/observability/otel.py` ships `OTelCounter` / `OTelHistogram` / `OTelMetrics` (caches instruments by name so repeated `counter("anyduct.records.read")` doesn't leak SDK identifiers) + `OTelSpan` / `OTelTracer`. The SDK is **lazy-imported** inside `configure_otel(...)` so a plain `pip install etl-plugins` (no `[observability]` extra) never pulls OpenTelemetry.
   - `configure_otel(*, service_name, otlp_endpoint=None, in_memory=False, resource_attributes=None) -> OTelHandle` swaps the global metrics + tracer backends. Production path: OTLP/gRPC exporter to a collector. Test path: `in_memory=True` wires `InMemoryMetricReader` + `InMemorySpanExporter` so assertions can introspect emissions without standing up a collector. `OTelHandle.shutdown()` flushes + tears down both providers cleanly.
   - `[project.optional-dependencies] observability` is now `["opentelemetry-sdk>=1.25", "opentelemetry-exporter-otlp-proto-grpc>=1.25"]` (Step 1.6 placeholder unblocked). Added to dev group so the test suite always sees the SDK; mypy override for `opentelemetry, opentelemetry.*` keeps strict mode green.
   - 14 new unit tests via `tests/unit/observability/test_otel.py` (per-test InMemory backend fixture, NoOp reset on teardown). Cover backend swap on `configure_otel`, endpoint-required-when-not-in-memory, reset restores NoOp, counter add → reader sees correct sum + instrument caching + no-attribute path, histogram record → matching count+sum + caching, span lifecycle through context manager → exporter sees attributes, exception inside `with` attaches event, and `isinstance` checks on the three wrapper classes.
@@ -1106,24 +1106,24 @@ suite + mkdocs site.
   - `components/shell/header.stories.tsx` — 5 stories (title-only, with-subtitle, with-actions, anonymous state, light theme via swapped `MockThemeProvider initial="light"`).
   - `components/shell/sidebar.stories.tsx` — 6 stories driven by Storybook 9's `parameters.nextjs.navigation.pathname` so the active-nav state lights up the right entry (pipelines-active, overview-active, settings-active, blue-workspace `currentIndex=1`, no-workspaces, solo).
   - `components/connections/connection-form.stories.tsx` — 4 stories (create, edit-postgres, edit-http, edit-mongo). The "Save" button intentionally 401s inside Storybook — these stories are for visual + a11y verification of the connector-type-aware multi-step form.
-  - 12 components × ~53 stories now in the catalog. `pnpm --filter @etlx/web {typecheck,build,build-storybook}` all green.
+  - 12 components × ~53 stories now in the catalog. `pnpm --filter @anyduct/web {typecheck,build,build-storybook}` all green.
 - **Storybook test-runner + higher-level stories** [Step 10.8 follow-up] — axe-core CI gate is now wired, plus two more component stories shipped.
-  - `.storybook/test-runner.ts` ships an `@storybook/test-runner` config that injects axe via `axe-playwright` and calls `checkA11y('#storybook-root')` on every story's `postVisit` — failing any WCAG AA violation. Individual stories opt out with `parameters.a11y.disable = true` (no current story does). New script: `pnpm --filter @etlx/web test-storybook`. CI runbook documented in `.storybook/README.md` (build → static serve → `test-storybook --url` + first-time Playwright chromium install).
+  - `.storybook/test-runner.ts` ships an `@storybook/test-runner` config that injects axe via `axe-playwright` and calls `checkA11y('#storybook-root')` on every story's `postVisit` — failing any WCAG AA violation. Individual stories opt out with `parameters.a11y.disable = true` (no current story does). New script: `pnpm --filter @anyduct/web test-storybook`. CI runbook documented in `.storybook/README.md` (build → static serve → `test-storybook --url` + first-time Playwright chromium install).
   - `components/builder/pipeline-node.stories.tsx` — 6 stories rendered inside a mini `@xyflow/react` canvas so source/target handle placement, accent-tinted icon chip, and the ring-on-select state all match the production builder. Covers postgres source, filter transform, s3 sink, mongo source, selected state, and not-configured fallback.
   - `components/schedules/cron-input.stories.tsx` — 6 stories with a stateful wrapper so preset chips, live `cronstrue` description, and next-firing preview all light up exactly like `/w/[slug]/schedules`. Covers daily 03:00, every 5 min, weekdays 09:00, empty-batch (required hint), empty-stream-allowed (info hint), and invalid (error styling).
   - Storybook + Next builds both still green; Storybook bundle weight unchanged (~580 kB axe chunk dominates). Provider-dependent components (Sidebar / Header / ConnectionForm) are deferred until a fake-provider wrapper lands so we don't pull localStorage / `next/navigation` mocks into every story.
-- **Storybook 9 + addon-a11y foundation** [Step 10.8] — new `services/etlx-web/.storybook/` brings the design system to life.
+- **Storybook 9 + addon-a11y foundation** [Step 10.8] — new `services/anyduct-web/.storybook/` brings the design system to life.
   - **Framework**: `@storybook/nextjs-vite@9.1.20` (not the legacy webpack-backed `@storybook/nextjs` — that was incompatible with Next 15.5's bundled webpack and failed with a `Cannot read properties of undefined (reading 'tap')` cache hook error). The vite-backed framework picks up the same `app/globals.css` Tailwind v4 pipeline via `@tailwindcss/vite` registered in `viteFinal`, so every `@theme` token resolves identically to `next build`.
   - **Theme + a11y**: `withThemeByDataAttribute` decorator toggles `data-theme="dark"|"light"` on `<html>` so designers see the same dual-token result the app ships. `@storybook/addon-a11y` runs axe-core inside each story canvas so AA violations surface during local dev — feeding the CLAUDE.md hard rule "a11y AA 위반 머지 금지".
   - **Stories for 7 ui/ primitives** — Button (5 variants + size row + with-icon + loading + disabled + destructive-with-icon = 8 stories), Input (default + value + invalid+aria-describedby + disabled + with-label), Card (basic + with-action + 2-up grid), StatusBadge (7 status states + combined row), EmptyState (no-pipelines + failed-fetch + title-only), DataTable (basic + empty-state + clickable, sample Pipeline rows + StatusBadge cells), ConfirmDialog (destructive with loading-spin + confirm path). ~30 stories across 13 meta pages, all autodoc-tagged.
-  - **Scripts**: `pnpm --filter @etlx/web storybook` for dev, `build-storybook` for CI sanity (renders to `storybook-static/`, gitignored). `next build` continues to pass — 11 routes, 187 kB max first-load JS (no regression).
+  - **Scripts**: `pnpm --filter @anyduct/web storybook` for dev, `build-storybook` for CI sanity (renders to `storybook-static/`, gitignored). `next build` continues to pass — 11 routes, 187 kB max first-load JS (no regression).
   - **Future work** (still under Step 10.8): higher-level component stories (Sidebar / Header / PipelineNode / CronInput / ConnectionForm), automated axe-core gate via Storybook test-runner in CI, Chromatic/Playwright visual regression baseline on 5 key pages, keyboard-only scenario coverage.
 - **MongoDB connector — first NoSQL** [Step 5.3] — new `etl_plugins/connectors/nosql/mongodb.py` ships `MongoDBConnector(BatchSource, BatchSink)`, registered as `mongodb` via `@ConnectorRegistry.register` and an entry-point row. Sync pymongo so it slots into `Pipeline.run` (driven from a thread) the same way the RDBMS connectors do.
   - **Read** (`query` = collection name): `**options` accepts `filter` (default `{}`), `projection`, `sort` ((field, direction) tuple or list of tuples), `limit` (0 = unbounded), and `batch_size` (overrides `chunk_size` for the wire-level cursor batch). Documents map verbatim onto `Record.data` with `_id` preserved so upsert/dedup logic can reference it.
   - **Write** (`table` = collection name): `append` uses `insert_many(ordered=False)` so a single duplicate `_id` doesn't kill the batch; `overwrite` does `drop_collection` then insert; `upsert` issues bulk `ReplaceOne(filter=<keys>, upsert=True)` ops — `key_columns` is required and each document must carry every key. `BulkWriteError` and other `PyMongoError`s are wrapped in `WriteError` with full context.
   - **Health check**: `admin.command('ping')`, returning `False` when not yet connected (mirrors the sqlite/postgres/mysql contract behavior — no auto-connect). `ConnectionFailure` also flips to `False`; other pymongo errors propagate so misconfiguration isn't silently masked.
   - **pyproject changes**: new optional extra `mongodb = ["pymongo>=4.6"]`, entry-point row `mongodb = "etl_plugins.connectors.nosql.mongodb:MongoDBConnector"`, dev dep `pymongo>=4.6`, testcontainers extra `mongodb`, mypy override for `pymongo` / `bson`.
-  - **UI catalog**: `services/etlx-web/lib/operators.ts` gains `source:mongodb` (Collection / Filter JSON / Projection JSON / Limit) and `sink:mongodb` (Collection / Mode / Key fields) — 17 operators total. `services/etlx-web/lib/connector-schemas.ts` adds the MongoDB connection form (uri + database required, optional username/password secret/auth_source/timeout_ms). Users can now build MongoDB pipelines end-to-end from the web UI.
+  - **UI catalog**: `services/anyduct-web/lib/operators.ts` gains `source:mongodb` (Collection / Filter JSON / Projection JSON / Limit) and `sink:mongodb` (Collection / Mode / Key fields) — 17 operators total. `services/anyduct-web/lib/connector-schemas.ts` adds the MongoDB connection form (uri + database required, optional username/password secret/auth_source/timeout_ms). Users can now build MongoDB pipelines end-to-end from the web UI.
   - **Testing strategy**: 26 unit tests use a hand-rolled `_FakeMongoClient` injected via the constructor's `client=` kwarg — keeps the unit tier free of `mongomock` (and Docker) while still exercising option dispatch, mode branches, and error mapping. 34 integration tests against a testcontainers `mongo:7` image cover the standard `BatchSource` / `BatchSink` / `BatchRoundTrip` contracts (18 cases via a `_StripIdConnector` subclass that drops `_id` for payload equality) plus 16 mongo-specific tests: filter, sort+limit, projection, overwrite drops collection first, upsert insert vs. update, missing-key rejection, unreachable host produces `ReadError` (not hang), explicit `_id` round-trip, extra kwargs forwarded to `MongoClient`, isolation between collections, and idempotent `close()` after an unreachable connect. Cumulative: **374 core unit + 3 skipped, 818 tests project-wide all green**.
 - **HTTP source connector** [Step 5.7] — new `etl_plugins/connectors/http/` houses `HttpConnector(BatchSource)`, registered as `http` via `@ConnectorRegistry.register` and the `etl_plugins.connectors` entry-point.
   - **httpx-backed** so timeout / retry / JSON decoding behavior is consistent with the rest of the stack, and tests can use `httpx.MockTransport` instead of a real server.
@@ -1132,9 +1132,9 @@ suite + mkdocs site.
   - **Auth**: optional `auth_token` becomes `Authorization: Bearer <token>`; arbitrary `headers` (e.g. `X-Api-Key`) merge into every request. `params` is sent as static query parameters on every page.
   - **Health check** returns `True` for any response with status `< 500` (so 401 / 403 mean "server up, auth is the issue, not reachability"); only 5xx and connection errors flip it to `False`.
   - **`httpx>=0.27` promoted** from dev-only (FastAPI TestClient) to a top-level `dependencies` entry so the HTTP connector is zero-extras to install. New entry-point row `http = "etl_plugins.connectors.http.connector:HttpConnector"`.
-  - **UI catalog**: `services/etlx-web/lib/operators.ts` gains a `source:http` operator with fields for Path / Records field / Page parameter / Static params; `services/etlx-web/lib/connector-schemas.ts` adds the matching connection form (base_url + bearer token secret + timeout). Users can build an HTTP pipeline end-to-end from the web UI.
+  - **UI catalog**: `services/anyduct-web/lib/operators.ts` gains a `source:http` operator with fields for Path / Records field / Page parameter / Static params; `services/anyduct-web/lib/connector-schemas.ts` adds the matching connection form (base_url + bearer token secret + timeout). Users can build an HTTP pipeline end-to-end from the web UI.
   - **21 new unit tests** (`tests/unit/connectors/http/test_http.py`) cover construction guards (missing `base_url`, non-http scheme), array + object response shapes, custom `records_field`, Bearer auth header, custom headers, query params, pagination-until-empty + `max_pages` cap, non-2xx → `ReadError`, non-JSON → `ReadError`, missing field → `ReadError`, non-object record → `ReadError`, registry lookup, and `records_field=None` with object response. Cumulative core-side: **348 unit + 3 skipped**; full project **758 tests** all green.
-- **Stream worker manager** [Step 9.4] — new `etlx_server/worker/stream.py` + `etlx-server stream-worker run` CLI runs as a separate process and keeps stream pipelines alive.
+- **Stream worker manager** [Step 9.4] — new `anyduct_server/worker/stream.py` + `anyduct-server stream-worker run` CLI runs as a separate process and keeps stream pipelines alive.
   - **Lifecycle inversion**: batch pipelines are pull-driven (scheduler enqueues, worker claims); stream pipelines are push-driven (worker scans active stream Schedule rows on a tick, creates a `running` Run row, and spawns an `asyncio.Task` that calls `Pipeline.arun_stream()`). The task gets the same heartbeat + RunRecorder periodic-drain treatment as batch.
   - **Cancellation**: deactivating or deleting a schedule cancels its in-flight task; the Run row is stamped `cancelled` with `error_class='StreamCancelled'`. Worker shutdown cancels every in-flight stream so the UI never shows ghost `running` rows after a restart.
   - **No re-spawn loop**: when a task finishes for any reason (build failure / mode mismatch / connector error / success), the worker records the schedule's `updated_at` at that moment. The next tick refuses to re-spawn unless `Schedule.updated_at` has changed — so a misconfigured pipeline doesn't generate a Run row per tick. The user has to edit the schedule (toggle off+on, change cron, etc.) to retry.
@@ -1151,7 +1151,7 @@ suite + mkdocs site.
 - **Recorder periodic drain (live log tail)** [Step 9.3c / 10.5] — opt-in mid-run flushing for `RunRecorder`.
   - `RunRecorder` gains a `flush_interval_seconds: float | None = None` parameter. When set, an `asyncio` background task wakes up every N seconds and commits the snapshot of pending log + metric entries through a fresh session from the factory. Producers (structlog processor, `RecordingMetrics`) stay zero-lock; the timer task is the only writer, and it serializes against the `__aexit__` final flush via the existing stop event.
   - Default stays at `None` so unit tests using the shared `_SessionFactoryAdapter` (where the executor + recorder share one `AsyncSession`) keep working — concurrent `session.commit()` calls aren't safe on one async session, and the periodic path would deadlock.
-  - **Wiring**: `RunExecutor` accepts `log_flush_interval_seconds`, `RunWorker` forwards it, and `etlx-server worker run` exposes a `--log-flush-interval` CLI flag (default 2.0s, 0 disables). Production worker process now writes logs to `run_logs` live; the Run-detail page's existing 2-second poll picks them up without further changes.
+  - **Wiring**: `RunExecutor` accepts `log_flush_interval_seconds`, `RunWorker` forwards it, and `anyduct-server worker run` exposes a `--log-flush-interval` CLI flag (default 2.0s, 0 disables). Production worker process now writes logs to `run_logs` live; the Run-detail page's existing 2-second poll picks them up without further changes.
   - **New test**: `test_recorder_flushes_periodically_when_interval_set` builds a separate `async_sessionmaker` against the testcontainer engine (skipping the conftest outer-transaction wrapper because the recorder's separate connection can't see uncommitted parent rows through it). Verifies `run_logs` contains the mid-run event *before* the recorder's `__aexit__`. Explicit cleanup in `finally` keeps later tests in the session unaffected. Cumulative server-side: **294 tests in suite, all green**.
 - **Pipeline-level retry + DLQ config in the builder** [Step 10.4 / 9.5] — `PipelineConfig.retry` and `PipelineConfig.dlq` are no longer invisible in the UI.
   - New `PipelineSettingsPanel` (`components/builder/pipeline-settings-panel.tsx`) shows in the right pane when no node is selected. Two collapsible sections per DESIGN.md card grammar:
@@ -1176,27 +1176,27 @@ suite + mkdocs site.
   - **Filters**: resource type `<select>` (workspace / membership / connection / pipeline / schedule / run + "All"), resource ID exact match. Both are pushed straight into the `?resource_type` / `?resource_id` query params of `GET /audit?workspace_id=…` — the server already enforces "must be a member or SuperAdmin" so no UI-side ACL.
   - **Row expansion**: each row is a single line (timestamp · action chip · resource_type+id · actor truncated UUID). Clicking expands into a two-column `before_json` / `after_json` pre block so the diff is immediately visible without a separate detail page. Rows that had `before == null` AND `after == {}` collapse the chevron and disable expansion since there's nothing to show.
   - **Pagination**: 100/page offset stepper at the bottom; Next is disabled when fewer rows came back than the page size.
-  - **API surface**: `auditApi.query` + `AuditLogEntry` type added to `lib/api.ts`. Verified by `pnpm --filter @etlx/web build` — audit route is 4.33 kB / 127 kB first-load JS, 11 total routes.
+  - **API surface**: `auditApi.query` + `AuditLogEntry` type added to `lib/api.ts`. Verified by `pnpm --filter @anyduct/web build` — audit route is 4.33 kB / 127 kB first-load JS, 11 total routes.
 - **Member management UI** [Step 10.6] — `/w/[slug]/members` with sidebar nav entry.
   - **List**: shows joined user identity (name / email) + role chip (color-coded per role — pink Owner / blue Editor / amber Runner / muted Viewer).
-  - **Add by email** (Owner only): inline form with email + role select; matches the server contract that the email must already exist in the metadata DB (no signup flow yet — local-auth users are seeded via OIDC first-sign-in or `etlx-server` CLI).
+  - **Add by email** (Owner only): inline form with email + role select; matches the server contract that the email must already exist in the metadata DB (no signup flow yet — local-auth users are seeded via OIDC first-sign-in or `anyduct-server` CLI).
   - **Role change** (Owner only): inline `<select>` on each row hits `PATCH /memberships/{user_id}`; toasts the new role. The server's `LastOwnerError` 409 is surfaced unmodified in the error toast so the message is clear ("cannot remove the last Owner of workspace X").
   - **Remove** (Owner only): trash button → `ConfirmDialog`. The current user's own row shows "You" instead of a remove button so a self-eject can't lock the user out by accident.
   - **Non-owner view**: read-only — the page renders a "Read-only" card explaining that only Owners can manage members. Detection uses `WorkspaceSummary.role`; SuperAdmin bypass (`role === null`) is treated as Owner.
   - **API surface**: `membershipsApi.list` / `add` / `updateRole` / `remove` added to `lib/api.ts`.
-  - Verified by `pnpm --filter @etlx/web build` — members route is 5.19 kB / 128 kB first-load JS, 10 total routes.
+  - Verified by `pnpm --filter @anyduct/web build` — members route is 5.19 kB / 128 kB first-load JS, 10 total routes.
 - **Schedule CRUD + cron builder UI** [Step 10.5] — `/w/[slug]/schedules` is no longer read-only.
   - **CronInput** (`components/schedules/cron-input.tsx`): 5-field cron text input wrapped with six preset chips (every minute / every 5 min / hourly / daily 03:00 / weekdays 09:00 / monthly), an inline human-readable description from `cronstrue` (verbose mode), and red-border invalidation on parse failure. Stream mode allows blank — the description text explains the semantics.
   - **Schedule form** (`components/schedules/schedule-form.tsx`): create flow with mode pill picker (batch / stream — pickable only at create time per the server's immutable-mode rule), CronInput, active checkbox. Edit flow renames + cron only (mode read-only). Both validate the batch-mode-requires-cron rule client-side before submitting so a 422 from the server is the rare case rather than the common one.
   - **Schedules page**: pipelines fetched once for the create-form pipeline picker (each schedule belongs to one pipeline). Each row gets toggle (pause/resume via `POST /toggle`), edit, and delete actions. `ConfirmDialog` carries forward from Step 10.3 for delete confirmation.
   - **API surface**: `schedulesApi.create` / `update` / `delete` / `toggle` added to `lib/api.ts`, plus `ScheduleCreateBody` / `ScheduleUpdateBody` typed bodies matching the server's request schemas.
-  - **New dep**: `cronstrue ^3.4.x`. Verified by `pnpm --filter @etlx/web build` — schedules route is 12.6 kB / 136 kB first-load JS (was 2.62 kB read-only); cronstrue weighs ~10 kB gzipped.
+  - **New dep**: `cronstrue ^3.4.x`. Verified by `pnpm --filter @anyduct/web build` — schedules route is 12.6 kB / 136 kB first-load JS (was 2.62 kB read-only); cronstrue weighs ~10 kB gzipped.
 - **Connection create/edit/delete UI** [Step 10.3] — `/w/[slug]/connections` is no longer read-only.
   - **Connector schema catalog** (`lib/connector-schemas.ts`): per-connector list of fields with type / required / default / placeholder / `isSecret`. Mirrors the `__init__` signatures of `postgres` / `mysql` / `sqlite` / `s3` / `kafka` exactly so the form never emits a knob the runtime wouldn't accept.
   - **Create form** (`components/connections/connection-form.tsx`): name + connector-type pill picker + schema-driven field grid. Secret fields render as `type=password` inputs; the wire-format builder turns each filled secret into a `{"$secret": "<field_key>"}` marker in `config` plus a matching entry in `secrets`, so plaintext only travels over TLS and never reaches the metadata DB (`SecretWalker` server-side enforces this).
   - **Edit form**: rename only this slice — the server's update contract requires re-supplying every secret when `config` changes, and the UI can't read existing plaintext. The form is explicit about "delete + recreate" being the path for credential rotation.
   - **Delete**: per-row trash button → new `ConfirmDialog` primitive (`components/ui/confirm-dialog.tsx`, DESIGN.md §7.9 — backdrop blur, Esc-to-cancel, destructive Button variant). Confirmation warns about secret backend cleanup and pipelines that may break.
-  - **API surface**: `connectionsApi.create` / `update` / `delete` / `get` added to `lib/api.ts` with typed bodies matching `ConnectionCreateRequest` / `ConnectionUpdateRequest`. Verified by `pnpm --filter @etlx/web build` — connections route is 6.56 kB / 130 kB first-load JS (was 3.27 kB read-only).
+  - **API surface**: `connectionsApi.create` / `update` / `delete` / `get` added to `lib/api.ts` with typed bodies matching `ConnectionCreateRequest` / `ConnectionUpdateRequest`. Verified by `pnpm --filter @anyduct/web build` — connections route is 6.56 kB / 130 kB first-load JS (was 3.27 kB read-only).
 - **Run detail page** [Step 10.5 UI] — `/w/[slug]/runs/[id]` consumes the freshly-populated `run_logs` / `run_metrics` tables from Step 9.3c.
   - **Layout**: two columns (lg+) — logs viewer on the left, Summary + Metrics + Error stack on the right. Logs render as monospaced rows with timestamp, level chip (color-coded), message, and inline `context_json` pairs; the pane autoscrolls to the bottom when new lines arrive. Summary is a definition list (status / pipeline / version / scheduled / started / finished / duration / records / worker / heartbeat). Metrics groups by `name` and shows summed value + sample count so the canonical `etl_plugins.records.read` / `etl_plugins.records.written` / `etl_plugins.duration.seconds` are immediately legible.
   - **Polling**: while the run isn't terminal, the page re-fetches the trio (run / logs / metrics) every 2 s; on first terminal status it fetches one more time and stops, so the page stays cheap once the run is done.
@@ -1204,10 +1204,10 @@ suite + mkdocs site.
   - **Runs list integration**: rows in `/w/[slug]/runs` are now clickable and route to the detail page; the data table's `onRowClick` was already in place.
   - Live-tail through the existing SSE endpoint is *not* wired this slice — `EventSource` doesn't carry an `Authorization` header, and Step 9.3c flushes at `__aexit__` so logs only become visible after the run finishes anyway. A follow-up will move the recorder to a separate factory + periodic drain so logs land mid-run.
 - **Log / metric forwarding** [Step 9.3c] — bridges core `structlog` events and the core `Metrics` ABC into the `run_logs` / `run_metrics` tables during worker execution.
-  - New `etlx_server/worker/recorder.py`: `RunRecorder` async context manager registers itself in a module-level map keyed by `run_id`, installs `RecordingMetrics` as the global metrics backend, and exposes `log_processor` (a structlog processor) + `current_run_id` (a `ContextVar` so `asyncio.to_thread` workers inherit it). Producers (structlog event, `Counter.add`, `Histogram.record`) enqueue into `queue.SimpleQueue` — thread-safe, zero-lock from caller side.
+  - New `anyduct_server/worker/recorder.py`: `RunRecorder` async context manager registers itself in a module-level map keyed by `run_id`, installs `RecordingMetrics` as the global metrics backend, and exposes `log_processor` (a structlog processor) + `current_run_id` (a `ContextVar` so `asyncio.to_thread` workers inherit it). Producers (structlog event, `Counter.add`, `Histogram.record`) enqueue into `queue.SimpleQueue` — thread-safe, zero-lock from caller side.
   - **One-shot flush at `__aexit__`** — the recorder removes itself from the active map *before* writing, then commits the queue snapshot in a single transaction. Periodic drain was prototyped and dropped: the executor and recorder share an `AsyncSession` in the test harness, and concurrent `session.commit()` calls aren't supported. Live-tail latency is the cost; the existing `GET /runs/{id}/logs/stream` SSE already re-polls.
   - **Executor lifecycle log events**: `RunExecutor.execute` now binds a structlog logger with `run_id=str(run.id)` and emits `run.build_started` / `run.build_failed` / `run.pipeline_started` / `run.pipeline_succeeded` / `run.pipeline_failed` so even a connector that logs nothing leaves a trail in `run_logs`. `pipeline_succeeded` includes `records_read` / `records_written` / `duration_seconds` for the UI Run-detail page.
-  - **Worker CLI integration**: `etlx-server worker run` calls `configure_logging(level=..., json=True, extra_processors=[log_processor])` on startup so any `structlog.get_logger()` event with a matching `run_id` lands in `run_logs` for the duration of the recorder.
+  - **Worker CLI integration**: `anyduct-server worker run` calls `configure_logging(level=..., json=True, extra_processors=[log_processor])` on startup so any `structlog.get_logger()` event with a matching `run_id` lands in `run_logs` for the duration of the recorder.
   - **5 new integration tests** (`tests/db/test_worker_recorder.py`): matching-run-id structlog events captured / metric calls captured with attrs / events after `__aexit__` are dropped / e2e success through `RunExecutor` populates `RECORDS_READ_TOTAL` + `RECORDS_WRITTEN_TOTAL` + `DURATION_SECONDS` and all 3 lifecycle messages / build-failure path leaves `run.build_failed` with `error_class=_PipelineBuildError`. Cumulative server-side: **293 tests in suite, all green**.
 - **Pipeline Builder (visual flow editor)** [Step 10 UI 2] — React Flow (`@xyflow/react`) based drag-add operator canvas at `/w/[slug]/pipelines/[id]/edit`.
   - **Operator catalog** (`lib/operators.ts`): 5 sources (Postgres / MySQL / SQLite / S3 / Kafka), 4 transforms (rename / cast / filter / python), 5 sinks. Each operator declares its accent color (DESIGN.md §3.5 palette), Lucide icon, and a list of typed fields (`string`/`number`/`select`/`json`/`connection`) so the right-side Properties panel renders the form without per-operator code.
@@ -1218,13 +1218,13 @@ suite + mkdocs site.
   - **Properties panel** (right, 320px): per-field input with connection dropdown that filters to matching `Connection.type`. JSON fields parse/validate inline (red border + error helper on bad JSON).
   - **Save / Trigger**: header buttons call `PATCH /pipelines/{id}` (canonicalized through `PipelineConfig.model_validate` on the server, so an idempotent new `PipelineVersion` is created) and `POST /pipelines/{id}/trigger`. The pipelines list page's "New pipeline" affordance creates a blank `PipelineConfig` (default Postgres source+sink, empty connection strings — pass validation but won't run until configured) and redirects straight into the builder.
   - **Layout**: `AppShell` content column is now `h-screen flex-col overflow-hidden`; list pages wrap their bodies in `flex-1 overflow-y-auto` so they scroll independently from the sticky header, and the builder fills the remaining viewport.
-  - **New dep**: `@xyflow/react ^12.10.2`. Verified by `pnpm --filter @etlx/web build` — editor route compiles to 64 kB / 187 kB first-load JS.
-- **Web UI foundation** [Step 10 UI 1] — `services/etlx-web` Next.js 15 / React 19 / Tailwind v4 app.
+  - **New dep**: `@xyflow/react ^12.10.2`. Verified by `pnpm --filter @anyduct/web build` — editor route compiles to 64 kB / 187 kB first-load JS.
+- **Web UI foundation** [Step 10 UI 1] — `services/anyduct-web` Next.js 15 / React 19 / Tailwind v4 app.
   - **Design tokens (Step 10.0)**: `app/globals.css` carries every token from DESIGN.md §11.1 inside a `@theme` block; dark default + `[data-theme="light"]` branch + Tailwind v4 CSS-first config (no `tailwind.config.ts`). Focus-visible ring uses the accent token; scrollbars and a `pulse-dot` keyframe round out shared visual chrome. PostCSS bridge via `postcss.config.mjs` → `@tailwindcss/postcss`.
   - **Primitives (Step 10.1)**: `components/ui/{button,input,card,data-table,status-badge,empty-state}.tsx`. Button has 5 variants × 3 sizes (primary = accent gradient + `shadow-md`, secondary/ghost/destructive/outline). `StatusBadge` covers every `RunStatus` + queued/skipped with status-tinted bg/text and a pulsing dot in `running`.
   - **Shell (Step 10.2)**: `components/shell/{app-shell,sidebar,header}.tsx`. Sidebar is Arc-style — 4px inset color bar drives off the current workspace's `color_hex`, an inline dropdown switches workspaces with hex preview, and nav items go pink when active. Header sticks at top with theme toggle + user avatar + sign-out.
-  - **Providers** (all `"use client"`): `AuthProvider` reads JWT from `localStorage["etlx.token"]`, calls `/auth/me` on mount, listens for the `etlx:unauthorized` window event (dispatched by the API client on 401) and routes to `/login?next=...`. `ThemeProvider` persists `etlx.theme` and writes `[data-theme]` to `<html>`. `WorkspaceProvider` lists `/workspaces` and pins the current selection via `etlx.workspace` localStorage.
-  - **API client** (`lib/api.ts`): typed `fetch` wrapper, DTOs mirror `etlx_server.auth.schemas` exactly so the FE never translates names. Endpoint groups: `workspacesApi`, `connectionsApi`, `pipelinesApi`, `schedulesApi`, `runsApi`. Tokens are read per-call (no in-memory cache) so multi-tab sign-in/out doesn't desync; the base URL falls back to `http://localhost:8000` if `NEXT_PUBLIC_ETLX_API_URL` is unset.
+  - **Providers** (all `"use client"`): `AuthProvider` reads JWT from `localStorage["anyduct.token"]`, calls `/auth/me` on mount, listens for the `anyduct:unauthorized` window event (dispatched by the API client on 401) and routes to `/login?next=...`. `ThemeProvider` persists `anyduct.theme` and writes `[data-theme]` to `<html>`. `WorkspaceProvider` lists `/workspaces` and pins the current selection via `anyduct.workspace` localStorage.
+  - **API client** (`lib/api.ts`): typed `fetch` wrapper, DTOs mirror `anyduct_server.auth.schemas` exactly so the FE never translates names. Endpoint groups: `workspacesApi`, `connectionsApi`, `pipelinesApi`, `schedulesApi`, `runsApi`. Tokens are read per-call (no in-memory cache) so multi-tab sign-in/out doesn't desync; the base URL falls back to `http://localhost:8000` if `NEXT_PUBLIC_ANYDUCT_API_URL` is unset.
   - **Pages**:
     - `/login` — email/password form → `POST /auth/login`, stores access + refresh, toasts on failure, honors `?next=`.
     - `/workspaces` — list + create flow (auto-owner via `POST /workspaces`), 8 preset color picker matching DESIGN.md §3.5.
@@ -1233,16 +1233,16 @@ suite + mkdocs site.
     - `/w/[slug]/schedules` — flattened across pipelines (cron + mode + active state).
     - `/w/[slug]/runs` — Run table with `StatusBadge`, 5s polling so live runs visibly progress, formatted duration / records-read-written / error class.
     - `/w/[slug]/settings` — workspace metadata read-out.
-  - **Guardrails**: every color/spacing/radius comes from a token; no `bg-[#…]` arbitrary classes; PostCSS pipeline + Next 15 production build succeed (`pnpm --filter @etlx/web build`).
+  - **Guardrails**: every color/spacing/radius comes from a token; no `bg-[#…]` arbitrary classes; PostCSS pipeline + Next 15 production build succeed (`pnpm --filter @anyduct/web build`).
   - **Deferred to a later slice**: Storybook + Chromatic baseline, axe-core scan, font self-host, Command Palette, member-management UI, audit log viewer, schedule cron editor, DLQ tools. Tracked under ROADMAP §10.0/10.1/10.5/10.6/10.8.
-- **Cron 스케줄러** [Step 9.2] — `services/etlx-server/etlx_server/scheduler/` 패키지.
+- **Cron 스케줄러** [Step 9.2] — `services/anyduct-server/anyduct_server/scheduler/` 패키지.
   - `Scheduler(factory, *, tick_interval_seconds=10.0)` — `tick_once()`이 활성 batch 스케줄 1회 스캔, cron의 다음 firing이 도래한 행에 대해 `RunStatus.PENDING` Run을 enqueue. worker(Step 9.3a)가 그 후 SKIP-LOCKED claim.
   - "last fire" 기준은 `MAX(runs.scheduled_at) WHERE schedule_id=…` — 별도 컬럼/마이그레이션 없음. 첫 firing은 `schedule.created_at`을 base로 사용해 epoch backfill 방지.
   - **No-catchup 의미론** (한 tick당 미스 firing 하나씩 enqueue). 진정한 no-catchup은 `base = max(last_or_created, now)` 변경으로 가능하나 새 스케줄이 첫 tick에 firing 안 함 — 정책 결정 보류, 현 상태가 합리적 trade-off.
   - **방어적 skip + log** (loop crash 안 함): `is_active=False` / `mode=STREAM` / `cron_expr IS NULL` / `is_current` 버전 부재 / 잘못된 cron 식 (router 검증 우회 시).
   - `croniter` 라이브러리(이미 의존성)로 firing 계산. invalid cron은 `ValueError`/`KeyError` 잡아 skip.
   - `asyncio.Event` 기반 graceful stop — `Scheduler.stop()` 호출 시 다음 tick wait가 즉시 깨어남.
-  - 새 CLI 서브커맨드 `etlx-server scheduler run --tick-interval … --log-level …` — `worker run` / `reaper run`과 동일한 패턴으로 별도 process 배포 (SIGTERM/SIGINT graceful).
+  - 새 CLI 서브커맨드 `anyduct-server scheduler run --tick-interval … --log-level …` — `worker run` / `reaper run`과 동일한 패턴으로 별도 process 배포 (SIGTERM/SIGINT graceful).
   - 8 신규 통합 테스트(`tests/db/test_scheduler.py`): due batch → 1 Run 생성 + version/workspace 핀 / inactive skipped / stream skipped / no current version skipped + log / 두 번째 tick은 no-op(yearly cron으로 결정성 보장) / 잘못된 cron skip / loop pre-set stop / loop fires + stop.
   - **HA 노트**: 현 단일-replica 배포 안전. multi-replica는 `FOR UPDATE SKIP LOCKED`로 schedule row를 lock 필요 — 운영 도입 시 추가.
 - **Harness 문서** [Step 1.0]
@@ -1405,14 +1405,14 @@ suite + mkdocs site.
   - `etl_plugins/runtime/builder.py` — `build_connector` / `build_connectors` / `build_pipeline` / `build_pipeline_from_yaml`. Composition root. `(Pipeline, dict[str, Connector])` 튜플 반환 → caller 또는 `run_pipeline_yaml`이 lifecycle 관리. `extra_connectors=`로 테스트에서 mock 주입 자연스러움.
   - `etl_plugins/runtime/runner.py` — `run_pipeline_yaml(...)` 헬퍼: 빌드 → connect 일괄 → run → close 일괄 (`contextlib.suppress(Exception)`로 cleanup 안전). 한 커넥터 close 실패가 다른 정리 안 막음.
   - `etl_plugins/runtime/__init__.py` — 7개 public 심볼 re-export
-- **`etlx` CLI** [Step 3.1]
+- **`anyduct` CLI** [Step 3.1]
   - `etl_plugins/cli.py` — Typer 기반. 서브커맨드 5종:
-    - `etlx version` — 패키지 버전
-    - `etlx list-connectors` — 등록된 connector 이름 (built-in + entry-point)
-    - `etlx validate <pipe.yaml> [--connections <conn.yaml>]` — YAML 파싱 + 연결 인자 검증 (실제 connect 없음)
-    - `etlx run <pipe.yaml> [--connections <conn.yaml>] [--env-file <.env>]` — 빌드 → connect → run → close, 결과 요약 출력
-    - `etlx test-connection <name|--all> --connections <conn.yaml>` — 각 connector의 health_check() 호출
-  - `pyproject.toml`: `[project.scripts] etlx = "etl_plugins.cli:app"` — `uv pip install -e .` 후 즉시 사용
+    - `anyduct version` — 패키지 버전
+    - `anyduct list-connectors` — 등록된 connector 이름 (built-in + entry-point)
+    - `anyduct validate <pipe.yaml> [--connections <conn.yaml>]` — YAML 파싱 + 연결 인자 검증 (실제 connect 없음)
+    - `anyduct run <pipe.yaml> [--connections <conn.yaml>] [--env-file <.env>]` — 빌드 → connect → run → close, 결과 요약 출력
+    - `anyduct test-connection <name|--all> --connections <conn.yaml>` — 각 connector의 health_check() 호출
+  - `pyproject.toml`: `[project.scripts] anyduct = "etl_plugins.cli:app"` — `uv pip install -e .` 후 즉시 사용
 - **테스트** [Step 3.1]
   - `tests/unit/runtime/test_transforms.py` — 23 tests (dispatcher 2 + rename 3 + cast 7 + filter 5 + python 6)
   - `tests/unit/runtime/test_builder.py` — 8 tests (build_connector / build_connectors / build_pipeline / build_pipeline_from_yaml E2E)
@@ -1425,7 +1425,7 @@ suite + mkdocs site.
 - ADR-0011: Step 3.1 Pipeline runtime (runtime/ 패키지 분리, transform registry 별도, filter sandbox 위협 모델 명시, Typer CLI, `run-stream`/Retry/DLQ는 Step 3.2/3.3로 이동)
 
 ### Milestone
-- **Step 3.1 — Pipeline runtime + `etlx` CLI 완료 (2026-05-14)**: YAML → Pipeline + Connectors + Transforms 빌더, batch 실행 헬퍼, CLI 5개 서브커맨드. 38 신규 unit tests. **다음은 Step 3.2 (stream runtime + commit)**.
+- **Step 3.1 — Pipeline runtime + `anyduct` CLI 완료 (2026-05-14)**: YAML → Pipeline + Connectors + Transforms 빌더, batch 실행 헬퍼, CLI 5개 서브커맨드. 38 신규 unit tests. **다음은 Step 3.2 (stream runtime + commit)**.
 
 - **Stream runtime** [Step 3.2]
   - `etl_plugins/core/pipeline.py` — `Pipeline.arun_stream(...)` async 메서드 (mode='stream'). subscribe → transform → publish → buffer flush → commit 흐름. `stop_after_records` / `stop_after_seconds`로 확정적 종료 가능. `finally` 블록에서 잔여 pending flush 보장.
@@ -1436,7 +1436,7 @@ suite + mkdocs site.
   - `etl_plugins/connectors/stream/kafka.py` — `KafkaConnector._consumer` 참조 보존(subscribe 시 set, 종료/aclose 시 unset). `commit()`은 활성 consumer가 없으면 `ConnectError`, 있으면 `await self._consumer.commit()`. ADR-0010의 NotImplementedError 약속을 superseded.
 - **Runtime / CLI 확장** [Step 3.2]
   - `etl_plugins/runtime/runner.py` — `arun_stream_pipeline_yaml(...)` async helper. cleanup이 `aclose()`(async, Kafka) → `close()`(sync) fallback.
-  - `etl_plugins/cli.py` — `etlx run-stream <pipe.yaml> [--stop-after-records N] [--stop-after-seconds T]`. KeyboardInterrupt → exit 130.
+  - `etl_plugins/cli.py` — `anyduct run-stream <pipe.yaml> [--stop-after-records N] [--stop-after-seconds T]`. KeyboardInterrupt → exit 130.
 - **테스트 인프라** [Step 3.2]
   - `tests/fixtures/connectors.py` — `InMemoryStreamSource` (async generator subscribe + commits list) + `InMemoryStreamSink` (publish list + flush_calls counter). Stream-pipeline unit tests를 Docker 없이 실행 가능.
 - **테스트** [Step 3.2]
@@ -1450,7 +1450,7 @@ suite + mkdocs site.
 - ADR-0012: Step 3.2 Stream runtime (sync run + async arun_stream 분리, commit ABC async화 + offsets 옵셔널, Pipeline.commit_strategy 필드, buffer dict in sink_options, stop_after_* 확정 종료, Kafka consumer ref 보존, integration test에서 실제 commit 검증)
 
 ### Milestone
-- **Step 3.2 — Stream runtime 완료 (2026-05-14)**: `Pipeline.arun_stream` + Kafka async commit + buffer + `etlx run-stream`. 17 신규 unit + 2 신규 integration tests (269 unit + 82 it = 351 total). **다음은 Step 3.3 (Retry / DLQ / Checkpoint)**.
+- **Step 3.2 — Stream runtime 완료 (2026-05-14)**: `Pipeline.arun_stream` + Kafka async commit + buffer + `anyduct run-stream`. 17 신규 unit + 2 신규 integration tests (269 unit + 82 it = 351 total). **다음은 Step 3.3 (Retry / DLQ / Checkpoint)**.
 
 - **Retry / DLQ / 자동 메트릭** [Step 3.3]
   - `etl_plugins/config/models.py` — `DlqConfig {connection, table?, topic?, mode='append'}` 추가. `PipelineConfig.dlq: DlqConfig | None` 필드.
@@ -1532,7 +1532,7 @@ suite + mkdocs site.
     - `overwrite`: `DELETE FROM <table>` (TRUNCATE 미지원) + INSERT
     - `upsert`: `INSERT ... ON CONFLICT (key_columns) DO UPDATE SET col = excluded.col, ...` (SQLite 3.24+)
   - Double-quote 기반 식별자 quoting (`"name"`), 내부 `"`는 `""` escape.
-  - `@ConnectorRegistry.register("sqlite")` + `[project.entry-points."etl_plugins.connectors"]` — `etlx list-connectors`에 자동 노출.
+  - `@ConnectorRegistry.register("sqlite")` + `[project.entry-points."etl_plugins.connectors"]` — `anyduct list-connectors`에 자동 노출.
 - **테스트** [Step 5.1b]
   - `tests/unit/connectors/rdbms/test_sqlite.py` — Contract subclass (Source 7 + Sink 5 + RoundTrip 3 = 15) + SQLite-specific 17 = **32 unit tests** (Docker 없이, `tmp_path`로 파일 db 매 테스트마다). ~0.3s 실행.
   - boolean → INT(0/1) 의미론은 `_sqlitify()` 헬퍼로 매핑.
@@ -1546,7 +1546,7 @@ suite + mkdocs site.
 - **Step 5.1b — SQLite 커넥터 완료 (2026-05-14)**: 세 번째 RDBMS connector. RDBMS 슬롯에 3/5 채움(postgres/mysql/sqlite). 32 신규 unit tests (321 unit + 3 skip + 111 it = 435 total). 다음은 Step 5.x 추가 connectors.
 
 - **서비스화 방향 확정** [Step 7~11 신설]
-  - `SPEC.md` — 코어 위에 얹는 **별도 패키지 (`services/etlx-server` FastAPI + `services/etlx-web` Next.js)** 도입. §1 (목적), §2 (아키텍처 9-layer), §3 (디렉토리: `services/` 추가), §8.5 (서비스 경계 규칙), §10 (Steps 7~11 추가) 패치. **단방향 의존** — `etl_plugins/`은 `services/`를 절대 import하지 않음.
+  - `SPEC.md` — 코어 위에 얹는 **별도 패키지 (`services/anyduct-server` FastAPI + `services/anyduct-web` Next.js)** 도입. §1 (목적), §2 (아키텍처 9-layer), §3 (디렉토리: `services/` 추가), §8.5 (서비스 경계 규칙), §10 (Steps 7~11 추가) 패치. **단방향 의존** — `etl_plugins/`은 `services/`를 절대 import하지 않음.
   - `ROADMAP.md` — Step 7~11 추가:
     - 7: Service Foundation (Metadata DB / Secret / YAML↔DB 양방향)
     - 8: API Server (FastAPI, OIDC + JWT, RBAC, audit, CRUD/Action 엔드포인트)
@@ -1557,7 +1557,7 @@ suite + mkdocs site.
   - 코드 변경 없음 (코어 라이브러리는 그대로). 모든 결정은 ADR-0017로 기록.
 
 - **디자인 시스템 채택** [Step 10 사전 준비]
-  - `DESIGN.md` 신규 (662줄) — `services/etlx-web`의 디자인 SSOT.
+  - `DESIGN.md` 신규 (662줄) — `services/anyduct-web`의 디자인 SSOT.
     - Arc Browser 영감 (사이드바 중심 + Command Palette + 워크스페이스 컬러 인디케이터)
     - 컬러: 깊은 네이비 베이스 (`#0A1228` / `#0F1730` / `#15203F`) + 팝핑크 강조 (`#FF3D8B`)
     - 타이포: Inter Variable + Pretendard Variable + JetBrains Mono (self-host)
@@ -1570,7 +1570,7 @@ suite + mkdocs site.
   - `SPEC.md` §9.7 / `CLAUDE.md` 금기사항에 디자인 규칙 통합
 
 ### Decisions
-- ADR-0017: 서비스화 전략 — 코어 라이브러리 위에 별도 패키지로 웹 UI/API 분리. 모노레포(`etl_plugins/` + `services/etlx-server/` + `services/etlx-web/`), 단방향 의존(서비스 → 코어), CI 분리(`ci-core.yml` / `ci-server.yml` / `ci-web.yml`), 세부 기술 스택은 Step 7.0에서 ADR-0019~0023으로 확정.
+- ADR-0017: 서비스화 전략 — 코어 라이브러리 위에 별도 패키지로 웹 UI/API 분리. 모노레포(`etl_plugins/` + `services/anyduct-server/` + `services/anyduct-web/`), 단방향 의존(서비스 → 코어), CI 분리(`ci-core.yml` / `ci-server.yml` / `ci-web.yml`), 세부 기술 스택은 Step 7.0에서 ADR-0019~0023으로 확정.
 - ADR-0018: 디자인 시스템 — Arc 영감, 네이비 베이스 + 팝핑크 강조. shadcn/ui + Tailwind v4 + Storybook + Chromatic/Playwright visual regression + axe-core a11y가 CI 게이트. 프론트엔드 스택(Next.js/TS/React Flow) 결정도 함께 포함되어 ROADMAP §7.0의 "프론트엔드 스택 ADR"은 별도 두지 않음.
 
 ### Milestone
@@ -1578,11 +1578,11 @@ suite + mkdocs site.
 
 - **서비스 기술 스택 ADR 5개** [Step 7.0]
   - 코드 변경 없음. 결정 문서만(DECISIONS.md). 다음 슬라이스(7.1 모노레포 스캐폴딩)가 명확해짐.
-  - **ADR-0019**: API 프레임워크 = FastAPI (`>=0.115`) + uvicorn workers + gunicorn 진입점. Pydantic v2 통합으로 코어의 `ConnectionConfig` / `PipelineConfig`를 REST body로 그대로 재사용. OpenAPI 자동 생성 → `etlx-web`이 type-safe client 자동 생성.
+  - **ADR-0019**: API 프레임워크 = FastAPI (`>=0.115`) + uvicorn workers + gunicorn 진입점. Pydantic v2 통합으로 코어의 `ConnectionConfig` / `PipelineConfig`를 REST body로 그대로 재사용. OpenAPI 자동 생성 → `anyduct-web`이 type-safe client 자동 생성.
   - **ADR-0020**: 메타데이터 저장소 = PostgreSQL 16+ + SQLAlchemy 2.x async(`asyncpg`) + Alembic. JSONB로 config 직렬화 + JSONB GIN 인덱스. UUID PK (uuid7 권장). 워크스페이스 격리는 응용 레벨(`workspace_id` 외래키). 시크릿은 절대 DB 평문 저장 금지 — backend ref만.
   - **ADR-0021**: 실행 엔진 = **자체 PostgreSQL-backed worker queue** 채택, Dagster/Prefect 임베드 거부. 이유: 코어가 이미 `Pipeline.run` / `arun_stream` / retry / DLQ / metrics를 갖춤. `runs` 테이블이 큐 겸함, `FOR UPDATE SKIP LOCKED`로 멀티 워커 fan-out, advisory lock으로 스케줄러 단일 leader. Step 4 외부 엔진 adapter는 그대로 유지(사용자가 자기 Airflow에 우리 pipeline 얹는 경로 보존). Step 9.1 PoC 후 본 구현.
   - **ADR-0022**: 모노레포 = uv workspace + pnpm workspace, 단일 git repo. CI 3분리 (`ci-core.yml` / `ci-server.yml` / `ci-web.yml`) + `paths:` 필터. `import-linter`로 ADR-0017의 단방향 의존을 CI 자동 검증 (`etl_plugins` → `services` 차단, `core` → `connectors`/`adapters`/`runtime` 차단). 릴리스 워크플로 3분리(`release-core` / `release-server` / `release-web`), 서비스 별도 SemVer.
-  - **ADR-0023**: 인증·인가 = OIDC 일반화(authlib, Google/Azure AD/Okta/GitHub) + 로컬 fallback(email+bcrypt) + JWT RS256(access 15min, refresh 7d rotation) + PAT(`etlx_pat_*`). 4 역할 RBAC(Owner/Editor/Runner/Viewer) 워크스페이스 단위 + 글로벌 SuperAdmin. FastAPI `Depends(require_workspace_role(...))` 체이닝으로 선언적 표현. 모든 mutating endpoint가 `audit_log` row 남김(actor / before_json / after_json / ip / user_agent).
+  - **ADR-0023**: 인증·인가 = OIDC 일반화(authlib, Google/Azure AD/Okta/GitHub) + 로컬 fallback(email+bcrypt) + JWT RS256(access 15min, refresh 7d rotation) + PAT(`anyduct_pat_*`). 4 역할 RBAC(Owner/Editor/Runner/Viewer) 워크스페이스 단위 + 글로벌 SuperAdmin. FastAPI `Depends(require_workspace_role(...))` 체이닝으로 선언적 표현. 모든 mutating endpoint가 `audit_log` row 남김(actor / before_json / after_json / ip / user_agent).
 
 ### Decisions
 - ADR-0019: API 프레임워크 = FastAPI (>=0.115), Pydantic v2 통합, OpenAPI 자동 — 코어 모델 REST 재사용
@@ -1592,12 +1592,12 @@ suite + mkdocs site.
 - ADR-0023: OIDC + 로컬 fallback + JWT RS256 + 4-role RBAC + PAT + audit_log
 
 ### Milestone
-- **Step 7.0 — 서비스 기술 스택 확정 (2026-05-14)**: 5개 ADR(0019~0023)로 FastAPI / PostgreSQL+async / 자체 PG worker queue / uv+pnpm 모노레포 / OIDC+RBAC을 모두 못박음. 코드 변경 없음. **다음 슬라이스는 Step 7.1 (모노레포 스캐폴딩) — `services/etlx-server/pyproject.toml` + `services/etlx-web/package.json` + workspace 설정 + CI 3분리 워크플로 + `import-linter` 규칙 추가**.
+- **Step 7.0 — 서비스 기술 스택 확정 (2026-05-14)**: 5개 ADR(0019~0023)로 FastAPI / PostgreSQL+async / 자체 PG worker queue / uv+pnpm 모노레포 / OIDC+RBAC을 모두 못박음. 코드 변경 없음. **다음 슬라이스는 Step 7.1 (모노레포 스캐폴딩) — `services/anyduct-server/pyproject.toml` + `services/anyduct-web/package.json` + workspace 설정 + CI 3분리 워크플로 + `import-linter` 규칙 추가**.
 
 - **ADR-0021 본문 강화** [실행 엔진 결정 보강, 코드 변경 없음]
   - Considered alternatives 표 추가: 7개 후보(자체 PG / Dagster 임베드 / Prefect 임베드 / Celery+Redis / arq / APScheduler / Temporal)를 broker 의존 / task model / 코어 재사용 / UI 중복 / 거부 사유 5축으로 비교. 결정적 기준 명시: (1) 코어 재사용 100% + (2) 인프라 추가 0 + (3) UI 중복 없음 — 자체 PG queue만 동시 만족.
   - Operating envelope 정량화: ~50 runs/sec / ~10k runs/day / p95 enqueue→start <2s / 동시 워커 ~50.
-  - Exit ramp 명시: 큐 폴링 코드를 `etlx_server/workers/queue.py` 한 파일에 격리(interface = claim_next/heartbeat/complete/fail). 백엔드 교체 = 그 한 파일 + Alembic 한 번.
+  - Exit ramp 명시: 큐 폴링 코드를 `anyduct_server/workers/queue.py` 한 파일에 격리(interface = claim_next/heartbeat/complete/fail). 백엔드 교체 = 그 한 파일 + Alembic 한 번.
   - PoC 합격 기준 4개(Step 9.1) — 통과 못 하면 본 ADR을 supersede하고 broker 재검토.
 
 - **Step 6 격상 — Asset/Lineage/Cursor 1급 모델로 재구성** [장기 운영 관점, 코드 변경 없음]
@@ -1615,54 +1615,54 @@ suite + mkdocs site.
 - **장기 플랫폼 방향 정렬 (2026-05-14)**: ADR-0021 강화 + ADR-0024로 "데이터 통합 플랫폼"으로서의 모델 결정을 미리 못박음. 코드 변경 없음, 결정 + 계획 문서만. **다음 슬라이스는 Step 7.1 (모노레포 스캐폴딩)** — Step 6 격상 작업은 추후 슬라이스로 진입.
 
 - **모노레포 스캐폴딩** [Step 7.1]
-  - `services/etlx-server/pyproject.toml` — uv workspace member, `etl-plugins` path dep, FastAPI/SQLAlchemy/asyncpg/Alembic/authlib/passlib/pyjwt/croniter 의존성(ADR-0019~0023 기준)
-  - `services/etlx-server/etlx_server/main.py` — FastAPI app placeholder, `/health` + `/version` 2개 엔드포인트. `etl_plugins.__version__`을 그대로 노출하여 코어 통합 검증.
-  - `services/etlx-server/tests/test_health.py` — TestClient 기반 2 unit tests
-  - `services/etlx-web/package.json` — pnpm workspace member, Next.js 15 + React 19 + TS 5.6
-  - `services/etlx-web/{tsconfig.json, next.config.ts, app/{layout,page}.tsx}` — Next.js App Router 최소 placeholder
-  - `pnpm-workspace.yaml` (root) + 루트 `pyproject.toml`에 `[tool.uv.workspace] members = ["services/etlx-server"]` 추가
-  - `services/docker-compose.services.yml` — etlx-server / etlx-web / metadata-db(별도 5433 포트로 dev compose의 5432 회피) profile 분리 placeholder
+  - `services/anyduct-server/pyproject.toml` — uv workspace member, `etl-plugins` path dep, FastAPI/SQLAlchemy/asyncpg/Alembic/authlib/passlib/pyjwt/croniter 의존성(ADR-0019~0023 기준)
+  - `services/anyduct-server/anyduct_server/main.py` — FastAPI app placeholder, `/health` + `/version` 2개 엔드포인트. `etl_plugins.__version__`을 그대로 노출하여 코어 통합 검증.
+  - `services/anyduct-server/tests/test_health.py` — TestClient 기반 2 unit tests
+  - `services/anyduct-web/package.json` — pnpm workspace member, Next.js 15 + React 19 + TS 5.6
+  - `services/anyduct-web/{tsconfig.json, next.config.ts, app/{layout,page}.tsx}` — Next.js App Router 최소 placeholder
+  - `pnpm-workspace.yaml` (root) + 루트 `pyproject.toml`에 `[tool.uv.workspace] members = ["services/anyduct-server"]` 추가
+  - `services/docker-compose.services.yml` — anyduct-server / anyduct-web / metadata-db(별도 5433 포트로 dev compose의 5432 회피) profile 분리 placeholder
 - **단방향 의존 자동 검증** [Step 7.1]
   - `.importlinter` 추가 — 두 contract:
-    1. `etl_plugins` → `etlx_server` import 차단 (ADR-0017 §6)
+    1. `etl_plugins` → `anyduct_server` import 차단 (ADR-0017 §6)
     2. `etl_plugins.core` → `connectors/adapters/runtime` import 차단 (ADR-0022 §4)
   - `import-linter>=2.0`을 dev group에 추가. 현재 코어가 두 contract 모두 KEPT (위반 0).
 - **CI 3분리** [Step 7.1]
   - `.github/workflows/ci.yml` → **`ci-core.yml`** rename (git mv로 이력 보존) + `paths:` 필터(etl_plugins/, tests/, pyproject.toml, uv.lock, .importlinter) + `lint-imports` step 추가
-  - `.github/workflows/ci-server.yml` 신규 — `services/etlx-server/**` path filter, uv workspace sync + ruff + pytest
-  - `.github/workflows/ci-web.yml` 신규 — `services/etlx-web/**` path filter, pnpm install + typecheck + build
+  - `.github/workflows/ci-server.yml` 신규 — `services/anyduct-server/**` path filter, uv workspace sync + ruff + pytest
+  - `.github/workflows/ci-web.yml` 신규 — `services/anyduct-web/**` path filter, pnpm install + typecheck + build
 - **README 갱신** — CI 뱃지 3개로 분리(`ci-core` / `ci-server` / `ci-web`)
 
 ### Decisions
 - (이번 슬라이스에서 신규 ADR 없음 — ADR-0017/0022가 가이드한 구조 그대로 구현)
 
 ### Milestone
-- **Step 7.1 — 모노레포 스캐폴딩 완료 (2026-05-15)**: `services/etlx-server` + `services/etlx-web` 패키지 골격 + CI 3분리 + import-graph 자동 검증. 321 코어 + 2 server placeholder + 3 skip + 111 it = **437 tests** all green, `import-linter` 2 contracts KEPT. 다음 슬라이스는 **Step 7.2 (메타데이터 DB 스키마)** — SQLAlchemy 2.x async 모델 (workspaces / users / roles / connections / pipelines / schedules / runs / audit_log) + Alembic 초기 마이그레이션 + factory_boy fixture.
+- **Step 7.1 — 모노레포 스캐폴딩 완료 (2026-05-15)**: `services/anyduct-server` + `services/anyduct-web` 패키지 골격 + CI 3분리 + import-graph 자동 검증. 321 코어 + 2 server placeholder + 3 skip + 111 it = **437 tests** all green, `import-linter` 2 contracts KEPT. 다음 슬라이스는 **Step 7.2 (메타데이터 DB 스키마)** — SQLAlchemy 2.x async 모델 (workspaces / users / roles / connections / pipelines / schedules / runs / audit_log) + Alembic 초기 마이그레이션 + factory_boy fixture.
 
 - **메타데이터 DB 스키마** [Step 7.2]
-  - `services/etlx-server/etlx_server/db/uuid7.py` — RFC 9562 uuid7 (stdlib only, 시간 정렬 PK). 외부 라이브러리 의존 회피.
-  - `services/etlx-server/etlx_server/db/base.py` — `Base(DeclarativeBase)` + `UUIDMixin` (uuid7 PK) + `TimestampMixin` (`created_at`/`updated_at`, `server_default=now()` + `onupdate=func.now()`).
-  - `services/etlx-server/etlx_server/db/enums.py` — `StrEnum` 5종: `WorkspaceRole`(owner/editor/runner/viewer, ADR-0023) / `AuthMethod`(local/oidc) / `PipelineMode`(batch/stream) / `RunStatus`(pending→running→succeeded/failed/cancelled) / `LogLevel`. PG native ENUM 타입으로 컬럼 정의.
-  - `services/etlx-server/etlx_server/db/session.py` — `make_engine(url)` + `async_sessionmaker` + `get_session(factory)` 헬퍼. `DATABASE_URL` env var 우선.
-  - `services/etlx-server/etlx_server/db/models/workspace.py` — `Workspace`(slug unique, color_hex `#FF3D8B` default) + `User`(email unique, `auth_method`, `password_hash` nullable, `is_superadmin`) + `Membership`(`(workspace_id, user_id)` unique + role enum) + `PersonalAccessToken`(prefix unique, hash 저장, expires/last_used). ADR-0023.
-  - `services/etlx-server/etlx_server/db/models/connection.py` — `Connection`(`(workspace_id, name)` unique, type, `config_json` JSONB, `secret_refs` JSONB list — **`${SECRET_REF}` placeholders only**, 평문 시크릿 컬럼 없음 — Step 7.4 secret backend로 연동).
-  - `services/etlx-server/etlx_server/db/models/pipeline.py` — `Pipeline`(`(workspace_id, name)` unique) + `PipelineVersion`(immutable snapshot, `version` 1-based 정수, `is_current` bool, `config_json` JSONB) + `Schedule`(cron_expr nullable for stream, `config_overrides` JSONB).
-  - `services/etlx-server/etlx_server/db/models/run.py` — `Run` (ADR-0021 워커 큐 + 결과 SSOT): `status` / `scheduled_at` / `heartbeat_at` / `worker_id` / `records_read` / `records_written` / `duration_seconds` / `error_class` / `error_message` / `result_json` JSONB. 인덱스 3종: `ix_runs_queue_poll(status, scheduled_at)` (워커 폴링 핫패스) / `ix_runs_workspace_created` / `ix_runs_heartbeat` (좀비 회수). `RunLog`(`run_id`+`ts`+`level`+`message`+`context_json`) + `RunMetric`(`name`+`value`+`attrs_json`).
-  - `services/etlx-server/etlx_server/db/models/audit.py` — `AuditLog`(actor `SET NULL` on user delete, `workspace_id`, action, resource_type/id, before/after JSONB, IP, user_agent). GIN 인덱스 후보 (initial migration에선 B-tree 만).
-  - `services/etlx-server/alembic.ini` + `alembic/env.py`(async, `DATABASE_URL` env var) + `alembic/versions/0001_initial_schema.py` — hand-written 마이그레이션: 5 enum 타입 + 12 테이블 + 모든 FK/UNIQUE/INDEX 명시 (autogenerate는 첫 마이그레이션 우선 hand-written으로 명세 보존).
+  - `services/anyduct-server/anyduct_server/db/uuid7.py` — RFC 9562 uuid7 (stdlib only, 시간 정렬 PK). 외부 라이브러리 의존 회피.
+  - `services/anyduct-server/anyduct_server/db/base.py` — `Base(DeclarativeBase)` + `UUIDMixin` (uuid7 PK) + `TimestampMixin` (`created_at`/`updated_at`, `server_default=now()` + `onupdate=func.now()`).
+  - `services/anyduct-server/anyduct_server/db/enums.py` — `StrEnum` 5종: `WorkspaceRole`(owner/editor/runner/viewer, ADR-0023) / `AuthMethod`(local/oidc) / `PipelineMode`(batch/stream) / `RunStatus`(pending→running→succeeded/failed/cancelled) / `LogLevel`. PG native ENUM 타입으로 컬럼 정의.
+  - `services/anyduct-server/anyduct_server/db/session.py` — `make_engine(url)` + `async_sessionmaker` + `get_session(factory)` 헬퍼. `DATABASE_URL` env var 우선.
+  - `services/anyduct-server/anyduct_server/db/models/workspace.py` — `Workspace`(slug unique, color_hex `#FF3D8B` default) + `User`(email unique, `auth_method`, `password_hash` nullable, `is_superadmin`) + `Membership`(`(workspace_id, user_id)` unique + role enum) + `PersonalAccessToken`(prefix unique, hash 저장, expires/last_used). ADR-0023.
+  - `services/anyduct-server/anyduct_server/db/models/connection.py` — `Connection`(`(workspace_id, name)` unique, type, `config_json` JSONB, `secret_refs` JSONB list — **`${SECRET_REF}` placeholders only**, 평문 시크릿 컬럼 없음 — Step 7.4 secret backend로 연동).
+  - `services/anyduct-server/anyduct_server/db/models/pipeline.py` — `Pipeline`(`(workspace_id, name)` unique) + `PipelineVersion`(immutable snapshot, `version` 1-based 정수, `is_current` bool, `config_json` JSONB) + `Schedule`(cron_expr nullable for stream, `config_overrides` JSONB).
+  - `services/anyduct-server/anyduct_server/db/models/run.py` — `Run` (ADR-0021 워커 큐 + 결과 SSOT): `status` / `scheduled_at` / `heartbeat_at` / `worker_id` / `records_read` / `records_written` / `duration_seconds` / `error_class` / `error_message` / `result_json` JSONB. 인덱스 3종: `ix_runs_queue_poll(status, scheduled_at)` (워커 폴링 핫패스) / `ix_runs_workspace_created` / `ix_runs_heartbeat` (좀비 회수). `RunLog`(`run_id`+`ts`+`level`+`message`+`context_json`) + `RunMetric`(`name`+`value`+`attrs_json`).
+  - `services/anyduct-server/anyduct_server/db/models/audit.py` — `AuditLog`(actor `SET NULL` on user delete, `workspace_id`, action, resource_type/id, before/after JSONB, IP, user_agent). GIN 인덱스 후보 (initial migration에선 B-tree 만).
+  - `services/anyduct-server/alembic.ini` + `alembic/env.py`(async, `DATABASE_URL` env var) + `alembic/versions/0001_initial_schema.py` — hand-written 마이그레이션: 5 enum 타입 + 12 테이블 + 모든 FK/UNIQUE/INDEX 명시 (autogenerate는 첫 마이그레이션 우선 hand-written으로 명세 보존).
 - **통합 테스트 인프라** [Step 7.2]
-  - `services/etlx-server/tests/conftest.py` — session-scoped `metadata_db_container` (testcontainers `postgres:16-alpine`) → `_alembic_upgrade` (subprocess `uv run alembic upgrade head`) → session-scoped `metadata_engine` → per-test `session` (outer transaction + rollback isolation). `pytest_collection_modifyitems` 가 `tests/db/*` 를 자동으로 `pytest.mark.it` 부착.
-  - `services/etlx-server/tests/db/` — **18 통합 테스트**: workspace 모델 6 / connection 3 / pipeline 3 / run 4 / audit 2. `FOR UPDATE SKIP LOCKED` 패턴 검증 + cascade/SET NULL FK 동작 + JSONB 라운드트립 모두 커버.
+  - `services/anyduct-server/tests/conftest.py` — session-scoped `metadata_db_container` (testcontainers `postgres:16-alpine`) → `_alembic_upgrade` (subprocess `uv run alembic upgrade head`) → session-scoped `metadata_engine` → per-test `session` (outer transaction + rollback isolation). `pytest_collection_modifyitems` 가 `tests/db/*` 를 자동으로 `pytest.mark.it` 부착.
+  - `services/anyduct-server/tests/db/` — **18 통합 테스트**: workspace 모델 6 / connection 3 / pipeline 3 / run 4 / audit 2. `FOR UPDATE SKIP LOCKED` 패턴 검증 + cascade/SET NULL FK 동작 + JSONB 라운드트립 모두 커버.
   - 루트 `pyproject.toml`: `asyncio_default_fixture_loop_scope = "session"` + `asyncio_default_test_loop_scope = "session"` 추가 — session-scoped 엔진과 테스트가 동일 event loop 공유.
 
 ### Decisions
 - (이번 슬라이스에서 신규 ADR 없음 — ADR-0020/0021/0023의 결정을 구현체로 옮긴 것)
 
 ### Milestone
-- **Step 7.2 — 메타데이터 DB 스키마 완료 (2026-05-16)**: 12 테이블 + 5 enum 타입 + 초기 Alembic 마이그레이션 + 18 통합 테스트 (testcontainers Postgres 16). 코어 321 unit (regression 0) + 서버 18 it = **변경 없는 코어 + 18 신규 it green**. `mypy strict` 통과(13 source files), `lint-imports` 2 contracts KEPT. 다음 슬라이스는 **Step 7.3 (YAML ↔ DB 양방향)** — `etl_plugins.config.models` 재사용해 `configs/*.yaml` ↔ metadata DB upsert/export + CLI `etlx import|export`.
+- **Step 7.2 — 메타데이터 DB 스키마 완료 (2026-05-16)**: 12 테이블 + 5 enum 타입 + 초기 Alembic 마이그레이션 + 18 통합 테스트 (testcontainers Postgres 16). 코어 321 unit (regression 0) + 서버 18 it = **변경 없는 코어 + 18 신규 it green**. `mypy strict` 통과(13 source files), `lint-imports` 2 contracts KEPT. 다음 슬라이스는 **Step 7.3 (YAML ↔ DB 양방향)** — `etl_plugins.config.models` 재사용해 `configs/*.yaml` ↔ metadata DB upsert/export + CLI `anyduct import|export`.
 
 - **YAML ↔ DB 양방향 동기화** [Step 7.3]
-  - `services/etlx-server/etlx_server/io/yaml_sync.py` — `connections.yaml` + `pipelines/*.yaml` ↔ metadata DB 양방향 sync.
+  - `services/anyduct-server/anyduct_server/io/yaml_sync.py` — `connections.yaml` + `pipelines/*.yaml` ↔ metadata DB 양방향 sync.
     * `import_connections_yaml(session, ws, path)` — 한 워크스페이스에 connections 일괄 upsert.
     * `import_pipeline_yaml(session, ws, path)` — 한 파이프라인 upsert: Pipeline 존재 확인 후 PipelineVersion 비교 → diff면 새 버전 생성(`is_current=True`, 이전 demote), 동일하면 no-op. cfg.schedule 유무에 따라 `name="default"` Schedule 추가/삭제.
     * `import_yaml_dir(session, ws, dir)` — 디렉토리 walk + `ImportResult` 요약(연결/파이프라인/새 버전/유지/스케줄 카운트).
@@ -1670,14 +1670,14 @@ suite + mkdocs site.
   - Secret 처리 (평문 0 약속 유지): `!secret <path>` YAML 태그 → DB `config_json`에 `${SECRET:<path>}` placeholder + `connections.secret_refs` 리스트. Export 시 `${SECRET:<path>}` → `!secret <path>` 태그로 복원. `${VAR}` env-var 형식은 import 시 절대 expand 하지 않고 그대로 보관 → DB는 항상 unresolved placeholder만 가짐.
   - 코어 `etl_plugins.config.models`(SSOT)을 그대로 재사용 — `ConnectionsConfig`/`ConnectionConfig`/`PipelineConfig`이 spec 검증을 책임짐. `extra="forbid"`인 모델 덕분에 unknown 필드가 자동 차단됨.
   - PipelineVersion 증가 규칙: 동일 `config_json` 재import = no-op (`pipeline_versions_unchanged++`). 변경된 import만 `version=v+1`로 새 행 + 이전 `is_current=False` (단일 트랜잭션).
-- **etlx-server CLI** [Step 7.3]
-  - `services/etlx-server/etlx_server/cli.py` — Typer 기반 admin CLI. 두 서브커맨드:
-    * `etlx-server import-yaml <yaml_dir> --workspace <slug>` — 슬러그로 워크스페이스 찾고 디렉토리 import → 요약 한 줄.
-    * `etlx-server export-yaml --workspace <slug> --to <dir>` — DB → YAML 트리.
+- **anyduct-server CLI** [Step 7.3]
+  - `services/anyduct-server/anyduct_server/cli.py` — Typer 기반 admin CLI. 두 서브커맨드:
+    * `anyduct-server import-yaml <yaml_dir> --workspace <slug>` — 슬러그로 워크스페이스 찾고 디렉토리 import → 요약 한 줄.
+    * `anyduct-server export-yaml --workspace <slug> --to <dir>` — DB → YAML 트리.
   - `DATABASE_URL` env var 필수(없으면 exit 2). 자체 engine + session 생성 → commit 한 후 dispose.
-  - `services/etlx-server/pyproject.toml`: `typer>=0.12` 의존성 + `[project.scripts] etlx-server = "etlx_server.cli:app"` 추가. **코어 `etlx`와 분리** — ADR-0017 단방향 의존 유지(`etlx` = `etl_plugins.cli`는 DB 무지, `etlx-server`는 services 안에서 DB를 다룸).
+  - `services/anyduct-server/pyproject.toml`: `typer>=0.12` 의존성 + `[project.scripts] anyduct-server = "anyduct_server.cli:app"` 추가. **코어 `anyduct`와 분리** — ADR-0017 단방향 의존 유지(`anyduct` = `etl_plugins.cli`는 DB 무지, `anyduct-server`는 services 안에서 DB를 다룸).
 - **통합 테스트 확장** [Step 7.3]
-  - `services/etlx-server/tests/db/test_yaml_sync.py` — 9 신규 it 테스트:
+  - `services/anyduct-server/tests/db/test_yaml_sync.py` — 9 신규 it 테스트:
     * `!secret`/`${VAR}` 처리(평문 미저장, env placeholder 보존)
     * Pipeline+Schedule 생성, batch/stream 모드 모두
     * 재import idempotent / diff 시 버전 증가 + demote
@@ -1690,7 +1690,7 @@ suite + mkdocs site.
 - (이번 슬라이스에서 신규 ADR 없음 — ADR-0017 단방향 의존 + ADR-0020 SSOT 재사용 원칙 그대로 구현)
 
 ### Milestone
-- **Step 7.3 — YAML ↔ DB 양방향 완료 (2026-05-16)**: `etlx-server` 새 CLI + `yaml_sync.py` 양방향 + 9 신규 it 통합 테스트. 누적 코어 321 unit + 서버 2 unit + 서버 **27 it** (18 + 9) = **350 tests** all green. `mypy strict` 16 source files OK, `lint-imports` 2 contracts KEPT. 다음 슬라이스는 **Step 7.4 (Secret backend UI 통합)** — `EnvSecretBackend` 외 3종(Vault/AWS SM/GCP SM) 실제 구현 + 로컬 dev용 `FileSecretBackend`.
+- **Step 7.3 — YAML ↔ DB 양방향 완료 (2026-05-16)**: `anyduct-server` 새 CLI + `yaml_sync.py` 양방향 + 9 신규 it 통합 테스트. 누적 코어 321 unit + 서버 2 unit + 서버 **27 it** (18 + 9) = **350 tests** all green. `mypy strict` 16 source files OK, `lint-imports` 2 contracts KEPT. 다음 슬라이스는 **Step 7.4 (Secret backend UI 통합)** — `EnvSecretBackend` 외 3종(Vault/AWS SM/GCP SM) 실제 구현 + 로컬 dev용 `FileSecretBackend`.
 
 - **Secret backend 구현** [Step 7.4]
   - `etl_plugins/config/secrets.py` — `SecretBackend` ABC에 write API 추가 (`set(path, value)` + `delete(path)`). 베이스 구현은 read-only 시 `NotImplementedError("…is read-only…")` 를 던지고 write 가능한 백엔드만 override.
@@ -1723,18 +1723,18 @@ suite + mkdocs site.
 - **Step 7.4 — Secret backend 구현 완료 (2026-05-16)**: 4 신규 백엔드(File/Vault/AWS SM/GCP SM) + write API(set/delete) + 3 pyproject extras. 누적 코어 344 unit + 2 server unit + 코어 **119 it** (111 + 8 secret backend) + 27 server it = **492 tests** all green. testcontainers Vault + LocalStack 모두 실제 Docker 컨테이너로 검증, 컨테이너는 매 세션 후 sweep. `mypy strict` 39+16 source files OK, `lint-imports` 2 contracts KEPT. **Step 7 (Service Foundation) 전 슬라이스 완료**. 다음은 **Step 8 (API Server / FastAPI)** — 부트스트랩 → 인증 → 워크스페이스/연결/파이프라인 CRUD → 실행 트리거 → SSE/WebSocket 로그.
 
 - **FastAPI 부트스트랩 / OOP 재구성** [Step 8.1]
-  - `services/etlx-server/etlx_server/settings.py` — `Settings(BaseSettings)`, `Environment` StrEnum, env/`.env` 기반 + `get_settings()` `lru_cache`. 필드: `service_name`/`environment`/`database_url`/`database_echo`/`cors_origins` + 파생 프로퍼티 `docs_enabled`(prod이면 False).
-  - `services/etlx-server/etlx_server/app_factory.py` — `create_app(settings: Settings | None = None) -> FastAPI`. **Composition root**: lifespan 핸들러 빌드 → engine + session_factory를 `app.state`에 attach → 라우터 include → CORS는 origins 있을 때만. `main.py`는 `app = create_app()` thin shim.
-  - `services/etlx-server/etlx_server/dependencies.py` — DI 헬퍼: `get_settings`/`get_engine`/`get_session_factory`/`get_session` (per-request 세션, 예외 시 자동 rollback).
-  - `services/etlx-server/etlx_server/routers/health.py` — `/health`(외부 의존 0 liveness) + `/ready`(DB `SELECT 1` 실패 시 503 + `database: error` + 에러 클래스명 노출). Pydantic `HealthStatus`/`ReadinessStatus` response model.
-  - `services/etlx-server/etlx_server/routers/meta.py` — `/version` (server/core/service/environment 4-tuple). `VersionInfo` response model.
-  - `services/etlx-server/etlx_server/main.py` — thin shim(`app = create_app()`). uvicorn은 변함없이 `uvicorn etlx_server.main:app`.
+  - `services/anyduct-server/anyduct_server/settings.py` — `Settings(BaseSettings)`, `Environment` StrEnum, env/`.env` 기반 + `get_settings()` `lru_cache`. 필드: `service_name`/`environment`/`database_url`/`database_echo`/`cors_origins` + 파생 프로퍼티 `docs_enabled`(prod이면 False).
+  - `services/anyduct-server/anyduct_server/app_factory.py` — `create_app(settings: Settings | None = None) -> FastAPI`. **Composition root**: lifespan 핸들러 빌드 → engine + session_factory를 `app.state`에 attach → 라우터 include → CORS는 origins 있을 때만. `main.py`는 `app = create_app()` thin shim.
+  - `services/anyduct-server/anyduct_server/dependencies.py` — DI 헬퍼: `get_settings`/`get_engine`/`get_session_factory`/`get_session` (per-request 세션, 예외 시 자동 rollback).
+  - `services/anyduct-server/anyduct_server/routers/health.py` — `/health`(외부 의존 0 liveness) + `/ready`(DB `SELECT 1` 실패 시 503 + `database: error` + 에러 클래스명 노출). Pydantic `HealthStatus`/`ReadinessStatus` response model.
+  - `services/anyduct-server/anyduct_server/routers/meta.py` — `/version` (server/core/service/environment 4-tuple). `VersionInfo` response model.
+  - `services/anyduct-server/anyduct_server/main.py` — thin shim(`app = create_app()`). uvicorn은 변함없이 `uvicorn anyduct_server.main:app`.
 - **신규 의존성** [Step 8.1]
-  - `services/etlx-server/pyproject.toml`: `pydantic-settings>=2.5`. 다른 cloud SDK / 인증 라이브러리는 Step 8.2+ 에서 추가.
+  - `services/anyduct-server/pyproject.toml`: `pydantic-settings>=2.5`. 다른 cloud SDK / 인증 라이브러리는 Step 8.2+ 에서 추가.
 - **테스트 정규화** [Step 8.1]
-  - `services/etlx-server/tests/test_settings.py` — Settings 6 unit (env var fallback, default development, prod hides docs, invalid env raises, lru_cache, empty CORS).
-  - `services/etlx-server/tests/test_health.py` — 6 unit으로 재작성: `TestClient(create_app(settings=...))` 패턴, prod/dev docs 가시성, CORS preflight 헤더, OpenAPI 스키마에 `/health`/`/ready`/`/version` 등장.
-  - `services/etlx-server/tests/db/test_health_ready.py` — testcontainers PG로 실제 readiness 검증 (`httpx.AsyncClient(ASGITransport(app))` + `app.router.lifespan_context` 직접 enter). degraded path는 closed local port로 검증(503 + detail).
+  - `services/anyduct-server/tests/test_settings.py` — Settings 6 unit (env var fallback, default development, prod hides docs, invalid env raises, lru_cache, empty CORS).
+  - `services/anyduct-server/tests/test_health.py` — 6 unit으로 재작성: `TestClient(create_app(settings=...))` 패턴, prod/dev docs 가시성, CORS preflight 헤더, OpenAPI 스키마에 `/health`/`/ready`/`/version` 등장.
+  - `services/anyduct-server/tests/db/test_health_ready.py` — testcontainers PG로 실제 readiness 검증 (`httpx.AsyncClient(ASGITransport(app))` + `app.router.lifespan_context` 직접 enter). degraded path는 closed local port로 검증(503 + detail).
 
 ### Decisions
 - (이번 슬라이스에서 신규 ADR 없음 — ADR-0019(FastAPI) 결정의 OOP 구현체)
@@ -1744,13 +1744,13 @@ suite + mkdocs site.
 
 - **로컬 인증 + JWT** [Step 8.2a]
   - **분할 결정**: Step 8.2를 a(로컬 + JWT) / b(OIDC) 두 슬라이스로 분리 — 1 PR = 1 slice 원칙 유지.
-  - `services/etlx-server/etlx_server/auth/` 신규 패키지 (정규화된 OOP layering):
+  - `services/anyduct-server/anyduct_server/auth/` 신규 패키지 (정규화된 OOP layering):
     * `jwt_service.py` — `JwtService` (RS256, `issue_access`/`issue_refresh`/`verify(token, expected_type)`), `Claims` dataclass, `TokenType` StrEnum, `InvalidTokenError`. verify-only 인스턴스 지원(private_key=None) → 워커가 검증만 할 때 사용. `extra_claims`가 reserved claim(`sub`/`iss`/`exp`/...) 덮어쓰지 못함. `generate_rsa_keypair_pem()` 헬퍼(테스트/스크립트용).
     * `password_service.py` — `PasswordService(rounds=12)`. **bcrypt 직접 사용**(passlib는 bcrypt 4.x와 비호환 — `__about__` 누락 + 72-byte 엄격 체크). 72-byte 초과 패스워드는 SHA-256 prehash + base64 후 bcrypt에 전달.
     * `user_repository.py` — `UserRepository(session)` 에 `get_by_id` / `get_by_email`(email은 항상 lowercase). 라우터가 ORM 직접 접근하지 않게 분리.
     * `schemas.py` — Pydantic `LoginRequest`(EmailStr) / `RefreshRequest` / `TokenPair`(`token_type: "bearer"` 고정) / `CurrentUser`.
     * `current_user.py` — `get_jwt_service` / `get_password_service` (app.state DI) + `get_current_user`(HTTPBearer → JwtService.verify(ACCESS) → UserRepository.get_by_id → CurrentUser). 모든 실패 경로 401 + `WWW-Authenticate: Bearer` 일관 응답.
-  - `services/etlx-server/etlx_server/routers/auth.py` — `/auth/login`(local, disabled 시 503), `/auth/refresh`(refresh 토큰만 허용 — access는 401), `/auth/logout`(stateless 204), `/auth/me`(FE bootstrap). Login은 unknown email 시 dummy bcrypt verify로 timing leak 방지. OIDC 사용자가 local login 시도하면 401(detail 동일 — leak 방지).
+  - `services/anyduct-server/anyduct_server/routers/auth.py` — `/auth/login`(local, disabled 시 503), `/auth/refresh`(refresh 토큰만 허용 — access는 401), `/auth/logout`(stateless 204), `/auth/me`(FE bootstrap). Login은 unknown email 시 dummy bcrypt verify로 timing leak 방지. OIDC 사용자가 local login 시도하면 401(detail 동일 — leak 방지).
   - `app_factory.py` — lifespan에서 `PasswordService` + `JwtService` 인스턴스화 후 `app.state`에 attach. JwtService는 키 누락 시 None — 무관한 엔드포인트(`/health`/`/ready`/`/version`)는 키 없이도 동작.
   - `settings.py` 확장: `auth_jwt_private_key_pem`/`auth_jwt_public_key_pem`(SecretStr) / `auth_jwt_issuer` / `auth_jwt_audience` / `auth_jwt_access_ttl_seconds` / `auth_jwt_refresh_ttl_seconds` / `auth_local_enabled`.
 - **의존성 변경** [Step 8.2a]
@@ -1758,9 +1758,9 @@ suite + mkdocs site.
   - 제거: `passlib[bcrypt]>=1.7` — bcrypt 4.x와 호환 안 됨.
   - mypy override 추가: `passlib.*` → ignore_missing_imports (남아있는 transitive 참조 대비).
 - **테스트 정규화** [Step 8.2a]
-  - `services/etlx-server/tests/auth/test_password_service.py` — 4 unit (round-trip, wrong password, malformed hash → False(fail-closed), `$2`로 시작하는 bcrypt marker).
-  - `services/etlx-server/tests/auth/test_jwt_service.py` — 11 unit (access/refresh 발급+검증, 잘못된 type 거부, signature 검증, audience/issuer 검증, expired 거부, verify-only 인스턴스, public_key 자동 derive, extra_claims가 reserved 못 덮음 등).
-  - `services/etlx-server/tests/db/test_auth_router.py` — 13 it (real PG via testcontainers). conftest의 outer-trans rollback과 lifespan의 별도 connection이 충돌하므로 `app.dependency_overrides[get_session]`로 테스트 세션을 라우터에 주입 — rollback isolation 유지. 시나리오: login(성공 / wrong password / unknown email / OIDC user / disabled local) + me(missing token / garbage token / refresh token in auth header) + refresh(success / access token rejected) + logout(204 / 401).
+  - `services/anyduct-server/tests/auth/test_password_service.py` — 4 unit (round-trip, wrong password, malformed hash → False(fail-closed), `$2`로 시작하는 bcrypt marker).
+  - `services/anyduct-server/tests/auth/test_jwt_service.py` — 11 unit (access/refresh 발급+검증, 잘못된 type 거부, signature 검증, audience/issuer 검증, expired 거부, verify-only 인스턴스, public_key 자동 derive, extra_claims가 reserved 못 덮음 등).
+  - `services/anyduct-server/tests/db/test_auth_router.py` — 13 it (real PG via testcontainers). conftest의 outer-trans rollback과 lifespan의 별도 connection이 충돌하므로 `app.dependency_overrides[get_session]`로 테스트 세션을 라우터에 주입 — rollback isolation 유지. 시나리오: login(성공 / wrong password / unknown email / OIDC user / disabled local) + me(missing token / garbage token / refresh token in auth header) + refresh(success / access token rejected) + logout(204 / 401).
 
 ### Decisions
 - (이번 슬라이스에서 신규 ADR 없음 — ADR-0023 로컬 fallback + JWT 부분 구현체)
@@ -1769,20 +1769,20 @@ suite + mkdocs site.
 - **Step 8.2a — 로컬 인증 + JWT 완료 (2026-05-16)**: 정규화된 auth 패키지(JwtService/PasswordService/UserRepository/Schemas) + 4 엔드포인트(login/refresh/logout/me). 누적 코어 344 unit + 서버 **23 unit** + 서버 **47 it** + 코어 119 it = **533 tests** all green. mypy strict 29 server src files OK, import-linter 2 contracts KEPT. 다음 슬라이스는 **Step 8.2b (OIDC)** — authlib 기반 Google/Azure AD/Okta 공통화 + `/auth/oidc/login`+`/auth/oidc/callback` + ID token 검증 + 신규 OIDC 사용자 자동 프로비저닝.
 
 - **OIDC SSO** [Step 8.2b]
-  - `services/etlx-server/etlx_server/auth/oidc_config.py` 신규: `OidcProviderConfig`(Pydantic frozen — `name`/`display_name`/`client_id`/`client_secret: SecretStr`/`discovery_url`/`redirect_uri`/`scopes`). `auth_method` property가 provider명 → `AuthMethod` enum 매핑(google/azure/okta/github → 전용 enum, 그 외 → `OIDC_GENERIC`).
-  - `services/etlx-server/etlx_server/auth/oidc_state.py` 신규: `OidcStateSigner` — `JwtService`와 동일 RSA 키쌍 재사용. `token_type=oidc_state` 단명 JWT(기본 10분)에 `provider`+`nonce`+`return_to`를 담아 callback에 전달. 서버측 세션/쿠키 0, 무상태 CSRF. `verify`는 access/refresh 토큰을 거부(token_type 검사).
-  - `services/etlx-server/etlx_server/auth/oidc_service.py` 신규: `OidcService` — provider 레지스트리 + Authorization Code 플로우 드라이버. `build_authorize_url(provider, return_to=)`은 IdP authorize URL + state 토큰 반환. `handle_callback(provider, code, state)`은 state 검증 → discovery → token exchange → JWKS 페치 → ID 토큰 RS256 검증(kid 매칭, audience/issuer/email_verified/nonce 강제) → `OidcCallbackResult` 반환. 메타데이터/JWKS 메모리 캐시(프로세스 lifetime). `http_client_factory` + `nonce_factory` DI로 테스트 시 `httpx.MockTransport` 주입. 예외 분리: `UnknownProviderError`/`OidcDiscoveryError`/`OidcExchangeError`/`IdTokenError`. authlib.jose deprecation 회피를 위해 PyJWT + httpx 직접 사용.
+  - `services/anyduct-server/anyduct_server/auth/oidc_config.py` 신규: `OidcProviderConfig`(Pydantic frozen — `name`/`display_name`/`client_id`/`client_secret: SecretStr`/`discovery_url`/`redirect_uri`/`scopes`). `auth_method` property가 provider명 → `AuthMethod` enum 매핑(google/azure/okta/github → 전용 enum, 그 외 → `OIDC_GENERIC`).
+  - `services/anyduct-server/anyduct_server/auth/oidc_state.py` 신규: `OidcStateSigner` — `JwtService`와 동일 RSA 키쌍 재사용. `token_type=oidc_state` 단명 JWT(기본 10분)에 `provider`+`nonce`+`return_to`를 담아 callback에 전달. 서버측 세션/쿠키 0, 무상태 CSRF. `verify`는 access/refresh 토큰을 거부(token_type 검사).
+  - `services/anyduct-server/anyduct_server/auth/oidc_service.py` 신규: `OidcService` — provider 레지스트리 + Authorization Code 플로우 드라이버. `build_authorize_url(provider, return_to=)`은 IdP authorize URL + state 토큰 반환. `handle_callback(provider, code, state)`은 state 검증 → discovery → token exchange → JWKS 페치 → ID 토큰 RS256 검증(kid 매칭, audience/issuer/email_verified/nonce 강제) → `OidcCallbackResult` 반환. 메타데이터/JWKS 메모리 캐시(프로세스 lifetime). `http_client_factory` + `nonce_factory` DI로 테스트 시 `httpx.MockTransport` 주입. 예외 분리: `UnknownProviderError`/`OidcDiscoveryError`/`OidcExchangeError`/`IdTokenError`. authlib.jose deprecation 회피를 위해 PyJWT + httpx 직접 사용.
   - `auth/user_repository.py` 확장: `provision_oidc_user(email, name, auth_method)` 신규 — 동일 provider 재로그인 시 name만 갱신(idempotent), LOCAL/다른 OIDC provider와 email 충돌 시 `OidcEmailCollisionError`(409) 발생. `auth_method=LOCAL`을 받으면 `ValueError`.
   - `auth/schemas.py` 확장: `OidcProviderSummary`(시크릿 0) / `OidcAuthorizeResponse`(`authorize_url`+`state`) / `OidcCallbackResponse`(TokenPair + `return_to`).
   - `auth/current_user.py` 확장: `get_oidc_service` Depends — `app.state.oidc_service`가 없으면 503.
-  - `services/etlx-server/etlx_server/routers/oidc.py` 신규: `/auth/oidc/providers`(시크릿 0 메타) / `/auth/oidc/login?provider=&return_to=` / `/auth/oidc/callback?provider=&code=&state=`. provider명 → `AuthMethod` 매핑, 이메일 충돌 → 409, 알 수 없는 provider → 404, ID 토큰 검증 실패 → 401, IdP 통신 실패 → 502, OIDC 미설정 → 503.
+  - `services/anyduct-server/anyduct_server/routers/oidc.py` 신규: `/auth/oidc/providers`(시크릿 0 메타) / `/auth/oidc/login?provider=&return_to=` / `/auth/oidc/callback?provider=&code=&state=`. provider명 → `AuthMethod` 매핑, 이메일 충돌 → 409, 알 수 없는 provider → 404, ID 토큰 검증 실패 → 401, IdP 통신 실패 → 502, OIDC 미설정 → 503.
   - `app_factory.py` 확장: `_build_oidc_service(settings)` 헬퍼 — provider 0개거나 키 누락 시 None 반환. lifespan에서 `app.state.oidc_service` 부착. `app.include_router(oidc_router.router)` 추가.
   - `settings.py` 확장: `auth_oidc_enabled`(default False) / `auth_oidc_providers: list[OidcProviderConfig]`(env JSON, 기본 `[]`) / `auth_oidc_state_ttl_seconds`(default 600) / `auth_oidc_http_timeout_seconds`(default 10).
 - **테스트 정규화** [Step 8.2b]
-  - `services/etlx-server/tests/auth/test_oidc_state.py` — 6 unit (sign/verify round-trip ± return_to, garbage 거부, signature tamper 거부, expired 거부, access 토큰 거부).
-  - `services/etlx-server/tests/auth/test_oidc_service.py` — 14 unit (provider 레지스트리, 중복 provider 거부, name→AuthMethod 매핑, build_authorize_url 파라미터/state 디코드, unknown provider, discovery 실패, callback happy path + form 검증, state/provider mismatch, token endpoint 에러, nonce mismatch, email_verified=false 거부, audience mismatch 거부, id_token 누락, name 누락 시 email-local fallback). `httpx.MockTransport`로 IdP 모킹, 진짜 RSA 키로 ID 토큰 RS256 서명 → JWKS 검증 경로 전체 실행.
-  - `services/etlx-server/tests/db/test_user_repository_oidc.py` — 6 it (신규 OIDC 사용자 생성/email 정규화/password_hash=None, 재로그인 시 name 갱신, idempotent, LOCAL 충돌 거부, 다른 OIDC provider 충돌 거부, `auth_method=LOCAL` ValueError).
-  - `services/etlx-server/tests/db/test_auth_oidc_router.py` — 11 it (providers 리스트, 비활성 시 빈 리스트, 비활성 시 login 503, unknown provider 404, login authorize URL 형태, callback 신규 사용자 프로비저닝 + 토큰 발급 + `/auth/me` 작동, 재로그인 name 갱신, LOCAL 충돌 409, tampered state 401, state/provider mismatch 404, 미설정 OIDC callback 503).
+  - `services/anyduct-server/tests/auth/test_oidc_state.py` — 6 unit (sign/verify round-trip ± return_to, garbage 거부, signature tamper 거부, expired 거부, access 토큰 거부).
+  - `services/anyduct-server/tests/auth/test_oidc_service.py` — 14 unit (provider 레지스트리, 중복 provider 거부, name→AuthMethod 매핑, build_authorize_url 파라미터/state 디코드, unknown provider, discovery 실패, callback happy path + form 검증, state/provider mismatch, token endpoint 에러, nonce mismatch, email_verified=false 거부, audience mismatch 거부, id_token 누락, name 누락 시 email-local fallback). `httpx.MockTransport`로 IdP 모킹, 진짜 RSA 키로 ID 토큰 RS256 서명 → JWKS 검증 경로 전체 실행.
+  - `services/anyduct-server/tests/db/test_user_repository_oidc.py` — 6 it (신규 OIDC 사용자 생성/email 정규화/password_hash=None, 재로그인 시 name 갱신, idempotent, LOCAL 충돌 거부, 다른 OIDC provider 충돌 거부, `auth_method=LOCAL` ValueError).
+  - `services/anyduct-server/tests/db/test_auth_oidc_router.py` — 11 it (providers 리스트, 비활성 시 빈 리스트, 비활성 시 login 503, unknown provider 404, login authorize URL 형태, callback 신규 사용자 프로비저닝 + 토큰 발급 + `/auth/me` 작동, 재로그인 name 갱신, LOCAL 충돌 409, tampered state 401, state/provider mismatch 404, 미설정 OIDC callback 503).
 
 ### Decisions
 - (이번 슬라이스에서 신규 ADR 없음 — ADR-0023 OIDC 부분 구현체)
@@ -1791,18 +1791,18 @@ suite + mkdocs site.
 - **Step 8.2b — OIDC 완료 (2026-05-18)**: OidcService/OidcStateSigner/OidcProviderConfig + provision_oidc_user + 3 라우트(`/auth/oidc/providers`+`/login`+`/callback`). 누적 코어 344 unit + 서버 **48 unit** (23 → 48, +25) + 서버 **59 it** (47 → 59, +12, user_repository 분리 포함) + 코어 119 it = **570 tests** all green. mypy strict 코어 39 + 서버 33 src files OK, import-linter 2 contracts KEPT. 다음 슬라이스는 **Step 8.3 (RBAC)** — workspace 단위 4역할(Owner/Editor/Runner/Viewer) + `Depends(require_workspace_role(...))` + 리소스 쿼리 자동 필터.
 
 - **RBAC (workspace 단위 4역할 + 의존성 게이트)** [Step 8.3]
-  - `services/etlx-server/etlx_server/auth/rbac.py` 신규: `WorkspaceRole`을 strict hierarchy로 모델링(Owner=4>Editor=3>Runner=2>Viewer=1). `role_rank(role)` + `has_at_least(actual, required)`. Editor가 ADR-0023상 "all CRUD"이므로 trigger를 포함 — Runner는 trigger+inspect+DLQ만 가능한 Editor의 subset. 따라서 hierarchical 비교가 충분.
+  - `services/anyduct-server/anyduct_server/auth/rbac.py` 신규: `WorkspaceRole`을 strict hierarchy로 모델링(Owner=4>Editor=3>Runner=2>Viewer=1). `role_rank(role)` + `has_at_least(actual, required)`. Editor가 ADR-0023상 "all CRUD"이므로 trigger를 포함 — Runner는 trigger+inspect+DLQ만 가능한 Editor의 subset. 따라서 hierarchical 비교가 충분.
   - `auth/membership_repository.py` 신규: `MembershipRepository.get_role(workspace_id, user_id) -> WorkspaceRole | None`. read-only — 멤버십 CRUD는 Step 8.5.
   - `auth/workspace_repository.py` 신규: `WorkspaceRepository.get_by_id(workspace_id) -> Workspace | None`. read-only — 워크스페이스 CRUD는 Step 8.5.
   - `auth/workspace_context.py` 신규: `WorkspaceContext` frozen dataclass(user + workspace + role | None) + `get_current_workspace` Depends(path param `workspace_id`를 FastAPI가 자동 추출 → WorkspaceRepository로 404 처리 → MembershipRepository로 role 조회, 비멤버 + 비SuperAdmin 시 403) + `require_workspace_role(min_role)` factory가 closure-based checker 반환(SuperAdmin 무조건 통과, 그 외엔 `has_at_least(ctx.role, min_role)` 강제, 실패 시 403 + role 정보 leak 없이 "requires X or higher" 메시지).
   - `auth/schemas.py` 확장: `WorkspaceSummary`(id/name/slug/color_hex/`role: str | None` — SuperAdmin bypass 표현).
-  - `services/etlx-server/etlx_server/routers/workspaces.py` 신규: `GET /workspaces/{workspace_id}` — `require_workspace_role(WorkspaceRole.VIEWER)` 게이트. ruff B008 회피 위해 모듈 레벨 `_require_viewer = Depends(...)` 싱글톤. Step 8.5가 같은 dependency stack에 CRUD/list/멤버 관리 확장 예정.
+  - `services/anyduct-server/anyduct_server/routers/workspaces.py` 신규: `GET /workspaces/{workspace_id}` — `require_workspace_role(WorkspaceRole.VIEWER)` 게이트. ruff B008 회피 위해 모듈 레벨 `_require_viewer = Depends(...)` 싱글톤. Step 8.5가 같은 dependency stack에 CRUD/list/멤버 관리 확장 예정.
   - `app_factory.py`에 `app.include_router(workspaces_router.router)` 추가.
 - **테스트 정규화** [Step 8.3]
-  - `services/etlx-server/tests/auth/test_rbac.py` — 9 unit (rank monotonicity, 각 role의 self-satisfy, Owner는 모든 요구 만족, Viewer는 Viewer만, Runner/Editor의 정확한 경계).
-  - `services/etlx-server/tests/auth/test_workspace_context.py` — 6 unit (`require_workspace_role` checker를 직접 호출: SuperAdmin without membership / SuperAdmin as Viewer requesting Owner / exact role / higher role / lower role 403 / Viewer-on-Viewer passthrough).
-  - `services/etlx-server/tests/db/test_membership_repository.py` — 4 it (member role 조회, 비멤버 None, 미존재 workspace None, 동일 사용자의 다중 워크스페이스 role 격리).
-  - `services/etlx-server/tests/db/test_workspaces_router.py` — 7 it (실제 `/auth/login`으로 JWT 발급 후 `GET /workspaces/{id}`: 401 unauthenticated / 404 unknown / 403 non-member / 200 Viewer with role echo / 200 Owner / 200 SuperAdmin with role=None / 422 malformed UUID).
+  - `services/anyduct-server/tests/auth/test_rbac.py` — 9 unit (rank monotonicity, 각 role의 self-satisfy, Owner는 모든 요구 만족, Viewer는 Viewer만, Runner/Editor의 정확한 경계).
+  - `services/anyduct-server/tests/auth/test_workspace_context.py` — 6 unit (`require_workspace_role` checker를 직접 호출: SuperAdmin without membership / SuperAdmin as Viewer requesting Owner / exact role / higher role / lower role 403 / Viewer-on-Viewer passthrough).
+  - `services/anyduct-server/tests/db/test_membership_repository.py` — 4 it (member role 조회, 비멤버 None, 미존재 workspace None, 동일 사용자의 다중 워크스페이스 role 격리).
+  - `services/anyduct-server/tests/db/test_workspaces_router.py` — 7 it (실제 `/auth/login`으로 JWT 발급 후 `GET /workspaces/{id}`: 401 unauthenticated / 404 unknown / 403 non-member / 200 Viewer with role echo / 200 Owner / 200 SuperAdmin with role=None / 422 malformed UUID).
 
 ### Decisions
 - (이번 슬라이스에서 신규 ADR 없음 — ADR-0023 RBAC 부분 구현체)
@@ -1811,20 +1811,20 @@ suite + mkdocs site.
 - **Step 8.3 — RBAC 완료 (2026-05-18)**: 4역할 strict hierarchy + WorkspaceContext + `Depends(require_workspace_role(...))` + 첫 RBAC-protected 라우터(`GET /workspaces/{id}`). 누적 코어 344 unit + 서버 **63 unit** (48 → 63, +15) + 서버 **70 it** (59 → 70, +11) + 코어 119 it = **596 tests** all green. mypy strict 코어 39 + 서버 38 src files OK, import-linter 2 contracts KEPT. 워크스페이스 단위 격리(쿼리 자동 필터)는 Step 8.5의 도메인 CRUD가 들어올 때 함께 구현 — 8.3 단독으로는 적용 대상이 없어 자연 이관. 다음 슬라이스는 **Step 8.4 (Audit log)** — mutating 요청 미들웨어 + actor/before/after JSON 기록 + `/audit?resource=&actor=` 조회.
 
 - **Audit log infra + `/audit` query** [Step 8.4]
-  - `services/etlx-server/etlx_server/audit/` 신규 패키지 (모든 모듈이 단일 책임 + OOP-normalized):
+  - `services/anyduct-server/anyduct_server/audit/` 신규 패키지 (모든 모듈이 단일 책임 + OOP-normalized):
     * `service.py` — `AuditService(session, *, request_meta=None)` 와 `RequestMeta(ip, user_agent)` frozen dataclass. `record(*, action, resource_type, actor_user_id, workspace_id=None, resource_id=None, before=None, after=None)` 가 `AuditLog` row를 add+flush 후 반환. **commit 안 함** — 호출자(보통 라우터)가 트랜잭션 boundary 소유. 비즈니스 mutation이 rollback되면 audit row도 함께 rollback되어 false-positive 0 보장 (테스트로 검증).
     * `repository.py` — `AuditLogRepository.query(workspace_id, actor_user_id, resource_type, resource_id, limit=50, offset=0)`. `created_at desc` 정렬, offset 페이지네이션 (Step 11에서 cursor pagination으로 격상 가능).
     * `middleware.py` — `AuditRequestMetaMiddleware(BaseHTTPMiddleware)`. `request.client.host` + `request.headers["user-agent"]`를 `request.state.audit_meta`(RequestMeta)에 부착. `X-Forwarded-For` reverse-proxy 처리는 Step 11(Operability)로 위임 — 배포 토폴로지 의존.
     * `dependencies.py` — `get_audit_service` Depends. `request.state.audit_meta`가 없거나 잘못된 타입이면 빈 `RequestMeta()` fallback (middleware 없이 직접 호출되는 경로 안전).
     * `__init__.py` — public re-export + 사용 패턴 docstring.
-  - `services/etlx-server/etlx_server/routers/audit.py` 신규: `GET /audit` 이중 ACL. `workspace_id` 미지정 시 SuperAdmin 필수 (그 외 403 with detail "cross-workspace audit query requires SuperAdmin"). 지정 시 SuperAdmin이거나 `MembershipRepository.get_role`이 None이 아니어야 함(비멤버는 미존재 workspace UUID에도 403 — workspace 존재 여부 leak 방지). 필터: `actor_user_id` / `resource_type`(≤64) / `resource_id`(≤64). `limit` 1~200 강제(422), `offset` ≥0. 응답은 `list[AuditLogEntry]` (Pydantic, `from_attributes=True` ORM mapping).
+  - `services/anyduct-server/anyduct_server/routers/audit.py` 신규: `GET /audit` 이중 ACL. `workspace_id` 미지정 시 SuperAdmin 필수 (그 외 403 with detail "cross-workspace audit query requires SuperAdmin"). 지정 시 SuperAdmin이거나 `MembershipRepository.get_role`이 None이 아니어야 함(비멤버는 미존재 workspace UUID에도 403 — workspace 존재 여부 leak 방지). 필터: `actor_user_id` / `resource_type`(≤64) / `resource_id`(≤64). `limit` 1~200 강제(422), `offset` ≥0. 응답은 `list[AuditLogEntry]` (Pydantic, `from_attributes=True` ORM mapping).
   - `auth/schemas.py` 확장: `AuditLogEntry` (id/actor/workspace/action/resource_type/resource_id/before_json/after_json/ip/user_agent/created_at).
   - `app_factory.py` 확장: `app.add_middleware(AuditRequestMetaMiddleware)` (CORS보다 앞 — 모든 핸들러 진입 전에 부착) + `app.include_router(audit_router.router)`.
 - **테스트 정규화** [Step 8.4]
-  - `services/etlx-server/tests/audit/test_middleware.py` — 2 unit. 진짜 Starlette 앱에 `TestClient` 부착해서 production 경로 그대로 실행 — `request.state.audit_meta`가 `RequestMeta` 인스턴스로 들어오고 UA 헤더가 전달되는지 확인.
-  - `services/etlx-server/tests/db/test_audit_service.py` — 4 it. record + roundtrip / RequestMeta 없이 NULL fields / actor·workspace 모두 NULL(시스템 이벤트) / rollback 시 audit row 함께 사라지는지 검증.
-  - `services/etlx-server/tests/db/test_audit_repository.py` — 5 it. workspace/actor/resource_type+id 필터 + `created_at desc` 정렬(record 사이 5ms sleep으로 microsecond 분리) + limit/offset 페이지네이션.
-  - `services/etlx-server/tests/db/test_audit_router.py` — 8 it. 401 unauthenticated / 403 비admin global / 200 admin global / 403 비멤버 workspace / 200 Viewer 멤버 workspace(자신 workspace 행만) / 200 multi-filter(workspace + resource_type) / 422 limit=0 / 403 미존재 workspace UUID에 비admin(enumeration leak 방지).
+  - `services/anyduct-server/tests/audit/test_middleware.py` — 2 unit. 진짜 Starlette 앱에 `TestClient` 부착해서 production 경로 그대로 실행 — `request.state.audit_meta`가 `RequestMeta` 인스턴스로 들어오고 UA 헤더가 전달되는지 확인.
+  - `services/anyduct-server/tests/db/test_audit_service.py` — 4 it. record + roundtrip / RequestMeta 없이 NULL fields / actor·workspace 모두 NULL(시스템 이벤트) / rollback 시 audit row 함께 사라지는지 검증.
+  - `services/anyduct-server/tests/db/test_audit_repository.py` — 5 it. workspace/actor/resource_type+id 필터 + `created_at desc` 정렬(record 사이 5ms sleep으로 microsecond 분리) + limit/offset 페이지네이션.
+  - `services/anyduct-server/tests/db/test_audit_router.py` — 8 it. 401 unauthenticated / 403 비admin global / 200 admin global / 403 비멤버 workspace / 200 Viewer 멤버 workspace(자신 workspace 행만) / 200 multi-filter(workspace + resource_type) / 422 limit=0 / 403 미존재 workspace UUID에 비admin(enumeration leak 방지).
 
 ### Decisions
 - (이번 슬라이스에서 신규 ADR 없음 — ADR-0023 §9 audit 부분 구현체)
@@ -1844,7 +1844,7 @@ suite + mkdocs site.
     * `DELETE /workspaces/{id}` (Owner only via `_require_owner` 싱글톤). 204. **audit row를 delete 전에 먼저 record** — `audit_log.workspace_id` FK가 `ON DELETE SET NULL`이라 row는 살아남고 workspace_id만 NULL로 떨어져 forensics에 사용 가능.
   - 모든 mutation이 `audit.record(action=workspace.create/update/delete, resource_type='workspace', resource_id=str(ws.id), before=..., after=...)` 호출 후 `await session.commit()`. 비즈니스 mutation 실패 시 audit row 함께 rollback — Step 8.4 설계 의도가 production 코드로 처음 검증됨.
 - **테스트 정규화** [Step 8.5a]
-  - `services/etlx-server/tests/db/test_workspaces_crud.py` — 11 신규 it. 패턴: `_audit_rows_for(session, ws_id)`가 `await session.commit()` 후 audit 테이블을 직접 select — conftest의 outer-trans rollback이 router의 `commit()`을 savepoint release로 처리하기 때문에 동일 session identity map만으로는 router 쓴 데이터가 안 보임, 명시적 commit + 재조회로 봐야 함.
+  - `services/anyduct-server/tests/db/test_workspaces_crud.py` — 11 신규 it. 패턴: `_audit_rows_for(session, ws_id)`가 `await session.commit()` 후 audit 테이블을 직접 select — conftest의 outer-trans rollback이 router의 `commit()`을 savepoint release로 처리하기 때문에 동일 session identity map만으로는 router 쓴 데이터가 안 보임, 명시적 commit + 재조회로 봐야 함.
   - 시나리오: POST happy path(201 + Owner 멤버십 insert + audit.create row with after JSON) / POST duplicate slug 409 / POST invalid slug 422 / GET list returns only caller's memberships / GET list SuperAdmin sees all / PATCH editor allowed + audit.update with before·after / PATCH runner 403 / PATCH empty body 400 / PATCH slug collision 409 / DELETE owner + audit.delete + cascade memberships 제거 + workspace_id SET NULL 검증 / DELETE editor 403.
 
 ### Decisions
@@ -1857,11 +1857,11 @@ suite + mkdocs site.
   - `auth/membership_repository.py` 확장: 기존 `get_role` 외에 `get`(full row), `list_for_workspace`(User join → 이메일 정렬, FE 표시용), `count_owners`(워크스페이스 단위), `add`(UNIQUE 위반 → `MembershipExistsError`), `update_role`(마지막 Owner 데모트 시 `LastOwnerError`), `remove`(마지막 Owner 제거 시 `LastOwnerError`). 모든 mutation은 호출자 트랜잭션 안에서 동작 — repo는 commit 하지 않음.
   - 신규 도메인 예외 2종: `MembershipExistsError`(라우터 → 409), `LastOwnerError`(라우터 → 409). DB 무결성 + 비즈니스 invariant를 라우터가 안전하게 다룰 수 있게 추상화.
   - `auth/schemas.py` 확장: `MembershipSummary`(id/user_id/email/name/role), `MembershipCreateRequest`(email + role — UUID 대신 이메일로 초대, role은 `Literal["owner","editor","runner","viewer"]`로 422 강제), `MembershipUpdateRequest`(role only).
-  - `services/etlx-server/etlx_server/routers/memberships.py` 신규: 4 엔드포인트 (`/workspaces/{ws}/memberships` GET Viewer+ / POST Owner; `/{user_id}` PATCH Owner / DELETE Owner). 모듈 레벨 `_require_viewer`/`_require_owner` Depends 싱글톤. POST는 `UserRepository.get_by_email`로 사용자 조회(unknown → 404), `MembershipRepository.add`로 insert. PATCH는 `update_role`로 LastOwnerError 처리. DELETE는 row 삭제 *전*에 `membership.id`를 Python 변수에 캡처하여 삭제 후 audit row의 `resource_id`로 사용. 각 mutation이 `audit.record(action=membership.{create,update,delete}, resource_type='membership', resource_id=str(membership.id))` + `session.commit`.
+  - `services/anyduct-server/anyduct_server/routers/memberships.py` 신규: 4 엔드포인트 (`/workspaces/{ws}/memberships` GET Viewer+ / POST Owner; `/{user_id}` PATCH Owner / DELETE Owner). 모듈 레벨 `_require_viewer`/`_require_owner` Depends 싱글톤. POST는 `UserRepository.get_by_email`로 사용자 조회(unknown → 404), `MembershipRepository.add`로 insert. PATCH는 `update_role`로 LastOwnerError 처리. DELETE는 row 삭제 *전*에 `membership.id`를 Python 변수에 캡처하여 삭제 후 audit row의 `resource_id`로 사용. 각 mutation이 `audit.record(action=membership.{create,update,delete}, resource_type='membership', resource_id=str(membership.id))` + `session.commit`.
   - **마지막 Owner 보호 의도**: 자기 자신 mutation에도 적용 — 다른 Owner가 없는 상태에서 자기 데모트/제거하면 409. 워크스페이스가 orphan 되어 아무도 관리할 수 없는 상태를 원천 차단.
   - `app_factory.py`: `app.include_router(memberships_router.router)` 추가.
 - **테스트 정규화** [Step 8.5b]
-  - `services/etlx-server/tests/db/test_memberships_router.py` — 15 신규 it. 시나리오:
+  - `services/anyduct-server/tests/db/test_memberships_router.py` — 15 신규 it. 시나리오:
     * list: 멤버는 모든 멤버 목록 조회 / 비멤버 403
     * POST: owner adds editor + audit.create / non-owner 403 / unknown email 404 / dup 409 / invalid role 422
     * PATCH: role 변경 + audit before·after / last-owner demote 409 / 다른 Owner 존재 시 자기 demote 허용 / unknown membership 404
@@ -1874,9 +1874,9 @@ suite + mkdocs site.
 - **Step 8.5b — Membership management 완료 (2026-05-18)**: 4 신규 endpoint + 마지막 Owner 보호 + audit 페어링. 누적 코어 344 unit + 서버 **65 unit** + 서버 **113 it** (98 → 113, +15) + 코어 119 it = **641 tests** all green. mypy strict 코어 39 + 서버 45 src files OK, import-linter 2 contracts KEPT. 다음 슬라이스는 **Step 8.5c (Connections CRUD)** — workspace-scoped `/connections` + 시크릿은 Secret backend(Vault/AWS SM/GCP SM/File)에 즉시 위임, DB에는 ref만 + `POST /{conn_id}/test`.
 
 - **Connections CRUD + secret backend integration + test endpoint** [Step 8.5c]
-  - 새 `services/etlx-server/etlx_server/connections/` 패키지 (단일 책임, OOP-normalized):
+  - 새 `services/anyduct-server/anyduct_server/connections/` 패키지 (단일 책임, OOP-normalized):
     * `repository.py` — `ConnectionRepository.list_for_workspace`/`get`/`add`(pre-minted UUID, UNIQUE → `ConnectionNameTakenError`)/`update`(필드 화이트리스트 + IntegrityError → `ConnectionNameTakenError`)/`delete` + `snapshot()` 헬퍼.
-    * `secrets.py` — `SecretWalker.sanitize(config, secrets, ws_id, conn_id)`가 `{"$secret": "key"}` sentinel을 `${SECRET:etlx/{ws}/{conn}/{key}}` placeholder로 치환 + `(sanitized, refs)` 반환. orphan 마커(`config`에 있으나 `secrets`에 없음) → `SecretMarkerError`, orphan 값(반대) → 같은 예외. `write_secrets`는 backend.set 호출 — read-only backend(`EnvSecretBackend`) NotImplementedError → `SecretBackendReadOnlyError`. `delete_paths`는 best-effort.
+    * `secrets.py` — `SecretWalker.sanitize(config, secrets, ws_id, conn_id)`가 `{"$secret": "key"}` sentinel을 `${SECRET:anyduct/{ws}/{conn}/{key}}` placeholder로 치환 + `(sanitized, refs)` 반환. orphan 마커(`config`에 있으나 `secrets`에 없음) → `SecretMarkerError`, orphan 값(반대) → 같은 예외. `write_secrets`는 backend.set 호출 — read-only backend(`EnvSecretBackend`) NotImplementedError → `SecretBackendReadOnlyError`. `delete_paths`는 best-effort.
     * `tester.py` — `ConnectionTester(backend).run(connection)`가 `${SECRET:...}` placeholder를 backend.get으로 resolve → `ConnectorRegistry.get(type)` (RegistryError/ConfigError catch → 친절한 에러) → `asyncio.to_thread(_run_blocking_health_check, klass, options)`로 sync connect/health_check/close 실행. 결과는 `ConnectionTestOutcome(ok, error)`.
   - `routers/connections.py` 6 신규 엔드포인트 (`/workspaces/{ws}/connections` 접두):
     * `GET ""` Viewer+, `GET "/{id}"` Viewer+
@@ -1890,7 +1890,7 @@ suite + mkdocs site.
   - `app_factory._build_secret_backend(settings)`가 lifespan에서 `get_secret_backend(name, **opts)` 호출, `app.state.secret_backend` attach. `dependencies.get_secret_backend_dep` Depends.
   - `app.include_router(connections_router.router)`.
 - **테스트 정규화** [Step 8.5c]
-  - `services/etlx-server/tests/db/test_connections_router.py` — 18 신규 it. `_build_app(session, backend=...)`가 `StaticSecretBackend()`(write 가능) 또는 `EnvSecretBackend()`(read-only 403 검증) 주입. SQLite `:memory:`로 `POST /test` happy path 검증 — 외부 인프라 0.
+  - `services/anyduct-server/tests/db/test_connections_router.py` — 18 신규 it. `_build_app(session, backend=...)`가 `StaticSecretBackend()`(write 가능) 또는 `EnvSecretBackend()`(read-only 403 검증) 주입. SQLite `:memory:`로 `POST /test` happy path 검증 — 외부 인프라 0.
   - 시나리오: POST happy(secret + placeholder 형식 + backend path 검증 + audit.after_json에 secret_refs) / orphan marker 422 / orphan value 422 / EnvSecretBackend 503 / dup 409 / Viewer 403 / list workspace 단위 / cross-ws 404 / PATCH name only / PATCH secret rotation(old path backend.delete + new path backend.set) / 빈 PATCH 400 / secrets-without-config 400 / DELETE row + backend + audit / DELETE 404 / test endpoint sqlite ok=True / unknown connector type ok=False + RegistryError 메시지 / secret resolve 후 test ok=True / Viewer test 403.
 
 ### Decisions
@@ -1900,7 +1900,7 @@ suite + mkdocs site.
 - **Step 8.5c — Connections CRUD + test 완료 (2026-05-18)**: 6 신규 endpoint + Secret backend 완전 통합 + 평문 0 + `POST /test`로 핵심 connector smoke 검증. 누적 코어 344 unit + 서버 **65 unit** + 서버 **131 it** (113 → 131, +18) + 코어 119 it = **659 tests** all green. mypy strict 코어 39 + 서버 50 src files OK, import-linter 2 contracts KEPT. 다음 슬라이스는 **Step 8.5d (Pipelines CRUD + 버전 관리)** — `/workspaces/{ws}/pipelines` + `GET /{pid}/versions`. Step 7.3 yaml_sync의 PipelineVersion idempotency 패턴(config_json diff 시에만 새 version 생성) 재사용.
 
 - **Pipelines CRUD + immutable version history** [Step 8.5d]
-  - 새 `services/etlx-server/etlx_server/pipelines/` 패키지:
+  - 새 `services/anyduct-server/anyduct_server/pipelines/` 패키지:
     * `repository.py` — `PipelineRepository` with `list_for_workspace`/`get`/`get_current_version`/`list_versions`/`add`(Pipeline + PipelineVersion v1 원자적 insert, UNIQUE → `PipelineNameTakenError`)/`update_metadata`(name/description 화이트리스트, IntegrityError → 같은 예외)/`ensure_version`(Step 7.3 yaml_sync와 동일한 **idempotency** — `current.config_json == new` 면 no-op, 다르면 `current.is_current=False` + 신규 `version=current.version+1` insert)/`delete`(FK cascade로 versions + schedules 제거) + `snapshot(pipeline, current)` 헬퍼.
     * `__init__.py` — public re-export + 사용 패턴 docstring.
   - `routers/pipelines.py` 6 신규 엔드포인트:
@@ -1915,7 +1915,7 @@ suite + mkdocs site.
   - `auth/schemas.py` 확장: `PipelineSummary`(id/ws_id/name/description/current_version/current_config_json), `PipelineCreateRequest`(name/description?/config), `PipelineUpdateRequest`(전부 optional — PATCH), `PipelineVersionEntry`(id/version/is_current/config_json/created_at, `from_attributes=True`).
   - `app_factory.py`: `app.include_router(pipelines_router.router)`.
 - **테스트 정규화** [Step 8.5d]
-  - `services/etlx-server/tests/db/test_pipelines_router.py` — 14 신규 it. 핵심: **버전 idempotency 양 분기 직접 검증** — `test_patch_config_diff_creates_new_version`은 prior `is_current=False` + 신규 v2 `is_current=True` 검증 + `audit.after_json.version_created=True` 확인 / `test_patch_config_identical_is_no_op`은 같은 config 재제출 시 v1 그대로 + audit.after_json.version_created=False 확인. POST happy + v1 + audit + 서버가 `config["name"]` 주입 / invalid config 422 / dup 409 / Viewer 403 / list with current_version / 단건 404 / PATCH metadata only no bump / 빈 400 / name collision 409 / DELETE cascade + audit / GET /versions multi-version + is_current / versions 404.
+  - `services/anyduct-server/tests/db/test_pipelines_router.py` — 14 신규 it. 핵심: **버전 idempotency 양 분기 직접 검증** — `test_patch_config_diff_creates_new_version`은 prior `is_current=False` + 신규 v2 `is_current=True` 검증 + `audit.after_json.version_created=True` 확인 / `test_patch_config_identical_is_no_op`은 같은 config 재제출 시 v1 그대로 + audit.after_json.version_created=False 확인. POST happy + v1 + audit + 서버가 `config["name"]` 주입 / invalid config 422 / dup 409 / Viewer 403 / list with current_version / 단건 404 / PATCH metadata only no bump / 빈 400 / name collision 409 / DELETE cascade + audit / GET /versions multi-version + is_current / versions 404.
 
 ### Decisions
 - (이번 슬라이스에서 신규 ADR 없음 — Step 7.3 idempotency 패턴 재사용)
@@ -1925,8 +1925,8 @@ suite + mkdocs site.
 
 - **Schedules CRUD + Runs read-only** [Step 8.5e]
   - 새 두 패키지:
-    * `services/etlx-server/etlx_server/schedules/repository.py` — `ScheduleRepository` (list_for_pipeline/get/add/update/delete + snapshot 헬퍼) + `InvalidCronError` + `validate_cron_for_mode(mode, cron_expr)`. **mode-aware cron 검증**: batch는 `cron_expr` 필수, stream은 NULL 허용(연속 활성); 둘 다 supplied 시 `croniter.is_valid`로 검증. 워커(Step 9)가 다음 firing time 계산에 같은 라이브러리 사용 — "저장된 schedule = 워커가 실행할 schedule" 보장. update는 화이트리스트(`name`/`cron_expr`/`is_active`/`config_overrides`) — unknown 필드 즉시 ValueError로 거부. **mode immutable** — UpdateRequest에 mode 필드 없음, batch↔stream 전환은 삭제+재생성.
-    * `services/etlx-server/etlx_server/runs/repository.py` — `RunRepository` (list_for_workspace/get/list_logs/list_metrics). **read-only** — write 메서드 없음. 워커(Step 9) 전용. 필터는 status/pipeline_id/schedule_id + limit(1~500, default 50)/offset; 정렬은 created_at desc.
+    * `services/anyduct-server/anyduct_server/schedules/repository.py` — `ScheduleRepository` (list_for_pipeline/get/add/update/delete + snapshot 헬퍼) + `InvalidCronError` + `validate_cron_for_mode(mode, cron_expr)`. **mode-aware cron 검증**: batch는 `cron_expr` 필수, stream은 NULL 허용(연속 활성); 둘 다 supplied 시 `croniter.is_valid`로 검증. 워커(Step 9)가 다음 firing time 계산에 같은 라이브러리 사용 — "저장된 schedule = 워커가 실행할 schedule" 보장. update는 화이트리스트(`name`/`cron_expr`/`is_active`/`config_overrides`) — unknown 필드 즉시 ValueError로 거부. **mode immutable** — UpdateRequest에 mode 필드 없음, batch↔stream 전환은 삭제+재생성.
+    * `services/anyduct-server/anyduct_server/runs/repository.py` — `RunRepository` (list_for_workspace/get/list_logs/list_metrics). **read-only** — write 메서드 없음. 워커(Step 9) 전용. 필터는 status/pipeline_id/schedule_id + limit(1~500, default 50)/offset; 정렬은 created_at desc.
   - `routers/schedules.py` 6 신규 엔드포인트 (`/workspaces/{ws}/pipelines/{pid}/schedules` 하위에 nest — schema가 1-pipeline-many-schedules + worker가 PipelineVersion에 policy attach):
     * `GET ""` Viewer+ — name 정렬.
     * `POST ""` Editor+ (201) — cron 검증, 422 on InvalidCronError.
@@ -1948,8 +1948,8 @@ suite + mkdocs site.
   - `app_factory.py`: schedules + runs router 두 개 추가.
   - **Schedule name 비유일** — Pipelines/Connections/Workspaces는 YAML(Step 7.3 yaml_sync)에서 name으로 addressing이라 unique이지만 schedule은 id로만 — 이번 슬라이스에서 unique constraint를 schema에 추가하지 않고 가벼운 자유로 유지. 필요해지면 후속 ADR + migration.
 - **테스트 정규화** [Step 8.5e]
-  - `services/etlx-server/tests/db/test_schedules_router.py` — 15 신규 it. cron 검증 매트릭스 (batch+valid / stream+null / batch missing 422 / 잘못된 cron 422) + Viewer 403 + cross-ws pipeline 404 + list 정렬 + single 404 + PATCH cron + audit before·after / PATCH invalid cron 422 / 빈 PATCH 400 + DELETE + audit + toggle ON↔OFF (2번) + audit 행 3개 검증 + repository.update unknown 필드 ValueError + 다른 pipeline 하위 schedule 404.
-  - `services/etlx-server/tests/db/test_runs_router.py` — 11 신규 it. list happy + status 필터 + pipeline_id 필터 + 워크스페이스 boundary (list + GET 둘 다) + limit/offset 페이지네이션 + RunDetail 단건 + 404 + logs 시계열 정렬 + metrics + 다른 ws run logs 404 + **mutation 메서드 거부** (POST 404 / PATCH 405 / DELETE 405).
+  - `services/anyduct-server/tests/db/test_schedules_router.py` — 15 신규 it. cron 검증 매트릭스 (batch+valid / stream+null / batch missing 422 / 잘못된 cron 422) + Viewer 403 + cross-ws pipeline 404 + list 정렬 + single 404 + PATCH cron + audit before·after / PATCH invalid cron 422 / 빈 PATCH 400 + DELETE + audit + toggle ON↔OFF (2번) + audit 행 3개 검증 + repository.update unknown 필드 ValueError + 다른 pipeline 하위 schedule 404.
+  - `services/anyduct-server/tests/db/test_runs_router.py` — 11 신규 it. list happy + status 필터 + pipeline_id 필터 + 워크스페이스 boundary (list + GET 둘 다) + limit/offset 페이지네이션 + RunDetail 단건 + 404 + logs 시계열 정렬 + metrics + 다른 ws run logs 404 + **mutation 메서드 거부** (POST 404 / PATCH 405 / DELETE 405).
 
 ### Decisions
 - (이번 슬라이스에서 신규 ADR 없음 — ADR-0023 §5/§9 + ADR-0021 worker queue 의존성 분리 적용)
@@ -1958,7 +1958,7 @@ suite + mkdocs site.
 - **Step 8.5e — Schedules CRUD + Runs read-only 완료 (2026-05-18)**: 6 schedule endpoint + 4 run read-only endpoint + croniter mode-aware 검증 + workspace/pipeline boundary 검증 + worker write 도메인 격리. 누적 코어 344 unit + 서버 **65 unit** + 서버 **171 it** (145 → 171, +26) + 코어 119 it = **699 tests** all green. mypy strict 코어 39 + 서버 55 src files OK, import-linter 2 contracts KEPT. **Step 8.5 (CRUD 도메인) 완전 종료** — workspaces / memberships / connections / pipelines / schedules / runs read 모두 ship. 다음은 **Step 8.6 (Action 엔드포인트)** — `POST /pipelines/{id}/dry-run` / `POST /pipelines/{id}/trigger` (run 큐잉) / `POST /runs/{id}/retry` / `GET /runs/{id}/logs` streaming. Step 9 worker queue와 짝지어 동작 — 8.6은 큐 enqueue만, 실제 execute는 Step 9.
 
 - **Pipeline + Run action endpoints** [Step 8.6]
-  - 새 `services/etlx-server/etlx_server/pipelines/dry_run.py`:
+  - 새 `services/anyduct-server/anyduct_server/pipelines/dry_run.py`:
     * `DryRunService(session, backend).run(pipeline, version, check_health=True)` — 워크스페이스 connection 이름들 resolve → `${SECRET:<path>}` placeholder를 backend로 풀이 → `ConnectionConfig.model_validate` → 코어 `build_connector`/`build_pipeline` → connector instance를 그대로 보관 → 병렬 `asyncio.to_thread(_blocking_health_check, connector)`로 connect/health/close. 단일 connector 실패 시 per-row 보고(`ConnectorCheck`); pipeline build 실패는 top-level errors. `DryRunResult{ok, errors, connectors}`.
     * **첫 100 record 샘플은 의도적으로 미포함** — bounded read는 retry/timeout/back-pressure 정책과 묶여야 안전. 후속 UI 요구사항 생기면 worker(Step 9)의 `stop_after_records=N` 위에 얹는 방식이 옳다.
   - `routers/pipelines.py` 2 신규:
@@ -1970,8 +1970,8 @@ suite + mkdocs site.
   - `runs/repository.py` 확장: `add_manual(pipeline, version, triggered_by_user_id, result_json=None)` + `add_retry(original, *, triggered_by_user_id)` + `RunNotRetryableError`. write 메서드 둘 다 "새 pending row를 만들 뿐 기존 row는 손 안 댐" — 워커 단일 writer 원칙 보존.
   - `auth/schemas.py` 확장: `DryRunConnectorCheck`(name/type/ok/error), `DryRunResponse`(ok/errors/connectors), `RunTriggerRequest`(현재 빈 — 후속 필드 placeholder).
 - **테스트 정규화** [Step 8.6]
-  - `services/etlx-server/tests/db/test_pipeline_actions_router.py` — 11 신규 it. dry-run happy(sqlite :memory:로 실제 connect/health_check 검증) / 누락 connection name / unknown connector type per-row 보고 / `${SECRET:...}` placeholder를 `StaticSecretBackend`로 풀이해서 happy / Viewer 403 / 404. trigger happy + 202 + Run row 직접 검증 + audit `run.trigger` after_json{source,version} / Viewer 403 / 현재 버전 없는 pipeline 409 / 404 / cross-workspace pipeline 404.
-  - `services/etlx-server/tests/db/test_run_actions_router.py` — 8 신규 it. retry happy + 202 + 원본 row unchanged + 새 row의 `result_json.retry_of` + audit `run.retry` / succeeded 409 / running 409 / cancelled OK(retry 가능) / Viewer 403 / cross-workspace 404. SSE stream은 terminal run에 대해 seed된 3 log row를 모두 frame으로 emit + terminal+idle 자동 close(8s timeout으로 bound), unknown run 404. 스트림 테스트는 `app.dependency_overrides[get_session_factory]`로 test session을 재사용하는 `_StubFactory`.
+  - `services/anyduct-server/tests/db/test_pipeline_actions_router.py` — 11 신규 it. dry-run happy(sqlite :memory:로 실제 connect/health_check 검증) / 누락 connection name / unknown connector type per-row 보고 / `${SECRET:...}` placeholder를 `StaticSecretBackend`로 풀이해서 happy / Viewer 403 / 404. trigger happy + 202 + Run row 직접 검증 + audit `run.trigger` after_json{source,version} / Viewer 403 / 현재 버전 없는 pipeline 409 / 404 / cross-workspace pipeline 404.
+  - `services/anyduct-server/tests/db/test_run_actions_router.py` — 8 신규 it. retry happy + 202 + 원본 row unchanged + 새 row의 `result_json.retry_of` + audit `run.retry` / succeeded 409 / running 409 / cancelled OK(retry 가능) / Viewer 403 / cross-workspace 404. SSE stream은 terminal run에 대해 seed된 3 log row를 모두 frame으로 emit + terminal+idle 자동 close(8s timeout으로 bound), unknown run 404. 스트림 테스트는 `app.dependency_overrides[get_session_factory]`로 test session을 재사용하는 `_StubFactory`.
 
 ### Decisions
 - (이번 슬라이스에서 신규 ADR 없음 — ADR-0021 worker queue + ADR-0023 §5 RBAC 적용)
@@ -1980,7 +1980,7 @@ suite + mkdocs site.
 - **Step 8.6 — Action 엔드포인트 완료 (2026-05-18)**: 4 신규 endpoint (dry-run / trigger / retry / SSE logs stream) + worker 단일 writer 원칙 유지(retry는 새 row 생성, 원본 unchanged). 누적 코어 344 unit + 서버 **65 unit** + 서버 **190 it** (171 → 190, +19) + 코어 119 it = **718 tests** all green. mypy strict 코어 39 + 서버 60 src files OK, import-linter 2 contracts KEPT. **Step 8 (API Server)의 코어 surface 사실상 종료** — auth / RBAC / audit / CRUD / actions / SSE 모두 ship, 남은 8.7은 end-to-end 시나리오 테스트 추가. 다음은 **Step 8.7 (시나리오 테스트)** 또는 **Step 9 (Execution Engine)** — 워커가 runs 큐 claim → 코어 `run_pipeline_yaml` 호출 + heartbeat + zombie 회수.
 
 - **End-to-end scenario tests** [Step 8.7]
-  - 새 `services/etlx-server/tests/db/test_scenario_e2e.py` — 3 e2e 시나리오, 모두 testcontainers PG 위에서 outer-trans rollback 격리 유지:
+  - 새 `services/anyduct-server/tests/db/test_scenario_e2e.py` — 3 e2e 시나리오, 모두 testcontainers PG 위에서 outer-trans rollback 격리 유지:
     * **full happy path**: login → POST workspace(Owner 자동 멤버십) → POST 2 connections(src/dst, sqlite :memory:로 dry-run health_check이 실제로 connect/close 검증) → POST pipeline + POST schedule(batch + cron) → POST dry-run(ok=True + connector 둘 다 ok) → POST trigger(202, status=pending, worker_id/heartbeat_at NULL — 워커 미존재 확인) → GET runs list(triggered run 포함) + single → **GET audit?workspace_id={ws}로 정확한 순서 검증** `workspace.create → connection.create → connection.create → pipeline.create → schedule.create → run.trigger` (dry-run·GET는 audit 없음 확인). 6 mutation 모두가 같은 트랜잭션 흐름으로 audit row 작성된다는 composition 보장.
     * **retry-after-simulated-worker-failure**: trigger 후 ORM으로 Run.status=FAILED + error_message 직접 set (워커가 없으니 실패 simulate) → HTTP `POST /runs/{rid}/retry` → 새 row의 `result_json={"retry_of": <original_id>}` + pipeline_version_id 상속 + 원본 row.status=FAILED + error_message 그대로 보존 검증. 워커가 status 전이의 단일 writer라는 원칙이 HTTP 측에서 깨지지 않음을 e2e로 확인.
     * **non-member cross-workspace boundary**: Alice 워크스페이스에 Bob이 GET single / GET pipelines list / POST dry-run / POST trigger 모두 403. RBAC가 모든 엔드포인트에 일관 적용되는지 확인.
@@ -1993,12 +1993,12 @@ suite + mkdocs site.
 - **Step 8.7 — 시나리오 테스트 완료 (2026-05-18)**: 3 신규 e2e it (happy / retry-after-failure / cross-ws boundary). 누적 코어 344 unit + 서버 **65 unit** + 서버 **193 it** (190 → 193, +3) + 코어 119 it = **721 tests** all green. mypy strict 코어 39 + 서버 60 src files OK, import-linter 2 contracts KEPT. **Step 8 (API Server) 완전 종료** — auth(local + OIDC) / RBAC(workspace-scoped + SuperAdmin bypass) / audit(middleware + 이중 ACL) / CRUD(workspaces/memberships/connections/pipelines/schedules) / runs read-mostly / actions(dry-run+trigger+retry+SSE) / e2e 시나리오 검증 모두 ship. 다음은 **Step 9 (Execution Engine)** — 워커가 ADR-0021 runs 큐를 SKIP LOCKED로 claim → 코어 `run_pipeline_yaml` 호출 + heartbeat per ~30s + zombie 회수. Step 8.6에서 enqueue까지 끝났으니 9는 큐 consumer + status writer만 추가하면 된다.
 
 - **Worker — claim + batch execution lifecycle** [Step 9.3a]
-  - 새 `services/etlx-server/etlx_server/worker/` 패키지:
+  - 새 `services/anyduct-server/anyduct_server/worker/` 패키지:
     * `claim.py` — `claim_pending_run(session, *, worker_id)`: `SELECT ... WHERE status='pending' AND scheduled_at <= now() ORDER BY scheduled_at, created_at LIMIT 1 FOR UPDATE SKIP LOCKED` + 같은 트랜잭션에서 `status=running` + `worker_id` + `started_at` + `heartbeat_at` 전이. ADR-0021 SKIP LOCKED로 다중 워커 안전 동시 claim.
     * `executor.py` — `RunExecutor(factory, backend, *, worker_id).execute(run_id)`: fresh session per run, `_build`로 `PipelineConfig.model_validate` + connection 이름 resolve + `${SECRET:<path>}` 풀이 + 코어 `build_connector`/`build_pipeline`. **build 실패는 status=failed로 기록한 뒤 commit 후 종료** (worker crash 아님). 빌드 성공 시 단일 `asyncio.to_thread(_run_pipeline_in_thread, ...)`로 connect+run+close 일관 thread — sqlite3 같은 thread-bound driver 호환. 성공: `records_read`/`records_written`/`duration_seconds`/`result_json.core_run_id` 기록. 실패: `error_class`/`error_message[2000자 trim]`/`finished_at`/`heartbeat_at`. `result_json.retry_of` 같은 pre-existing key는 성공 write에서 보존.
     * `runner.py` — `RunWorker(factory, backend, *, worker_id, poll_interval=1.0)`: `asyncio.Event` stop, claim → execute → 즉시 다음 iteration; queue 비면 `contextlib.suppress(TimeoutError) + asyncio.wait_for(stop_event.wait, timeout=poll_interval)`. claim 단계의 row lock은 status 전이까지만 hold(긴 실행 시간 동안 lock 보유 X).
-  - `etlx-server worker run` CLI 신규: `--poll-interval / --worker-id / --secret-backend / --secret-file-path / --log-level`. SIGTERM/SIGINT 그레이스풀 종료(handler → `worker.stop()`).
-  - 신규 공유 모듈 `etlx_server/pipelines/runtime.py` (`resolve_placeholders` / `referenced_connection_names` / `load_connections_by_name`) — DryRunService와 worker가 빌드 경로 공유해 "dry-run ok면 worker run도 build는 통과" 보장. DryRunService에서 동일 코드 중복 제거.
+  - `anyduct-server worker run` CLI 신규: `--poll-interval / --worker-id / --secret-backend / --secret-file-path / --log-level`. SIGTERM/SIGINT 그레이스풀 종료(handler → `worker.stop()`).
+  - 신규 공유 모듈 `anyduct_server/pipelines/runtime.py` (`resolve_placeholders` / `referenced_connection_names` / `load_connections_by_name`) — DryRunService와 worker가 빌드 경로 공유해 "dry-run ok면 worker run도 build는 통과" 보장. DryRunService에서 동일 코드 중복 제거.
 - **코어 버그 수정** [Step 9.3a 부수 작업, 별도 변경 아님]
   - `etl_plugins/core/pipeline.py::Pipeline._run_task`가 `task.sink_table`을 `sink.write`에 forwarding 안 하던 잠재 버그 — 코어 unit 테스트는 `InMemoryBatchSink`(`**options` 흡수)라 가려져 있었다. RDBMS sink(sqlite/postgres/mysql)의 batch 경로가 worker에서 처음 동작하면서 발견. 1-line 수정. S3 sink(`**options`)와 Kafka(stream path는 별도) 비영향. 코어 unit 327개 무회귀.
 - **Audit 정렬 안정화** [Step 9.3a 부수 작업]
@@ -2006,7 +2006,7 @@ suite + mkdocs site.
 - **OIDC state test 비결정성 수정** [Step 9.3a 부수 작업]
   - `test_verify_rejects_tampered_token`이 base64 마지막 char 1bit flip만으로는 underlying signature bytes 동일할 수 있어 ~40% 통과. signature 전체를 명백히 wrong한 `"AAA...A"`로 치환해 결정적으로 만들었다.
 - **테스트 정규화** [Step 9.3a]
-  - `services/etlx-server/tests/db/test_worker_lifecycle.py` — 11 신규 it. claim 4(oldest pending pick + None on empty + skip running + skip future scheduled_at) + executor 5(sqlite tmp file fixture로 실제 read→write 3 row 검증 + unknown connector type failed + missing connection failed + stream mode 거부 failed + retry_of preserve in result_json) + worker 2(loop processes pending then stops + empty queue exits on stop). `_SessionFactoryAdapter`로 conftest의 outer-trans fixture 안에서 executor가 reuse하도록 wrap.
+  - `services/anyduct-server/tests/db/test_worker_lifecycle.py` — 11 신규 it. claim 4(oldest pending pick + None on empty + skip running + skip future scheduled_at) + executor 5(sqlite tmp file fixture로 실제 read→write 3 row 검증 + unknown connector type failed + missing connection failed + stream mode 거부 failed + retry_of preserve in result_json) + worker 2(loop processes pending then stops + empty queue exits on stop). `_SessionFactoryAdapter`로 conftest의 outer-trans fixture 안에서 executor가 reuse하도록 wrap.
 
 ### Decisions
 - (이번 슬라이스에서 신규 ADR 없음 — ADR-0021 worker queue 첫 구현)
@@ -2015,21 +2015,21 @@ suite + mkdocs site.
 - **Step 9.3a — Worker batch lifecycle 완료 (2026-05-18)**: 3 신규 패키지 모듈 + 1 신규 공유 helper + 1 신규 CLI 서브커맨드 + 1 코어 버그 수정 + 2 비결정성 테스트 수정. 누적 코어 344 unit + 서버 **65 unit** + 서버 **204 it** (193 → 204, +11) + 코어 119 it = **732 tests** all green. mypy strict 코어 39 + 서버 65 src files OK, import-linter 2 contracts KEPT. ADR-0021 in-DB queue 첫 구현 — 신규 ADR 없음. 다음은 **Step 9.2 (스케줄러)** — schedules 테이블 tick으로 pending Run 생성 — 또는 **Step 9.3b (heartbeat + zombie reaper)** — stuck running row 회수.
 
 - **Heartbeat-during-execution + ZombieReaper** [Step 9.3b]
-  - 새 `services/etlx-server/etlx_server/worker/heartbeat.py`:
+  - 새 `services/anyduct-server/anyduct_server/worker/heartbeat.py`:
     * `heartbeat_loop(factory, run_id, *, stop_event, interval_seconds)` async fn — asyncio main loop에서 별도 fresh session으로 주기적 `UPDATE runs SET heartbeat_at=now()`. `stop_event` 우선 wait → timeout이면 stamp. exception은 log + 계속 (transient DB hiccup이 in-flight pipeline 죽이지 않게).
   - `RunExecutor.execute` 갱신: `asyncio.to_thread(pipeline.run, ...)` *호출 전에* `heartbeat_loop` task spawn → finally에서 `stop_event.set()` + `await heartbeat_task` (CancelledError suppress). 기본 interval `_HEARTBEAT_INTERVAL_SECONDS=10.0` — reaper의 기본 idle threshold(60s)보다 6배 작게 유지.
-  - 새 `services/etlx-server/etlx_server/worker/reaper.py`:
+  - 새 `services/anyduct-server/anyduct_server/worker/reaper.py`:
     * `ZombieReaper(factory, *, heartbeat_timeout_seconds=60, scan_interval_seconds=30, batch_limit=100)` — async `run()` 폴 루프 + `reap_once()` 한 번 스캔.
     * `reap_once()`: `SELECT ... WHERE status='running' AND heartbeat_at IS NOT NULL AND heartbeat_at < cutoff ORDER BY heartbeat_at LIMIT N FOR UPDATE SKIP LOCKED` → 각 행을 `status=failed` + `error_class='ZombieReaped'` + `error_message='worker {id} stopped heartbeating {s}s ago (threshold {t}s)'` + `finished_at=now`로 전이. SKIP LOCKED라 worker가 막 heartbeat 갱신 중인 row는 자동 건너뜀.
     * **Auto-resubmit 의도적 안 함** — poison row가 worker 전체를 죽이는 thundering herd 방지. UI(Step 10)에서 ZombieReaped failure는 명시적이며, 사용자가 Step 8.6 `POST /runs/{id}/retry`로 retry 가능.
     * `heartbeat_at IS NOT NULL` 가드 — claim된 직후 heartbeat stamp 전 microsecond 구간 보호.
-  - `etlx-server reaper run` CLI 신규 (별도 process):
+  - `anyduct-server reaper run` CLI 신규 (별도 process):
     * `--heartbeat-timeout` / `--scan-interval` / `--batch-limit` / `--log-level`. SIGTERM/SIGINT 핸들러 → `reaper.stop()`.
     * 별도 process 이유: ① reaper crash가 worker 죽이지 않게 격리, ② 운영 스케일링이 다름(N worker마다 reaper 1대면 충분), ③ kubernetes에서 별도 Deployment.
-  - `etlx_server/worker/__init__.py` re-export 확장: `ZombieReaper` + `heartbeat_loop` 추가.
+  - `anyduct_server/worker/__init__.py` re-export 확장: `ZombieReaper` + `heartbeat_loop` 추가.
 - **테스트 정규화** [Step 9.3b]
-  - `services/etlx-server/tests/db/test_zombie_reaper.py` — 8 신규 it. `reap_once` 6: stale → failed + error_message 검증(worker_id 포함) / fresh untouched / NULL heartbeat untouched / terminal 3종(succeeded/failed/cancelled) untouched / 두 번째 reap_once는 0(idempotent) / 3 stale + batch_limit=2 → 2 + 1 + 0. `run()` loop 2: pre-set stop은 즉시 exit / 짧은 sleep 후 stop은 1 zombie reap 후 종료.
-  - `services/etlx-server/tests/db/test_worker_heartbeat.py` — 3 신규 it. heartbeat_loop가 0.5s 동안 0.1s 간격으로 stamp → heartbeat_at이 stale value(1h ago)에서 최근으로 진행 / pre-set stop은 stamp 안 함(no-op execute 보호) / 첫 iteration이 `RuntimeError` 던지는 flaky factory에서도 loop 계속 → 후속 iteration이 stamp 성공.
+  - `services/anyduct-server/tests/db/test_zombie_reaper.py` — 8 신규 it. `reap_once` 6: stale → failed + error_message 검증(worker_id 포함) / fresh untouched / NULL heartbeat untouched / terminal 3종(succeeded/failed/cancelled) untouched / 두 번째 reap_once는 0(idempotent) / 3 stale + batch_limit=2 → 2 + 1 + 0. `run()` loop 2: pre-set stop은 즉시 exit / 짧은 sleep 후 stop은 1 zombie reap 후 종료.
+  - `services/anyduct-server/tests/db/test_worker_heartbeat.py` — 3 신규 it. heartbeat_loop가 0.5s 동안 0.1s 간격으로 stamp → heartbeat_at이 stale value(1h ago)에서 최근으로 진행 / pre-set stop은 stamp 안 함(no-op execute 보호) / 첫 iteration이 `RuntimeError` 던지는 flaky factory에서도 loop 계속 → 후속 iteration이 stamp 성공.
 
 ### Decisions
 - (이번 슬라이스에서 신규 ADR 없음 — ADR-0021 worker queue 운영성 보강)

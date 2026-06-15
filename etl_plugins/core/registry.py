@@ -158,7 +158,7 @@ class ConnectorRegistry:
     @classmethod
     def _load_all_builtins(cls) -> None:
         """Try every built-in once. Used by :meth:`list_connectors` so
-        ``etlx list-connectors`` is exhaustive even on a stale-metadata
+        ``anyduct list-connectors`` is exhaustive even on a stale-metadata
         install."""
         for name in _BUILTIN_MODULES:
             if name not in cls._registry:

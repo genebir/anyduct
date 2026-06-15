@@ -1,7 +1,7 @@
 # Architecture decisions
 
 Every non-trivial design choice in this repo is recorded as a numbered
-ADR in [`DECISIONS.md`](https://github.com/genebir/ETL/blob/main/dev-docs/DECISIONS.md)
+ADR in [`DECISIONS.md`](https://github.com/genebir/anyduct/blob/main/dev-docs/DECISIONS.md)
 at the repo root. This page is a short index — click through for the
 full rationale, alternatives considered, and follow-up actions.
 

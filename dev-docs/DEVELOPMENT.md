@@ -36,8 +36,8 @@ npm i -g pnpm@9
 ## 2. Bootstrap (원커맨드)
 
 ```bash
-git clone git@github.com:genebir/ETL.git
-cd ETL
+git clone git@github.com:genebir/anyduct.git
+cd anyduct
 ./scripts/bootstrap.sh
 ```
 

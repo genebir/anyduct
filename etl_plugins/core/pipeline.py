@@ -1411,7 +1411,7 @@ class Pipeline:
         src_table = task.source_options.get("table") if task.source_options else None
         if not src_table and task.query:
             try:
-                from etl_plugins.runtime.sql_lineage import extract_referenced_tables
+                from etl_plugins.core.sql_introspect import extract_referenced_tables
 
                 tables = extract_referenced_tables(task.query)
                 src_table = tables[0] if tables else None

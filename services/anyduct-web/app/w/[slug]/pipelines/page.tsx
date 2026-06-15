@@ -35,6 +35,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { BackfillDialog } from "@/components/pipelines/backfill-dialog";
+import { TriggerParamsDialog } from "@/components/pipelines/trigger-params-dialog";
 import {
   ApiError,
   connectionsApi,
@@ -280,6 +281,8 @@ export default function PipelinesPage() {
     connNames,
   ]);
   const [triggering, setTriggering] = useState<string | null>(null);
+  // 자유도 1단계: pipeline whose params dialog is open (null = closed).
+  const [paramsFor, setParamsFor] = useState<PipelineSummary | null>(null);
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -427,6 +430,14 @@ export default function PipelinesPage() {
 
   async function onTrigger(row: PipelineSummary) {
     if (!ws) return;
+    // 자유도 1단계: if the pipeline declares params, let the operator
+    // override them before the run; otherwise trigger in one click.
+    const declared = (row.current_config_json as { params?: Record<string, unknown> } | null)
+      ?.params;
+    if (declared && Object.keys(declared).length > 0) {
+      setParamsFor(row);
+      return;
+    }
     setTriggering(row.id);
     try {
       await pipelinesApi.trigger(ws.id, row.id);
@@ -889,6 +900,15 @@ export default function PipelinesPage() {
           workspaceId={ws.id}
           pipeline={backfillRow}
           onClose={() => setBackfillRow(null)}
+        />
+      ) : null}
+
+      {ws ? (
+        <TriggerParamsDialog
+          open={paramsFor !== null}
+          workspaceId={ws.id}
+          pipeline={paramsFor}
+          onClose={() => setParamsFor(null)}
         />
       ) : null}
 

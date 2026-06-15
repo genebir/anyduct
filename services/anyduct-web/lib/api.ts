@@ -429,10 +429,10 @@ export const pipelinesApi = {
       method: "PATCH",
       json: body,
     }),
-  trigger: (workspaceId: string, id: string) =>
+  trigger: (workspaceId: string, id: string, params?: Record<string, unknown>) =>
     api<RunSummary>(`/workspaces/${workspaceId}/pipelines/${id}/trigger`, {
       method: "POST",
-      json: {},
+      json: params && Object.keys(params).length > 0 ? { params } : {},
     }),
   backfill: (
     workspaceId: string,

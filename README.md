@@ -247,4 +247,4 @@ make up / down   # docker compose dev infra
 
 ## 라이선스
 
-Apache License 2.0. (`LICENSE` 파일은 첫 릴리스 전 추가)
+Apache License 2.0 — 전문은 [`LICENSE`](LICENSE) 참조.

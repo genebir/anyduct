@@ -1,7 +1,7 @@
 # CLAUDE.md — ETL Plugins 세션 컨텍스트
 
-> Claude Code가 매 세션 시작 시 읽는 요약 컨텍스트. **전체 설계 명세는 [`SPEC.md`](SPEC.md)** 에 있다.
-> 세션 시작 순서: ① 이 파일 → ② [`ROADMAP.md`](ROADMAP.md) → ③ 최근 커밋 로그.
+> Claude Code가 매 세션 시작 시 읽는 요약 컨텍스트. **전체 설계 명세는 [`SPEC.md`](dev-docs/SPEC.md)** 에 있다.
+> 세션 시작 순서: ① 이 파일 → ② [`ROADMAP.md`](dev-docs/ROADMAP.md) → ③ 최근 커밋 로그.
 
 ---
 
@@ -593,9 +593,9 @@ Step별 산출물 요약:
 
 | 문서 | 용도 |
 |---|---|
-| [`SPEC.md`](SPEC.md) | 마스터 설계 명세서 (원칙·아키텍처·인터페이스·설정·로드맵 전체) |
-| [`ROADMAP.md`](ROADMAP.md) | Step 단위 진행 상태 (체크박스). Step 7~11은 서비스화. |
-| [`DECISIONS.md`](DECISIONS.md) | ADR — 모든 설계 결정 기록. 서비스화는 ADR-0017부터. |
-| [`DEVELOPMENT.md`](DEVELOPMENT.md) | 신규 환경 인계 / 부트스트랩 / 트러블슈팅 |
+| [`SPEC.md`](dev-docs/SPEC.md) | 마스터 설계 명세서 (원칙·아키텍처·인터페이스·설정·로드맵 전체) |
+| [`ROADMAP.md`](dev-docs/ROADMAP.md) | Step 단위 진행 상태 (체크박스). Step 7~11은 서비스화. |
+| [`DECISIONS.md`](dev-docs/DECISIONS.md) | ADR — 모든 설계 결정 기록. 서비스화는 ADR-0017부터. |
+| [`DEVELOPMENT.md`](dev-docs/DEVELOPMENT.md) | 신규 환경 인계 / 부트스트랩 / 트러블슈팅 |
 | [`CHANGELOG.md`](CHANGELOG.md) | Keep a Changelog 포맷 변경 이력 |
-| [`DESIGN.md`](DESIGN.md) | etlx-web 디자인 시스템 (Step 10 SSOT, ADR-0018) |
+| [`DESIGN.md`](dev-docs/DESIGN.md) | etlx-web 디자인 시스템 (Step 10 SSOT, ADR-0018) |

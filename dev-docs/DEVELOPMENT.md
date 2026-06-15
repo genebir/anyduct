@@ -1,7 +1,7 @@
 # DEVELOPMENT — 신규 환경 인계 문서
 
 > 처음 이 저장소를 클론한 사람(혹은 다른 PC로 옮긴 본인)이 **막힘없이 같은 상태에서 작업을 이어가도록** 만드는 문서.
-> 세션 시작 시는 [`CLAUDE.md`](./CLAUDE.md) → [`ROADMAP.md`](./ROADMAP.md) → 최근 커밋 로그 순서로 확인.
+> 세션 시작 시는 [`CLAUDE.md`](../CLAUDE.md) → [`ROADMAP.md`](./ROADMAP.md) → 최근 커밋 로그 순서로 확인.
 
 ---
 

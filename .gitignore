@@ -76,3 +76,6 @@ storybook-static/
 
 # DA# ERD sample exports (large binaries — local only)
 erd_sample/
+
+# --- Claude Code / agent session state (local only — never publish) ---
+.claude/

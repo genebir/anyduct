@@ -34,7 +34,7 @@
 
 > ⚠️ **성숙도**: postgres·mysql·sqlite·vertica·mongodb·s3·kafka·dynamodb·kinesis·sqs는 실컨테이너(testcontainers/LocalStack) 통합 검증됨. snowflake·bigquery·redshift·clickhouse·cassandra·redis·rabbitmq·nats·mssql은 fake-client 단위 테스트(드라이버 API 모델 검증) — 프로덕션 전 실서버 스모크 권장. PyPI `v0.1.0` 정식 릴리스는 준비 중.
 
-상세 진행은 [`ROADMAP.md`](./ROADMAP.md), 설계 결정은 [`DECISIONS.md`](./DECISIONS.md)(97 ADR), 변경 이력은 [`CHANGELOG.md`](./CHANGELOG.md).
+상세 진행은 [`ROADMAP.md`](./dev-docs/ROADMAP.md), 설계 결정은 [`DECISIONS.md`](./dev-docs/DECISIONS.md)(97 ADR), 변경 이력은 [`CHANGELOG.md`](./CHANGELOG.md).
 
 ---
 
@@ -43,12 +43,12 @@
 | 문서 | 용도 |
 |---|---|
 | [`CLAUDE.md`](./CLAUDE.md) | 세션 시작 시 읽는 요약 컨텍스트 |
-| [`SPEC.md`](./SPEC.md) | 마스터 설계 명세서 (원칙·아키텍처·인터페이스·설정) |
-| [`ROADMAP.md`](./ROADMAP.md) | Step 단위 진행 상태 |
-| [`DECISIONS.md`](./DECISIONS.md) | ADR — 모든 설계 결정 |
-| [`DEVELOPMENT.md`](./DEVELOPMENT.md) | 신규 환경 인계 / bootstrap / 트러블슈팅 |
+| [`SPEC.md`](./dev-docs/SPEC.md) | 마스터 설계 명세서 (원칙·아키텍처·인터페이스·설정) |
+| [`ROADMAP.md`](./dev-docs/ROADMAP.md) | Step 단위 진행 상태 |
+| [`DECISIONS.md`](./dev-docs/DECISIONS.md) | ADR — 모든 설계 결정 |
+| [`DEVELOPMENT.md`](./dev-docs/DEVELOPMENT.md) | 신규 환경 인계 / bootstrap / 트러블슈팅 |
 | [`CHANGELOG.md`](./CHANGELOG.md) | Keep a Changelog 형식 변경 이력 |
-| [`DESIGN.md`](DESIGN.md) | `etlx-web` 디자인 시스템 SSOT (토큰·컴포넌트·a11y) |
+| [`DESIGN.md`](./dev-docs/DESIGN.md) | `etlx-web` 디자인 시스템 SSOT (토큰·컴포넌트·a11y) |
 
 ---
 
@@ -60,7 +60,7 @@ cd ETL
 ./scripts/bootstrap.sh        # uv sync + .env 복사 + pre-commit + docker compose up
 ```
 
-자세한 절차와 트러블슈팅은 [`DEVELOPMENT.md`](./DEVELOPMENT.md).
+자세한 절차와 트러블슈팅은 [`DEVELOPMENT.md`](./dev-docs/DEVELOPMENT.md).
 
 ---
 
@@ -233,7 +233,7 @@ Foundation             (Config / Secrets / Logging / Metrics
                         / Tracing / Retry / Chunk / async_io)
 ```
 
-상세 다이어그램은 [`SPEC.md`](./SPEC.md) §2, 디렉토리 규약은 [`CLAUDE.md`](./CLAUDE.md) §3.
+상세 다이어그램은 [`SPEC.md`](./dev-docs/SPEC.md) §2, 디렉토리 규약은 [`CLAUDE.md`](./CLAUDE.md) §3.
 
 ---
 
@@ -262,7 +262,7 @@ make fmt         # ruff format + autofix
 make up / down   # docker compose dev infra
 ```
 
-새 커넥터를 추가하는 절차는 [`DEVELOPMENT.md`](./DEVELOPMENT.md) §7.
+새 커넥터를 추가하는 절차는 [`DEVELOPMENT.md`](./dev-docs/DEVELOPMENT.md) §7.
 
 ---
 

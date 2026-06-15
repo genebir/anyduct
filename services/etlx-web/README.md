@@ -2,7 +2,7 @@
 
 Next.js (App Router) frontend for the etl-plugins web UI. This slice
 (Step 10 UI 1) wires up the design tokens from
-[`../../DESIGN.md`](../../DESIGN.md) — the Arc-style sidebar shell, JWT auth
+[`../../dev-docs/DESIGN.md`](../../dev-docs/DESIGN.md) — the Arc-style sidebar shell, JWT auth
 backed by `etlx-server`, and read-only list pages for connections, pipelines,
 schedules, and runs. The visual Pipeline Builder (drag-drop operators on
 React Flow) lands in the next slice.
@@ -37,6 +37,6 @@ lib/
   cn.ts                 # clsx + tailwind-merge helper
 ```
 
-Design system SSOT: [`../../DESIGN.md`](../../DESIGN.md). Tokens outside the
+Design system SSOT: [`../../dev-docs/DESIGN.md`](../../dev-docs/DESIGN.md). Tokens outside the
 system (arbitrary colors/spacing, inline hex, Tailwind `bg-[#…]`) are a
 PR-reject (see ADR-0018 and `CLAUDE.md` §6).

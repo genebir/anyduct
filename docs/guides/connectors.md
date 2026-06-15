@@ -24,7 +24,7 @@ SQL-capable migration targets form a 10×10 cross-DB matrix.
 
 "Arrow" marks the bulk fast-path (`read_arrow`/`write_arrow`, ADR-0093) —
 eligible transform-less pipelines bypass the per-row Record plane (see
-[Data paths](pipelines.md#data-paths--pushdown--arrow--records-adr-00930094)).
+[Data paths](pipelines.md#data-paths-pushdown-arrow-records-adr-00930094)).
 
 | Connector | Extra | Migration target | Arrow | Notes |
 |-----------|-------|:---:|:---:|-------|

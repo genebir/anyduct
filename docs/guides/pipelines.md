@@ -90,6 +90,69 @@ Supported events: `pre_run`, `on_task_start`, `on_task_end`,
 `on_error`, `post_run`. Hooks are called synchronously, in registration
 order, after the runtime emits its standard metrics.
 
+## Parameters & runtime templating (`{{ }}`)
+
+The same pipeline can run for different dates / regions / windows
+*without editing the config* — via **per-run parameters** and a
+runtime templating layer. This is the dynamic counterpart to the static
+`${var.name}` variables: variables resolve once at load time; templates
+resolve *per execution*, after everything else.
+
+Four substitution namespaces compose without clashing:
+
+| Syntax | When | Source |
+|--------|------|--------|
+| `${ENV}` | load | environment variables |
+| `!secret` / `${SECRET:...}` | resolve | secret backend |
+| `${var.name}` | load | pipeline/workspace variables (static) |
+| **`{{ expr }}`** | **run** | **runtime context (params + run metadata)** |
+
+Declare default params on the pipeline, reference them with
+`{{ params.name }}`, and use the run's logical date with `{{ ds }}`:
+
+```yaml
+name: daily_orders
+params:
+  region: kr            # default — overridable per run
+source:
+  connection: pg
+  query: "SELECT * FROM orders WHERE region = '{{ params.region }}' AND day = '{{ ds }}'"
+sink:
+  connection: warehouse
+  table: "orders_{{ params.region }}_{{ ds_nodash }}"
+  mode: overwrite
+```
+
+Available context keys: `{{ ds }}` (logical date `YYYY-MM-DD`),
+`{{ ds_nodash }}` (`YYYYMMDD`), `{{ ts }}` / `{{ logical_date }}`
+(ISO-8601), `{{ run_id }}`, `{{ pipeline_name }}`, and
+`{{ params.<key> }}` (nested paths like `{{ params.window.start }}` work).
+A whole-string reference preserves the value's type
+(`chunk_size: "{{ params.cs }}"` stays an int); embedded references
+interpolate as text. An undefined reference fails the run with a clear
+error (typos surface immediately).
+
+Override params at run time:
+
+```bash
+# CLI — repeatable, values JSON-parsed (100 → int, [1,2] → list)
+uv run anyduct run daily_orders.yaml -c connections.yaml \
+  --param region=us --logical-date 2026-06-15
+```
+
+```bash
+# REST — trigger with a params body (web UI shows a params dialog
+# automatically when the pipeline declares params)
+POST /workspaces/{ws}/pipelines/{id}/trigger
+{ "params": { "region": "us" } }
+```
+
+**Security**: templating is *not* Jinja2 — it resolves dotted paths only,
+with no function calls, arithmetic, or code execution (the same
+sandboxed posture as filter/branch predicates). Catalog asset keys are
+derived from the *rendered* config, so lineage matches the tables a run
+actually wrote.
+
 ## Data paths — pushdown / Arrow / records (ADR-0093/0094)
 
 The runtime picks the cheapest data path per task, automatically, in

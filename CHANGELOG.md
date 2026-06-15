@@ -9,6 +9,9 @@
 
 ## [Unreleased]
 
+### Added
+- **런타임 파라미터 + `{{ }}` 템플릿 — 파라미터화 실행 (자유도 1단계, 2026-06-15)**: 같은 파이프라인을 날짜·리전·윈도우별로 *config 수정 없이* 실행. 정적 `${var}`(로드타임)와 분리된 per-run 동적 레이어. `RuntimeContext`(run_id·logical_date·params) → `{{ ds }}`·`{{ ds_nodash }}`·`{{ ts }}`·`{{ run_id }}`·`{{ params.x }}`(중첩 경로) 안전 치환(whole-string 타입보존/embedded 보간, undefined는 ConfigError). 보안: Jinja2 미도입 — 점-경로 조회만(코드실행·함수·연산 불가). `PipelineConfig.params`(선언 기본값) + CLI `--param k=v`(JSON 타이핑)/`--logical-date` + REST 트리거 `params` 바디 + 웹 트리거 파라미터 다이얼로그. 워커는 실행·리니지 양쪽에 렌더 적용(asset 키가 렌더된 테이블과 일치). 단위 18+4, 통합 it 1, a11y 90, live CLI/REST e2e 검증.
+
 ### Fixed
 - **같은-커넥션 pushdown이 서버 실행에서 영구 침묵 스킵 + 비따옴표 INSERT 케이스 폴딩 (2026-06-12, ADR-0094 f/u, 실데이터 dogfood)**: ① 워커는 `connector_factory`로 sink에 전용 인스턴스를 mint(스트리밍 read/write 데드락 가드)하는데 linear/tasks pushdown의 *인스턴스 identity* 검사가 이를 항상 불통과 → 서버-빌드 파이프라인은 pushdown이 절대 발화 안 하고 Arrow로 침묵 강등. graph 체인이 이미 쓰던 **이름 기반 same-DB 판정**(`SinkSpec.connection_name`, builder가 flat/multi-sink 양 경로에 원본 커넥션명 기록)으로 교체 — 단일 INSERT는 소스 인스턴스에서 실행(읽기 없음 = 데드락 무관). ② pushdown INSERT가 비따옴표 테이블이라 발화 시 case-sensitive(대문자) 테이블이 즉시 실패 — 9개 pushdown 커넥터에 write 경로와 동일한 `quote_table()` 추가(한 config가 데이터 경로와 무관하게 동일 동작). live: 사용자 test ws 배치로그 태스크(대문자 스키마, WITH-CTE 쿼리)가 `data_paths: pushdown`으로 무이동 실행 성공. 잠금 unit 3종.
 - **quoted(대소문자 구분) 식별자 컬럼 리니지 전손실 (2026-06-12, 실데이터 dogfood 발견)**: `SELECT m."A" AS "X"` 류 quoted 식별자 쿼리에서 `alias_or_name`이 따옴표를 벗긴 이름을 `sqlglot.lineage()`에 넘겨 비따옴표 정규화(소문자화)로 lookup 미스 → **모든 leaf 소실(컬럼 행만 있고 upstream 0)**. 대문자 스키마 엔터프라이즈 DB(사용자 실데이터)의 전 쿼리가 해당. quoted 출력 식별자는 quoting 보존 SQL로 lookup. JOIN+GROUP BY 집계 마트 쿼리가 컬럼 단위 정확 귀속으로 복원(live 4-hop 체인 DM←DS←DC←vertica 검증).

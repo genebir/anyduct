@@ -145,6 +145,7 @@ async def _seed_pending_run(
     pipeline_id: UUID,
     pipeline_version_id: UUID,
     scheduled_at: datetime | None = None,
+    result_json: dict | None = None,
 ) -> Run:
     r = Run(
         workspace_id=workspace_id,
@@ -154,6 +155,8 @@ async def _seed_pending_run(
     )
     if scheduled_at is not None:
         r.scheduled_at = scheduled_at
+    if result_json is not None:
+        r.result_json = result_json
     session.add(r)
     await session.flush()
     return r
@@ -372,6 +375,73 @@ async def test_executor_resolves_global_and_local_variables(
     assert refreshed.status == RunStatus.SUCCEEDED, (refreshed.error_class, refreshed.error_message)
     assert refreshed.records_read == 3
     assert refreshed.records_written == 2  # id > 1 (local threshold), table from global
+
+
+async def test_executor_renders_runtime_params_and_ds(
+    session: AsyncSession, tmp_path: Path
+) -> None:
+    """자유도 1단계: trigger params + {{ ds }} render at execution.
+
+    The pipeline declares ``params.region`` default 'kr'; the run's trigger
+    overrides it to 'us' (on result_json.params) and pins a logical date via
+    scheduled_at. Both the source query filter and the sink table name use
+    ``{{ params.region }}`` / ``{{ ds_nodash }}``, so the rendered run must
+    write to the parameterised table and reflect the overridden region.
+    """
+    db_path = _prepare_sqlite_fixture(tmp_path)
+    # seed rows: (id, name) — fixture has ids 1,2,3. Add a region column run.
+    import sqlite3
+
+    con = sqlite3.connect(db_path)
+    con.execute("CREATE TABLE ev (id INTEGER, region TEXT)")
+    con.executemany("INSERT INTO ev VALUES (?,?)", [(1, "kr"), (2, "us"), (3, "us")])
+    con.commit()
+    con.close()
+    ws = await _seed_workspace(session, slug="we-params")
+    await _seed_connection(session, workspace_id=ws.id, name="src", config={"database": db_path})
+    await _seed_connection(session, workspace_id=ws.id, name="dst", config={"database": db_path})
+    cfg = {
+        "name": "p",
+        "params": {"region": "kr"},  # default, overridden by trigger
+        "source": {
+            "connection": "src",
+            "query": "SELECT id, region FROM ev WHERE region='{{ params.region }}'",
+        },
+        "sink": {
+            "connection": "dst",
+            "table": "out_{{ params.region }}_{{ ds_nodash }}",
+            "mode": "overwrite",
+            "auto_create_table": True,
+        },
+    }
+    p, pv = await _seed_pipeline(session, workspace_id=ws.id, name="p", config=cfg)
+    run = await _seed_pending_run(
+        session,
+        workspace_id=ws.id,
+        pipeline_id=p.id,
+        pipeline_version_id=pv.id,
+        scheduled_at=datetime(2026, 6, 15, tzinfo=UTC),
+        result_json={"params": {"region": "us"}},  # trigger override
+    )
+    claimed = await claim_pending_run(session, worker_id="worker-A")
+    assert claimed is not None
+    await session.commit()
+
+    await RunExecutor(
+        _SessionFactoryAdapter(session), StaticSecretBackend(), worker_id="worker-A"
+    ).execute(run.id)
+
+    refreshed = (await session.execute(select(Run).where(Run.id == run.id))).scalar_one()
+    assert refreshed.status == RunStatus.SUCCEEDED, (
+        refreshed.error_class,
+        refreshed.error_message,
+    )
+    assert refreshed.records_written == 2  # region='us' → ids 2,3
+    # Sink table name was templated from params.region + ds_nodash.
+    con = sqlite3.connect(db_path)
+    tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    con.close()
+    assert "out_us_20260615" in tables
 
 
 async def test_executor_fails_on_undefined_variable(session: AsyncSession, tmp_path: Path) -> None:

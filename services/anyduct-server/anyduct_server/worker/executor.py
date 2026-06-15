@@ -29,6 +29,7 @@ import functools
 import logging
 import threading
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
@@ -67,6 +68,7 @@ from etl_plugins.core.exceptions import ConfigError, RegistryError, SecretError
 from etl_plugins.core.pipeline import Pipeline as CorePipeline
 from etl_plugins.core.pipeline import RunResult, Task
 from etl_plugins.runtime.builder import build_connector, build_pipeline
+from etl_plugins.runtime.templating import RuntimeContext, render_config_templates
 
 logger = logging.getLogger(__name__)
 
@@ -201,6 +203,7 @@ class RunExecutor:
                             run.id,
                             cursor_from=backfill.get("cursor_from"),
                             cursor_to=backfill.get("cursor_to"),
+                            runtime_context=self._runtime_context(run, version),
                         )
                     except _PipelineBuildError as e:
                         log.error(
@@ -458,7 +461,8 @@ class RunExecutor:
             global_vars = await WorkspaceVariableRepository(session).as_dict(
                 workspace_id=run.workspace_id
             )
-            cfg_dict = resolve_config_variables(version.config_json, extra=global_vars)
+            ctx = self._runtime_context(run, version)
+            cfg_dict = self._resolve_and_render(version, global_vars, ctx)
             cfg = PipelineConfig.model_validate(cfg_dict)
         except Exception as e:
             log.warning(
@@ -1265,6 +1269,36 @@ class RunExecutor:
             )
             log.info("run.triggered_downstream", target_pipeline_id=str(target_id))
 
+    @staticmethod
+    def _runtime_context(run: Run, version: PipelineVersion) -> RuntimeContext:
+        """Per-run templating context (자유도 1단계). ``logical_date`` is the
+        scheduled tick for scheduled runs, else the row's creation time;
+        ``params`` come from the trigger (stored on ``result_json.params``)
+        and override the config's declared ``params`` defaults at render."""
+        cfg = version.config_json or {}
+        return RuntimeContext(
+            run_id=str(run.id),
+            logical_date=run.scheduled_at or run.created_at,
+            params=dict((run.result_json or {}).get("params") or {}),
+            pipeline_name=str(cfg.get("name") or ""),
+        )
+
+    @staticmethod
+    def _resolve_and_render(
+        version: PipelineVersion,
+        global_vars: dict[str, Any],
+        ctx: RuntimeContext,
+    ) -> dict[str, Any]:
+        """Static ``${var}`` resolution then runtime ``{{ }}`` rendering, in
+        order. Declared ``params`` defaults are merged *under* the run's
+        params before rendering. Used by BOTH the execution build and the
+        lineage derivation so catalog asset keys match the rendered tables
+        (mirrors the ${var} lineage fix, ADR-0057)."""
+        cfg_dict = resolve_config_variables(version.config_json, extra=global_vars)
+        declared = dict(cfg_dict.get("params") or {})
+        merged = replace(ctx, params={**declared, **ctx.params})
+        return render_config_templates(cfg_dict, merged)
+
     async def _prepare(
         self,
         pipeline: Pipeline,
@@ -1274,6 +1308,7 @@ class RunExecutor:
         *,
         cursor_from: Any = None,
         cursor_to: Any = None,
+        runtime_context: RuntimeContext | None = None,
     ) -> tuple[Callable[[], RunResult], str]:
         """Build a thread-callable that runs the pipeline in-process.
 
@@ -1288,10 +1323,13 @@ class RunExecutor:
             workspace_id=pipeline.workspace_id
         )
         try:
-            cfg_dict = resolve_config_variables(version.config_json, extra=global_vars)
+            if runtime_context is not None:
+                cfg_dict = self._resolve_and_render(version, global_vars, runtime_context)
+            else:
+                cfg_dict = resolve_config_variables(version.config_json, extra=global_vars)
             cfg = PipelineConfig.model_validate(cfg_dict)
         except ConfigError as e:
-            raise _PipelineBuildError(f"variable resolution failed: {e}") from e
+            raise _PipelineBuildError(f"variable/template resolution failed: {e}") from e
         except ValidationError as e:
             raise _PipelineBuildError(f"invalid pipeline config: {e.errors()}") from e
         if cfg.mode != PipelineMode.BATCH.value:

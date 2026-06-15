@@ -691,12 +691,14 @@ class DlqPreviewResponse(BaseModel):
 class RunTriggerRequest(BaseModel):
     """Body of ``POST /workspaces/{ws}/pipelines/{pid}/trigger``.
 
-    Intentionally empty for now — the action enqueues the *current*
-    PipelineVersion with no overrides. Leaving the body in place
-    (rather than collapsing to a parameterless POST) keeps room for
-    future fields (``config_overrides``, ``scheduled_at``, ...) without
-    a breaking change to the URL.
+    ``params`` — per-run parameters (자유도 1단계). They override the
+    pipeline's declared ``params`` defaults and are templated into the
+    config at execution via the ``{{ params.name }}`` layer, so the same
+    pipeline runs for different dates/regions/windows without an edit.
+    Empty by default (the current version runs with its declared defaults).
     """
+
+    params: dict[str, Any] = Field(default_factory=dict)
 
 
 class RunBackfillRequest(BaseModel):

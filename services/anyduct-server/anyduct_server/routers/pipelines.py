@@ -478,6 +478,9 @@ async def trigger_pipeline(
         pipeline=pipeline,
         version=current,
         triggered_by_user_id=ctx.user.id,
+        # Per-run params (자유도 1단계) ride on result_json (like backfill range)
+        # — the worker reads them into the RuntimeContext for {{ params.x }}.
+        result_json={"params": body.params} if body.params else None,
     )
     await audit.record(
         actor_user_id=ctx.user.id,

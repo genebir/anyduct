@@ -125,9 +125,18 @@ async def test_n_replicas_drain_queue_without_double_claim(
     db_path = _sqlite_fixture(tmp_path, "claims.db")
     ws_id, run_ids = await _seed_committed(factory, slug="mw-claims", n_runs=12, db_path=db_path)
     try:
+        # A barrier makes "the work spread across replicas" DETERMINISTIC
+        # instead of timing-dependent: each replica claims exactly one row,
+        # then waits until all three have done so before draining the rest.
+        # 12 rows ≥ 3 replicas, so every replica gets a first claim (SKIP
+        # LOCKED hands three concurrent claimers three distinct rows) — no
+        # deadlock. Without this, a fast runner let one replica drain all 12
+        # before the others polled (flaky "queue was not shared").
+        first_claim = asyncio.Barrier(3)
 
         async def replica(worker_id: str) -> list[UUID]:
             claimed: list[UUID] = []
+            gated = False
             while True:
                 async with factory() as session:
                     run = await claim_pending_run(session, worker_id=worker_id)
@@ -136,18 +145,20 @@ async def test_n_replicas_drain_queue_without_double_claim(
                         return claimed
                     claimed.append(run.id)
                     await session.commit()
-                # Yield so replicas interleave like real processes would.
+                if not gated:
+                    gated = True
+                    await first_claim.wait()  # hold until all three have one
                 await asyncio.sleep(0)
 
         results = await asyncio.gather(replica("w-1"), replica("w-2"), replica("w-3"))
         all_claimed = [rid for claimed in results for rid in claimed]
-        # Exactly-once: no double claims, nothing left behind.
+        # Exactly-once: no double claims, nothing left behind (the real
+        # SKIP LOCKED guarantee).
         assert len(all_claimed) == len(set(all_claimed)) == len(run_ids)
         assert set(all_claimed) == set(run_ids)
-        # The work actually spread: with 12 rows and interleaved loops at
-        # least two replicas must have participated.
+        # The barrier guarantees all three replicas participated.
         participants = [i for i, claimed in enumerate(results) if claimed]
-        assert len(participants) >= 2, f"queue was not shared: {[len(c) for c in results]}"
+        assert len(participants) == 3, f"queue was not shared: {[len(c) for c in results]}"
         # Every claimed row is RUNNING and stamped with its owner.
         async with factory() as session:
             rows = (await session.execute(select(Run).where(Run.id.in_(run_ids)))).scalars().all()

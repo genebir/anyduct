@@ -12,6 +12,7 @@ from etl_plugins.core.connector import Connector
 from etl_plugins.core.context import Context
 from etl_plugins.core.pipeline import RunResult
 from etl_plugins.runtime.builder import build_pipeline_from_yaml
+from etl_plugins.runtime.templating import RuntimeContext
 
 
 def run_pipeline_yaml(
@@ -22,11 +23,13 @@ def run_pipeline_yaml(
     secret_backend: SecretBackend | None = None,
     extra_connectors: dict[str, Connector] | None = None,
     context: Context | None = None,
+    runtime_context: RuntimeContext | None = None,
 ) -> RunResult:
     """Load YAML → build Pipeline + Connectors → open → run → close → return result.
 
     Connectors are opened with ``connect()`` before the run and closed with
-    ``close()`` afterwards (even on exception).
+    ``close()`` afterwards (even on exception). ``runtime_context`` enables
+    the ``{{ ds }}`` / ``{{ params.x }}`` templating layer (자유도 1단계).
     """
     pipeline, connectors = build_pipeline_from_yaml(
         pipeline_path,
@@ -34,6 +37,7 @@ def run_pipeline_yaml(
         env=env,
         secret_backend=secret_backend,
         extra_connectors=extra_connectors,
+        runtime_context=runtime_context,
     )
 
     for c in connectors.values():

@@ -30,6 +30,41 @@ from etl_plugins.core.registry import ConnectorRegistry
 from etl_plugins.observability.logging import configure_logging
 from etl_plugins.runtime.builder import build_connectors
 from etl_plugins.runtime.runner import arun_stream_pipeline_yaml, run_pipeline_yaml
+from etl_plugins.runtime.templating import RuntimeContext
+
+
+def _build_runtime_context(
+    params: list[str] | None, logical_date: str | None
+) -> RuntimeContext | None:
+    """Assemble a :class:`RuntimeContext` from ``--param KEY=VALUE`` options
+    and ``--logical-date``. Returns ``None`` when neither is given (no
+    templating overhead). Values are parsed as JSON when possible (so
+    ``--param limit=100`` is an int, ``--param tags=[1,2]`` a list), else
+    kept as the raw string."""
+    import json
+    import uuid
+    from datetime import UTC, datetime
+
+    if not params and not logical_date:
+        return None
+    parsed: dict[str, object] = {}
+    for item in params or []:
+        if "=" not in item:
+            _err(f"--param must be KEY=VALUE, got {item!r}")
+        key, _, raw = item.partition("=")
+        try:
+            parsed[key.strip()] = json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            parsed[key.strip()] = raw
+    if logical_date:
+        try:
+            ld = datetime.fromisoformat(logical_date)
+        except ValueError:
+            _err(f"--logical-date must be ISO-8601, got {logical_date!r}")
+    else:
+        ld = datetime.now(UTC)
+    return RuntimeContext(run_id=uuid.uuid4().hex, logical_date=ld, params=parsed)
+
 
 app = typer.Typer(
     name="anyduct",
@@ -126,15 +161,34 @@ def run(
         Path | None,
         typer.Option("--env-file", help="Load env vars from this .env file before running"),
     ] = None,
+    param: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--param",
+            "-p",
+            help="Run parameter KEY=VALUE (repeatable). Reference as {{ params.KEY }} "
+            "in queries/options. Overrides the pipeline's declared 'params' default.",
+        ),
+    ] = None,
+    logical_date: Annotated[
+        str | None,
+        typer.Option(
+            "--logical-date",
+            help="Logical/execution date for {{ ds }} / {{ ts }} (ISO-8601). "
+            "Defaults to now (UTC).",
+        ),
+    ] = None,
 ) -> None:
     """Run a pipeline end-to-end (load → build → connect → run → close)."""
     if env_file is not None:
         load_dotenv(env_file)
+    runtime_context = _build_runtime_context(param, logical_date)
     try:
         result = run_pipeline_yaml(
             pipeline_yaml,
             connections_path=connections,
             secret_backend=get_secret_backend(),
+            runtime_context=runtime_context,
         )
     except ETLError as exc:
         _err(f"pipeline failed: {exc}")

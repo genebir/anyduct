@@ -411,6 +411,13 @@ class PipelineConfig(BaseModel):
     # string fields; resolved at load time (see config.variables). Workspace-wide
     # globals merge underneath these (locals win) at the service layer (V2).
     variables: dict[str, Any] = Field(default_factory=dict)
+    # Run parameters (자유도 1단계, 2026-06-15). Declared *default* values a run
+    # can template against via the runtime ``{{ params.name }}`` layer
+    # (etl_plugins.runtime.templating). Distinct from ``variables`` (static,
+    # ``${var.x}``, load time): params are *per-run*, overridable at trigger
+    # time (CLI ``--param k=v`` / API trigger body), so the same pipeline runs
+    # for different dates/regions/windows without editing the config.
+    params: dict[str, Any] = Field(default_factory=dict)
     # Node-level execution (ADR-0041, H2, service-only). When true *and* this is a
     # graph pipeline, the worker expands the graph into per-node ``node_runs`` and
     # executes node-by-node (per-node status / retry foundation) instead of one

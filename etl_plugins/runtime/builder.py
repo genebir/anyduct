@@ -14,6 +14,7 @@ The composition root:
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +41,7 @@ from etl_plugins.core.pipeline import (
 )
 from etl_plugins.core.registry import ConnectorRegistry
 from etl_plugins.runtime.column_lineage import derive_column_lineage
+from etl_plugins.runtime.templating import RuntimeContext, render_config_templates
 from etl_plugins.runtime.transforms import build_transform
 
 
@@ -495,6 +497,7 @@ def build_pipeline_from_yaml(
     env: Mapping[str, str] | None = None,
     secret_backend: SecretBackend | None = None,
     extra_connectors: dict[str, Connector] | None = None,
+    runtime_context: RuntimeContext | None = None,
 ) -> tuple[Pipeline, dict[str, Connector]]:
     """Load YAML config and instantiate the Pipeline + its connectors.
 
@@ -512,6 +515,19 @@ def build_pipeline_from_yaml(
         whatever ``connections_path`` produces.
     """
     pc = load_pipeline(pipeline_path, env=env, secret_backend=secret_backend)
+    # Runtime templating (자유도 1단계): render ``{{ ds }}`` / ``{{ params.x }}``
+    # AFTER static ${var}/secret/env resolution (load_pipeline) and BEFORE
+    # build, so the pipeline carries concrete per-run values. Trigger-time
+    # params override the config's declared ``params`` defaults; the
+    # pipeline's name is injected so ``{{ pipeline_name }}`` works.
+    if runtime_context is not None:
+        ctx = replace(
+            runtime_context,
+            params={**pc.params, **runtime_context.params},
+            pipeline_name=runtime_context.pipeline_name or pc.name,
+        )
+        rendered = render_config_templates(pc.model_dump(), ctx)
+        pc = PipelineConfig.model_validate(rendered)
     connectors: dict[str, Connector] = {}
     conn_configs: dict[str, ConnectionConfig] = {}
     if connections_path is not None:

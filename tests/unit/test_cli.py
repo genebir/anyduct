@@ -182,3 +182,33 @@ connections:
     # Clean up the seeded registrations
     ConnectorRegistry._registry.pop("cli-stream-source-seeded", None)
     ConnectorRegistry._registry.pop("cli-stream-sink-seeded", None)
+
+
+# ---------- 런타임 파라미터/템플릿 컨텍스트 (자유도 1단계) ----------
+from etl_plugins.cli import _build_runtime_context  # noqa: E402
+
+
+def test_runtime_context_none_when_empty() -> None:
+    assert _build_runtime_context(None, None) is None
+    assert _build_runtime_context([], None) is None
+
+
+def test_runtime_context_param_json_typing() -> None:
+    ctx = _build_runtime_context(["limit=100", "region=kr", "tags=[1,2]"], None)
+    assert ctx is not None
+    assert ctx.params["limit"] == 100 and isinstance(ctx.params["limit"], int)
+    assert ctx.params["region"] == "kr"
+    assert ctx.params["tags"] == [1, 2]
+
+
+def test_runtime_context_logical_date() -> None:
+    ctx = _build_runtime_context(None, "2026-06-15")
+    assert ctx is not None
+    assert ctx.as_mapping()["ds"] == "2026-06-15"
+
+
+def test_runtime_context_bad_param_exits() -> None:
+    import typer
+
+    with pytest.raises(typer.Exit):
+        _build_runtime_context(["noequals"], None)

@@ -12,23 +12,29 @@
 
 ---
 
-## 현재 상태 (2026-05-14)
+## 현재 상태
 
-**Steps 1–4 완료 + Step 5 진행 중. 321 단위 + 3 skip + 111 통합 = 435 테스트, 16 ADR.**
+**코어 라이브러리 + 웹 서비스 풀스택 동작. 1,320 코어 단위 + 227 통합 + 454 서버 통합 테스트, 97 ADR, 커넥터 20종.**
 
-- [x] **Step 1 — Foundation**: 스캐폴딩, Harness 문서, Core/Config/Observability/Utils, Contract test infra
-- [x] **Step 2 — Reference Connectors**: `postgres`(psycopg3), `s3`(boto3+pyarrow, MinIO 호환), `kafka`(aiokafka, Stream Contract 신규 도입)
-- [x] **Step 3 — Pipeline 실행기 + CLI**
-  - 3.1 YAML→Pipeline 빌더 + `etlx` CLI (`version`, `list-connectors`, `validate`, `run`, `run-stream`, `test-connection`) + transforms(rename/cast/filter sandbox/python)
-  - 3.2 Stream runtime (`Pipeline.arun_stream` + Kafka async `commit()` + buffer policy + `--stop-after-*`)
-  - 3.3 Retry + DLQ 라우팅 + 자동 메트릭 emit + 글로벌 `--log-format json|console` / `--log-level`
-- [x] **Step 4 — Orchestrator Adapters**: Airflow `ETLPluginsOperator`, Dagster `EtlPluginsResource`+`etl_plugins_op`, Prefect `run_etl_pipeline_flow`+`task`. PEP 562 lazy 로딩으로 orchestrator 미설치 환경에서도 모듈 import 성공.
-- [x] **Step 5.1 — Additional RDBMS**: MySQL(PyMySQL), SQLite(stdlib)
-- [ ] Step 5.2~5.7: DW / NoSQL / Streaming / CDC / Object 추가 / HTTP — 미착수
-- [ ] Step 6: OpenLineage, OTel/Prometheus 실구현, mkdocs, v0.1.0 릴리스
-**다음 분기**: 서비스 계층 착수(Step 7~) 예정. UI 디자인은 `DESIGN.md`에 확정 — Arc Browser 영감, 깊은 네이비 베이스 + 팝한 핫핑크 강조.
+두 층으로 이뤄진다. 코어는 서비스를 모른다(단방향 의존) — **서비스 패키지가 통째로 사라져도 라이브러리는 그대로 동작한다.**
 
-상세 진행은 [`ROADMAP.md`](./ROADMAP.md), 설계 결정은 [`DECISIONS.md`](./DECISIONS.md).
+**① 코어 라이브러리 (`etl_plugins`)**
+- [x] **통일 커넥터 추상화** — BatchSource/Sink, StreamSource/Sink, `Record` 정규화 + 공통 contract test.
+- [x] **커넥터 20종** — RDBMS/DW(postgres·mysql·sqlite·vertica·mssql·snowflake·bigquery·redshift·clickhouse), NoSQL(mongodb·dynamodb·cassandra), Streaming(kafka·kinesis·sqs·redis·rabbitmq·nats), Object/HTTP(s3·http).
+- [x] **파이프라인 실행 모델** — 단일 task / Task-DAG(`depends_on`) / 데이터플로우 graph(join·aggregate·branch) + Retry·DLQ·재시도.
+- [x] **데이터 플레인** — DuckDB `sql` 변환(JOIN/GROUP BY/윈도우) + Arrow 벡터 fast-path(postgres·mysql·vertica·mssql, Record 플레인 우회) + same-connection / ELT 푸시다운(데이터 무이동, dbt식).
+- [x] **자산·리니지** — derived-first 카탈로그 + 컬럼 레벨 리니지(sqlglot 풀 AST) + OpenLineage export + 증분/백필 커서.
+- [x] **오케스트레이터 어댑터** — Airflow / Dagster / Prefect (PEP 562 lazy) + `etlx` CLI.
+- [x] **관측성** — structlog + OTel trace + Prometheus exporter.
+
+**② 서비스 패키지 (`services/etlx-server` FastAPI + `services/etlx-web` Next.js)** — 비개발자도 쓰는 웹 UI ETL 서비스
+- [x] **API + 실행 엔진** — OIDC/로컬 인증 + RBAC + 워크스페이스 격리 + 감사 로그. PostgreSQL run-큐(SKIP LOCKED) 멀티-replica 워커 + cron 스케줄러 + 센서 프레임워크.
+- [x] **웹 UI** — 비주얼 파이프라인 빌더(React Flow) + 연결/스케줄/마이그레이션 관리 + run 모니터링 + 카탈로그/리니지 그래프 + ERD 디자이너.
+- [x] **배포** — `docker-compose.prod.yml` + Helm 차트(kind 실배포 검증) + Grafana 대시보드.
+
+> ⚠️ **성숙도**: postgres·mysql·sqlite·vertica·mongodb·s3·kafka·dynamodb·kinesis·sqs는 실컨테이너(testcontainers/LocalStack) 통합 검증됨. snowflake·bigquery·redshift·clickhouse·cassandra·redis·rabbitmq·nats·mssql은 fake-client 단위 테스트(드라이버 API 모델 검증) — 프로덕션 전 실서버 스모크 권장. PyPI `v0.1.0` 정식 릴리스는 준비 중.
+
+상세 진행은 [`ROADMAP.md`](./ROADMAP.md), 설계 결정은 [`DECISIONS.md`](./DECISIONS.md)(97 ADR), 변경 이력은 [`CHANGELOG.md`](./CHANGELOG.md).
 
 ---
 
@@ -42,7 +48,7 @@
 | [`DECISIONS.md`](./DECISIONS.md) | ADR — 모든 설계 결정 |
 | [`DEVELOPMENT.md`](./DEVELOPMENT.md) | 신규 환경 인계 / bootstrap / 트러블슈팅 |
 | [`CHANGELOG.md`](./CHANGELOG.md) | Keep a Changelog 형식 변경 이력 |
-| [`DESIGN.md`](DESIGN.md) | `etlx-web` 디자인 시스템 (Step 10 진행 시 SSOT) |
+| [`DESIGN.md`](DESIGN.md) | `etlx-web` 디자인 시스템 SSOT (토큰·컴포넌트·a11y) |
 
 ---
 
@@ -61,14 +67,17 @@ cd ETL
 ## 설치
 
 ```bash
-# 코어만 (CLI / runtime / Pipeline ABC)
-pip install etl-plugins                          # PyPI 릴리스는 Step 6에서
+# 코어만 (CLI / runtime / Pipeline ABC) — PyPI 정식 릴리스 준비 중,
+# 그 전에는 소스에서: uv sync  (또는 pip install git+https://github.com/genebir/ETL)
+pip install etl-plugins
 
-# 필요한 커넥터/오케스트레이터 extra 추가
+# 필요한 커넥터/오케스트레이터 extra 추가 (커넥터 20종 — 전체 목록은 pyproject.toml)
 pip install 'etl-plugins[postgres]'              # psycopg 3
 pip install 'etl-plugins[mysql]'                 # PyMySQL
 pip install 'etl-plugins[s3]'                    # boto3 + pyarrow
 pip install 'etl-plugins[kafka]'                 # aiokafka
+pip install 'etl-plugins[snowflake]'             # snowflake-connector-python
+pip install 'etl-plugins[duckdb]'                # DuckDB sql 변환 + Arrow 플레인
 pip install 'etl-plugins[airflow]'               # apache-airflow
 pip install 'etl-plugins[dagster]'               # dagster
 pip install 'etl-plugins[prefect]'               # prefect

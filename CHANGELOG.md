@@ -15,6 +15,9 @@
 - **partial schema가 star-없는 쿼리 리니지를 오염 (2026-06-12, 동일 dogfood)**: 워커의 star 감지가 문자열 `"*" in query`라 `COUNT(*)`에 오탐 → 형제 태스크용으로 fetch한 부분 스키마가 같은 커넥션의 **star-없는 태스크 derive에도 주입** → sqlglot이 스키마에 없는 테이블 해석을 Placeholder로 강등, edge 전멸. 코어 `extract_sql_lineage`가 projection star 없는 쿼리에선 schema를 무시(star 확장이라는 문서화된 용도로 한정) + 워커 감지를 `has_projection_star()`(AST 기반, COUNT(*) 제외)로 교체. 잠금 테스트 7종(quoted 4 + schema 오염 3).
 
 ### Added
+- **run 상세 데이터 경로 칩 — 태스크별 분해 (2026-06-15)**: task-DAG run은 경로가 섞이는데(copy 6태스크 Arrow + append 로그 pushdown) 칩이 distinct 경로 타입으로만 collapse돼 "어느 태스크가 어느 경로?"를 알 수 없던 갭. 칩에 ×N 카운트 + hover 시 해당 경로를 탄 태스크 목록.
+- **빌더 task-DAG safe-exit (2026-06-15)**: `tasks`+`depends_on` shape 파이프라인을 graph 전용 빌더에서 열면 빈 캔버스로 떨어지고 저장 시 전체 구성이 대체되던 footgun → 안내 카드 + 목록 복귀(마이그레이션 폼 가드 미러). connection-usage walker도 task-DAG shape 추가(삭제 경고 침묵 갭).
+- **Checkbox primitive 전 영역 전파 (2026-06-15)**: 마이그레이션/파이프라인 목록에만 있던 토큰 기반 Checkbox를 빌더/연결/스케줄/센서/ERD/assets/audit 14곳에 전파(인라인 accent-color 제거). 컬럼 리니지 `*` 의사 컬럼 "(전체 행)" 라벨.
 - **accent 위 텍스트 흰색 복원 (2026-06-12, 오너 결정)**: a11y 게이트가 네이비로 바꿨던 핑크/빨강 채움 위 텍스트를 사용자 요청으로 흰색 복원(`--text-on-accent`=white — 시맨틱 토큰이라 한 곳 변경으로 전체 복원, 체크박스 마크 포함). 3.3:1 AA 미달은 **수용된 트레이드오프로 문서화**, axe 게이트는 `.text-on-accent`만 제외하고 나머지(AA 토큰 보정 등)는 전부 유지. 88/88 통과.
 - **필수 필드 별표 마커 (2026-06-12, 사용자 요청)**: 빌더 속성 패널의 "필수" 텍스트 칩을 라벨 우상단의 작은 빨간 아스터리스크(`RequiredMark` primitive — tooltip/aria로 의미 유지, inline/flex 라벨 양쪽 대응)로 교체. **전 폼 일관 적용**: 연결 폼(이름/유형/커넥터 필드) · 마이그레이션 폼(이름/소스·대상 연결/테이블/스키마/커서·키 컬럼) · 스케줄 폼(이름/cron) · 워크스페이스 생성·설정(이름/slug) · 멤버 추가(이메일) · 변수(이름). 빈 필수 필드의 빨간 보더 강조는 그대로. 스토리 포함, a11y 게이트 89/89.
 - **커넥터 벤더 브랜드 아이콘 (2026-06-12, 사용자 요청)**: 빌더 팔레트/캔버스 노드의 source/sink 아이콘을 simple-icons 브랜드 로고로 — Postgres/MySQL/SQLite/Snowflake/BigQuery/ClickHouse/Cassandra/MongoDB/Redis/Kafka/RabbitMQ/NATS 12종(24 operator). lucide 시그니처 호환 래퍼라 사용처 무변경. AWS 계열·Vertica·SQL Server는 simple-icons에서 상표 정책으로 제거돼 lucide 폴백 유지.

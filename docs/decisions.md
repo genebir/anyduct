@@ -29,7 +29,7 @@ full rationale, alternatives considered, and follow-up actions.
 
 | ADR | Title |
 |-----|-------|
-| ADR-0011 | Step 3.1 Pipeline runtime — YAML builder, Transforms, `etlx` CLI |
+| ADR-0011 | Step 3.1 Pipeline runtime — YAML builder, Transforms, `anyduct` CLI |
 | ADR-0012 | Step 3.2 Stream runtime — `arun_stream`, async commit, buffering |
 | ADR-0013 | Step 3.3 Retry / DLQ / 자동 메트릭 / CLI logging |
 | ADR-0014 | Step 4 Orchestrator Adapters — Airflow / Dagster / Prefect lazy |
@@ -45,7 +45,7 @@ full rationale, alternatives considered, and follow-up actions.
 
 | ADR | Title |
 |-----|-------|
-| ADR-0017 | 서비스화 전략 — 코어 위에 `services/etlx-{server,web}` 별도 패키지 |
+| ADR-0017 | 서비스화 전략 — 코어 위에 `services/anyduct-{server,web}` 별도 패키지 |
 | ADR-0018 | 디자인 시스템 — Arc 영감, 네이비 + 팝핑크 강조 |
 | ADR-0019 | API 프레임워크 = FastAPI |
 | ADR-0020 | 메타데이터 저장소 = PostgreSQL 16+ + SQLAlchemy 2.x async + Alembic |

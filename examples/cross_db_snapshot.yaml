@@ -16,7 +16,7 @@
 #
 # Pair with ``examples/connections.example.yaml`` and run:
 #
-#     uv run etlx validate examples/cross_db_snapshot.yaml \
+#     uv run anyduct validate examples/cross_db_snapshot.yaml \
 #         --connections examples/connections.example.yaml
 #
 name: customers_snapshot

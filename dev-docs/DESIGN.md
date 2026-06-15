@@ -1,4 +1,4 @@
-# DESIGN.md — etlx-web 디자인 시스템
+# DESIGN.md — anyduct-web 디자인 시스템
 
 > `services/etlx-web` (Step 10)의 디자인 마스터 문서. 토큰·컴포넌트·인터랙션의 단일 진실(SSOT). 변경 시 ADR-0018을 갱신.
 >

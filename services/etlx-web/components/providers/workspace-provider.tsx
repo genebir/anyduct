@@ -12,7 +12,7 @@ import {
 import { workspacesApi, type WorkspaceSummary } from "@/lib/api";
 import { useAuth } from "./auth-provider";
 
-const STORAGE_KEY = "etlx.workspace";
+const STORAGE_KEY = "anyduct.workspace";
 
 interface WorkspaceContextValue {
   workspaces: WorkspaceSummary[];

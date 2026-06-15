@@ -3,7 +3,7 @@
 **Backend-agnostic, orchestrator-agnostic Python ETL plugin library.**
 
 Write your pipeline once. Run it from a script, from Airflow, from Dagster,
-from Prefect, or from the bundled `etlx-server` service — same connector,
+from Prefect, or from the bundled `anyduct-server` service — same connector,
 same `Pipeline.run()` call, same observability.
 
 ```python

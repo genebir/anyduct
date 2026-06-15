@@ -14,10 +14,10 @@
 #
 # Validate (a live run needs the [sqs] + [redis] extras + credentials):
 #
-#     uv run etlx validate examples/stream_queue_to_stream.yaml \
+#     uv run anyduct validate examples/stream_queue_to_stream.yaml \
 #         --connections examples/connections.example.yaml
 #
-#     uv run etlx run-stream examples/stream_queue_to_stream.yaml \
+#     uv run anyduct run-stream examples/stream_queue_to_stream.yaml \
 #         --connections examples/connections.example.yaml \
 #         --stop-after-records 1000
 name: queue_to_stream

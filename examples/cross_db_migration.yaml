@@ -14,9 +14,9 @@
 #
 # Pair this with ``examples/connections.example.yaml`` and run with:
 #
-#     uv run etlx validate examples/cross_db_migration.yaml \
+#     uv run anyduct validate examples/cross_db_migration.yaml \
 #         --connections examples/connections.example.yaml
-#     uv run etlx run      examples/cross_db_migration.yaml \
+#     uv run anyduct run      examples/cross_db_migration.yaml \
 #         --connections examples/connections.example.yaml
 #
 name: orders_replication

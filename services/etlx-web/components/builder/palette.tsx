@@ -127,7 +127,7 @@ export function Palette({
 // DataTransfer MIME type for palette → canvas drag-and-drop (2026-05-26
 // user request). Custom MIME so the canvas can ignore non-palette drags
 // (files from desktop, text selections, …) without false positives.
-export const PALETTE_DND_MIME = "application/x-etlx-operator-id";
+export const PALETTE_DND_MIME = "application/x-anyduct-operator-id";
 
 /**
  * Drag-only palette item (2026-05-26 user request: '오퍼레이터가 클릭으로는

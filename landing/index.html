@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>etlx — 어떤 데이터베이스든, 어떤 오케스트레이터 위에서든</title>
+<title>anyduct — 어떤 데이터베이스든, 어떤 오케스트레이터 위에서든</title>
 <meta name="description" content="Backend-agnostic · Orchestrator-agnostic 오픈소스 Python ETL. 코드도 노코드도, 무이동 데이터 경로와 자동 컬럼 리니지까지. 당신의 인프라 안에서." />
-<meta property="og:title" content="etlx — 데이터 파이프라인 플랫폼" />
+<meta property="og:title" content="anyduct — 데이터 파이프라인 플랫폼" />
 <meta property="og:description" content="하나의 인터페이스로 20여 종 시스템을 연결. 오픈소스 · 셀프호스팅 · 자동 리니지 · 무이동 ELT." />
 <meta property="og:type" content="website" />
 <meta name="theme-color" content="#000000" />
@@ -171,7 +171,7 @@
   tbody tr{transition:background .2s;}
   tbody tr:hover{background:#fafafc;}
   tbody tr:last-child td{border-bottom:none;}
-  .cmp-col-etlx{background:rgba(94,92,230,.06);}
+  .cmp-col-anyduct{background:rgba(94,92,230,.06);}
   caption{caption-side:bottom;color:var(--ink-3);font-size:12.5px;padding:14px 16px;text-align:left;}
   .cmp-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;}
   @media (max-width:620px){ table{min-width:560px;} }
@@ -216,7 +216,7 @@
 
 <header class="nav" id="nav">
   <div class="wrap">
-    <span class="brand">etlx</span>
+    <span class="brand">anyduct</span>
     <nav aria-label="주요">
       <a href="#different">차이점</a>
       <a href="#features">기능</a>
@@ -246,10 +246,10 @@
   <!-- DIFFERENTIATORS -->
   <section id="different" class="alt" aria-labelledby="diff-h">
     <div class="wrap">
-      <p class="kicker grad" data-reveal>왜 etlx인가</p>
+      <p class="kicker grad" data-reveal>왜 anyduct인가</p>
       <h2 class="head" data-reveal id="diff-h">다른 ETL과 무엇이 다른가</h2>
       <p class="lead" data-reveal>Fivetran 같은 SaaS, dbt 같은 변환 전용 도구, Airflow 같은 오케스트레이터 —
-        각자 한 조각을 잘합니다. etlx는 그 경계를 없앱니다.</p>
+        각자 한 조각을 잘합니다. anyduct는 그 경계를 없앱니다.</p>
       <div class="diffs">
         <div class="diff" data-reveal>
           <div class="num grad">01</div>
@@ -362,7 +362,7 @@
           <p class="who grad">데이터 엔지니어</p>
           <ul>
             <li>YAML 또는 Python으로 파이프라인 정의</li>
-            <li>etlx CLI · Airflow / Dagster / Prefect 어댑터</li>
+            <li>anyduct CLI · Airflow / Dagster / Prefect 어댑터</li>
             <li>커넥터·변환을 직접 확장 (Registry 패턴)</li>
             <li>타입 검증(Pydantic) · 단위/통합 테스트 1,300+</li>
           </ul>
@@ -396,20 +396,20 @@
           <thead>
             <tr>
               <th class="feat">항목</th>
-              <th class="cmp-col-etlx">etlx</th>
+              <th class="cmp-col-anyduct">anyduct</th>
               <th>SaaS ETL<br/>(예: Fivetran)</th>
               <th>변환 전용<br/>(예: dbt)</th>
               <th>오케스트레이터<br/>(예: Airflow)</th>
             </tr>
           </thead>
           <tbody>
-            <tr><td>오픈소스 · 셀프호스팅</td><td class="cmp-col-etlx"><span class="y">●</span> 예</td><td><span class="n">아니오</span></td><td><span class="y">●</span> 예</td><td><span class="y">●</span> 예</td></tr>
-            <tr><td>데이터가 내 인프라에만</td><td class="cmp-col-etlx"><span class="y">●</span> 예</td><td><span class="n">외부 경유</span></td><td><span class="y">●</span> 예</td><td><span class="y">●</span> 예</td></tr>
-            <tr><td>오케스트레이터 비종속</td><td class="cmp-col-etlx"><span class="y">●</span> 예</td><td><span class="n">자체</span></td><td><span class="n">별도</span></td><td><span class="n">자기 자신</span></td></tr>
-            <tr><td>비개발자용 노코드 UI</td><td class="cmp-col-etlx"><span class="y">●</span> 예</td><td><span class="y">●</span> 예</td><td><span class="n">코드</span></td><td><span class="n">코드</span></td></tr>
-            <tr><td>무이동 ELT 푸시다운</td><td class="cmp-col-etlx"><span class="y">●</span> 자동</td><td><span class="n">부분</span></td><td><span class="y">●</span> 예</td><td><span class="n">직접 구현</span></td></tr>
-            <tr><td>자동 컬럼 리니지</td><td class="cmp-col-etlx"><span class="y">●</span> 기본</td><td><span class="n">부분</span></td><td><span class="n">제한적</span></td><td><span class="n">없음</span></td></tr>
-            <tr><td>스트리밍 + 배치 통합</td><td class="cmp-col-etlx"><span class="y">●</span> 예</td><td><span class="n">부분</span></td><td><span class="n">배치</span></td><td><span class="n">배치 중심</span></td></tr>
+            <tr><td>오픈소스 · 셀프호스팅</td><td class="cmp-col-anyduct"><span class="y">●</span> 예</td><td><span class="n">아니오</span></td><td><span class="y">●</span> 예</td><td><span class="y">●</span> 예</td></tr>
+            <tr><td>데이터가 내 인프라에만</td><td class="cmp-col-anyduct"><span class="y">●</span> 예</td><td><span class="n">외부 경유</span></td><td><span class="y">●</span> 예</td><td><span class="y">●</span> 예</td></tr>
+            <tr><td>오케스트레이터 비종속</td><td class="cmp-col-anyduct"><span class="y">●</span> 예</td><td><span class="n">자체</span></td><td><span class="n">별도</span></td><td><span class="n">자기 자신</span></td></tr>
+            <tr><td>비개발자용 노코드 UI</td><td class="cmp-col-anyduct"><span class="y">●</span> 예</td><td><span class="y">●</span> 예</td><td><span class="n">코드</span></td><td><span class="n">코드</span></td></tr>
+            <tr><td>무이동 ELT 푸시다운</td><td class="cmp-col-anyduct"><span class="y">●</span> 자동</td><td><span class="n">부분</span></td><td><span class="y">●</span> 예</td><td><span class="n">직접 구현</span></td></tr>
+            <tr><td>자동 컬럼 리니지</td><td class="cmp-col-anyduct"><span class="y">●</span> 기본</td><td><span class="n">부분</span></td><td><span class="n">제한적</span></td><td><span class="n">없음</span></td></tr>
+            <tr><td>스트리밍 + 배치 통합</td><td class="cmp-col-anyduct"><span class="y">●</span> 예</td><td><span class="n">부분</span></td><td><span class="n">배치</span></td><td><span class="n">배치 중심</span></td></tr>
           </tbody>
         </table>
         </div>
@@ -435,7 +435,7 @@ pip install <span class="s">'etl-plugins[postgres]'</span>
 pip install <span class="s">'etl-plugins[duckdb]'</span>   <span class="c"># SQL transform + Arrow</span>
 
 <span class="c"># 3) run</span>
-uv run etlx run configs/pipelines/my.yaml --connections configs/connections.yaml</code></pre>
+uv run anyduct run configs/pipelines/my.yaml --connections configs/connections.yaml</code></pre>
       </div>
       <div class="cta-final" data-reveal style="margin-top:42px">
         <div class="actions">
@@ -449,7 +449,7 @@ uv run etlx run configs/pipelines/my.yaml --connections configs/connections.yaml
 
 <footer>
   <div class="wrap">
-    <span>© etlx — Apache License 2.0</span>
+    <span>© anyduct — Apache License 2.0</span>
     <span>
       <a href="https://github.com/genebir/ETL" rel="noopener">GitHub</a> ·
       <a href="https://github.com/genebir/ETL#readme" rel="noopener">README</a> ·

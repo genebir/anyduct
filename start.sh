@@ -282,7 +282,7 @@ else
     else
         log_info "starting etlx-worker (log: $WORKER_LOG)"
         spawn_background "$WORKER_PID" "$WORKER_LOG" \
-            uv run --package etlx-server etlx-server worker run --log-flush-interval 2.0
+            uv run --package etlx-server anyduct-server worker run --log-flush-interval 2.0
         log_ok "etlx-worker spawned (pid=$(cat "$WORKER_PID"))"
     fi
     if is_running "$REAPER_PID"; then
@@ -290,7 +290,7 @@ else
     else
         log_info "starting etlx-reaper (log: $REAPER_LOG)"
         spawn_background "$REAPER_PID" "$REAPER_LOG" \
-            uv run --package etlx-server etlx-server reaper run
+            uv run --package etlx-server anyduct-server reaper run
         log_ok "etlx-reaper spawned (pid=$(cat "$REAPER_PID"))"
     fi
     # Scheduler: fires cron schedules + freshness-based re-runs (ADR-0038).
@@ -299,7 +299,7 @@ else
     else
         log_info "starting etlx-scheduler (log: $SCHEDULER_LOG)"
         spawn_background "$SCHEDULER_PID" "$SCHEDULER_LOG" \
-            uv run --package etlx-server etlx-server scheduler run
+            uv run --package etlx-server anyduct-server scheduler run
         log_ok "etlx-scheduler spawned (pid=$(cat "$SCHEDULER_PID"))"
     fi
     # Sensor scheduler: polls active sensors (HTTP / file / asset freshness),
@@ -309,7 +309,7 @@ else
     else
         log_info "starting etlx-sensor-scheduler (log: $SENSOR_SCHEDULER_LOG)"
         spawn_background "$SENSOR_SCHEDULER_PID" "$SENSOR_SCHEDULER_LOG" \
-            uv run --package etlx-server etlx-server sensor-scheduler run
+            uv run --package etlx-server anyduct-server sensor-scheduler run
         log_ok "etlx-sensor-scheduler spawned (pid=$(cat "$SENSOR_SCHEDULER_PID"))"
     fi
 fi

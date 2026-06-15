@@ -18,7 +18,7 @@ once." Step 6.1 ships the abstraction across four layers:
 ```python
 from etl_plugins import Pipeline, Task, FileCursorState
 
-state = FileCursorState("/var/lib/etlx/cursors.json")
+state = FileCursorState("/var/lib/anyduct/cursors.json")
 prior = state.get("orders-nightly")          # Cursor | None
 
 with source, sink:
@@ -74,7 +74,7 @@ creating event loop. See its docstring for the rationale.
 ```python
 from etl_plugins import FileCursorState, Cursor
 
-state = FileCursorState("/var/lib/etlx/cursors.json")
+state = FileCursorState("/var/lib/anyduct/cursors.json")
 state.set("orders", Cursor(column="ts", value="2026-05-19T03:00:00+00:00"))
 state.get("orders")  # → Cursor(column='ts', value='2026-05-19T03:00:00+00:00')
 ```
@@ -90,7 +90,7 @@ ISO-8601 lexicographic order matches chronological order.
 from etlx_server.cursors import DbCursorState
 
 state = DbCursorState.from_url(
-    "postgresql+asyncpg://etlx:…@db/etlx",   # async URL is fine; suffix is swapped
+    "postgresql+asyncpg://anyduct:…@db/anyduct",   # async URL is fine; suffix is swapped
     workspace_id=ws.id,
 )
 state.update("pipeline:123:task:1", "id", 4823)

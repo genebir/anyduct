@@ -40,8 +40,10 @@ connectors = [
 
 [project.scripts]
 # Admin CLI for the metadata DB (Step 7.3). Stays on the service side so the
-# core ``etlx`` CLI in etl_plugins.cli remains DB-agnostic (ADR-0017).
-etlx-server = "etlx_server.cli:app"
+# core ``anyduct`` CLI in etl_plugins.cli remains DB-agnostic (ADR-0017).
+# Command renamed to ``anyduct-server``; the import package stays ``etlx_server``
+# (internal module rename is a separate change).
+anyduct-server = "etlx_server.cli:app"
 
 [build-system]
 requires = ["hatchling>=1.24"]

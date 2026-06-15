@@ -21,7 +21,7 @@ const FAKE_EXISTING: ConnectionSummary = {
     host: "db.acme.example",
     port: 5432,
     database: "orders",
-    user: "etlx",
+    user: "anyduct",
   },
   secret_refs: ["password"],
 };

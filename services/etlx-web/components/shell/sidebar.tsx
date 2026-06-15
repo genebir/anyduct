@@ -169,7 +169,7 @@ export function Sidebar() {
         >
           <GitBranchIcon size={16} />
         </span>
-        etlx
+        anyduct
       </Link>
 
       <div className="relative">

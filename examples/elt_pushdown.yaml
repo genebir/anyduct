@@ -27,7 +27,7 @@
 #
 # Pair with ``examples/connections.example.yaml`` and run:
 #
-#     uv run etlx validate examples/elt_pushdown.yaml \
+#     uv run anyduct validate examples/elt_pushdown.yaml \
 #         --connections examples/connections.example.yaml
 #
 name: daily_revenue_rollup

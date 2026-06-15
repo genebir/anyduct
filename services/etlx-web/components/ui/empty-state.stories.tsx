@@ -27,7 +27,7 @@ export const FailedFetch: Story = {
     icon: <AlertTriangleIcon className="h-10 w-10 text-error" aria-hidden />,
     title: "Couldn't load runs",
     description:
-      "Server returned 503. Check that etlx-server is reachable, then retry.",
+      "Server returned 503. Check that anyduct-server is reachable, then retry.",
     action: <Button variant="secondary">Retry</Button>,
   },
 };

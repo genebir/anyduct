@@ -100,7 +100,7 @@ function addDataSheet(
 export async function exportErdExcel(design: ErdDesign, docName: string): Promise<Blob> {
   const ExcelJS = (await import("exceljs")).default;
   const wb = new ExcelJS.Workbook();
-  wb.creator = "etlx";
+  wb.creator = "anyduct";
   wb.created = new Date();
 
   // ── 개요 (cover) ─────────────────────────────────────────────────────────

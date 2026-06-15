@@ -80,7 +80,7 @@ gcp-sm = ["google-cloud-secret-manager>=2.20"]
 
 # CLI entry point (Step 3에서 구현)
 [project.scripts]
-etlx = "etl_plugins.cli:app"
+anyduct = "etl_plugins.cli:app"
 
 # 내장 커넥터 entry-point. 외부 패키지도 동일 그룹에 등록하면 자동 발견됨.
 [project.entry-points."etl_plugins.connectors"]

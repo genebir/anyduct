@@ -11,7 +11,7 @@ import {
 } from "react";
 
 type Theme = "light" | "dark";
-const STORAGE_KEY = "etlx.theme";
+const STORAGE_KEY = "anyduct.theme";
 
 interface ThemeContextValue {
   theme: Theme;

@@ -1,22 +1,22 @@
 /**
- * Typed REST client for etlx-server.
+ * Typed REST client for anyduct-server.
  *
  * DTOs mirror `etlx_server.auth.schemas` — field names match the FastAPI
  * `response_model` exactly so the FE never has to translate between snake
  * and camel case.
  *
  * Behavior:
- * - Reads JWT from `localStorage["etlx.token"]` per call (no in-memory cache)
+ * - Reads JWT from `localStorage["anyduct.token"]` per call (no in-memory cache)
  *   so signing in/out from any tab doesn't desync.
- * - On 401 clears tokens and dispatches a `etlx:unauthorized` window event;
+ * - On 401 clears tokens and dispatches a `anyduct:unauthorized` window event;
  *   the auth provider listens for that and routes to `/login`.
  */
 
 import type { ErdDesign } from "@/lib/erd-design";
 
 const DEFAULT_BASE = "http://localhost:8000";
-const TOKEN_KEY = "etlx.token";
-const REFRESH_KEY = "etlx.refresh";
+const TOKEN_KEY = "anyduct.token";
+const REFRESH_KEY = "anyduct.refresh";
 
 export class ApiError extends Error {
   status: number;
@@ -31,7 +31,7 @@ export class ApiError extends Error {
 
 export function apiBaseUrl(): string {
   if (typeof process !== "undefined") {
-    const fromEnv = process.env.NEXT_PUBLIC_ETLX_API_URL;
+    const fromEnv = process.env.NEXT_PUBLIC_ANYDUCT_API_URL;
     if (fromEnv) return fromEnv.replace(/\/$/, "");
   }
   return DEFAULT_BASE;
@@ -87,7 +87,7 @@ export async function api<T = unknown>(
   if (res.status === 401 && token) {
     clearTokens();
     if (typeof window !== "undefined") {
-      window.dispatchEvent(new CustomEvent("etlx:unauthorized"));
+      window.dispatchEvent(new CustomEvent("anyduct:unauthorized"));
     }
   }
 

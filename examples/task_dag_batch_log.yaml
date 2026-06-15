@@ -25,7 +25,7 @@
 #
 # Pair with ``examples/connections.example.yaml`` and run:
 #
-#     uv run etlx validate examples/task_dag_batch_log.yaml \
+#     uv run anyduct validate examples/task_dag_batch_log.yaml \
 #         --connections examples/connections.example.yaml
 #
 name: staging_load_with_batch_log

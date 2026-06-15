@@ -147,7 +147,7 @@ retry:
 Then:
 
 ```bash
-uv run etlx run configs/pipelines/orders.yaml --connections configs/connections.yaml
+uv run anyduct run configs/pipelines/orders.yaml --connections configs/connections.yaml
 ```
 
 See [Quickstart](../getting-started/quickstart.md) for the full

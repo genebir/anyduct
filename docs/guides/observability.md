@@ -19,7 +19,7 @@ immediately. Opt in by installing the extra and calling
 from etl_plugins.observability.otel import configure_otel
 
 handle = configure_otel(
-    service_name="etlx-worker",
+    service_name="anyduct-worker",
     otlp_endpoint="http://otel-collector:4317",
     resource_attributes={"deployment.environment": "prod"},
 )
@@ -40,7 +40,7 @@ For Prometheus pull-model deployments, set `prometheus_port` instead of
 
 ```python
 handle = configure_otel(
-    service_name="etlx-worker",
+    service_name="anyduct-worker",
     prometheus_port=9090,
     prometheus_addr="0.0.0.0",      # default — bind to all interfaces
 )
@@ -148,7 +148,7 @@ Secrets are masked by a structlog processor before they reach stdout.
 
 ## Grafana dashboard template
 
-`services/grafana/etlx-pipelines-dashboard.json` is a ready-to-import
+`services/grafana/anyduct-pipelines-dashboard.json` is a ready-to-import
 dashboard over the Prometheus exporter's metrics (verified against a live
 Grafana 13 import API):
 

@@ -1,6 +1,6 @@
-# ETL Plugins
+# anyduct
 
-> Backend-agnostic, orchestrator-agnostic **Python ETL plugin library**.
+> **anyduct** — Backend-agnostic, orchestrator-agnostic **Python ETL plugin library**.
 > 모든 데이터 소스/싱크(RDBMS, NoSQL, DW, Stream, Object Storage)에 대해 통일된 인터페이스를 제공하고, 어떤 오케스트레이터(Airflow / Dagster / Prefect / 사내 워크플로우) 위에서도 그대로 재사용할 수 있다.
 
 🌐 **[랜딩 페이지 (소개 사이트)](https://genebir.github.io/ETL/)** — 다른 ETL과의 차이점을 한눈에.
@@ -26,7 +26,7 @@
 - [x] **파이프라인 실행 모델** — 단일 task / Task-DAG(`depends_on`) / 데이터플로우 graph(join·aggregate·branch) + Retry·DLQ·재시도.
 - [x] **데이터 플레인** — DuckDB `sql` 변환(JOIN/GROUP BY/윈도우) + Arrow 벡터 fast-path(postgres·mysql·vertica·mssql, Record 플레인 우회) + same-connection / ELT 푸시다운(데이터 무이동, dbt식).
 - [x] **자산·리니지** — derived-first 카탈로그 + 컬럼 레벨 리니지(sqlglot 풀 AST) + OpenLineage export + 증분/백필 커서.
-- [x] **오케스트레이터 어댑터** — Airflow / Dagster / Prefect (PEP 562 lazy) + `etlx` CLI.
+- [x] **오케스트레이터 어댑터** — Airflow / Dagster / Prefect (PEP 562 lazy) + `anyduct` CLI.
 - [x] **관측성** — structlog + OTel trace + Prometheus exporter.
 
 **② 서비스 패키지 (`services/etlx-server` FastAPI + `services/etlx-web` Next.js)** — 비개발자도 쓰는 웹 UI ETL 서비스
@@ -50,7 +50,7 @@
 | [`DECISIONS.md`](./dev-docs/DECISIONS.md) | ADR — 모든 설계 결정 |
 | [`DEVELOPMENT.md`](./dev-docs/DEVELOPMENT.md) | 신규 환경 인계 / bootstrap / 트러블슈팅 |
 | [`CHANGELOG.md`](./CHANGELOG.md) | Keep a Changelog 형식 변경 이력 |
-| [`DESIGN.md`](./dev-docs/DESIGN.md) | `etlx-web` 디자인 시스템 SSOT (토큰·컴포넌트·a11y) |
+| [`DESIGN.md`](./dev-docs/DESIGN.md) | `anyduct-web` 디자인 시스템 SSOT (토큰·컴포넌트·a11y) |
 
 ---
 
@@ -88,7 +88,7 @@ pip install 'etl-plugins[prefect]'               # prefect
 
 ---
 
-## 사용 예 1: YAML + `etlx` CLI
+## 사용 예 1: YAML + `anyduct` CLI
 
 ```yaml
 # configs/connections.yaml
@@ -113,14 +113,14 @@ dlq:   { connection: dlq_sink, table: failed_orders }
 ```
 
 ```bash
-uv run etlx list-connectors                              # 설치된 extra의 커넥터 목록 (20종 중)
-uv run etlx validate  configs/pipelines/orders_to_dw.yaml  --connections configs/connections.yaml
-uv run etlx test-connection --all                         --connections configs/connections.yaml
-uv run etlx run       configs/pipelines/orders_to_dw.yaml --connections configs/connections.yaml
-uv run etlx --log-format console run configs/pipelines/orders_to_dw.yaml --connections configs/connections.yaml
+uv run anyduct list-connectors                              # 설치된 extra의 커넥터 목록 (20종 중)
+uv run anyduct validate  configs/pipelines/orders_to_dw.yaml  --connections configs/connections.yaml
+uv run anyduct test-connection --all                         --connections configs/connections.yaml
+uv run anyduct run       configs/pipelines/orders_to_dw.yaml --connections configs/connections.yaml
+uv run anyduct --log-format console run configs/pipelines/orders_to_dw.yaml --connections configs/connections.yaml
 
 # 스트리밍
-uv run etlx run-stream configs/pipelines/events_to_kafka.yaml \
+uv run anyduct run-stream configs/pipelines/events_to_kafka.yaml \
   --connections configs/connections.yaml \
   --stop-after-records 10000
 ```
@@ -219,7 +219,7 @@ run_etl_pipeline_flow("configs/pipelines/orders_to_dw.yaml", "configs/connection
 │                          스케줄러 / 센서 / 시크릿 백엔드   │
 └──────────────────── 서비스 / 코어 경계 (단방향) ─────────┘
         ↑
-Orchestrator Adapters  (Airflow / Dagster / Prefect / etlx CLI)
+Orchestrator Adapters  (Airflow / Dagster / Prefect / anyduct CLI)
         ↑
 Pipeline Runtime       (YAML builder / transforms / 데이터플레인:
                         DuckDB sql · Arrow · pushdown / retry / DLQ)

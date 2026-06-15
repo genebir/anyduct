@@ -19,7 +19,7 @@
 #
 # Pair this with ``examples/connections.example.yaml`` and run with:
 #
-#     uv run etlx validate examples/cross_cloud_dw_migration.yaml \
+#     uv run anyduct validate examples/cross_cloud_dw_migration.yaml \
 #         --connections examples/connections.example.yaml
 #
 # (A live run needs the [snowflake] + [bigquery] extras and real

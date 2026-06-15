@@ -66,9 +66,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     void refreshUser();
     const handleUnauthorized = () => setState({ kind: "anonymous" });
-    window.addEventListener("etlx:unauthorized", handleUnauthorized);
+    window.addEventListener("anyduct:unauthorized", handleUnauthorized);
     return () =>
-      window.removeEventListener("etlx:unauthorized", handleUnauthorized);
+      window.removeEventListener("anyduct:unauthorized", handleUnauthorized);
   }, [refreshUser]);
 
   useEffect(() => {

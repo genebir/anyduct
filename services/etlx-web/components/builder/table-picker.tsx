@@ -45,7 +45,7 @@ export function useTables(
   return { tables, loading, error };
 }
 
-const TABLE_DATALIST_PREFIX = "etlx-tables-";
+const TABLE_DATALIST_PREFIX = "anyduct-tables-";
 let _datalistSeq = 0;
 const SELECT_CLS =
   "h-10 rounded-md border border-border-subtle bg-elevated px-2 text-sm text-text focus-visible:border-accent focus-visible:outline-none";

@@ -89,7 +89,7 @@ const SQLITE: ConnectorSchema = {
       label: "Database path",
       type: "string",
       required: true,
-      placeholder: "/data/etlx.db",
+      placeholder: "/data/anyduct.db",
       help: "Use ``:memory:`` for an ephemeral in-process database (won't persist between runs).",
     },
   ],

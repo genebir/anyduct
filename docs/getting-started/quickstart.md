@@ -55,7 +55,7 @@ retry:
 ## 4. Run from the CLI
 
 ```bash
-uv run etlx run configs/pipelines/orders-nightly.yaml \
+uv run anyduct run configs/pipelines/orders-nightly.yaml \
     --connections configs/connections.yaml
 ```
 

@@ -81,11 +81,11 @@ uv run pytest -m it                  # 코어 통합 (111, Docker 필요)
 uv run pytest --cov=etl_plugins --cov-report=term-missing
 
 # CLI
-uv run etlx run        configs/pipelines/<x>.yaml --connections configs/connections.yaml
-uv run etlx run-stream configs/pipelines/<x>.yaml --connections configs/connections.yaml --stop-after-records 1000
-uv run etlx test-connection --all                  --connections configs/connections.yaml
-uv run etlx list-connectors
-uv run etlx --log-format console --log-level DEBUG run ...
+uv run anyduct run        configs/pipelines/<x>.yaml --connections configs/connections.yaml
+uv run anyduct run-stream configs/pipelines/<x>.yaml --connections configs/connections.yaml --stop-after-records 1000
+uv run anyduct test-connection --all                  --connections configs/connections.yaml
+uv run anyduct list-connectors
+uv run anyduct --log-format console --log-level DEBUG run ...
 ```
 
 ### 4.2 services/etlx-server (FastAPI, Step 7~)
@@ -180,7 +180,7 @@ make clean       # __pycache__, .pytest_cache, dist 삭제
 | `pre-commit` hook이 너무 느림 | `pre-commit run --files <변경파일>`로 부분 실행 |
 | `docker compose up` 포트 충돌 | `docker compose -f docker/docker-compose.dev.yml down` 후 호스트의 5432/9092 등 사용 프로세스 확인 |
 | testcontainers `permission denied` | docker socket 권한: `sudo usermod -aG docker $USER` 후 재로그인 |
-| `etlx test-connection` 실패 | `.env`의 시크릿, `configs/connections.yaml`의 host/port, 방화벽 순으로 확인 |
+| `anyduct test-connection` 실패 | `.env`의 시크릿, `configs/connections.yaml`의 host/port, 방화벽 순으로 확인 |
 | pre-commit `detect-secrets` 오탐 | `.secrets.baseline` 갱신: `uv run detect-secrets scan > .secrets.baseline` |
 | `mypy` 외부 라이브러리 stub 부재 | `uv add --dev types-<pkg>` 또는 `[[tool.mypy.overrides]]`로 `ignore_missing_imports` |
 

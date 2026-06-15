@@ -40,7 +40,7 @@ function LoginForm() {
     <main className="flex w-full max-w-md flex-col gap-6 rounded-xl border border-border-subtle bg-surface p-8 shadow-lg">
       <div>
         <div className="text-xs font-semibold uppercase tracking-widest text-accent">
-          etlx
+          anyduct
         </div>
         <h1 className="mt-2 text-2xl font-semibold text-text">
           {t("login.title")}

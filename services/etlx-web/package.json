@@ -2,7 +2,7 @@
   "name": "@etlx/web",
   "version": "0.0.0",
   "private": true,
-  "description": "etl-plugins web UI — Next.js. DESIGN.md tokens, Arc-style shell, REST client to etlx-server.",
+  "description": "etl-plugins web UI — Next.js. DESIGN.md tokens, Arc-style shell, REST client to anyduct-server.",
   "engines": {
     "node": ">=22",
     "pnpm": ">=9"

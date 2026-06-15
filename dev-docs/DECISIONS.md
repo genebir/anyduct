@@ -50,7 +50,7 @@
   | Python | `>=3.11` | `Self`, exception groups, structural pattern match, TaskGroup 등 모던 typing/async 활용. 3.10은 2026년 말 EoL 임박. |
   | 패키지 매니저 | **`uv` 단일** | 빠른 resolve/sync, lockfile 표준화, dependency-groups(PEP 735) 지원. 혼용 금지(CLAUDE.md §6). |
   | 데이터 검증 | Pydantic v2 | SPEC.md §4.2가 명시. v2의 성능/strict 모드 활용. |
-  | CLI | **Typer** | type-hint 기반(Click 상위 호환), `etlx` 서브커맨드 구조와 자연스럽게 매핑. |
+  | CLI | **Typer** | type-hint 기반(Click 상위 호환), `anyduct` 서브커맨드 구조와 자연스럽게 매핑. |
   | 로깅 | structlog | SPEC.md §9.2가 명시. JSON 구조화 로그, contextvar 친화. |
   | Retry | tenacity | 데코레이터 + 지수 백오프/jitter, async 지원. |
   | 템플릿팅 | Jinja2 | SPEC.md §2/§5.3 (`${VAR}` 외 조건/루프 필요 시). |
@@ -300,7 +300,7 @@
 
 ---
 
-## ADR-0011: Step 3.1 Pipeline runtime — YAML 빌더 + Transforms + `etlx` CLI
+## ADR-0011: Step 3.1 Pipeline runtime — YAML 빌더 + Transforms + `anyduct` CLI
 
 - **Date**: 2026-05-14
 - **Status**: Accepted
@@ -319,12 +319,12 @@
   10. **CLI 서브커맨드 (Step 3.1 MVP)**: `version`, `list-connectors`, `validate`, `run`, `test-connection`. `run-stream`은 Step 3.2에서, `schema`는 Step 5+에서. `validate`는 YAML 파싱 + 연결 구성자 인자 검증까지만 — 실제 connect는 `test-connection`에서.
   11. **`run` 명령은 자동으로 connectors.connect() → pipeline.run() → close()**. close()는 `contextlib.suppress(Exception)`로 감싸서 cleanup 실패가 결과 전파 막지 않게. 모든 ETLError는 빨간 에러 메시지로 exit code 1, 예상치 못한 예외는 클래스 이름 포함.
   12. **`test-connection`은 `--all`로 일괄 점검 가능**. 실패 개수만큼 exit code 결정. 단순.
-  13. **`pyproject.toml`에 `etlx = "etl_plugins.cli:app"` entry-point**. `uv pip install -e .` 후 `etlx version`이 동작. Typer `app`은 callable이라 그대로 entry-point로 사용 가능. 테스트는 `typer.testing.CliRunner`로 in-process 호출 — 빠르고 sys.exit 없음.
+  13. **`pyproject.toml`에 `anyduct = "etl_plugins.cli:app"` entry-point**. `uv pip install -e .` 후 `anyduct version`이 동작. Typer `app`은 callable이라 그대로 entry-point로 사용 가능. 테스트는 `typer.testing.CliRunner`로 in-process 호출 — 빠르고 sys.exit 없음.
   14. **Test fixture에서 InMemory 커넥터를 stable name으로 등록 + 복원** (`ConnectorRegistry.register("cli-inmem-source", replace=True)(InMemoryBatchSource)`). `replace=True`로 idempotent. yield 후 원상복구. 다른 테스트 파일과 충돌 회피.
 - **Consequences**:
   - (+) CLI smoke test 7개 + builder 8개 + transforms 23개 = 38 unit tests 추가 (총 252). 외부 Docker 없이 YAML → Pipeline 라이프사이클 전체 검증됨.
   - (+) Orchestrator adapter는 이제 단 3줄로 작성 가능: `pipeline, conns = build_pipeline_from_yaml(...); pipeline.run(connectors=conns)`. Step 4 작업 부담 대폭 감소.
-  - (+) `etlx validate <yaml>`이 CI에서 모든 파이프라인 YAML 검증 가능 — 수정 즉시 피드백.
+  - (+) `anyduct validate <yaml>`이 CI에서 모든 파이프라인 YAML 검증 가능 — 수정 즉시 피드백.
   - (+) 외부 패키지가 자체 transform 추가는 한 줄: `@register_transform("my-transform")`.
   - (−) Stream mode는 아직 미구현 (Pipeline.run이 batch만). `mode: stream` YAML은 빌드는 되지만 `run`은 NotImplementedError. **Step 3.2**.
   - (−) Retry/DLQ/Checkpoint 미구현. `RetryConfig`는 빌드되지만 무시됨. **Step 3.3**.
@@ -350,11 +350,11 @@
   7. **`finally` 블록에서 잔여 pending flush + commit**. stop 조건으로 break하면 `pending > 0`이 남을 수 있음 — at-least-once 보장을 위해 마지막 flush 보장. `contextlib.suppress(Exception)`으로 cleanup 안전.
   8. **`commit()`의 `NotImplementedError`는 `contextlib.suppress`로 흡수**. 다른 StreamSource 구현체가 commit을 지원하지 않을 때도 pipeline은 동작. Kafka는 실제로 raise하지 않음 (ADR-0010의 NIE 약속을 이번 ADR이 superseded).
   9. **`arun_stream_pipeline_yaml` async 헬퍼**: sync `run_pipeline_yaml`의 mirror. cleanup이 `aclose()`(async, Kafka가 제공) → `close()`(sync) fallback 순서.
-  10. **`etlx run-stream` CLI 서브커맨드**: `asyncio.run(arun_stream_pipeline_yaml(...))`. KeyboardInterrupt를 catch → exit 130 + "interrupted" 메시지. ETLError는 빨간 에러로 exit 1.
+  10. **`anyduct run-stream` CLI 서브커맨드**: `asyncio.run(arun_stream_pipeline_yaml(...))`. KeyboardInterrupt를 catch → exit 130 + "interrupted" 메시지. ETLError는 빨간 에러로 exit 1.
   11. **`InMemoryStreamSource/Sink` 추가** (`tests/fixtures/connectors.py`). InMemory의 `commit()`은 `self.commits.append(offsets)` — 호출 횟수/내용 검증에 사용. 17 신규 unit tests (16 stream pipeline + 1 CLI smoke).
   12. **Kafka commit 통합 검증**: `test_stream_pipeline_commits_offsets`가 (a) pipeline run, (b) 동일 group_id로 새 consumer attach, (c) 메시지 없음(즉 offset 모두 commit됨)을 확인. 진짜 Kafka에서 at-least-once + commit이 작동하는지 직접 검증.
 - **Consequences**:
-  - (+) YAML 한 줄(`mode: stream` + `commit.strategy`)로 stream pipeline 가능. CLI `etlx run-stream <yaml> --stop-after-records 1000`로 dry-run 친화.
+  - (+) YAML 한 줄(`mode: stream` + `commit.strategy`)로 stream pipeline 가능. CLI `anyduct run-stream <yaml> --stop-after-records 1000`로 dry-run 친화.
   - (+) Kafka commit이 실제로 작동(integration test) — at-least-once delivery 보장 첫 마일스톤.
   - (+) 17 new unit tests (총 269 unit), 2 new integration tests (총 82 it). All green incl. mypy strict + ruff.
   - (+) `Pipeline.arun_stream`은 transform/filter/buffer/commit/stop을 한 함수에서 처리 — 다음 슬라이스(Retry/DLQ)는 명확한 hook 지점을 가진다.
@@ -485,7 +485,7 @@
   6. **mypy `sqlite3.connect`가 `isolation_level: Literal[...]`을 요구** → `cast`로 우회. 우리는 사용자가 `"DEFERRED"` (기본)/ `"IMMEDIATE"` / `"EXCLUSIVE"` / `None`을 전달할 수 있게 허용 — cast 한 줄로 stdlib 시그니처 만족.
   7. **모든 테스트는 unit tests** (`tests/unit/connectors/rdbms/test_sqlite.py`). Docker 불필요. `tmp_path` fixture로 매 테스트마다 새 db 파일. Contract 3종 (Source 7 + Sink 5 + RoundTrip 3) + SQLite-specific 17 = **32 tests**.
   8. **Boolean은 INT(0/1)** — MySQL과 동일 이슈. `_sqlitify()` 헬퍼로 contract test에서 bool→int 매핑.
-  9. **Entry-point 등록 (no extra)** — `etlx list-connectors`에 자동 노출.
+  9. **Entry-point 등록 (no extra)** — `anyduct list-connectors`에 자동 노출.
 - **Consequences**:
   - (+) RDBMS 슬롯 3개째 (postgres / mysql / sqlite). Contract suite가 매번 그대로 재사용 — 한 connector 추가에 평균 ~200 LOC + 30 tests.
   - (+) 가장 가벼운 RDBMS 옵션 — 로컬 dev / quick scripts / 테스트 fixture로 활용 가능 (예: pipeline의 dlq sink로 SQLite 파일 지정).
@@ -603,7 +603,7 @@
 - **Status**: Accepted
 - **Context**:
   `services/etlx-server`(Step 7~8)는 다음 요건을 동시에 만족해야 한다:
-  - **OpenAPI 자동 생성** — `etlx-web`이 type-safe API client를 자동 생성(openapi-typescript)할 수 있어야 함
+  - **OpenAPI 자동 생성** — `anyduct-web`이 type-safe API client를 자동 생성(openapi-typescript)할 수 있어야 함
   - **Pydantic 통합** — 코어의 `etl_plugins.config.models.ConnectionConfig` / `PipelineConfig`를 그대로 REST body로 재사용
   - **async 네이티브** — SQLAlchemy 2.x async + 외부 시크릿 백엔드(Vault) + Kafka commit hook 등 IO-bound
   - **의존성 주입** — `Depends(require_role("editor"))` 같은 RBAC 가드를 선언적으로
@@ -614,7 +614,7 @@
   1. **FastAPI (`>=0.115`)** 채택. 위 5개 요건 모두 만족 + 생태계 성숙(authlib / fastapi-pagination / SQLAlchemy 통합 패턴 확립).
   2. ASGI 서버: **uvicorn workers + gunicorn 진입점**. 로컬은 `uvicorn --reload`.
   3. Pydantic v2 명시 — 코어와 동일 버전(`pydantic>=2.7`).
-  4. OpenAPI 스키마는 `/openapi.json`, 인터랙티브 문서는 `/docs`(Swagger) + `/redoc`. CI에서 `etlx-web`이 `openapi-typescript`로 client 코드 생성.
+  4. OpenAPI 스키마는 `/openapi.json`, 인터랙티브 문서는 `/docs`(Swagger) + `/redoc`. CI에서 `anyduct-web`이 `openapi-typescript`로 client 코드 생성.
   5. RBAC / 워크스페이스 격리는 의존성 주입으로 표현 — `Depends(get_current_user)` → `Depends(require_workspace_role("editor"))` 체이닝.
   6. **코어를 import해서 직접 사용** (예: `from etl_plugins.runtime import run_pipeline_yaml`) — adapter 추가 불필요.
   7. 에러 핸들링: `etl_plugins.core.exceptions.ETLError` → HTTP 4xx/5xx 매핑은 FastAPI exception handler 한 곳에 집중.
@@ -760,10 +760,10 @@
      ├── pyproject.toml                # 코어 (etl-plugins)
      ├── etl_plugins/
      ├── services/
-     │   ├── etlx-server/
+     │   ├── anyduct-server/
      │   │   ├── pyproject.toml        # uv workspace member, deps: etl-plugins~=0.X
      │   │   └── etlx_server/
-     │   ├── etlx-web/
+     │   ├── anyduct-web/
      │   │   └── package.json          # pnpm workspace member
      │   └── docker-compose.services.yml
      ├── pnpm-workspace.yaml           # 서비스 web만 포함
@@ -781,8 +781,8 @@
      - 위반 시 CI 실패.
   5. **버전 정책**:
      - 코어 `etl-plugins`: SemVer. 0.x 동안은 minor 단위 breaking 허용.
-     - `etlx-server` / `etlx-web`: 별도 SemVer. 코어는 `~=X.Y`로 의존(같은 minor 라인).
-     - 서비스 첫 안정 릴리스 = `etlx-server 1.0` + `etlx-web 1.0` (코어가 0.x여도).
+     - `anyduct-server` / `anyduct-web`: 별도 SemVer. 코어는 `~=X.Y`로 의존(같은 minor 라인).
+     - 서비스 첫 안정 릴리스 = `anyduct-server 1.0` + `anyduct-web 1.0` (코어가 0.x여도).
   6. **릴리스 워크플로** 분리:
      - `release-core.yml` — git tag `core-vX.Y.Z` → PyPI Trusted Publishing.
      - `release-server.yml` — `server-vX.Y.Z` → Docker image push.
@@ -822,7 +822,7 @@
      - Access token TTL 15분, Refresh token TTL 7일(rotation).
      - 키페어는 secret backend(Vault / file)에 보관. 키 회전은 운영 매뉴얼.
      - 클레임: `sub`(user_id) / `email` / `name` / `auth_method` / `iat` / `exp`. 워크스페이스/역할은 매 요청 DB에서 조회(stale token 안전).
-  4. **API 호출용 PAT** (Personal Access Token) — 별도 테이블, prefix `etlx_pat_*`. `Authorization: Bearer <pat>`. UI에서 발급/회수.
+  4. **API 호출용 PAT** (Personal Access Token) — 별도 테이블, prefix `anyduct_pat_*`. `Authorization: Bearer <pat>`. UI에서 발급/회수.
   5. **RBAC 4 역할** (워크스페이스 단위):
      | 역할 | 가능한 작업 |
      |---|---|
@@ -901,7 +901,7 @@
 
 ---
 
-## ADR-0025: etlx-web 기본 폰트 = Pretendard Variable (self-host) + 무의존 i18n(ko/en)
+## ADR-0025: anyduct-web 기본 폰트 = Pretendard Variable (self-host) + 무의존 i18n(ko/en)
 
 - **Date**: 2026-05-20
 - **Status**: Accepted
@@ -911,7 +911,7 @@
   1. **Sans 1순위를 `Pretendard Variable`로 확정** — 한국어 우선 가변 폰트로 Apple SD Gothic Neo의 느낌을 웹에서 재현하고, Latin/Hangul을 한 폰트로 일관 처리. Inter는 폴백으로만 유지. `globals.css` `@font-face`(woff2-variations, weight 45 920) + `body`/`@theme --font-sans` 체인 선두 교체.
   2. **폰트 self-host** — `services/etlx-web/public/fonts/PretendardVariable.woff2`. CDN 의존 금지(프로덕션 컨테이너 런타임 외부 의존 0). 빌드시 jsdelivr `npm/pretendard@1.3.9`에서 1회 받아 리포에 포함.
   3. **i18n는 라이브러리 없이 자체 구현** — `lib/i18n/messages.ts`(typed flat dictionary, `en`이 SSOT이고 `ko: Messages`가 미러 → 키 누락은 TS 컴파일 에러) + `LocaleProvider`/`useLocale()` Context + `t(key, vars?)` `{name}` 보간. 2개 언어 UI에 next-intl 등 풀 i18n 라이브러리는 과함 — 번들 가볍게 유지.
-  4. **언어 설정은 localStorage(`etlx.locale`) 영속 + 초기값은 `navigator.language` 추정(en→en, 그 외 ko), 기본 ko**. Header에 토글 버튼.
+  4. **언어 설정은 localStorage(`anyduct.locale`) 영속 + 초기값은 `navigator.language` 추정(en→en, 그 외 ko), 기본 ko**. Header에 토글 버튼.
 - **Consequences**:
   - (+) 한·영 혼용 화면이 일관된 자형/자간으로 Arc-like 차분함. 사용자 요청 직접 충족.
   - (+) 키 누락이 빌드 타임 타입 에러 → 번역 누락 방지.
@@ -919,7 +919,7 @@
   - (−) woff2 ~2MB를 리포에 커밋(LFS 미사용). subsetting 안 함 — 한글 전체 글리프 필요해 trade-off.
   - (−) 자체 `t()`는 복수형/성별/날짜 현지화 미지원. 2개 언어·단순 문자열 범위에서만 유효 — 확장 시 라이브러리 재검토.
 - **References**:
-  - ADR-0018 (etlx-web 디자인 시스템 — 본 ADR이 §4.1 폰트 결정을 갱신) · DESIGN.md §4.1
+  - ADR-0018 (anyduct-web 디자인 시스템 — 본 ADR이 §4.1 폰트 결정을 갱신) · DESIGN.md §4.1
   - 사용자 요청(2026-05-19): "한글/영어 선택 + Apple 산돌고딕 느낌 폰트 + Arc 느낌"
 
 ---
@@ -1095,14 +1095,14 @@ ADR 본문이 P1.3에 남겨둔 미해결 포인트 "record-task 시스템에서
 - **Context**:
   ADR-0031에서 Spark/Databricks 백엔드 방향을 잡았다. 사용자가 "항상 운영·배포를 고려, 분산작업 시 어떻게 해야 할지도 설계"를 명시했다. Spark 백엔드는 "DataFrame 컴파일"만이 아니라 **프로덕션에서 어떻게 제출·실행·스케일·실패·관측·배포되는지**가 본질이다. (현 개발 환경엔 Java/pyspark가 없어 실행 검증 불가 — 설계를 먼저 못박는다.)
 - **Decision**:
-  1. **토폴로지 = thin worker + 외부 클러스터 잡 제출(권장)**. etlx 워커는 Spark를 in-process로 돌리지 않는다(프로덕션). 워커는 run을 claim → **Spark 잡을 외부 클러스터/Databricks에 제출 → 상태 폴링(heartbeat 유지) → 종료 상태/카운터/로그를 run에 기록**. 워커는 가볍게 유지되고 Spark 리소스는 독립 스케일. 기존 PG worker-queue 모델(ADR-0021)과 정합 — run terminal writer는 워커 단일.
+  1. **토폴로지 = thin worker + 외부 클러스터 잡 제출(권장)**. anyduct 워커는 Spark를 in-process로 돌리지 않는다(프로덕션). 워커는 run을 claim → **Spark 잡을 외부 클러스터/Databricks에 제출 → 상태 폴링(heartbeat 유지) → 종료 상태/카운터/로그를 run에 기록**. 워커는 가볍게 유지되고 Spark 리소스는 독립 스케일. 기존 PG worker-queue 모델(ADR-0021)과 정합 — run terminal writer는 워커 단일.
      - 대안(거부): fat worker가 SparkSession을 들고 클러스터 driver 노릇 → 워커 수명이 잡에 묶이고 무거움. **dev/소규모만 in-process `local[*]` 허용.**
   2. **제출 모드(submission mode)** — config로 선택:
      - `local` (in-process `SparkSession(local[*])`): dev/CI.
      - `spark-submit` (`--master yarn|k8s://…|spark://…`): 표준 클러스터, 잡당 driver.
      - `databricks` (Databricks Jobs API / SDK): 매니지드. 로컬 Spark 불필요.
      - (k8s) `spark-submit --master k8s://`: driver/executor 파드.
-  3. **제출 단위 = Spark entrypoint + 직렬화된 파이프라인**. 워커가 파이프라인 config(graph/linear) + connection config를 스테이징(객체 스토리지/컨피그)하고, 공용 entrypoint 모듈(`etlx_spark_job`)을 제출. driver가 그 안에서 DAG→DataFrame 컴파일·실행. 코드/엔진 분리.
+  3. **제출 단위 = Spark entrypoint + 직렬화된 파이프라인**. 워커가 파이프라인 config(graph/linear) + connection config를 스테이징(객체 스토리지/컨피그)하고, 공용 entrypoint 모듈(`anyduct_spark_job`)을 제출. driver가 그 안에서 DAG→DataFrame 컴파일·실행. 코드/엔진 분리.
   4. **분산 시크릿** — 평문 인자/Spark conf로 절대 안 보냄. **driver가 런타임에 SecretBackend(Vault/AWS SM/GCP SM)에서 재해석**(ADR-0023/Step 7.4 재사용). 클러스터엔 시크릿 backend 접근 권한(IAM/role)만 부여. Databricks는 Databricks Secrets 연동.
   5. **분산 병렬성 = 파티셔닝**. JDBC source는 `partitionColumn`/`numPartitions`/`lowerBound`/`upperBound` 없이는 단일 파티션(병렬성 0) — source/connection config에 파티셔닝 옵션 노출. object storage(parquet)는 자연 병렬. 셔플/조인은 Spark가 처리.
   6. **멱등성·재시도(분산 실패)**. Spark 잡은 부분 write 후 실패 가능 → sink는 멱등이어야 함: `overwrite`=스테이징 테이블/경로 write 후 **atomic swap(rename/`INSERT OVERWRITE`)**, `upsert`=MERGE, `append`=at-least-once(dedupe key 권장). 기존 retry(ADR-0021 `add_retry`)가 잡 재제출로 매핑.
@@ -1135,7 +1135,7 @@ ADR 본문이 P1.3에 남겨둔 미해결 포인트 "record-task 시스템에서
   2. **구조적(structural) 타이핑** — 커넥터는 상속 없이 두 메서드만 구현하면 capability 보유. 호출자는 `isinstance(conn, SchemaInspector)`로 가드. 인트로스펙션 불가 커넥터는 그냥 미구현 → UI는 자유 입력 fallback.
   3. **테이블 주소 형식 = 커넥터 natural form** 유지: Postgres `"schema.table"`(information_schema, pg_catalog/information_schema 제외), MySQL `"table"`(`table_schema = DATABASE()`), SQLite bare `"table"`(sqlite_master, `sqlite_%` 제외). `list_tables`가 돌려준 문자열을 그대로 sink `table` 필드에 쓸 수 있어야 한다.
   4. **SQL injection 가드**: 컬럼 조회는 가능한 한 파라미터 바인딩(information_schema). SQLite `PRAGMA table_info`는 파라미터 불가 → `_SAFE_IDENT` 정규식(`^[A-Za-z_][A-Za-z0-9_]*$`)으로 식별자 검증 후만 보간, 실패 시 `ReadError`.
-  5. RDBMS 3종(postgres/mysql/sqlite)에 우선 구현. 서비스 계층(Step 8.5c+)이 `GET /connections/{id}/tables`·`/columns`로 노출하고 etlx-web 빌더가 소비(별도 슬라이스).
+  5. RDBMS 3종(postgres/mysql/sqlite)에 우선 구현. 서비스 계층(Step 8.5c+)이 `GET /connections/{id}/tables`·`/columns`로 노출하고 anyduct-web 빌더가 소비(별도 슬라이스).
 - **Consequences**:
   - (+) 빌더 UX 대폭 개선("딸깍"). 코어는 서비스를 모름 — 단방향 의존 유지.
   - (+) capability 패턴이라 미지원 커넥터에 부담 0, 향후 DW/NoSQL 확장 시 동일 패턴.
@@ -1249,7 +1249,7 @@ ADR 본문이 P1.3에 남겨둔 미해결 포인트 "record-task 시스템에서
   2. **스케줄러 틱에 freshness 패스 추가**(`Scheduler._tick_freshness`, cron 패스 뒤). current 버전 config에 `freshness_sla_minutes`가 있는 batch 파이프라인을 스캔 → `derive_lineage` output 키들의 `last_materialized_at`을 조회 → 하나라도 None(미생성)이거나 `now - SLA`보다 오래되면 **stale → PENDING Run enqueue**(`result_json.triggered_by="freshness"`).
   3. **폭주 가드 2종**: ① in-flight — pending/running run이 있으면 skip(쌓지 않음). ② 쿨다운 — 가장 최근 run의 `created_at`이 SLA 윈도우 안이면 skip(실패하는 파이프라인이 매 틱 재시도하는 storm 방지 → SLA당 최대 1회 시도).
   4. **D1과 합성** — freshness가 root를 신선하게 유지하면, 그 run의 output이 D1(auto-materialize)로 downstream을 연쇄. freshness=시간 기반 root 트리거, auto_materialize=이벤트 기반 전파.
-  5. **빌더 UI** — 헤더에 "Freshness (min)" 숫자 입력 → config `freshness_sla_minutes` emit/restore. **스케줄러 프로세스 필요**(`etlx-server scheduler run`) — start.sh에 추가.
+  5. **빌더 UI** — 헤더에 "Freshness (min)" 숫자 입력 → config `freshness_sla_minutes` emit/restore. **스케줄러 프로세스 필요**(`anyduct-server scheduler run`) — start.sh에 추가.
 - **Consequences**:
   - (+) "데이터를 항상 N분 이내 신선하게" 선언적 보장 — cron 시각을 직접 안 짜도 됨. Dagster freshness policy UX.
   - (+) 기존 스케줄러·assets.last_materialized_at·worker-queue 재사용, 코어 변경은 플래그 1개.
@@ -1295,7 +1295,7 @@ ADR 본문이 P1.3에 남겨둔 미해결 포인트 "record-task 시스템에서
   1. **Spark 백엔드 삭제** — `etl_plugins/runtime/spark/`(backend.py/predicate.py) 전부 제거.
   2. **`ExecutionBackend` 추상화 삭제** — `etl_plugins/runtime/backends.py`(ABC + 레지스트리 + `LocalBackend` + `run_config` 디스패치) 제거. (사용자 선택: seam 유지가 아닌 **완전 제거** — local 단일 경로.) 실행은 `Pipeline.run`(in-process)이 유일.
   3. **`PipelineConfig.engine` 필드 삭제** — 단, `extra="forbid"`이므로 제거 전 저장된 config_json(P3.5 직렬화는 spark일 때만 `engine` emit)이 로드 실패하지 않도록 **`model_validator(mode="before")`로 legacy `engine` 키를 흘려보낸다**(값 무시).
-  4. **서비스 정리** — 워커 `RunExecutor`/`RunWorker`/CLI의 `engine` 분기·`_run_spark`·`spark_master`·`--spark-master` 제거. `Dockerfile.worker`(Spark 워커 이미지) 삭제, `docker-compose.prod.yml`의 `etlx-spark-worker`(--profile spark) 제거. 양 pyproject의 `[spark]` extra + pyspark mypy override 제거.
+  4. **서비스 정리** — 워커 `RunExecutor`/`RunWorker`/CLI의 `engine` 분기·`_run_spark`·`spark_master`·`--spark-master` 제거. `Dockerfile.worker`(Spark 워커 이미지) 삭제, `docker-compose.prod.yml`의 `anyduct-spark-worker`(--profile spark) 제거. 양 pyproject의 `[spark]` extra + pyspark mypy override 제거.
   5. **웹 정리** — 빌더 엔진 select·Spark 경고 배너·`isSparkUnsupported`·`Engine` 타입·serialize의 `engine` emit·파이프라인 목록 Spark 배지·i18n `engine.*` 제거.
 - **Consequences**:
   - (+) 실행 모델이 **로컬 인프로세스 단일 경로**로 단순화 — linear / task-DAG / dataflow graph만 남고, 모두 `Pipeline.run`. 오케스트레이션 개선의 깨끗한 출발점.
@@ -2857,7 +2857,7 @@ L1 출시 직후 사용자가 5개 회신:
 **Decision**:
 - **`services/charts/etlx`**: 옵션 내장 Postgres(StatefulSet, dev 전용 — 프로덕션은 `externalDatabase.url`+`postgresql.enabled=false`), Alembic migrate **Job을 `post-install,pre-upgrade` hook**으로(첫 설치는 DB 기동을 backoff 재시도로 흡수, 업그레이드는 새 pod 롤 전에 스키마 선행), server(liveness `/health`/readiness `/ready`), **worker `replicas` 기본 2**(SKIP LOCKED — 처리량 스케일 축), scheduler/reaper/stream-worker 각 1(멀티-replica 안전하지만 HA 용도), web 토글. JWT는 `existingSecret` 또는 PEM 값 주입. vault/prometheus는 차트 범위 밖(외부 권장 + extraEnv 훅).
 - **검증(kind 실배포)**: install → 8 pod Ready(web 포함, 서버 readiness=DB ping) → `admin create-user` → login → **파이프라인 trigger → k8s worker가 run SUCCEEDED(Arrow fast-path)** → web 200까지 전 사이클.
-- **검증이 발견한 실결함 — prod 이미지 커넥터 0**: 서버 패키지는 `etl-plugins` base만 의존하고 dev 환경은 dev-deps가 전 드라이버를 깔아줘서 가려짐 — `uv sync --no-dev`(Dockerfile)로 빌드된 prod 이미지는 **postgres 파이프라인조차 RegistryError로 실패**. `etlx-server[connectors]` extras 신설(경량/순수파이썬 티어: postgres·mysql·duckdb·s3·kafka·mongodb·redis·sqs·kinesis·dynamodb·rabbitmq·nats) + Dockerfile `--extra connectors`. 무겁거나 C-ext인 드라이버(cassandra/mssql/vertica/클라우드 DW)는 커스텀 이미지 레이어로 opt-in(문서화).
+- **검증이 발견한 실결함 — prod 이미지 커넥터 0**: 서버 패키지는 `etl-plugins` base만 의존하고 dev 환경은 dev-deps가 전 드라이버를 깔아줘서 가려짐 — `uv sync --no-dev`(Dockerfile)로 빌드된 prod 이미지는 **postgres 파이프라인조차 RegistryError로 실패**. `anyduct-server[connectors]` extras 신설(경량/순수파이썬 티어: postgres·mysql·duckdb·s3·kafka·mongodb·redis·sqs·kinesis·dynamodb·rabbitmq·nats) + Dockerfile `--extra connectors`. 무겁거나 C-ext인 드라이버(cassandra/mssql/vertica/클라우드 DW)는 커스텀 이미지 레이어로 opt-in(문서화).
 - **운영 교훈(검증 중 실측)**: 이미지 교체는 **`helm upgrade`로** — `kubectl rollout restart`만 하면 migrate hook이 안 돌아 새 코드가 스키마를 앞섬(UndefinedColumn 실제 발생). NOTES/문서에 명시.
 
 **Consequences**:

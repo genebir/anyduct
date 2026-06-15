@@ -39,7 +39,7 @@ type Translate = (key: keyof Messages, vars?: Record<string, string | number>) =
 const DRAWER_DEFAULT_WIDTH = 520;
 const DRAWER_MIN_WIDTH = 380;
 const DRAWER_MAX_WIDTH = 880;
-const DRAWER_WIDTH_STORAGE_KEY = "etlx.builder.drawerWidth";
+const DRAWER_WIDTH_STORAGE_KEY = "anyduct.builder.drawerWidth";
 
 function _readStoredWidth(): number {
   if (typeof window === "undefined") return DRAWER_DEFAULT_WIDTH;

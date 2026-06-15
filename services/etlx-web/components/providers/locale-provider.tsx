@@ -17,7 +17,7 @@ import {
   type Messages,
 } from "@/lib/i18n/messages";
 
-const STORAGE_KEY = "etlx.locale";
+const STORAGE_KEY = "anyduct.locale";
 const DEFAULT_LOCALE: Locale = "ko";
 
 type TranslateKey = keyof Messages;

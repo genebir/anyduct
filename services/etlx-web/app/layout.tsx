@@ -10,8 +10,8 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: {
-    template: "%s · etlx",
-    default: "etlx",
+    template: "%s · anyduct",
+    default: "anyduct",
   },
   description: "Visual ETL pipelines on top of etl-plugins.",
 };

@@ -80,7 +80,7 @@
 ```
 etl-plugins/                          # 리포 루트 (모노레포)
 ├── CLAUDE.md                         # Claude Code 컨텍스트 (필수)
-├── DESIGN.md                         # etlx-web 디자인 시스템 (Step 10 SSOT)
+├── DESIGN.md                         # anyduct-web 디자인 시스템 (Step 10 SSOT)
 ├── DEVELOPMENT.md                    # 개발 환경 인계 문서
 ├── ROADMAP.md                        # 단계별 작업 계획 + 진행 상태
 ├── DECISIONS.md                      # 설계 결정 기록 (ADR)
@@ -120,10 +120,10 @@ etl-plugins/                          # 리포 루트 (모노레포)
 │   ├── observability/                # logging, metrics, tracing
 │   ├── runtime/                      # transforms, builder, runner
 │   ├── utils/                        # retry, chunk, async_io
-│   └── cli.py                        # `etlx ...` CLI
+│   └── cli.py                        # `anyduct ...` CLI
 │
 ├── services/                         # ─── 서비스 패키지 (Steps 7~11, 별도 pyproject.toml)
-│   ├── etlx-server/                  # FastAPI 백엔드
+│   ├── anyduct-server/                  # FastAPI 백엔드
 │   │   ├── pyproject.toml            # etl-plugins(코어)에 의존, 코어는 이걸 모름
 │   │   ├── etlx_server/
 │   │   │   ├── __init__.py
@@ -135,7 +135,7 @@ etl-plugins/                          # 리포 루트 (모노레포)
 │   │   │   ├── workers/              # Stream worker manager
 │   │   │   └── execution/            # Dagster/Prefect 통합 또는 자체 실행기
 │   │   └── tests/
-│   ├── etlx-web/                     # Next.js 프론트엔드
+│   ├── anyduct-web/                     # Next.js 프론트엔드
 │   │   ├── package.json
 │   │   ├── tailwind.config.ts        # DESIGN.md §11.2 토큰 import
 │   │   ├── app/                      # App Router
@@ -327,7 +327,7 @@ VAULT_ADDR=
 VAULT_TOKEN=
 
 # === Runtime ===
-ETLX_ENV=local                # local | dev | stg | prod
+ANYDUCT_ENV=local                # local | dev | stg | prod
 LOG_LEVEL=INFO
 ```
 
@@ -514,12 +514,12 @@ run_etl_pipeline_flow("configs/pipelines/orders_to_dw.yaml", "configs/connection
 ### 7.4 CLI / Plain Python
 
 ```bash
-etlx run configs/pipelines/orders_to_dw.yaml
-etlx run-stream configs/pipelines/events_stream.yaml
-etlx test-connection pg_prod
-etlx list-connectors
-etlx validate <config.yaml>
-etlx --log-format console run ...
+anyduct run configs/pipelines/orders_to_dw.yaml
+anyduct run-stream configs/pipelines/events_stream.yaml
+anyduct test-connection pg_prod
+anyduct list-connectors
+anyduct validate <config.yaml>
+anyduct --log-format console run ...
 ```
 
 ---
@@ -565,7 +565,7 @@ etlx --log-format console run ...
 
 1. **단방향 의존**: 서비스 → 코어만 허용. 코어 → 서비스 금지. CI에서 import-graph 검사로 자동 검증.
 2. **별도 pyproject.toml**: `services/etlx-server/pyproject.toml`이 `etl-plugins`을 의존성으로 install. 모노레포지만 패키지 경계는 명확.
-3. **독립 실행 가능**: 서비스 없이도 `etlx` CLI / orchestrator adapter / 라이브러리 import만으로 모든 ETL 기능 사용 가능해야 함.
+3. **독립 실행 가능**: 서비스 없이도 `anyduct` CLI / orchestrator adapter / 라이브러리 import만으로 모든 ETL 기능 사용 가능해야 함.
 4. **CI 분리**: 코어 CI는 서비스 dep 설치 없이 통과. 서비스 CI는 별도 잡으로 분리.
 5. **버전 호환**: 서비스가 의존하는 코어 버전은 `etl-plugins>=X.Y,<X+1`로 SemVer 명시. 코어 breaking change는 major 버전 bump.
 
@@ -609,18 +609,18 @@ etlx --log-format console run ...
 - **Contract test**: 새 커넥터는 공통 contract 통과 필수. Batch + Stream 두 패밀리.
 - **Fixture**: `tests/fixtures/`에 표준 샘플 데이터셋 공유.
 
-### 9.6 CLI (`etlx`)
+### 9.6 CLI (`anyduct`)
 
 ```bash
-etlx run <pipeline.yaml>             # 배치 실행
-etlx run-stream <pipeline.yaml>      # 스트림 실행
-etlx test-connection <name|--all>    # 연결 점검
-etlx list-connectors                 # 등록된 커넥터 목록
-etlx schema <connection> <table>     # 원격 스키마 조회 (Step 5+)
-etlx validate <config.yaml>          # 설정 검증만
-etlx --log-format console|json
-etlx --log-level DEBUG|INFO|...
-etlx version
+anyduct run <pipeline.yaml>             # 배치 실행
+anyduct run-stream <pipeline.yaml>      # 스트림 실행
+anyduct test-connection <name|--all>    # 연결 점검
+anyduct list-connectors                 # 등록된 커넥터 목록
+anyduct schema <connection> <table>     # 원격 스키마 조회 (Step 5+)
+anyduct validate <config.yaml>          # 설정 검증만
+anyduct --log-format console|json
+anyduct --log-level DEBUG|INFO|...
+anyduct version
 ```
 
 ### 9.7 서비스화 추가 고려 (Steps 7~11)
@@ -650,7 +650,7 @@ etlx version
 - `postgres`, `s3`, `kafka` (각 카테고리 1개).
 
 ### Step 3 — Pipeline 실행기 + CLI ✅
-- YAML→Pipeline 빌더, `etlx` CLI, Stream runtime, Retry/DLQ/자동 메트릭.
+- YAML→Pipeline 빌더, `anyduct` CLI, Stream runtime, Retry/DLQ/자동 메트릭.
 
 ### Step 4 — Orchestrator Adapters ✅
 - Airflow / Dagster / Prefect, PEP 562 lazy.
@@ -681,7 +681,7 @@ etlx version
 - 7.1 `services/etlx-server/` 모노레포 패키지 스캐폴딩 (별도 pyproject)
 - 7.2 메타데이터 DB 스키마: `workspaces`, `users`, `connections`, `pipelines`, `pipeline_versions`, `schedules`, `runs`, `run_logs`, `audit_log`
 - 7.3 Alembic 마이그레이션
-- 7.4 YAML ↔ DB 양방향 변환 (`etlx import`, `etlx export` CLI 확장)
+- 7.4 YAML ↔ DB 양방향 변환 (`anyduct import`, `anyduct export` CLI 확장)
 - 7.5 Secret backend UI 통합 (UI 입력 → Vault/AWS SM, metadata DB에는 ref만)
 
 ### Step 8 — API Server (FastAPI)

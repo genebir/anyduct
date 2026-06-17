@@ -187,6 +187,54 @@ sandboxed posture as filter/branch predicates). Catalog asset keys are
 derived from the *rendered* config, so lineage matches the tables a run
 actually wrote.
 
+## Passing values between tasks — XCom (`{{ xcom.* }}`)
+
+In a task-DAG (tasks with `depends_on`), a downstream task can pull an
+upstream task's result via `{{ xcom.<task>.<key> }}` — the data-flow
+counterpart to the ordering primitives (`depends_on` / `trigger_rule` /
+`branch`). Each task **auto-publishes** a summary when it finishes:
+
+| Key | Value |
+|-----|-------|
+| `records_read` | rows the task read |
+| `records_written` | rows the task wrote |
+| `success` | always `True` once it completes |
+| `new_cursor` | max cursor value seen (cursored runs), else `null` |
+
+```yaml
+name: incremental_then_report
+tasks:
+  - name: load
+    source: pg
+    query: "SELECT * FROM events WHERE id > {{ params.since }}"
+    cursor_column: id
+    sink: warehouse
+    sink_options: {table: events, mode: append}
+  - name: report
+    depends_on: [load]
+    source: warehouse
+    # pull the upstream's high-water mark
+    query: "SELECT count(*) FROM events WHERE id > {{ xcom.load.new_cursor }}"
+    sink: warehouse
+    sink_options: {table: load_report, mode: overwrite}
+```
+
+References resolve **per task, at execution time** — after the upstream
+has run — so the value is concrete by the time `report` reads. A
+whole-string reference preserves the value's type
+(`chunk_size: "{{ xcom.load.records_written }}"` stays an int). An
+undefined key (typo, or a task not in `depends_on`) fails the run with a
+clear error. Same security posture as `{{ params }}`: dotted paths only,
+no code execution.
+
+> Note (slice 1): only the auto-published summary is available, and
+> XCom is resolved in the *flat* task path (`query` / `source_options` /
+> `sink_table` / `sink_options` / `sinks` / `pre_sql`). Explicit
+> push of arbitrary computed values, and graph-node-level XCom, are
+> planned follow-ups. Catalog lineage is derived from the pre-XCom
+> config, so an XCom reference inside a *table name* won't be reflected
+> in lineage.
+
 ## Data paths — pushdown / Arrow / records (ADR-0093/0094)
 
 The runtime picks the cheapest data path per task, automatically, in

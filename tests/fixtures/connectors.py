@@ -90,6 +90,7 @@ class InMemoryBatchSink(BatchSink):
         self.records: list[Record] = []
         self.last_mode: str = ""
         self.last_key_columns: list[str] | None = None
+        self.last_table: str | None = None
         self.connected = False
 
     def connect(self) -> None:
@@ -107,10 +108,12 @@ class InMemoryBatchSink(BatchSink):
         *,
         mode: str = "append",
         key_columns: list[str] | None = None,
+        table: str | None = None,
         **options: Any,
     ) -> int:
         self.last_mode = mode
         self.last_key_columns = key_columns
+        self.last_table = table
         if mode == "overwrite":
             self.records.clear()
         count = 0

@@ -11,7 +11,7 @@ import contextlib
 import re
 import time
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from types import CodeType
 from typing import Any, cast
 
@@ -44,6 +44,11 @@ from etl_plugins.core.exceptions import (
 )
 from etl_plugins.core.record import Record
 from etl_plugins.core.sql_exec import SqlExecutor
+from etl_plugins.core.templating import (
+    references_namespace,
+    render_templates,
+    template_namespaces,
+)
 from etl_plugins.observability.lineage import (
     COMPLETE,
     FAIL,
@@ -756,6 +761,11 @@ class Pipeline:
     # copied into ``RunResult.data_paths``). Pipelines are built per run by
     # the worker, so instance state is safe here.
     _task_data_paths: dict[str, str] = field(default_factory=dict)
+    # Scratch: XCom store of the CURRENT run (ADR-0097). ``task name → {key:
+    # value}`` — each task auto-pushes its summary after running; downstream
+    # tasks pull via ``{{ xcom.<task>.<key> }}`` rendered just before they run.
+    # Reset by ``run``; safe instance state for the same reason as above.
+    _xcom: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def add(self, task: Task) -> Pipeline:
         self.tasks.append(task)
@@ -933,6 +943,7 @@ class Pipeline:
 
         result = RunResult(run_id=ctx.run_id, pipeline_name=self.name, success=False)
         self._task_data_paths = {}
+        self._xcom = {}
         # Per-task retry (자유도 2단계): pass the RAW runner; ``_execute_task``
         # wraps each task with its OWN effective retry (task.retry ?? pipeline
         # retry), so a task can override the pipeline default.
@@ -1059,6 +1070,47 @@ class Pipeline:
             t.depends_on or t.branch or t.trigger_rule != DEFAULT_TRIGGER_RULE for t in self.tasks
         )
 
+    def _render_task_xcom(self, task: Task) -> Task:
+        """Resolve ``{{ xcom.<task>.<key> }}`` in this task's templatable fields
+        against the current run's XCom store (ADR-0097).
+
+        Only the ``xcom`` namespace is resolved — any other ``{{ }}`` reference
+        is left untouched (it was either already rendered at load time, or is a
+        namespace this pass doesn't own). Returns the task unchanged (no copy)
+        when it references no xcom, so non-XCom pipelines pay nothing. An xcom
+        reference to a task that hasn't published raises ``ConfigError`` (a typo
+        or a bad ``depends_on`` order surfaces immediately).
+        """
+        renderable: dict[str, Any] = {
+            "query": task.query,
+            "source_options": task.source_options,
+            "sink_table": task.sink_table,
+            "sink_options": task.sink_options,
+            "sinks": [{"table": s.table, "options": s.options} for s in task.sinks],
+            "pre_sql": [a.statement for a in task.pre_sql],
+        }
+        if not references_namespace(renderable, "xcom"):
+            return task
+        ctx: dict[str, Any] = {"xcom": self._xcom}
+        # Defer every namespace except xcom so a stray non-xcom token (e.g. a
+        # manually-built task) is preserved rather than erroring here.
+        deferred = frozenset(template_namespaces(renderable) - {"xcom"})
+
+        def _r(value: Any) -> Any:
+            return render_templates(value, ctx, deferred=deferred)
+
+        new_sinks = [replace(s, table=_r(s.table), options=_r(s.options)) for s in task.sinks]
+        new_pre_sql = [replace(a, statement=_r(a.statement)) for a in task.pre_sql]
+        return replace(
+            task,
+            query=_r(task.query),
+            source_options=_r(task.source_options),
+            sink_table=_r(task.sink_table),
+            sink_options=_r(task.sink_options),
+            sinks=new_sinks,
+            pre_sql=new_pre_sql,
+        )
+
     def _execute_task(
         self,
         task: Task,
@@ -1075,6 +1127,11 @@ class Pipeline:
         task_runner: Callable[..., tuple[int, int, CursorValue]],
     ) -> tuple[int, int]:
         """Run one task fully: span + runner + metric/result accumulation + hooks."""
+        # XCom pull (ADR-0097): resolve any deferred ``{{ xcom.<task>.<key> }}``
+        # in this task's templatable fields against upstream results gathered so
+        # far — done *before* the runner so pushdown/Arrow/records all see the
+        # concrete value. Cheap no-op when the task carries no xcom reference.
+        task = self._render_task_xcom(task)
         if cursored and not task.cursor_column:
             raise TaskError(
                 f"Task {task.name or task.source!r}: cursor_column is required "
@@ -1112,6 +1169,17 @@ class Pipeline:
             result.new_cursor is None or task_max > result.new_cursor  # type: ignore[operator]
         ):
             result.new_cursor = task_max
+        # XCom push (ADR-0097): auto-publish this task's summary so downstream
+        # tasks can pull it. Keyed by name — an unnamed single task can't be
+        # referenced, so skip it. Vocabulary matches the branch predicate env
+        # (records_read / records_written / success) plus new_cursor.
+        if task.name:
+            self._xcom[task.name] = {
+                "records_read": read_count,
+                "records_written": write_count,
+                "success": True,
+                "new_cursor": task_max,
+            }
         metrics.counter(RECORDS_READ_TOTAL).add(read_count, attrs)
         metrics.counter(RECORDS_WRITTEN_TOTAL).add(write_count, attrs)
         self._fire("on_task_end", ctx, task, write_count)

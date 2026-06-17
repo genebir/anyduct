@@ -2866,4 +2866,48 @@ L1 출시 직후 사용자가 5개 회신:
 
 ---
 
+## ADR-0097: 태스크 간 값 전달 — XCom(`{{ xcom.<task>.<key> }}`) [자유도 3단계]
+
+**Date**: 2026-06-17
+**Status**: Accepted (구현 + core unit 검증; slice 1 = auto-xcom pull)
+
+**Context**: 태스크-DAG는 ADR-0028에서 순서(`depends_on`/`trigger_rule`/`branch`)만 다뤘고,
+당시 *"태스크 간 데이터는 저장소(테이블/객체) 경유 — 코어에 XCom류 신규 메커니즘 불필요(필요 시 후속)"* 로
+의도적으로 미뤘다. Airflow 지향 자유도를 높이는 흐름(① 런타임 파라미터/`{{ }}` 템플릿, ② per-task
+retry/timeout)에서 가장 부족한 오케스트레이션 1급 요소가 바로 **상류 태스크 산출값을 하류 태스크가
+직접 참조**하는 경로다(③ dynamic task mapping의 선행 요건이기도 함). 또 branch predicate는 이미
+상류 컨텍스트(`records_read`/`records_written`/`success`)를 노출하고 있어 — 사실상 proto-XCom — 이를
+일반화하는 자연스러운 확장이다.
+
+**Decision**:
+- **문법은 ① `{{ }}` 템플릿 재사용** — pull = `{{ xcom.<task_name>.<key> }}`. path-only 안전
+  렌더러를 그대로 쓰므로 함수 호출/산술/코드실행 없음(Jinja2 비도입 자세 유지). Airflow의
+  `ti.xcom_pull(...)` 같은 호출형 대신 점-경로형이라 우리 샌드박스에 정확히 맞는다.
+- **2-phase 렌더링으로 "하류는 상류 실행 후 렌더" 문제 해결**:
+  - phase-1(load/once, 기존): `${var}`/`!secret`/`{{ params/ds/... }}` 를 빌드 전 1회 렌더.
+    단, **`xcom` 네임스페이스는 deferred** — `render_config_templates(deferred={"xcom"})` 기본값으로
+    `{{ xcom.* }}` 토큰을 건드리지 않고 통과(미정의 에러도 안 냄). 호출부(워커/CLI/빌더) 변경 0.
+  - phase-2(per-task, 코어 실행 시점): `_execute_task`가 태스크 실행 *직전* 그 태스크의 템플릿 가능
+    문자열 필드(`query`/`source_options`/`sink_table`/`sink_options`/`sinks[]`)를 누적된 xcom
+    스토어로 렌더(`dataclasses.replace`로 렌더된 사본 — 원본 Task 불변, 멱등 재실행 안전). 렌더가
+    pushdown/arrow/records 분기보다 앞서므로 ELT 푸시다운도 해석된 값으로 실행.
+- **xcom 스토어 = 단일 초크포인트**: linear/DAG 양 경로가 모두 `_execute_task`를 지나므로 거기서
+  실행 후 `xcom[task.name] = {records_read, records_written, success, new_cursor}` 자동 적재
+  (auto-xcom — branch predicate 어휘와 정합 + `new_cursor` 추가). 이름 없는 단일 태스크는 적재 안 함
+  (참조 불가하므로).
+- **templating 모듈을 `etl_plugins/core/templating.py`로 이전** — phase-2가 코어에서 렌더해야 하는데
+  import 계약상 `core`는 `runtime`을 import 못 한다. 렌더러는 순수 유틸(코어 개념)이므로 core로 옮기고
+  `etl_plugins/runtime/templating.py`는 재-export shim으로 남겨 기존 import 전부 무변경(runtime→core 허용).
+
+**Consequences**:
+- ✅ 하류 태스크가 `SELECT ... WHERE id > {{ xcom.extract.new_cursor }}` 처럼 상류 산출값을 직접 참조.
+  ③ dynamic mapping(상류 출력으로 fan-out)의 토대.
+- ⚠️ **리니지는 phase-1 config 기준**(xcom deferred 상태) — 테이블명에 xcom을 끼우면 카탈로그 asset
+  키가 토큰 그대로일 수 있다(쿼리 본문 xcom은 best-effort opaque). 슬라이스 1 한계로 문서화.
+- ⚠️ **slice 1 = auto-xcom pull만**. 명시적 push(임의 계산값을 키로 적재 — 예: `{type: xcom_push}`)와
+  web 노출은 후속 슬라이스. 그래프-shape 노드 단위 xcom도 후속(현재는 task 단위).
+- backward-compat 완전: 신규 deferred 기본값/스토어는 `{{ xcom }}` 미사용 파이프라인에 오버헤드 0.
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

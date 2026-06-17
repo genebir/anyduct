@@ -19,6 +19,7 @@ from etl_plugins.core.templating import (
     render_config_templates,
     render_templates,
     template_namespaces,
+    template_paths,
 )
 
 __all__ = [
@@ -30,4 +31,5 @@ __all__ = [
     "render_config_templates",
     "render_templates",
     "template_namespaces",
+    "template_paths",
 ]

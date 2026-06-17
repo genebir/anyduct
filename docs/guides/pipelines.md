@@ -278,6 +278,26 @@ empty expansion list runs zero instances (success, 0 records).
 > service layer (one `node_run` per mapped instance) and graph-node-level
 > mapping are planned follow-ups; today the run records the aggregate.
 
+### Catching unresolved `{{ map.* }}` / `{{ xcom.* }}` at dry-run
+
+Because these namespaces resolve *per task at execution time*, a typo in
+an `expand` key or an upstream task name isn't caught by ordinary config
+validation — the token would silently reach the connector, or the
+per-task render would fail mid-run. **Dry-run** surfaces these statically
+as advisory warnings:
+
+- `map_ref_without_expand` — a `{{ map.<key> }}` reference but the task
+  declares no `expand`.
+- `map_ref_unknown_key` — `{{ map.<key> }}` where `<key>` isn't one of
+  the task's `expand` keys.
+- `xcom_ref_unknown_task` — `{{ xcom.<task>.* }}` naming a task that
+  doesn't exist.
+- `xcom_ref_not_upstream` — pulling XCom from a task that isn't an
+  upstream dependency (it may not have run yet — add it to `depends_on`).
+
+These are advisory: they show up beside the connector health checks but
+don't block the run.
+
 ## Data paths — pushdown / Arrow / records (ADR-0093/0094)
 
 The runtime picks the cheapest data path per task, automatically, in

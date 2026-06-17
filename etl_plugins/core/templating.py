@@ -74,6 +74,7 @@ __all__ = [
     "render_config_templates",
     "render_templates",
     "template_namespaces",
+    "template_paths",
 ]
 
 
@@ -138,6 +139,27 @@ def template_namespaces(obj: Any) -> set[str]:
     elif isinstance(obj, list):
         for x in obj:
             out |= template_namespaces(x)
+    return out
+
+
+def template_paths(obj: Any) -> set[str]:
+    """The set of full dotted paths of every ``{{ path }}`` reference in ``obj``.
+
+    e.g. ``"{{ ds }} {{ xcom.a.b }}"`` → ``{"ds", "xcom.a.b"}``. Symmetric
+    with :func:`template_namespaces` but keeps the whole path — used by the
+    static lint to check a ``{{ map.<key> }}`` / ``{{ xcom.<task>.<key> }}``
+    reference against the task's ``expand`` keys / upstream task names.
+    """
+    out: set[str] = set()
+    if isinstance(obj, str):
+        for m in TEMPLATE_REF.finditer(obj):
+            out.add(m.group(1))
+    elif isinstance(obj, dict):
+        for v in obj.values():
+            out |= template_paths(v)
+    elif isinstance(obj, list):
+        for x in obj:
+            out |= template_paths(x)
     return out
 
 

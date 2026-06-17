@@ -157,6 +157,7 @@ def _build_task(
         branch=[BranchRule(when=br.when, to=list(br.to)) for br in task_cfg.branch],
         retry=task_cfg.retry,
         timeout_seconds=task_cfg.timeout_seconds,
+        expand=dict(task_cfg.expand),
     )
     # When a sink reuses the source's connection, give it a dedicated instance
     # (separate physical connection) so the streaming read cursor and the write

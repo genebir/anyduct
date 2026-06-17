@@ -59,9 +59,11 @@ _PATH = r"[a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*"
 TEMPLATE_REF = re.compile(r"\{\{\s*(" + _PATH + r")\s*\}\}")
 WHOLE_TEMPLATE_REF = re.compile(r"^\{\{\s*(" + _PATH + r")\s*\}\}$")
 
-# The namespaces resolved only at execution time (left intact by the
-# load-time pass). Currently just XCom (ADR-0097).
-DEFERRED_NAMESPACES = frozenset({"xcom"})
+# The namespaces resolved only at execution time, left intact by the
+# load-time pass: ``xcom`` (ADR-0097, upstream task results) and ``map``
+# (ADR-0098, the current dynamic-mapping element). Both are filled in
+# per-task by the core Pipeline as it executes.
+DEFERRED_NAMESPACES = frozenset({"xcom", "map"})
 
 __all__ = [
     "DEFERRED_NAMESPACES",

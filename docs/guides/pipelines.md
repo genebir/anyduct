@@ -235,6 +235,49 @@ no code execution.
 > config, so an XCom reference inside a *table name* won't be reflected
 > in lineage.
 
+## Dynamic task mapping — `expand` (Airflow `.expand()`)
+
+A task can **fan out at runtime** into one instance per element of a
+list — Airflow's mapped tasks. Declare `expand` as `name → list`; each
+instance exposes `{{ map.<name> }}` in its templatable fields. Multiple
+keys form the cross product.
+
+```yaml
+name: per_region_load
+params:
+  regions: [kr, us, jp]      # overridable per run
+tasks:
+  - name: load
+    expand:
+      region: "{{ params.regions }}"   # ← drives the fan-out
+    source: pg
+    query: "SELECT * FROM orders WHERE region = '{{ map.region }}'"
+    sink: warehouse
+    sink_options: {table: "orders_{{ map.region }}", mode: overwrite}
+```
+
+The expansion list can come from three places, all via templating:
+
+- a **literal** list (`expand: {region: [kr, us]}`),
+- a **per-run param** list (`{{ params.regions }}` — resolved at load,
+  so triggering with `--param regions='["kr","us"]'` or a REST `params`
+  body changes the fan-out without editing the pipeline),
+- an **upstream XCom** list (`{{ xcom.discover.items }}` — resolved at
+  execution, after the producing task runs).
+
+Each instance runs the full single-task path independently (its own
+retry / timeout / data-path selection). One instance failing does **not**
+stop the others — the task is reported failed and the first error is
+raised at the end. Records sum across instances, and the task publishes
+the **aggregate** to XCom (`{{ xcom.load.records_written }}` = total). An
+empty expansion list runs zero instances (success, 0 records).
+
+> Note (slice 1): mapping applies to the flat task path; the per-instance
+> element is injected into `query` / `source_options` / `sink_table` /
+> `sink_options` / `sinks` / `pre_sql`. Per-instance run rows in the
+> service layer (one `node_run` per mapped instance) and graph-node-level
+> mapping are planned follow-ups; today the run records the aggregate.
+
 ## Data paths — pushdown / Arrow / records (ADR-0093/0094)
 
 The runtime picks the cheapest data path per task, automatically, in

@@ -198,6 +198,11 @@ class TaskConfig(BaseModel):
     # is failed with TaskTimeoutError (retried if a retry policy applies).
     # ``None`` → fall back to the pipeline's ``task_timeout_seconds``.
     timeout_seconds: float | None = None
+    # Dynamic task mapping (자유도 3단계, ADR-0098 — Airflow ``.expand()``).
+    # ``name → list`` (or a ``{{ }}`` template resolving to a list); the task
+    # fans out into one instance per element (cross product over keys), each
+    # exposing ``{{ map.<key> }}``. Empty ⇒ not a mapped task.
+    expand: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _check_sink(self) -> TaskConfig:

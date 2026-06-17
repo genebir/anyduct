@@ -12,6 +12,7 @@ import re
 import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field, replace
+from itertools import product
 from types import CodeType
 from typing import Any, cast
 
@@ -45,7 +46,6 @@ from etl_plugins.core.exceptions import (
 from etl_plugins.core.record import Record
 from etl_plugins.core.sql_exec import SqlExecutor
 from etl_plugins.core.templating import (
-    references_namespace,
     render_templates,
     template_namespaces,
 )
@@ -326,6 +326,13 @@ class Task:
     # inherit the pipeline defaults (``Pipeline.retry`` / ``task_timeout_seconds``).
     retry: RetryConfig | None = None
     timeout_seconds: float | None = None
+    # Dynamic task mapping (ADR-0098, Airflow ``.expand()``). ``name → list``;
+    # the task fans out into one instance per element (cross product over keys),
+    # each exposing ``{{ map.<key> }}`` in its templatable fields. Values may be
+    # ``{{ }}`` templates — a per-run param list (``{{ params.regions }}``,
+    # resolved at load time) or an upstream list (``{{ xcom.discover.items }}``,
+    # resolved at execution time). Empty ⇒ this is not a mapped task.
+    expand: dict[str, Any] = field(default_factory=dict)
     # Dataflow graph (ADR-0030). When ``graph_nodes`` is non-empty the task runs
     # as an operator graph (records flow along edges, branching per-edge ``when``)
     # instead of the flat source→transforms→sinks path.
@@ -1070,16 +1077,16 @@ class Pipeline:
             t.depends_on or t.branch or t.trigger_rule != DEFAULT_TRIGGER_RULE for t in self.tasks
         )
 
-    def _render_task_xcom(self, task: Task) -> Task:
-        """Resolve ``{{ xcom.<task>.<key> }}`` in this task's templatable fields
-        against the current run's XCom store (ADR-0097).
+    def _render_task_xcom(self, task: Task, *, map_values: dict[str, Any] | None = None) -> Task:
+        """Resolve the execution-time namespaces in this task's templatable
+        fields: ``{{ xcom.<task>.<key> }}`` (ADR-0097) and, for a mapped
+        instance, ``{{ map.<key> }}`` (dynamic task mapping, ADR-0098).
 
-        Only the ``xcom`` namespace is resolved — any other ``{{ }}`` reference
-        is left untouched (it was either already rendered at load time, or is a
-        namespace this pass doesn't own). Returns the task unchanged (no copy)
-        when it references no xcom, so non-XCom pipelines pay nothing. An xcom
-        reference to a task that hasn't published raises ``ConfigError`` (a typo
-        or a bad ``depends_on`` order surfaces immediately).
+        Only those namespaces are resolved — any other ``{{ }}`` reference is
+        left untouched (already rendered at load time, or owned by no pass).
+        Returns the task unchanged (no copy) when it references none of them, so
+        ordinary pipelines pay nothing. An undefined reference raises
+        ``ConfigError`` (a typo / bad ``depends_on`` order surfaces at once).
         """
         renderable: dict[str, Any] = {
             "query": task.query,
@@ -1089,12 +1096,16 @@ class Pipeline:
             "sinks": [{"table": s.table, "options": s.options} for s in task.sinks],
             "pre_sql": [a.statement for a in task.pre_sql],
         }
-        if not references_namespace(renderable, "xcom"):
-            return task
         ctx: dict[str, Any] = {"xcom": self._xcom}
-        # Defer every namespace except xcom so a stray non-xcom token (e.g. a
+        active = {"xcom"}
+        if map_values is not None:
+            ctx["map"] = map_values
+            active.add("map")
+        if active.isdisjoint(template_namespaces(renderable)):
+            return task
+        # Defer every namespace except the active ones so a stray token (e.g. a
         # manually-built task) is preserved rather than erroring here.
-        deferred = frozenset(template_namespaces(renderable) - {"xcom"})
+        deferred = frozenset(template_namespaces(renderable) - active)
 
         def _r(value: Any) -> Any:
             return render_templates(value, ctx, deferred=deferred)
@@ -1125,13 +1136,33 @@ class Pipeline:
         tracer: Any,
         attrs: dict[str, Any],
         task_runner: Callable[..., tuple[int, int, CursorValue]],
+        map_values: dict[str, Any] | None = None,
     ) -> tuple[int, int]:
-        """Run one task fully: span + runner + metric/result accumulation + hooks."""
+        """Run one task fully: span + runner + metric/result accumulation + hooks.
+
+        ``map_values`` is set for one instance of a dynamically-mapped task
+        (ADR-0098); ``None`` is an ordinary single execution. A task that
+        declares ``expand`` and is *not* already a mapped instance fans out here.
+        """
+        if map_values is None and task.expand:
+            return self._execute_mapped_task(
+                task,
+                conns,
+                cursor_from,
+                cursor_to,
+                cursored=cursored,
+                ctx=ctx,
+                result=result,
+                metrics=metrics,
+                tracer=tracer,
+                attrs=attrs,
+                task_runner=task_runner,
+            )
         # XCom pull (ADR-0097): resolve any deferred ``{{ xcom.<task>.<key> }}``
-        # in this task's templatable fields against upstream results gathered so
-        # far — done *before* the runner so pushdown/Arrow/records all see the
-        # concrete value. Cheap no-op when the task carries no xcom reference.
-        task = self._render_task_xcom(task)
+        # (and ``{{ map.<key> }}`` for a mapped instance) in this task's
+        # templatable fields — done *before* the runner so pushdown/Arrow/records
+        # all see the concrete value. Cheap no-op when there's nothing to resolve.
+        task = self._render_task_xcom(task, map_values=map_values)
         if cursored and not task.cursor_column:
             raise TaskError(
                 f"Task {task.name or task.source!r}: cursor_column is required "
@@ -1172,8 +1203,10 @@ class Pipeline:
         # XCom push (ADR-0097): auto-publish this task's summary so downstream
         # tasks can pull it. Keyed by name — an unnamed single task can't be
         # referenced, so skip it. Vocabulary matches the branch predicate env
-        # (records_read / records_written / success) plus new_cursor.
-        if task.name:
+        # (records_read / records_written / success) plus new_cursor. Mapped
+        # instances (map_values set) don't push individually — the parent
+        # publishes the aggregate (ADR-0098).
+        if task.name and map_values is None:
             self._xcom[task.name] = {
                 "records_read": read_count,
                 "records_written": write_count,
@@ -1184,6 +1217,94 @@ class Pipeline:
         metrics.counter(RECORDS_WRITTEN_TOTAL).add(write_count, attrs)
         self._fire("on_task_end", ctx, task, write_count)
         return read_count, write_count
+
+    def _resolve_expand(self, task: Task) -> list[dict[str, Any]]:
+        """Expand a mapped task's ``expand`` spec into one mapping per instance
+        (ADR-0098). Each value is a list (literal, or a ``{{ }}`` template — e.g.
+        ``{{ params.regions }}`` resolved at load time, or ``{{ xcom.t.k }}``
+        resolved now). Multiple keys form the cross product (Airflow semantics).
+        """
+        resolved: dict[str, list[Any]] = {}
+        ctx: dict[str, Any] = {"xcom": self._xcom}
+        for key, raw in task.expand.items():
+            value = raw
+            if isinstance(raw, (str, list, dict)):
+                deferred = frozenset(template_namespaces(raw) - {"xcom"})
+                value = render_templates(raw, ctx, deferred=deferred)
+            if not isinstance(value, list):
+                raise TaskError(
+                    f"task {task.name or task.source!r}: expand[{key!r}] must "
+                    f"resolve to a list, got {type(value).__name__}"
+                )
+            resolved[key] = value
+        keys = list(resolved)
+        return [dict(zip(keys, combo, strict=True)) for combo in product(*resolved.values())]
+
+    def _execute_mapped_task(
+        self,
+        task: Task,
+        conns: dict[str, Connector],
+        cursor_from: CursorValue,
+        cursor_to: CursorValue,
+        *,
+        cursored: bool,
+        ctx: Context,
+        result: RunResult,
+        metrics: Any,
+        tracer: Any,
+        attrs: dict[str, Any],
+        task_runner: Callable[..., tuple[int, int, CursorValue]],
+    ) -> tuple[int, int]:
+        """Run one dynamically-mapped task as N instances (ADR-0098).
+
+        Each instance runs the full single-task path with its ``map_values``
+        injected (``{{ map.<key> }}``), independently — one failing instance does
+        not stop the others; the first error is re-raised at the end so the task
+        is reported failed. Records sum across instances; the parent publishes the
+        aggregate to XCom. An empty expansion runs zero instances (success, 0
+        records) — a no-op rather than an error.
+        """
+        instances = self._resolve_expand(task)
+        _module_logger.info(
+            "task_mapped_expand",
+            pipeline=self.name,
+            task=task.name or task.source,
+            instances=len(instances),
+        )
+        total_read = 0
+        total_written = 0
+        first_error: BaseException | None = None
+        for inst in instances:
+            try:
+                read, written = self._execute_task(
+                    task,
+                    conns,
+                    cursor_from,
+                    cursor_to,
+                    cursored=cursored,
+                    ctx=ctx,
+                    result=result,
+                    metrics=metrics,
+                    tracer=tracer,
+                    attrs=attrs,
+                    task_runner=task_runner,
+                    map_values=inst,
+                )
+                total_read += read
+                total_written += written
+            except Exception as exc:
+                if first_error is None:
+                    first_error = exc
+        if task.name:
+            self._xcom[task.name] = {
+                "records_read": total_read,
+                "records_written": total_written,
+                "success": first_error is None,
+                "new_cursor": None,
+            }
+        if first_error is not None:
+            raise first_error
+        return total_read, total_written
 
     def _run_dag(
         self,

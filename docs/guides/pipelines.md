@@ -77,6 +77,40 @@ pipeline = Pipeline(
   continues. A counter `etl_plugins.errors{phase=transform, routed=dlq}`
   is incremented on every routed record.
 
+## Per-task retry & timeout (자유도 2단계)
+
+Pipeline-level `retry` is the default, but any individual task can
+override it and/or set an execution timeout — the Airflow
+`retries` / `retry_delay` / `execution_timeout` shape, applied per task:
+
+```yaml
+name: orders
+mode: batch
+task_timeout_seconds: 600        # default budget for every task
+tasks:
+  - name: extract
+    source: pg
+    query: "SELECT * FROM orders"
+    sink: warehouse
+    sink_options: {table: orders, mode: append}
+    timeout_seconds: 120         # this task gets a tighter budget
+    retry:                       # overrides the pipeline default
+      max_attempts: 5
+      backoff: exponential
+      initial_delay_seconds: 2
+```
+
+* `task.retry` wins over the pipeline `retry` for that task; tasks
+  without one fall back to the pipeline default (or no retry).
+* `task.timeout_seconds` wins over the pipeline `task_timeout_seconds`;
+  `None`/absent means no timeout. The deadline is **cooperative** —
+  checked at each record boundary, so a chunked read/transform stream is
+  failed with `TaskTimeoutError` once it runs long. It does *not*
+  interrupt a single blocking driver call mid-fetch (Python can't kill a
+  blocked thread). `TaskTimeoutError` is a `TaskError` subclass, so a
+  configured retry will retry a slow task, each attempt getting a fresh
+  window.
+
 ## Hooks
 
 ```python

@@ -155,6 +155,8 @@ def _build_task(
         depends_on=list(task_cfg.depends_on),
         trigger_rule=task_cfg.trigger_rule,
         branch=[BranchRule(when=br.when, to=list(br.to)) for br in task_cfg.branch],
+        retry=task_cfg.retry,
+        timeout_seconds=task_cfg.timeout_seconds,
     )
     # When a sink reuses the source's connection, give it a dedicated instance
     # (separate physical connection) so the streaming read cursor and the write
@@ -403,6 +405,7 @@ def build_pipeline(
             mode=pipeline_config.mode,
             commit_strategy=commit_strategy,
             retry=pipeline_config.retry,
+            task_timeout_seconds=pipeline_config.task_timeout_seconds,
             dlq=pipeline_config.dlq,
         )
         pipeline.add(graph_task)
@@ -465,6 +468,7 @@ def build_pipeline(
         mode=pipeline_config.mode,
         commit_strategy=commit_strategy,
         retry=pipeline_config.retry,
+        task_timeout_seconds=pipeline_config.task_timeout_seconds,
         dlq=pipeline_config.dlq,
     )
     for task in tasks:

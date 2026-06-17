@@ -36,7 +36,12 @@ from etl_plugins.core.connector import (
 )
 from etl_plugins.core.context import Context
 from etl_plugins.core.cursor import CursorValue
-from etl_plugins.core.exceptions import PipelineError, TaskError, TransformError
+from etl_plugins.core.exceptions import (
+    PipelineError,
+    TaskError,
+    TaskTimeoutError,
+    TransformError,
+)
 from etl_plugins.core.record import Record
 from etl_plugins.core.sql_exec import SqlExecutor
 from etl_plugins.observability.lineage import (
@@ -310,6 +315,12 @@ class Task:
     # Branch selection rules (ADR-0028). Non-empty ⇒ this is a branch task that
     # chooses which direct downstream tasks run; the rest are skipped.
     branch: list[BranchRule] = field(default_factory=list)
+    # Per-task retry / timeout (자유도 2단계). ``retry`` overrides the
+    # pipeline-level default for this task; ``timeout_seconds`` fails the task
+    # (TaskTimeoutError) if its read loop runs past the deadline. Both None ⇒
+    # inherit the pipeline defaults (``Pipeline.retry`` / ``task_timeout_seconds``).
+    retry: RetryConfig | None = None
+    timeout_seconds: float | None = None
     # Dataflow graph (ADR-0030). When ``graph_nodes`` is non-empty the task runs
     # as an operator graph (records flow along edges, branching per-edge ``when``)
     # instead of the flat source→transforms→sinks path.
@@ -729,7 +740,10 @@ class Pipeline:
     mode: str = "batch"  # batch | stream
     tasks: list[Task] = field(default_factory=list)
     commit_strategy: str = "after_sink_flush"  # used by stream runtime; see SPEC.md §5.5
-    retry: RetryConfig | None = None  # if set, wrap each task with @retryable
+    retry: RetryConfig | None = None  # default per-task retry (task.retry overrides)
+    # Default per-task execution timeout (자유도 2단계). Applied to any task
+    # without its own ``timeout_seconds``. None ⇒ no timeout.
+    task_timeout_seconds: float | None = None
     dlq: DlqConfig | None = None  # if set, route TransformError records to this sink
     # ADR-0041 K5b: static column lineage derived at build time from the
     # source ``PipelineConfig`` so emitters (e.g. OpenLineage) can attach a
@@ -919,9 +933,10 @@ class Pipeline:
 
         result = RunResult(run_id=ctx.run_id, pipeline_name=self.name, success=False)
         self._task_data_paths = {}
+        # Per-task retry (자유도 2단계): pass the RAW runner; ``_execute_task``
+        # wraps each task with its OWN effective retry (task.retry ?? pipeline
+        # retry), so a task can override the pipeline default.
         task_runner = self._run_task
-        if self.retry is not None:
-            task_runner = retryable(**self._retry_kwargs())(task_runner)
 
         # Lineage (ADR-0036): emit START now; COMPLETE/FAIL after the run. The
         # default emitter is a no-op, so this is free unless a backend is set.
@@ -1075,8 +1090,15 @@ class Pipeline:
                 "sink": ",".join(s.name for s in task.effective_sinks()),
             },
         )
+        # Per-task retry (자유도 2단계): wrap with this task's effective retry
+        # (its own override, else the pipeline default). The deadline/timeout
+        # is applied inside ``_run_task`` per attempt via ``task.timeout_seconds``.
+        effective_retry = task.retry or self.retry
+        runner = task_runner
+        if effective_retry is not None:
+            runner = retryable(**self._retry_kwargs(effective_retry))(runner)
         try:
-            read_count, write_count, task_max = task_runner(task, conns, cursor_from, cursor_to)
+            read_count, write_count, task_max = runner(task, conns, cursor_from, cursor_to)
             task_span.set_attribute("records_read", read_count)
             task_span.set_attribute("records_written", write_count)
         except Exception as exc:
@@ -1558,16 +1580,33 @@ class Pipeline:
         cursored = cursor_from is not None or cursor_to is not None
         cursor_col = task.cursor_column if cursored else None
 
+        # Per-task execution timeout (자유도 2단계). Cooperative deadline checked
+        # at each record boundary — a slow read/transform stream is failed with
+        # TaskTimeoutError (retried if a retry policy applies; each attempt gets
+        # a fresh window). It does NOT interrupt a single blocking driver call
+        # mid-fetch (Python can't kill a blocked thread); for chunked reads —
+        # the normal ETL shape — it bounds wall-clock effectively.
+        timeout_s = (
+            task.timeout_seconds if task.timeout_seconds is not None else self.task_timeout_seconds
+        )
+        deadline = (time.monotonic() + timeout_s) if timeout_s else None
+
         def _source_iter() -> Iterator[Record]:
             if cursor_col is not None:
-                yield from source.read_since(
+                base = source.read_since(
                     cursor_col,
                     cursor_from,
                     query=task.query,
                     **task.source_options,
                 )
             else:
-                yield from source.read(query=task.query, **task.source_options)
+                base = source.read(query=task.query, **task.source_options)
+            for rec in base:
+                if deadline is not None and time.monotonic() > deadline:
+                    raise TaskTimeoutError(
+                        f"task {task.name or task.source!r} exceeded timeout_seconds={timeout_s}"
+                    )
+                yield rec
 
         def _cursor_stream(count: bool) -> Iterator[Record]:
             nonlocal records_read, new_cursor
@@ -1841,9 +1880,11 @@ class Pipeline:
 
     # ---------- internal helpers ------------------------------------------
 
-    def _retry_kwargs(self) -> dict[str, Any]:
-        """Translate ``self.retry`` (RetryConfig) into ``@retryable`` kwargs."""
-        rc = self.retry
+    def _retry_kwargs(self, rc: RetryConfig | None = None) -> dict[str, Any]:
+        """Translate a RetryConfig into ``@retryable`` kwargs (defaults to the
+        pipeline-level ``self.retry``; callers pass a task's own override)."""
+        if rc is None:
+            rc = self.retry
         if rc is None:
             return {}
         out: dict[str, Any] = {

@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 
 from etl_plugins.config.models import DlqConfig, RetryConfig
-from etl_plugins.core.exceptions import TransformError
+from etl_plugins.core.exceptions import TaskTimeoutError, TransformError
 from etl_plugins.core.pipeline import Pipeline, Task
 from etl_plugins.core.record import Record
 from etl_plugins.observability.metrics import (
@@ -168,6 +168,87 @@ def test_batch_retry_exhausts_and_reraises() -> None:
     snk.connect()
     with pytest.raises(RuntimeError, match="permanent"):
         p.run(connectors={"s": src, "k": snk})
+
+
+# ---------- per-task retry override (자유도 2단계) -------------------------
+
+
+def test_per_task_retry_overrides_pipeline_default() -> None:
+    """A task's own ``retry`` makes it succeed even when the pipeline sets none."""
+    attempts: list[int] = []
+
+    class _Flaky(InMemoryBatchSource):
+        def read(self, query=None, *, chunk_size=10_000, **opts):  # type: ignore[no-untyped-def, override]
+            attempts.append(1)
+            if len(attempts) < 2:
+                raise RuntimeError("transient")
+            yield from self._records
+
+    src = _Flaky([Record(data={"k": 1})])
+    snk = InMemoryBatchSink()
+    task = Task(
+        name="t",
+        source="s",
+        sink="k",
+        retry=RetryConfig(max_attempts=3, backoff="fixed", initial_delay_seconds=0.0),
+    )
+    p = Pipeline("p").add(task)  # no pipeline-level retry
+    src.connect()
+    snk.connect()
+    result = p.run(connectors={"s": src, "k": snk})
+    assert result.success is True
+    assert len(attempts) == 2
+    assert len(snk.records) == 1
+
+
+# ---------- per-task timeout (자유도 2단계) --------------------------------
+
+
+class _SlowSource(InMemoryBatchSource):
+    """Sleeps before each record so a small ``timeout_seconds`` trips."""
+
+    def read(self, query=None, *, chunk_size=10_000, **opts):  # type: ignore[no-untyped-def, override]
+        import time
+
+        for rec in self._records:
+            time.sleep(0.05)
+            yield rec
+
+
+def test_per_task_timeout_fails_slow_task() -> None:
+    src = _SlowSource([Record(data={"i": i}) for i in range(10)])
+    snk = InMemoryBatchSink()
+    task = Task(name="t", source="s", sink="k", timeout_seconds=0.01)
+    p = Pipeline("p").add(task)
+    src.connect()
+    snk.connect()
+    with pytest.raises(TaskTimeoutError):
+        p.run(connectors={"s": src, "k": snk})
+
+
+def test_pipeline_task_timeout_applies_when_task_has_none() -> None:
+    """A pipeline-wide ``task_timeout_seconds`` bounds a task that sets none."""
+    src = _SlowSource([Record(data={"i": i}) for i in range(10)])
+    snk = InMemoryBatchSink()
+    task = Task(name="t", source="s", sink="k")
+    p = Pipeline("p", task_timeout_seconds=0.01).add(task)
+    src.connect()
+    snk.connect()
+    with pytest.raises(TaskTimeoutError):
+        p.run(connectors={"s": src, "k": snk})
+
+
+def test_task_timeout_overrides_pipeline_default_to_disable() -> None:
+    """A fast task under the pipeline timeout completes; the deadline is per task."""
+    src = InMemoryBatchSource([Record(data={"i": 1})])
+    snk = InMemoryBatchSink()
+    task = Task(name="t", source="s", sink="k")
+    p = Pipeline("p", task_timeout_seconds=5.0).add(task)
+    src.connect()
+    snk.connect()
+    result = p.run(connectors={"s": src, "k": snk})
+    assert result.success is True
+    assert len(snk.records) == 1
 
 
 # ---------- DLQ on batch --------------------------------------------------

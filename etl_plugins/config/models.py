@@ -188,6 +188,16 @@ class TaskConfig(BaseModel):
     trigger_rule: str = "all_success"
     # Branch selection rules — non-empty makes this a branch task.
     branch: list[BranchRuleConfig] = Field(default_factory=list)
+    # Per-task retry override (자유도 2단계, 2026-06-17). When set, this task
+    # uses its own retry policy instead of the pipeline-level ``retry``
+    # (Airflow per-task ``retries``/``retry_delay``). ``None`` → fall back to
+    # the pipeline default.
+    retry: RetryConfig | None = None
+    # Per-task execution timeout in seconds (Airflow ``execution_timeout``).
+    # Checked at record/chunk boundaries during the read loop — a slow task
+    # is failed with TaskTimeoutError (retried if a retry policy applies).
+    # ``None`` → fall back to the pipeline's ``task_timeout_seconds``.
+    timeout_seconds: float | None = None
 
     @model_validator(mode="after")
     def _check_sink(self) -> TaskConfig:
@@ -443,6 +453,9 @@ class PipelineConfig(BaseModel):
     # --- dataflow graph shape (ADR-0030) ---
     graph: GraphConfig | None = None
     retry: RetryConfig | None = None
+    # Default per-task execution timeout (자유도 2단계). Applied to any task
+    # that doesn't set its own ``timeout_seconds``. ``None`` → no timeout.
+    task_timeout_seconds: float | None = None
     observability: ObservabilityConfig | None = None
     commit: CommitConfig | None = None
     dlq: DlqConfig | None = None

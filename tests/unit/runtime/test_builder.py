@@ -106,6 +106,36 @@ def test_build_pipeline_minimum() -> None:
     assert connectors == {"s": src, "k": snk}
 
 
+def test_build_pipeline_forwards_per_task_retry_and_timeout() -> None:
+    """TaskConfig.retry/timeout_seconds + PipelineConfig.task_timeout_seconds
+    reach the core Task/Pipeline (자유도 2단계)."""
+    pc = PipelineConfig.model_validate(
+        {
+            "name": "p",
+            "task_timeout_seconds": 30.0,
+            "tasks": [
+                {
+                    "name": "t",
+                    "source": {"connection": "s", "query": "SELECT 1"},
+                    "sink": {"connection": "k", "table": "T", "mode": "append"},
+                    "timeout_seconds": 5.0,
+                    "retry": {
+                        "max_attempts": 4,
+                        "backoff": "fixed",
+                        "initial_delay_seconds": 0.0,
+                    },
+                }
+            ],
+        }
+    )
+    pipeline, _ = build_pipeline(pc, {"s": InMemoryBatchSource(), "k": InMemoryBatchSink()})
+    assert pipeline.task_timeout_seconds == 30.0
+    task = pipeline.tasks[0]
+    assert task.timeout_seconds == 5.0
+    assert task.retry is not None
+    assert task.retry.max_attempts == 4
+
+
 def test_build_pipeline_splits_shared_source_sink_connection() -> None:
     """A sink reusing the source's connection gets its own instance (a separate
     physical connection) so the streaming read cursor and the write don't

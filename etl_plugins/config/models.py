@@ -203,6 +203,13 @@ class TaskConfig(BaseModel):
     # fans out into one instance per element (cross product over keys), each
     # exposing ``{{ map.<key> }}``. Empty ⇒ not a mapped task.
     expand: dict[str, Any] = Field(default_factory=dict)
+    # Explicit XCom push (자유도 3단계 f/u, ADR-0097). ``key → {column, distinct?}``;
+    # publishes the list of that column's values from the rows this task
+    # processes under ``xcom.<task>.<key>``, so a downstream task can
+    # ``expand`` over it (``{{ xcom.discover.regions }}``). Without this only
+    # the auto summary (records_read/written/success/new_cursor) is on XCom —
+    # none of which is a fan-out list. Forces the records data path.
+    push_xcom: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _check_sink(self) -> TaskConfig:
@@ -215,6 +222,18 @@ class TaskConfig(BaseModel):
                 f"task {self.name!r}: unknown trigger_rule {self.trigger_rule!r} "
                 f"(allowed: {sorted(TRIGGER_RULES)})"
             )
+        for key, spec in self.push_xcom.items():
+            if not isinstance(spec, dict) or "column" not in spec:
+                raise ValueError(
+                    f"task {self.name!r}: push_xcom[{key!r}] needs a 'column' "
+                    "(the row column whose values are published as a list)"
+                )
+            extra = set(spec) - {"column", "distinct"}
+            if extra:
+                raise ValueError(
+                    f"task {self.name!r}: push_xcom[{key!r}] has unknown keys "
+                    f"{sorted(extra)} (allowed: 'column', 'distinct')"
+                )
         return self
 
     def effective_sinks(self) -> list[SinkConfig]:

@@ -227,13 +227,41 @@ undefined key (typo, or a task not in `depends_on`) fails the run with a
 clear error. Same security posture as `{{ params }}`: dotted paths only,
 no code execution.
 
-> Note (slice 1): only the auto-published summary is available, and
-> XCom is resolved in the *flat* task path (`query` / `source_options` /
-> `sink_table` / `sink_options` / `sinks` / `pre_sql`). Explicit
-> push of arbitrary computed values, and graph-node-level XCom, are
-> planned follow-ups. Catalog lineage is derived from the pre-XCom
-> config, so an XCom reference inside a *table name* won't be reflected
-> in lineage.
+### Publishing a list — `push_xcom`
+
+The auto summary is all scalars — handy for thresholds, but none of it is
+a **list** to fan out over. `push_xcom` projects a column of the rows a
+task processes into a list under `xcom.<task>.<key>`:
+
+```yaml
+tasks:
+  - name: discover
+    source: pg
+    query: "SELECT DISTINCT region FROM orders"
+    sink: staging                 # the rows still land here
+    push_xcom:
+      regions: {column: region, distinct: true}   # → xcom.discover.regions
+  - name: load
+    depends_on: [discover]
+    expand:
+      region: "{{ xcom.discover.regions }}"        # fan out over the list
+    source: pg
+    query: "SELECT * FROM orders WHERE region = '{{ map.region }}'"
+    sink: warehouse
+    sink_options: {table: "orders_{{ map.region }}", mode: overwrite}
+```
+
+`distinct: true` dedupes preserving first-seen order. A task with
+`push_xcom` always takes the records data path (pushdown/Arrow never
+materialise Python rows). Referencing a column the rows don't have fails
+the task; an empty source publishes an empty list (zero fan-out).
+
+> Note (slice 1): XCom is resolved in the *flat* task path (`query` /
+> `source_options` / `sink_table` / `sink_options` / `sinks` / `pre_sql`).
+> `push_xcom` projects a column; pushing arbitrary computed values and
+> graph-node-level XCom are planned follow-ups. Catalog lineage is
+> derived from the pre-XCom config, so an XCom reference inside a *table
+> name* won't be reflected in lineage.
 
 ## Dynamic task mapping — `expand` (Airflow `.expand()`)
 
@@ -263,7 +291,8 @@ The expansion list can come from three places, all via templating:
   so triggering with `--param regions='["kr","us"]'` or a REST `params`
   body changes the fan-out without editing the pipeline),
 - an **upstream XCom** list (`{{ xcom.discover.items }}` — resolved at
-  execution, after the producing task runs).
+  execution, after the producing task runs; the upstream publishes the
+  list with [`push_xcom`](#publishing-a-list--push_xcom)).
 
 Each instance runs the full single-task path independently (its own
 retry / timeout / data-path selection). One instance failing does **not**

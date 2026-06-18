@@ -158,6 +158,7 @@ def _build_task(
         retry=task_cfg.retry,
         timeout_seconds=task_cfg.timeout_seconds,
         expand=dict(task_cfg.expand),
+        push_xcom={k: dict(v) for k, v in task_cfg.push_xcom.items()},
     )
     # When a sink reuses the source's connection, give it a dedicated instance
     # (separate physical connection) so the streaming read cursor and the write

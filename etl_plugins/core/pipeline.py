@@ -333,6 +333,12 @@ class Task:
     # resolved at load time) or an upstream list (``{{ xcom.discover.items }}``,
     # resolved at execution time). Empty ⇒ this is not a mapped task.
     expand: dict[str, Any] = field(default_factory=dict)
+    # Explicit XCom push (ADR-0097 follow-up). ``key → {column, distinct?}``;
+    # after the task runs, the list of that column's values across the rows it
+    # processed is published as ``self._xcom[task][key]`` — so a downstream task
+    # can ``expand`` over it (``{{ xcom.discover.regions }}``). Forces the
+    # records data path (pushdown/Arrow never touch Python rows). Empty ⇒ no push.
+    push_xcom: dict[str, dict[str, Any]] = field(default_factory=dict)
     # Dataflow graph (ADR-0030). When ``graph_nodes`` is non-empty the task runs
     # as an operator graph (records flow along edges, branching per-edge ``when``)
     # instead of the flat source→transforms→sinks path.
@@ -773,6 +779,11 @@ class Pipeline:
     # tasks pull via ``{{ xcom.<task>.<key> }}`` rendered just before they run.
     # Reset by ``run``; safe instance state for the same reason as above.
     _xcom: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # Scratch: explicit XCom pushes collected during ``_run_task`` (ADR-0097
+    # follow-up). ``task name → {key: [values]}`` — merged into ``_xcom`` after
+    # the task runs. Separate from ``_xcom`` so the auto-summary push stays a
+    # single literal dict and a retry simply overwrites the collected values.
+    _task_xcom_pushes: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def add(self, task: Task) -> Pipeline:
         self.tasks.append(task)
@@ -951,6 +962,7 @@ class Pipeline:
         result = RunResult(run_id=ctx.run_id, pipeline_name=self.name, success=False)
         self._task_data_paths = {}
         self._xcom = {}
+        self._task_xcom_pushes = {}
         # Per-task retry (자유도 2단계): pass the RAW runner; ``_execute_task``
         # wraps each task with its OWN effective retry (task.retry ?? pipeline
         # retry), so a task can override the pipeline default.
@@ -1212,6 +1224,9 @@ class Pipeline:
                 "records_written": write_count,
                 "success": True,
                 "new_cursor": task_max,
+                # Explicit pushes (ADR-0097 f/u) collected in ``_run_task`` —
+                # e.g. a discovered list a downstream task fans out over.
+                **self._task_xcom_pushes.get(task.name, {}),
             }
         metrics.counter(RECORDS_READ_TOTAL).add(read_count, attrs)
         metrics.counter(RECORDS_WRITTEN_TOTAL).add(write_count, attrs)
@@ -1753,12 +1768,16 @@ class Pipeline:
         self._run_pre_sql(task, connectors)
 
         cursored_run = cursor_from is not None or cursor_to is not None
-        pushed = self._try_sql_pushdown(task, source, sinks, cursored=cursored_run)
-        if pushed is not None:
-            return pushed
-        fast = self._try_arrow_fast_path(task, source, sinks, cursored=cursored_run)
-        if fast is not None:
-            return fast
+        # Explicit XCom push (ADR-0097 f/u) needs to see the rows in Python to
+        # project a column into a list, so it forces the records path — the
+        # pushdown/Arrow fast paths never materialise rows.
+        if not task.push_xcom:
+            pushed = self._try_sql_pushdown(task, source, sinks, cursored=cursored_run)
+            if pushed is not None:
+                return pushed
+            fast = self._try_arrow_fast_path(task, source, sinks, cursored=cursored_run)
+            if fast is not None:
+                return fast
         self._task_data_paths[task.name or "task"] = "records"
 
         records_read = 0
@@ -1857,6 +1876,30 @@ class Pipeline:
                 if record is not None:
                     yield record
 
+        # Explicit XCom push (ADR-0097 f/u): collect the projected column's
+        # values from the rows this task processes (post-transform, count pass
+        # only — the same pass that counts records_read), so a downstream task
+        # can ``expand`` over the list. ``distinct`` preserves first-seen order.
+        xcom_collected: dict[str, list[Any]] = {key: [] for key in task.push_xcom}
+        xcom_seen: dict[str, set[Any]] = {
+            key: set() for key, spec in task.push_xcom.items() if spec.get("distinct")
+        }
+
+        def _collect_xcom(record: Record) -> None:
+            for key, spec in task.push_xcom.items():
+                column = spec["column"]
+                if column not in record.data:
+                    raise TaskError(
+                        f"task {task.name or task.source!r}: push_xcom[{key!r}] "
+                        f"column {column!r} not in record (have {sorted(record.data)})"
+                    )
+                value = record.data[column]
+                if key in xcom_seen:
+                    if value in xcom_seen[key]:
+                        continue
+                    xcom_seen[key].add(value)
+                xcom_collected[key].append(value)
+
         def _read_and_transform(
             count: bool = True,
             accept: Callable[[Record], bool] | None = None,
@@ -1867,6 +1910,11 @@ class Pipeline:
                     _apply_row_stage(stream, stage) if isinstance(stage, list) else stage(stream)
                 )
             for record in stream:
+                # Collect XCom projections on the count pass before routing, so
+                # the published list covers every row the task produced (not
+                # just one sink's share under conditional fan-out).
+                if count and task.push_xcom:
+                    _collect_xcom(record)
                 # Conditional routing (ADR-0027): a per-sink ``accept``
                 # decides whether this transformed record belongs to the
                 # sink currently being written.
@@ -1940,6 +1988,11 @@ class Pipeline:
                 pre_sql=spec.pre_sql,
                 **spec.options,
             )
+        if task.push_xcom and task.name:
+            # Publish via the side channel; ``_execute_task`` merges it into the
+            # task's XCom entry alongside the auto summary. A retry re-runs this
+            # and overwrites, so the values always reflect the successful pass.
+            self._task_xcom_pushes[task.name] = dict(xcom_collected)
         return records_read, written, new_cursor
 
     def _try_sql_pushdown(

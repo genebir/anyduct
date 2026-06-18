@@ -381,6 +381,13 @@ lineage. The web builder edits this on the same canvas in **orchestration
 mode** (operator palette + dependency edges). Full example:
 [`operator_dag_mart.yaml`](https://github.com/anyduct/etl-plugins/blob/main/examples/operator_dag_mart.yaml).
 
+> **`sql_exec` graph node vs `sql` operator.** The dataflow graph builder has a
+> legacy "Run SQL" node (`sql_exec`) for side-effect SQL *inside a graph*. For
+> orchestration (ordered steps), prefer the `sql` operator — it gets the
+> orchestration knobs (`depends_on` / `trigger_rule` / retry), publishes
+> rows-affected to XCom, and registers its write target in the catalog. Both
+> remain supported; new orchestration pipelines should use the operator.
+
 ## Data paths — pushdown / Arrow / records (ADR-0093/0094)
 
 The runtime picks the cheapest data path per task, automatically, in

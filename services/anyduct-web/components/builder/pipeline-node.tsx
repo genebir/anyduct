@@ -99,7 +99,7 @@ export function PipelineNode({ id, data }: NodeProps) {
             className="truncate text-xs uppercase tracking-wider text-text-muted underline decoration-dotted decoration-text-muted/40 underline-offset-2"
             title={glossaryTooltip(op.kind, t)}
           >
-            {op.kind}
+            {op.kind === "operator" ? t("builder.opKindStep") : op.kind}
           </div>
           <div className="truncate text-sm font-semibold text-text">
             {label}
@@ -151,6 +151,7 @@ function glossaryTooltip(
   if (kind === "source") return t("glossary.source");
   if (kind === "sink") return t("glossary.sink");
   if (kind === "transform") return t("glossary.transform");
+  if (kind === "operator") return t("glossary.operator");
   return "";
 }
 

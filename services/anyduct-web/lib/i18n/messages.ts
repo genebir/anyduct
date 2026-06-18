@@ -777,6 +777,11 @@ export const en = {
   "pipelines.new": "New pipeline",
   "pipelines.nameLabel": "Pipeline name",
   "pipelines.namePlaceholder": "orders-sync",
+  "pipelines.kindLabel": "Pipeline type",
+  "pipelines.kindDataflow": "Dataflow",
+  "pipelines.kindDataflowDesc": "Records flow source → transform → sink.",
+  "pipelines.kindOrchestration": "Orchestration",
+  "pipelines.kindOrchestrationDesc": "Ordered steps: Load / Run SQL / Call procedure.",
   "pipelines.modeBatch": "Batch",
   "pipelines.modeStream": "Stream",
   "pipelines.createOpen": "Create & open builder",
@@ -854,6 +859,7 @@ export const en = {
 
   // pipeline builder (edit page + builder components)
   "builder.title": "Pipeline builder",
+  "builder.opKindStep": "Step",
   "builder.draft": "draft",
   "builder.dryRun": "Dry run",
   "builder.dryRunPassed": "Dry run passed",
@@ -1043,6 +1049,8 @@ export const en = {
   "glossary.sink": "Sink — where the data is written TO (the destination DB, file, etc.).",
   "glossary.transform":
     "Transform — modifies data on the way through (filter, rename columns, run SQL…).",
+  "glossary.operator":
+    "Step — one ordered unit of work (load a table, run SQL, call a procedure). Edges set the order.",
   "glossary.dag":
     "DAG (Directed Acyclic Graph) — a graph where data flows one direction with no loops.",
   "glossary.cursor":
@@ -2301,6 +2309,11 @@ export const ko: Messages = {
   "pipelines.new": "새 파이프라인",
   "pipelines.nameLabel": "파이프라인 이름",
   "pipelines.namePlaceholder": "orders-sync",
+  "pipelines.kindLabel": "파이프라인 유형",
+  "pipelines.kindDataflow": "데이터플로우",
+  "pipelines.kindDataflowDesc": "레코드가 소스 → 변환 → 싱크로 흐릅니다.",
+  "pipelines.kindOrchestration": "오케스트레이션",
+  "pipelines.kindOrchestrationDesc": "순서 있는 스텝: 적재 / SQL 실행 / 프로시저 호출.",
   "pipelines.modeBatch": "배치",
   "pipelines.modeStream": "스트림",
   "pipelines.createOpen": "생성 후 빌더 열기",
@@ -2377,6 +2390,7 @@ export const ko: Messages = {
     "커서 윈도우 재실행 (append 전략은 커서로 새 행을 읽음). 분할 지점을 주면 병렬 run으로 큐잉됩니다.",
 
   "builder.title": "파이프라인 빌더",
+  "builder.opKindStep": "스텝",
   "builder.draft": "초안",
   "builder.dryRun": "드라이런",
   "builder.dryRunPassed": "드라이런 통과",
@@ -2566,6 +2580,8 @@ export const ko: Messages = {
   "glossary.sink": "Sink — 데이터를 저장할 곳 (목적지 DB, 파일 등).",
   "glossary.transform":
     "Transform — 데이터가 통과하면서 가공되는 단계 (필터, 컬럼 이름 변경, SQL 실행 등).",
+  "glossary.operator":
+    "스텝 — 순서가 있는 하나의 작업 단위 (테이블 적재, SQL 실행, 프로시저 호출). 엣지가 순서를 정합니다.",
   "glossary.dag":
     "DAG (방향성 비순환 그래프) — 데이터가 한 방향으로 흐르고 순환이 없는 그래프.",
   "glossary.cursor":

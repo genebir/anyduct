@@ -1800,10 +1800,11 @@ export const OPERATORS_ORCH: OperatorSpec[] = [
       { key: "connection", label: "Connection", kind: "connection", required: true },
       {
         key: "statement",
-        label: "SQL statement",
+        label: "SQL statement(s)",
         kind: "sql",
         required: true,
         placeholder: "DELETE FROM schema.table WHERE day = '{{ params.day }}'",
+        help: "One or more statements separated by ';' — each runs in order.",
       },
     ],
   },

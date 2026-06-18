@@ -606,7 +606,14 @@ export function serializeTasksDAG(
     if (op?.connectorType === "sql") {
       task.kind = "sql";
       task.connection = d.connection as string;
-      task.statements = d.statement ? [d.statement as string] : [];
+      // The editor holds one or more statements separated by ';'. Split so the
+      // core runs each (committed in order). Round-trips with the ';\n\n' join
+      // in deserialize. (Caveat: a ';' inside a string literal would split —
+      // rare for DDL/DML; documented.)
+      task.statements = String(d.statement ?? "")
+        .split(";")
+        .map((s) => s.trim())
+        .filter(Boolean);
     } else if (op?.connectorType === "proc_call") {
       task.kind = "proc_call";
       task.connection = d.connection as string;
@@ -663,7 +670,9 @@ export function deserializeTasksDAG(config: PipelineConfigJson | null): GraphBui
     let data: Record<string, unknown> = { name: t.name };
     if (t.kind === "sql") {
       operatorId = "op:sql";
-      data = { name: t.name, connection: t.connection, statement: (t.statements ?? [])[0] ?? "" };
+      // Join the statement list back into one editable SQL block (split by ';'
+      // on save). Preserves multi-statement sql steps through a round-trip.
+      data = { name: t.name, connection: t.connection, statement: (t.statements ?? []).join(";\n\n") };
     } else if (t.kind === "proc_call") {
       operatorId = "op:proc_call";
       data = { name: t.name, connection: t.connection, procedure: t.procedure, args: t.args ?? [] };

@@ -581,6 +581,20 @@
   - [x] **P3b 파티션 분할 실행** ✅ (2026-06-12, ADR-0095) — `POST /pipelines/{pid}/partitioned-backfill {boundaries}` → 연속 쌍마다 half-open 커서 윈도우 backfill sub-run N개 enqueue(무중복+완전커버가 시맨틱으로 보장), `result_json.partition {group,index,of}` + audit `run.backfill_partitioned`. **워커/코어 변경 0** — 멀티-replica SKIP LOCKED 큐(P3a)가 병렬 분배. boundaries 검증(2~65, 동일타입, 강증가). 서버 e2e 3. **web(같은 날)**: Backfill 다이얼로그 분할 지점 입력(쉼표 구분, 숫자 자동 강제변환, From/To 필수 검증) + **분할 경계 제안**(`GET /cursor-stats` MIN/MAX/COUNT + 제안 버튼 — 채워주기만, 결정은 운영자; MIN-미만 nudge/MAX-원본/degrade footgun 가드).
   - [x] **P3c 배포 가이드 현행화 — 멀티-replica 운영 문서** ✅ (2026-06-12) — `docs/deployment.md` Worker scaling 재작성: 4 프로세스(worker/scheduler/stream-worker/reaper) 전부 SKIP LOCKED 멀티-replica 안전 매트릭스(경합 지점·스케일 단위 명시) + P3a 실증 인용 + **"Scaling one big run" 섹션**(partitioned backfill curl + UI 분할 지점 + 집계 경계 경고 + 자동 등분 기각 사유). "scheduler/stream-worker는 single-replica, leader election 예정"이라던 **stale 서술 제거**(K2/K2b 이후 사실과 불일치). mkdocs strict green. → **ADR-0093 데이터플레인+클러스터링 트랙 전 항목 완료.**
 
+#### 오케스트레이션 ETL — task-DAG를 타입 있는 Operator DAG로 승격 (ADR-0099, 2026-06-18~) ← 작업 중
+> 사용자 지정: 레거시 프로시저형 ETL(`START로그 ▸ DELETE ▸ INSERT…SELECT ▸ END로그` — 순서 있는 SQL 스텝, 대부분 side-effect)이 데이터플로우 graph에 구조적으로 안 맞음. 코어 task-DAG(`depends_on`/`trigger_rule`)와 이번 자유도 트랙(params/retry·timeout/XCom/expand = Airflow TI·XCom 평면)을 재사용해 **"그냥 이 SQL 실행"·"이 프로시저 CALL"을 1급 Operator로** 승격. graph(데이터플로우)는 데이터-파이프라인용으로 유지. **그린필드 대신 기존 task-DAG 승격**(사용자 선택). 설계문 먼저(ADR-0099) → 단계 구현.
+- **P1 — 코어 Operator 모델**:
+  - [ ] `TaskConfig.kind`(기본 `"etl"` = 현행, backward-compat) + `_execute_task`/`_run_task` 디스패치
+  - [ ] `sql` operator — 임의 SQL 문(DDL/DELETE/MERGE) 실행, source/sink 비종속, rows-affected → XCom(`sql_exec` 승격 + `pre_sql` 흡수)
+  - [ ] `proc_call` operator — `CALL 프로시저(args)` 1급 (레거시 로그/배치 프로시저)
+  - [ ] 모든 operator에 params/retry/timeout/expand 균일 적용(단일 초크포인트 재사용 확인) + lint(미지 kind/conn 누락) + 단위 테스트
+- **P2 — UI 빌더 "Operator DAG / 오케스트레이션" 모드**:
+  - [ ] operator 팔레트 + **의존(순서) 엣지**(데이터플로우 graph와 시각·시맨틱 구분) + kind별 properties
+  - [ ] task-DAG safe-exit 카드 해소(이제 빌더에서 직접 편집)
+  - 확정 kind 집합: `etl`(기본)/`sql`/`proc_call` (sql_load는 etl 자동 pushdown으로 흡수)
+- **P3 — 레퍼런스 재구축**: [ ] `BSASTS102` 프로시저를 새 모델로(`proc_call ▸ etl(pre_sql DELETE+INSERT…SELECT) ▸ proc_call`) → test_verti 라이브 검증(적재·BCOLOG701 로그·일자 멱등)
+- **P4 — 수렴(후속)**: [ ] `sql_exec` graph 노드 → `sql` operator 안내, graph-as-operator 통합 검토, 마이그레이션 가이드
+
 ### 10.5 Schedule + Run 모니터링 (← 작업 중, 2026-05-18 Schedule CRUD + Run 상세까지 완료)
 - [x] Run 목록 (Data Table, StatusBadge, 5s polling) — `/w/[slug]/runs`. Row 클릭 시 상세 페이지로 이동.
 - [x] Schedule 목록 — `/w/[slug]/schedules` (across pipelines flattened, cron/mode 표시).

@@ -593,7 +593,7 @@
   - [x] task-DAG safe-exit 카드 해소 — tasks shape → orchestration 모드 자동 편집. live: BSASTS102 operator DAG(sql▸etl▸sql, XCom NOCS) 생성·dry-run·edit 200. (2026-06-18)
   - [x] **P2b** 생성 진입점(생성 다이얼로그 Dataflow/Orchestration 선택 → blankOrchestration) + 노드 라벨 "Step" + glossary. (2026-06-18)
   - 확정 kind 집합: `etl`(기본)/`sql`/`proc_call` (sql_load는 etl 자동 pushdown으로 흡수)
-- **P3 — 레퍼런스 재구축**: [ ] `BSASTS102` 프로시저를 새 모델로(`proc_call ▸ etl(pre_sql DELETE+INSERT…SELECT) ▸ proc_call`) → test_verti 라이브 검증(적재·BCOLOG701 로그·일자 멱등)
+- **P3 — 레퍼런스 재구축**: [x] `BSASTS102`를 operator DAG로(`sql(START log) ▸ etl(pre_sql DELETE+load) ▸ sql(END log)`) → **test_verti 라이브 검증 완료(2026-06-18, IN_CRTR_DD=20260303)**: 2회 실행 succeeded 127/127, `TB_BSASTS102` 127행 멱등(254 아님), BCOLOG701 START(NOCS=0)/END(NOCS=127) 로그 적재, **END NOCS=127이 `{{ xcom.load_mart.records_written }}`로 전달**(operator XCom 실증). data_paths: load_mart=arrow, logs=sql.
 - **P4 — 수렴(후속)**: [ ] `sql_exec` graph 노드 → `sql` operator 안내, graph-as-operator 통합 검토, 마이그레이션 가이드
 
 ### 10.5 Schedule + Run 모니터링 (← 작업 중, 2026-05-18 Schedule CRUD + Run 상세까지 완료)

@@ -23,7 +23,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
@@ -125,11 +125,31 @@ class AssetRepository:
     # ---------- write: column lineage (J2) --------------------------------
 
     async def _asset_by_key(self, workspace_id: UUID, key: AssetKey) -> Asset | None:
-        return (
+        asset = (
             await self._session.execute(
                 select(Asset).where(Asset.workspace_id == workspace_id, Asset.asset_key == str(key))
             )
         ).scalar_one_or_none()
+        if asset is not None:
+            return asset
+        # Case-insensitive fallback (ADR-0099 dogfood): sqlglot lowercases
+        # unquoted identifiers, so a column-lineage upstream key
+        # ``conn/bda_ds.t`` won't exact-match the table-level asset
+        # ``conn/BDA_DS.T`` (uppercase, as written) — the edge would be
+        # silently dropped. Only runs when the exact match fails, so
+        # case-matching callers are unaffected.
+        return (
+            (
+                await self._session.execute(
+                    select(Asset).where(
+                        Asset.workspace_id == workspace_id,
+                        func.lower(Asset.asset_key) == str(key).lower(),
+                    )
+                )
+            )
+            .scalars()
+            .first()
+        )
 
     async def _ensure_column(self, asset_id: UUID, name: str) -> AssetColumn:
         existing = (
@@ -141,6 +161,23 @@ class AssetRepository:
         ).scalar_one_or_none()
         if existing is not None:
             return existing
+        # Case-insensitive fallback — reuse an existing column that differs
+        # only in case (sqlglot-lowercased upstream column vs the real
+        # uppercase one) instead of creating a duplicate.
+        ci = (
+            (
+                await self._session.execute(
+                    select(AssetColumn).where(
+                        AssetColumn.asset_id == asset_id,
+                        func.lower(AssetColumn.name) == name.lower(),
+                    )
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if ci is not None:
+            return ci
         col = AssetColumn(asset_id=asset_id, name=name)
         self._session.add(col)
         await self._session.flush()

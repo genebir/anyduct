@@ -541,6 +541,7 @@ interface TaskJson {
   name: string;
   kind?: string;
   depends_on?: string[];
+  trigger_rule?: string;
   source?: { connection?: string; query?: string; [k: string]: unknown };
   sink?: { connection?: string; [k: string]: unknown } | null;
   sinks?: { connection?: string; [k: string]: unknown }[];
@@ -589,6 +590,9 @@ export function serializeTasksDAG(
     const task: TaskJson = { name: (d.name as string) || n.id };
     const deps = state.edges.filter((e) => e.target === n.id).map((e) => nameOf(e.source));
     if (deps.length) task.depends_on = deps;
+    if (d.trigger_rule && d.trigger_rule !== "all_success") {
+      task.trigger_rule = d.trigger_rule as string;
+    }
     if (op?.connectorType === "sql") {
       task.kind = "sql";
       task.connection = d.connection as string;
@@ -662,6 +666,7 @@ export function deserializeTasksDAG(config: PipelineConfigJson | null): GraphBui
         key_columns: Array.isArray(kc) ? kc.join(",") : kc,
       };
     }
+    if (t.trigger_rule) data.trigger_rule = t.trigger_rule;
     const id = nextId("op");
     nameToId.set(t.name, id);
     nodes.push({ id, operatorId, data, position: { x: 0, y: 0 } });

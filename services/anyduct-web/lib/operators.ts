@@ -1832,6 +1832,26 @@ export const OPERATORS_ORCH: OperatorSpec[] = [
   },
 ];
 
+// Every orchestration step gets a ``trigger_rule`` (Airflow-style): when does
+// it run given its upstream steps' outcomes. ``all_done`` is the key one — an
+// error-log step that must run even when an upstream step failed (ADR-0099).
+const TRIGGER_RULE_FIELD: FieldDef = {
+  key: "trigger_rule",
+  label: "Run when",
+  kind: "select",
+  defaultValue: "all_success",
+  help: "When this step runs given its upstream steps. Use 'all done' for an error-log step.",
+  options: [
+    { label: "All upstream succeeded", value: "all_success" },
+    { label: "All upstream done (even if failed)", value: "all_done" },
+    { label: "Any upstream succeeded", value: "one_success" },
+    { label: "No upstream failed", value: "none_failed" },
+  ],
+};
+for (const s of OPERATORS_ORCH) {
+  s.fields = [...s.fields, TRIGGER_RULE_FIELD];
+}
+
 export const OPERATORS: OperatorSpec[] = [
   ...SOURCES,
   ...TRANSFORMS,

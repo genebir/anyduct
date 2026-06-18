@@ -180,6 +180,19 @@ function describeNode(
       "";
     return target ? `${conn} · ${target}` : conn;
   }
+  if (op.kind === "operator") {
+    // Orchestration step (ADR-0099): the step name is the key identifier
+    // (depends_on references it); pair it with the write/target hint.
+    const name = (values.name as string) || "";
+    const stmt = typeof values.statement === "string" ? values.statement : "";
+    const detail =
+      (values.table as string) ||
+      (values.procedure as string) ||
+      (stmt.length > 28 ? `${stmt.slice(0, 28)}…` : stmt) ||
+      "";
+    if (name && detail) return `${name} · ${detail}`;
+    return name || detail || t("builder.notConfigured");
+  }
   // transform — show first non-empty field as a hint
   const first = op.fields[0]?.key;
   const v = first ? values[first] : undefined;

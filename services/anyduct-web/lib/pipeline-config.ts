@@ -603,10 +603,15 @@ export function serializeTasksDAG(
       task.procedure = d.procedure as string;
       task.args = Array.isArray(d.args) ? (d.args as string[]) : [];
     } else {
-      // etl "Load": one connection used for both source read + sink write.
+      // etl "Load": source read connection, sink write connection (defaults to
+      // the same — in-database INSERT…SELECT; different = cross-DB load).
       const conn = d.connection as string;
+      const sinkConn = (d.sink_connection as string) || conn;
       task.source = { connection: conn, ...(d.query ? { query: d.query as string } : {}) };
-      const sink: Record<string, unknown> = { connection: conn, mode: (d.mode as string) ?? "append" };
+      const sink: Record<string, unknown> = {
+        connection: sinkConn,
+        mode: (d.mode as string) ?? "append",
+      };
       if (d.table) sink.table = d.table;
       if (d.pre_sql) sink.pre_sql = d.pre_sql;
       const kc = (d.key_columns as string | undefined)?.trim();
@@ -656,9 +661,13 @@ export function deserializeTasksDAG(config: PipelineConfigJson | null): GraphBui
       const src = t.source ?? {};
       const snk = t.sink ?? t.sinks?.[0] ?? {};
       const kc = snk.key_columns;
+      const srcConn = src.connection ?? snk.connection;
       data = {
         name: t.name,
-        connection: src.connection ?? snk.connection,
+        connection: srcConn,
+        // Only surface a write connection when it actually differs (keeps the
+        // common same-connection case clean).
+        sink_connection: snk.connection && snk.connection !== srcConn ? snk.connection : undefined,
         query: src.query,
         table: snk.table,
         mode: snk.mode ?? "append",

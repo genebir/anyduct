@@ -1754,8 +1754,14 @@ export const OPERATORS_ORCH: OperatorSpec[] = [
     anyConnection: true,
     fields: [
       { key: "name", label: "Step name", kind: "string", required: true, placeholder: "load_mart" },
-      { key: "connection", label: "Connection", kind: "connection", required: true },
+      { key: "connection", label: "Read connection", kind: "connection", required: true },
       { key: "query", label: "Read (SQL)", kind: "sql", placeholder: "SELECT ... FROM ..." },
+      {
+        key: "sink_connection",
+        label: "Write connection",
+        kind: "connection",
+        help: "Leave empty to write to the same connection (in-database INSERT…SELECT). Set a different one for a cross-DB load.",
+      },
       { key: "table", label: "Write to table", kind: "string", placeholder: "schema.table" },
       {
         key: "mode",

@@ -1854,8 +1854,16 @@ const TRIGGER_RULE_FIELD: FieldDef = {
     { label: "No upstream failed", value: "none_failed" },
   ],
 };
+// Per-step execution timeout (Airflow ``execution_timeout``). Checked at
+// record/chunk boundaries; a slow step fails with TaskTimeoutError.
+const TIMEOUT_FIELD: FieldDef = {
+  key: "timeout_seconds",
+  label: "Timeout (seconds)",
+  kind: "number",
+  help: "Fail this step if it runs longer than this. Empty = no timeout.",
+};
 for (const s of OPERATORS_ORCH) {
-  s.fields = [...s.fields, TRIGGER_RULE_FIELD];
+  s.fields = [...s.fields, TRIGGER_RULE_FIELD, TIMEOUT_FIELD];
 }
 
 export const OPERATORS: OperatorSpec[] = [

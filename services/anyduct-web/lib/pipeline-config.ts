@@ -542,6 +542,7 @@ interface TaskJson {
   kind?: string;
   depends_on?: string[];
   trigger_rule?: string;
+  timeout_seconds?: number;
   source?: { connection?: string; query?: string; [k: string]: unknown };
   sink?: { connection?: string; [k: string]: unknown } | null;
   sinks?: { connection?: string; [k: string]: unknown }[];
@@ -592,6 +593,10 @@ export function serializeTasksDAG(
     if (deps.length) task.depends_on = deps;
     if (d.trigger_rule && d.trigger_rule !== "all_success") {
       task.trigger_rule = d.trigger_rule as string;
+    }
+    const timeout = Number(d.timeout_seconds);
+    if (d.timeout_seconds !== undefined && d.timeout_seconds !== "" && timeout > 0) {
+      task.timeout_seconds = timeout;
     }
     if (op?.connectorType === "sql") {
       task.kind = "sql";
@@ -676,6 +681,9 @@ export function deserializeTasksDAG(config: PipelineConfigJson | null): GraphBui
       };
     }
     if (t.trigger_rule) data.trigger_rule = t.trigger_rule;
+    if (t.timeout_seconds !== undefined && t.timeout_seconds !== null) {
+      data.timeout_seconds = t.timeout_seconds;
+    }
     const id = nextId("op");
     nameToId.set(t.name, id);
     nodes.push({ id, operatorId, data, position: { x: 0, y: 0 } });

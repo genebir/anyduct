@@ -78,7 +78,7 @@ export function PipelineNode({ id, data }: NodeProps) {
           className="!h-2.5 !w-2.5 !rounded-full !border-2 !border-bg !bg-accent"
         />
       ) : null}
-      {op.kind === "source" || op.kind === "transform" ? (
+      {op.kind === "source" || op.kind === "transform" || op.kind === "operator" ? (
         <Handle
           type="source"
           position={Position.Right}

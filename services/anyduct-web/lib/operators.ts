@@ -38,7 +38,11 @@ import {
 // "call" was a linear-builder kind for fire-and-forget pipeline-to-pipeline
 // triggers (ADR-0029). Graph-only mode (2026-05-26) surfaces those in the
 // pipeline settings panel instead, so the operator kind is gone.
-export type OperatorKind = "source" | "transform" | "sink";
+// ``operator`` (ADR-0099): an orchestration step in a Task-DAG pipeline —
+// a Load (etl task), Run SQL (sql), or Call procedure (proc_call). Unlike
+// source/transform/sink (dataflow), operator nodes are ordered by dependency
+// edges and each is a self-contained unit of work.
+export type OperatorKind = "source" | "transform" | "sink" | "operator";
 
 interface FieldBase {
   key: string;
@@ -1733,10 +1737,111 @@ for (const s of SINKS) {
   }
 }
 
-export const OPERATORS: OperatorSpec[] = [...SOURCES, ...TRANSFORMS, ...SINKS];
+// ─── Orchestration operators (ADR-0099) ────────────────────────────────────
+// Task-DAG nodes: a Load (etl), Run SQL (sql), Call procedure (proc_call).
+// Each is one ordered unit of work; dependency edges set the order.
+export const OPERATORS_ORCH: OperatorSpec[] = [
+  {
+    id: "op:load",
+    kind: "operator",
+    connectorType: "etl",
+    label: "Load (ETL)",
+    description:
+      "Read with a SQL query and write to a table — the workhorse load step. " +
+      "Same-connection loads run as INSERT…SELECT inside the database.",
+    icon: DatabaseZapIcon,
+    accent: "#6366F1",
+    anyConnection: true,
+    fields: [
+      { key: "name", label: "Step name", kind: "string", required: true, placeholder: "load_mart" },
+      { key: "connection", label: "Connection", kind: "connection", required: true },
+      { key: "query", label: "Read (SQL)", kind: "sql", placeholder: "SELECT ... FROM ..." },
+      { key: "table", label: "Write to table", kind: "string", placeholder: "schema.table" },
+      {
+        key: "mode",
+        label: "Mode",
+        kind: "select",
+        defaultValue: "append",
+        options: [
+          { label: "Append", value: "append" },
+          { label: "Overwrite", value: "overwrite" },
+          { label: "Upsert", value: "upsert" },
+        ],
+      },
+      {
+        key: "pre_sql",
+        label: "Pre-write SQL (idempotency)",
+        kind: "sql",
+        placeholder: "DELETE FROM schema.table WHERE day = '{{ params.day }}'",
+        help: "Runs before the write — e.g. DELETE the partition this step re-inserts.",
+      },
+      { key: "key_columns", label: "Key columns (upsert)", kind: "string", placeholder: "id" },
+    ],
+  },
+  {
+    id: "op:sql",
+    kind: "operator",
+    connectorType: "sql",
+    label: "Run SQL",
+    description:
+      "Run a SQL statement (DELETE / DDL / MERGE) against a connection. " +
+      "Rows affected are published to XCom as records_written.",
+    icon: TerminalIcon,
+    accent: "#FACC15",
+    anyConnection: true,
+    fields: [
+      { key: "name", label: "Step name", kind: "string", required: true, placeholder: "cleanup" },
+      { key: "connection", label: "Connection", kind: "connection", required: true },
+      {
+        key: "statement",
+        label: "SQL statement",
+        kind: "sql",
+        required: true,
+        placeholder: "DELETE FROM schema.table WHERE day = '{{ params.day }}'",
+      },
+    ],
+  },
+  {
+    id: "op:proc_call",
+    kind: "operator",
+    connectorType: "proc_call",
+    label: "Call procedure",
+    description:
+      "CALL a stored procedure with positional arguments. Arguments are SQL " +
+      "expressions — quote strings yourself; {{ xcom.* }} / {{ params.* }} work.",
+    icon: LayersIcon,
+    accent: "#22D3EE",
+    anyConnection: true,
+    fields: [
+      { key: "name", label: "Step name", kind: "string", required: true, placeholder: "write_log" },
+      { key: "connection", label: "Connection", kind: "connection", required: true },
+      {
+        key: "procedure",
+        label: "Procedure",
+        kind: "string",
+        required: true,
+        placeholder: "SCHEMA.PROC_NAME",
+      },
+      {
+        key: "args",
+        label: "Arguments (JSON array of SQL expressions)",
+        kind: "json",
+        placeholder: '["\'START\'", "{{ xcom.load.records_written }}"]',
+      },
+    ],
+  },
+];
+
+export const OPERATORS: OperatorSpec[] = [
+  ...SOURCES,
+  ...TRANSFORMS,
+  ...SINKS,
+  ...OPERATORS_ORCH,
+];
 
 /** Sub-category within a kind — used to group a long palette (Airflow-style). */
 export function operatorCategory(spec: OperatorSpec): string {
+  if (spec.kind === "operator") return "Steps";
   if (spec.kind === "transform") {
     switch (spec.connectorType) {
       case "filter":
@@ -1773,6 +1878,7 @@ export const OPERATOR_GROUPS: { kind: OperatorKind; label: string; specs: Operat
   { kind: "source", label: "Sources", specs: SOURCES },
   { kind: "transform", label: "Transforms", specs: TRANSFORMS },
   { kind: "sink", label: "Sinks", specs: SINKS },
+  { kind: "operator", label: "Steps", specs: OPERATORS_ORCH },
 ];
 
 /** Operators grouped kind → category → specs, for a collapsible palette. */
@@ -1809,10 +1915,12 @@ export const OPERATOR_KIND_ACCENT: Record<OperatorKind, string> = {
   source: "#6366F1",
   transform: "#FBBF24",
   sink: "#4ADE80",
+  operator: "#22D3EE",
 };
 
 export const KIND_ICON: Record<OperatorKind, ComponentType<LucideProps>> = {
   source: DatabaseIcon,
   transform: WrenchIcon,
   sink: FileTextIcon,
+  operator: LayersIcon,
 };

@@ -92,6 +92,7 @@ const KIND_ORDER: Record<OperatorSpec["kind"], number> = {
   source: 0,
   transform: 1,
   sink: 2,
+  operator: 1,
 };
 
 export function blankBuilder(): BuilderState {
@@ -358,7 +359,11 @@ export type GraphIssueKind =
   | "missing_input"
   | "wrong_fanin"
   | "join_needs_two"
-  | "missing_connection";
+  | "missing_connection"
+  // Orchestration (Operator DAG, ADR-0099)
+  | "missing_name"
+  | "duplicate_name"
+  | "missing_statement";
 
 export interface GraphIssue {
   kind: GraphIssueKind;
@@ -521,6 +526,192 @@ export function serializeGraph(
     out.dlq = dlq;
   }
   return out;
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Orchestration / Operator DAG (ADR-0099)
+
+   A task-DAG pipeline (`tasks: [...]` + `depends_on`) is edited on the SAME
+   canvas as a dataflow graph, but each node is an *operator* (Load / Run SQL /
+   Call procedure) and edges are *ordering* (dependency), not data. Nodes carry
+   a unique ``name``; depends_on is reconstructed from the incoming edges.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+interface TaskJson {
+  name: string;
+  kind?: string;
+  depends_on?: string[];
+  source?: { connection?: string; query?: string; [k: string]: unknown };
+  sink?: { connection?: string; [k: string]: unknown } | null;
+  sinks?: { connection?: string; [k: string]: unknown }[];
+  connection?: string;
+  statements?: string[];
+  procedure?: string;
+  args?: string[];
+  [k: string]: unknown;
+}
+
+export function isTasksConfig(
+  config: PipelineConfigJson | null,
+): config is PipelineConfigJson & { tasks: TaskJson[] } {
+  const t = (config as { tasks?: unknown } | null)?.tasks;
+  return Boolean(config && !isGraphConfig(config) && Array.isArray(t) && t.length > 0);
+}
+
+/** One Load (etl) node to start a new orchestration pipeline. */
+export function blankOrchestration(): GraphBuilderState {
+  const n = makeNode("op:load");
+  return {
+    nodes: [{ id: n.id, operatorId: n.operatorId, data: { ...n.data }, position: { x: 0, y: 80 } }],
+    edges: [],
+  };
+}
+
+export function serializeTasksDAG(
+  state: GraphBuilderState,
+  meta: {
+    name: string;
+    mode?: "batch" | "stream";
+    variables?: Record<string, unknown>;
+    auto_materialize?: boolean;
+    freshness_sla_minutes?: number | null;
+    retry?: RetrySettings;
+    dlq?: DlqSettings;
+  },
+): PipelineConfigJson {
+  const nameOf = (id: string): string => {
+    const n = state.nodes.find((x) => x.id === id);
+    return (n?.data.name as string) || id;
+  };
+  const tasks = state.nodes.map((n) => {
+    const op = findOperator(n.operatorId);
+    const d = n.data;
+    const task: TaskJson = { name: (d.name as string) || n.id };
+    const deps = state.edges.filter((e) => e.target === n.id).map((e) => nameOf(e.source));
+    if (deps.length) task.depends_on = deps;
+    if (op?.connectorType === "sql") {
+      task.kind = "sql";
+      task.connection = d.connection as string;
+      task.statements = d.statement ? [d.statement as string] : [];
+    } else if (op?.connectorType === "proc_call") {
+      task.kind = "proc_call";
+      task.connection = d.connection as string;
+      task.procedure = d.procedure as string;
+      task.args = Array.isArray(d.args) ? (d.args as string[]) : [];
+    } else {
+      // etl "Load": one connection used for both source read + sink write.
+      const conn = d.connection as string;
+      task.source = { connection: conn, ...(d.query ? { query: d.query as string } : {}) };
+      const sink: Record<string, unknown> = { connection: conn, mode: (d.mode as string) ?? "append" };
+      if (d.table) sink.table = d.table;
+      if (d.pre_sql) sink.pre_sql = d.pre_sql;
+      const kc = (d.key_columns as string | undefined)?.trim();
+      if (kc) sink.key_columns = kc.split(",").map((s) => s.trim()).filter(Boolean);
+      task.sink = sink;
+    }
+    return task;
+  });
+  const out: PipelineConfigJson = {
+    name: meta.name,
+    mode: meta.mode ?? "batch",
+    ...(meta.variables && Object.keys(meta.variables).length ? { variables: meta.variables } : {}),
+    ...(meta.auto_materialize ? { auto_materialize: true } : {}),
+    ...(meta.freshness_sla_minutes ? { freshness_sla_minutes: meta.freshness_sla_minutes } : {}),
+    tasks,
+  } as PipelineConfigJson;
+  if (meta.retry?.enabled) {
+    out.retry = {
+      max_attempts: meta.retry.max_attempts,
+      backoff: meta.retry.backoff,
+      initial_delay_seconds: meta.retry.initial_delay_seconds,
+    };
+  }
+  if (meta.dlq?.enabled && meta.dlq.connection) {
+    const dlq: PipelineConfigJson["dlq"] = { connection: meta.dlq.connection, mode: meta.dlq.mode };
+    if (meta.dlq.table) dlq.table = meta.dlq.table;
+    if (meta.dlq.topic) dlq.topic = meta.dlq.topic;
+    out.dlq = dlq;
+  }
+  return out;
+}
+
+export function deserializeTasksDAG(config: PipelineConfigJson | null): GraphBuilderState {
+  const tasks = ((config as { tasks?: TaskJson[] } | null)?.tasks ?? []) as TaskJson[];
+  const nodes: GraphBuilderNode[] = [];
+  const nameToId = new Map<string, string>();
+  for (const t of tasks) {
+    let operatorId = "op:load";
+    let data: Record<string, unknown> = { name: t.name };
+    if (t.kind === "sql") {
+      operatorId = "op:sql";
+      data = { name: t.name, connection: t.connection, statement: (t.statements ?? [])[0] ?? "" };
+    } else if (t.kind === "proc_call") {
+      operatorId = "op:proc_call";
+      data = { name: t.name, connection: t.connection, procedure: t.procedure, args: t.args ?? [] };
+    } else {
+      const src = t.source ?? {};
+      const snk = t.sink ?? t.sinks?.[0] ?? {};
+      const kc = snk.key_columns;
+      data = {
+        name: t.name,
+        connection: src.connection ?? snk.connection,
+        query: src.query,
+        table: snk.table,
+        mode: snk.mode ?? "append",
+        pre_sql: snk.pre_sql,
+        key_columns: Array.isArray(kc) ? kc.join(",") : kc,
+      };
+    }
+    const id = nextId("op");
+    nameToId.set(t.name, id);
+    nodes.push({ id, operatorId, data, position: { x: 0, y: 0 } });
+  }
+  const edges: GraphBuilderEdge[] = [];
+  for (const t of tasks) {
+    const tid = nameToId.get(t.name);
+    if (!tid) continue;
+    for (const dep of t.depends_on ?? []) {
+      const sid = nameToId.get(dep);
+      if (sid) edges.push({ id: nextId("edge"), source: sid, target: tid });
+    }
+  }
+  layoutGraph(nodes, edges);
+  return { nodes, edges };
+}
+
+/** Client-side validation for an Operator DAG: unique non-empty names +
+ *  per-operator required fields. (Acyclicity is enforced by the canvas.) */
+export function validateTasksDAG(state: GraphBuilderState): GraphIssue[] {
+  const issues: GraphIssue[] = [];
+  const seen = new Map<string, number>();
+  for (const n of state.nodes) {
+    const op = findOperator(n.operatorId);
+    const name = (n.data.name as string | undefined)?.trim();
+    const label = op ? op.label : "Step";
+    if (!name) {
+      issues.push({ kind: "missing_name", message: `A "${label}" step needs a name`, nodeId: n.id });
+    } else {
+      seen.set(name, (seen.get(name) ?? 0) + 1);
+    }
+    if (!n.data.connection) {
+      issues.push({ kind: "missing_connection", message: `"${name ?? label}" needs a connection`, nodeId: n.id });
+    }
+    if (op?.connectorType === "sql" && !(n.data.statement as string | undefined)?.trim()) {
+      issues.push({ kind: "missing_statement", message: `"${name ?? label}" needs a SQL statement`, nodeId: n.id });
+    }
+    if (op?.connectorType === "proc_call" && !(n.data.procedure as string | undefined)?.trim()) {
+      issues.push({ kind: "missing_statement", message: `"${name ?? label}" needs a procedure`, nodeId: n.id });
+    }
+  }
+  for (const [name, count] of seen) {
+    if (count > 1) {
+      const dupes = state.nodes.filter((n) => (n.data.name as string)?.trim() === name);
+      for (const n of dupes) {
+        issues.push({ kind: "duplicate_name", message: `Duplicate step name "${name}"`, nodeId: n.id });
+      }
+    }
+  }
+  return issues;
 }
 
 /** Pull policy / behaviour metadata off a stored ``PipelineConfigJson`` so

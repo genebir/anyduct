@@ -1131,6 +1131,15 @@ export const en = {
     "Write records to an S3 (or MinIO) object as parquet / CSV / JSON.",
   "op.sink:kafka.label": "Kafka topic",
   "op.sink:kafka.description": "Stream-sink records to a Kafka topic.",
+  "op.op:load.label": "Load (ETL)",
+  "op.op:load.description":
+    "Read with a SQL query and write to a table. Same-connection loads run as INSERT…SELECT in the database.",
+  "op.op:sql.label": "Run SQL",
+  "op.op:sql.description":
+    "Run a SQL statement (DELETE / DDL / MERGE) against a connection. Rows affected go to XCom.",
+  "op.op:proc_call.label": "Call procedure",
+  "op.op:proc_call.description":
+    "CALL a stored procedure with positional SQL-expression arguments ({{ xcom.* }} / {{ params.* }} work).",
 
   // runs list
   "runs.colReadWritten": "Read / Written",
@@ -2641,6 +2650,15 @@ export const ko: Messages = {
     "S3(또는 MinIO) 객체에 레코드를 parquet / CSV / JSON 으로 기록합니다.",
   "op.sink:kafka.label": "Kafka 토픽",
   "op.sink:kafka.description": "Kafka 토픽에 레코드를 스트림으로 기록합니다.",
+  "op.op:load.label": "적재 (ETL)",
+  "op.op:load.description":
+    "SQL 쿼리로 읽어 테이블에 적재합니다. 같은 커넥션이면 DB 안에서 INSERT…SELECT로 실행됩니다.",
+  "op.op:sql.label": "SQL 실행",
+  "op.op:sql.description":
+    "커넥션에 SQL 문(DELETE / DDL / MERGE)을 실행합니다. 영향 행 수는 XCom으로 전달됩니다.",
+  "op.op:proc_call.label": "프로시저 호출",
+  "op.op:proc_call.description":
+    "저장 프로시저를 위치 인자(SQL 식)로 CALL 합니다 ({{ xcom.* }} / {{ params.* }} 사용 가능).",
 
   "runs.colReadWritten": "읽음 / 기록",
   // Phase ABG (2026-06-01) — 트리거 출처 컬럼

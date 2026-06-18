@@ -53,12 +53,16 @@ import {
   blankGraph,
   deserialize,
   deserializeGraph,
+  deserializeTasksDAG,
   extractPipelineMeta,
   isGraphConfig,
+  isTasksConfig,
   linearToGraph,
   serializeGraph,
+  serializeTasksDAG,
   validateGraph,
   validateGraphStructured,
+  validateTasksDAG,
   DEFAULT_DLQ,
   DEFAULT_RETRY,
   type DlqSettings,
@@ -175,9 +179,9 @@ export default function PipelineEditorPage() {
   // pending.
   const [savedGraphIndex, setSavedGraphIndex] = useState<number | null>(null);
   const [metaDirty, setMetaDirty] = useState(false);
-  // Task-DAG config loaded — the builder can't edit it; render a notice
-  // instead of an empty (and silently destructive-on-save) canvas.
-  const [tasksShape, setTasksShape] = useState(false);
+  // Builder shape (ADR-0099): "dataflow" = graph (records flow along edges),
+  // "orchestration" = Operator DAG (sql/proc_call/load steps, edges = order).
+  const [builderKind, setBuilderKind] = useState<"dataflow" | "orchestration">("dataflow");
   // Phase Q (2026-05-28): backfill dialog state. Same dialog the
   // pipelines list page uses — re-mounting it here lets the user
   // backfill without going back to the list. Disabled below when the
@@ -212,15 +216,11 @@ export default function PipelineEditorPage() {
         // ``setInitial`` resets the undo stack so the load itself is
         // never an undo target — the first thing the user can undo is
         // their first edit, not the network fetch.
-        // Task-DAG (``tasks`` + ``depends_on``) configs are control-flow,
-        // not a dataflow graph — the builder can't represent them, and
-        // deserialize() would fall to a BLANK canvas whose save silently
-        // REPLACES the whole pipeline. Safe-exit instead (the mirror of
-        // the migration form's non-migration-shape guard).
-        const taskList = (cfg as { tasks?: unknown[] } | null)?.tasks;
-        if (cfg && !isGraphConfig(cfg) && Array.isArray(taskList) && taskList.length > 0) {
-          setTasksShape(true);
-          history.setInitial(blankGraph());
+        // Task-DAG (``tasks`` + ``depends_on``) configs are an Operator DAG
+        // (ADR-0099) — edited on the same canvas in orchestration mode.
+        if (isTasksConfig(cfg)) {
+          setBuilderKind("orchestration");
+          history.setInitial(deserializeTasksDAG(cfg));
         } else if (isGraphConfig(cfg)) {
           history.setInitial(deserializeGraph(cfg, conns));
         } else if (cfg) {
@@ -300,8 +300,13 @@ export default function PipelineEditorPage() {
   // Phase L1 audit finding: analysts complained that the previous "first
   // issue only at save" UX let problems pile up invisibly).
   const graphIssues = useMemo<GraphIssue[]>(
-    () => (graphState ? validateGraphStructured(graphState) : []),
-    [graphState],
+    () =>
+      graphState
+        ? builderKind === "orchestration"
+          ? validateTasksDAG(graphState)
+          : validateGraphStructured(graphState)
+        : [],
+    [graphState, builderKind],
   );
   // Banner row click → focus the offending node inside the editor. The
   // ``nonce`` lets the user click the SAME row twice in a row and still
@@ -349,7 +354,7 @@ export default function PipelineEditorPage() {
     }
     setSaving(true);
     try {
-      const config = serializeGraph(graphState, {
+      const meta = {
         name: pipeline.name,
         mode: dataMode,
         variables,
@@ -357,7 +362,11 @@ export default function PipelineEditorPage() {
         freshness_sla_minutes: freshnessSla,
         retry,
         dlq,
-      });
+      };
+      const config =
+        builderKind === "orchestration"
+          ? serializeTasksDAG(graphState, meta)
+          : serializeGraph(graphState, meta);
       const updated = await pipelinesApi.update(ws.id, pipeline.id, { config });
       // Downstream triggers live outside config_json (ADR-0029) — persist
       // them on every save. Best-effort so a pending migration doesn't
@@ -391,6 +400,7 @@ export default function PipelineEditorPage() {
     retry,
     dlq,
     triggers,
+    builderKind,
     t,
   ]);
 
@@ -462,26 +472,6 @@ export default function PipelineEditorPage() {
     />
   );
 
-  if (tasksShape) {
-    return (
-      <>
-        <Header
-          title={pipeline?.name ?? t("builder.title")}
-          subtitle={ws?.name ?? ""}
-        />
-        <div className="mx-auto mt-16 max-w-lg rounded-xl border border-border-subtle bg-surface p-8 text-center shadow-sm">
-          <h2 className="text-base font-semibold text-text">{t("builder.tasksShapeTitle")}</h2>
-          <p className="mt-3 text-sm text-text-secondary">{t("builder.tasksShapeDesc")}</p>
-          <Link
-            href={`/w/${slug}/pipelines`}
-            className="mt-6 inline-flex h-9 cursor-pointer items-center rounded-lg bg-accent px-4 text-sm font-semibold text-on-accent hover:opacity-90"
-          >
-            {t("builder.tasksShapeBack")}
-          </Link>
-        </div>
-      </>
-    );
-  }
 
   return (
     <>
@@ -690,6 +680,7 @@ export default function PipelineEditorPage() {
           state={graphState}
           connections={connections}
           mode={dataMode}
+          builderKind={builderKind}
           onChange={updateGraph}
           workspaceId={ws?.id}
           focusRequest={focusRequest}

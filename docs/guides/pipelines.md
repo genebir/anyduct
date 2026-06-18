@@ -327,6 +327,60 @@ as advisory warnings:
 These are advisory: they show up beside the connector health checks but
 don't block the run.
 
+## Orchestration — Operator DAG (ADR-0099)
+
+A task-DAG can mix typed **operators**, not just `etl` (source→sink) tasks.
+This is the right shape for legacy stored-procedure-style ETL — ordered SQL
+steps with logging — where edges mean *run order* (`depends_on`) and data
+passes between steps via XCom, not along the edges.
+
+`kind` on a task selects the operator (default `etl`):
+
+| `kind` | Does | Fields |
+|--------|------|--------|
+| `etl` (default) | source query → sink table | `source`, `sink`, `transforms` |
+| `sql` | run statement(s) against a connection (DDL / DELETE / MERGE / log INSERT). Rows-affected → XCom `records_written`. | `connection`, `statements: [...]` |
+| `proc_call` | `CALL <procedure>(<args>)` — args are SQL expressions | `connection`, `procedure`, `args: [...]` |
+
+```yaml
+tasks:
+  - name: write_start_log         # a side-effect SQL step
+    kind: sql
+    connection: warehouse
+    statements:
+      - "INSERT INTO ops.batch_log (program, step) VALUES ('mart', 'START')"
+  - name: load_mart               # the actual load (etl, default kind)
+    depends_on: [write_start_log]
+    source: {connection: warehouse, query: "SELECT ... GROUP BY region"}
+    sink:
+      connection: warehouse
+      table: mart.daily
+      mode: append
+      pre_sql: "DELETE FROM mart.daily WHERE day = '{{ params.run_day }}'"
+  - name: write_end_log
+    kind: sql
+    connection: warehouse
+    depends_on: [load_mart]
+    statements:                   # rows-affected straight from the load's XCom
+      - "INSERT INTO ops.batch_log (step, n) VALUES ('END', {{ xcom.load_mart.records_written }})"
+  - name: write_error_log         # runs EVEN IF an upstream step failed
+    kind: sql
+    connection: warehouse
+    depends_on: [load_mart]
+    trigger_rule: all_done
+    statements:
+      - "INSERT INTO ops.batch_log (step) VALUES ('AUDIT')"
+```
+
+Each operator gets the orchestration knobs uniformly: `depends_on` (order),
+`trigger_rule` (`all_success` default; `all_done` for an error-log step),
+per-step `retry` / `timeout_seconds`, and `{{ params.* }}` / `{{ xcom.* }}`
+templating. Catalog lineage tracks every step — a `sql` step's INSERT target
+becomes an output asset; the etl load's source/sink form the table + column
+lineage. The web builder edits this on the same canvas in **orchestration
+mode** (operator palette + dependency edges). Full example:
+[`operator_dag_mart.yaml`](https://github.com/anyduct/etl-plugins/blob/main/examples/operator_dag_mart.yaml).
+
 ## Data paths — pushdown / Arrow / records (ADR-0093/0094)
 
 The runtime picks the cheapest data path per task, automatically, in

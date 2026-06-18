@@ -1171,6 +1171,9 @@ class RunExecutor:
         # considered "executed". For the failure path we still
         # record — the FIRST failing step's prior steps DID run.
         for task in cfg.effective_tasks():
+            # Operator kinds (ADR-0099): sql / proc_call carry no source.
+            if task.source is None:
+                continue
             # Phase W: source SELECT in the linear shape. ``query`` is
             # optional (some sources read by table name only), so
             # check truthy. Same SQL-connection-type filter as the

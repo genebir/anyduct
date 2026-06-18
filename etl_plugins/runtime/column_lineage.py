@@ -85,6 +85,10 @@ def derive_column_lineage(
         _process_graph(cfg.graph, edges, _mark_opaque, schemas)
     else:
         for task in cfg.effective_tasks():
+            # Operator kinds (ADR-0099): sql / proc_call have no source → no
+            # column lineage.
+            if task.source is None:
+                continue
             source_connection = task.source.connection
             sink_keys = [
                 derive_asset_key(s.connection, s.model_dump()) for s in task.effective_sinks()

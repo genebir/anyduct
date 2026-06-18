@@ -98,6 +98,10 @@ def derive_lineage(cfg: PipelineConfig) -> AssetLineage:
                     _add_edge(sk, sink_key)
     else:
         for task in cfg.effective_tasks():
+            # Operator kinds (ADR-0099): sql / proc_call have no source/sink →
+            # no asset lineage.
+            if task.source is None:
+                continue
             src_data = task.source.model_dump()
             primary_in = derive_asset_key(task.source.connection, src_data)
             _add_in(primary_in, asset_kind(src_data))
@@ -142,6 +146,8 @@ def _query_referenced_asset_keys(
     """
     source: SourceConfig | GraphNodeConfig
     if isinstance(source_holder, TaskConfig):
+        if source_holder.source is None:  # operator kinds (ADR-0099)
+            return []
         source = source_holder.source
     else:
         source = source_holder

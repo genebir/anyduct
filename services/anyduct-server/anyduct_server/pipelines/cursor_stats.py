@@ -193,7 +193,7 @@ class CursorStatsService:
         if cfg.source is not None and cfg.source.cursor_column:
             return cfg.source
         for task in cfg.tasks:
-            if task.source.cursor_column:
+            if task.source is not None and task.source.cursor_column:
                 return task.source
         return None
 

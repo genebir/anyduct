@@ -155,6 +155,11 @@ class DlqConfig(BaseModel):
 
 TRIGGER_RULES = frozenset({"all_success", "all_done", "one_success", "none_failed"})
 
+# Operator kinds for a Task-DAG node (ADR-0099). ``etl`` is the historical
+# source→transforms→sink task; ``sql`` / ``proc_call`` are pure orchestration
+# steps (run a statement / call a procedure against a connection, no dataflow).
+OPERATOR_KINDS = frozenset({"etl", "sql", "proc_call"})
+
 
 class BranchRuleConfig(BaseModel):
     """One branch rule (ADR-0028). ``when`` is a sandboxed Python predicate over
@@ -178,10 +183,26 @@ class TaskConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str
-    source: SourceConfig
+    # Operator kind (ADR-0099). ``etl`` (default) is the historical
+    # source→transforms→sink(s) task. ``sql`` / ``proc_call`` are pure
+    # orchestration steps (no dataflow) — see ``OPERATOR_KINDS``.
+    kind: str = "etl"
+    # ``etl`` requires ``source``; ``sql`` / ``proc_call`` leave it None and run
+    # against ``connection`` instead.
+    source: SourceConfig | None = None
     transforms: list[TransformConfig] = Field(default_factory=list)
     sink: SinkConfig | None = None
     sinks: list[SinkConfig] = Field(default_factory=list)
+    # --- sql / proc_call operators (ADR-0099) -------------------------------
+    # Connection the operator runs its statement(s) against.
+    connection: str | None = None
+    # ``sql`` operator: statements run in order, each committed (execute_statement
+    # contract). Total rows-affected is published to XCom as ``records_written``.
+    statements: list[str] = Field(default_factory=list)
+    # ``proc_call`` operator: ``CALL <procedure>(<args>)``. ``args`` are SQL
+    # expressions (string literals are quoted by the caller; ``{{ }}`` templates ok).
+    procedure: str | None = None
+    args: list[str] = Field(default_factory=list)
     # Upstream task names that must complete before this task runs.
     depends_on: list[str] = Field(default_factory=list)
     # When this task runs given its upstream states (see ``TRIGGER_RULES``).
@@ -213,10 +234,31 @@ class TaskConfig(BaseModel):
 
     @model_validator(mode="after")
     def _check_sink(self) -> TaskConfig:
-        if self.sink is not None and self.sinks:
-            raise ValueError(f"task {self.name!r}: specify either 'sink' or 'sinks', not both")
-        if self.sink is None and not self.sinks:
-            raise ValueError(f"task {self.name!r}: needs a 'sink' or non-empty 'sinks'")
+        if self.kind not in OPERATOR_KINDS:
+            raise ValueError(
+                f"task {self.name!r}: unknown kind {self.kind!r} "
+                f"(allowed: {sorted(OPERATOR_KINDS)})"
+            )
+        if self.kind == "etl":
+            if self.source is None:
+                raise ValueError(f"task {self.name!r}: kind 'etl' needs a 'source'")
+            if self.sink is not None and self.sinks:
+                raise ValueError(f"task {self.name!r}: specify either 'sink' or 'sinks', not both")
+            if self.sink is None and not self.sinks:
+                raise ValueError(f"task {self.name!r}: needs a 'sink' or non-empty 'sinks'")
+        else:
+            # sql / proc_call: pure orchestration steps — no dataflow source/sink.
+            if self.source is not None or self.sink is not None or self.sinks:
+                raise ValueError(
+                    f"task {self.name!r}: kind {self.kind!r} takes no source/sink "
+                    "(use 'connection' + statements/procedure)"
+                )
+            if not self.connection:
+                raise ValueError(f"task {self.name!r}: kind {self.kind!r} needs a 'connection'")
+            if self.kind == "sql" and not self.statements:
+                raise ValueError(f"task {self.name!r}: kind 'sql' needs non-empty 'statements'")
+            if self.kind == "proc_call" and not self.procedure:
+                raise ValueError(f"task {self.name!r}: kind 'proc_call' needs a 'procedure'")
         if self.trigger_rule not in TRIGGER_RULES:
             raise ValueError(
                 f"task {self.name!r}: unknown trigger_rule {self.trigger_rule!r} "

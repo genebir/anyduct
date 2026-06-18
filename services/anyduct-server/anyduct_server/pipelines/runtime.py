@@ -79,7 +79,13 @@ def referenced_connection_names(cfg: PipelineConfig) -> list[str]:
                 _add(node.connection)
     else:
         for task in cfg.effective_tasks():
-            _add(task.source.connection)
+            # Operator kinds (ADR-0099): ``sql`` / ``proc_call`` run against
+            # their own ``connection`` and carry no source/sink.
+            if task.kind in ("sql", "proc_call"):
+                _add(task.connection)
+                continue
+            if task.source is not None:
+                _add(task.source.connection)
             for s in task.effective_sinks():
                 _add(s.connection)
             # Pre-load SQL steps (ADR-0035) reference their own connection.

@@ -256,6 +256,8 @@ def _lint_column_mapping_consistency(cfg: PipelineConfig) -> list[LintWarning]:
     has_explicit_tasks = bool(cfg.tasks)
     for task_idx, task in enumerate(cfg.effective_tasks()):
         source = task.source
+        if source is None:  # operator kinds (ADR-0099) — no source/columns
+            continue
         transforms = list(task.transforms)
         mapping = _column_lineage_initial_mapping(source.connection, source.query)
         if mapping is None:
@@ -456,6 +458,8 @@ def _lint_sql_pushdown_ineligible(cfg: PipelineConfig) -> list[LintWarning]:
 
     has_explicit_tasks = bool(cfg.tasks)
     for task_idx, task in enumerate(cfg.effective_tasks()):
+        if task.source is None:  # operator kinds (ADR-0099) — no transforms/source
+            continue
         requested = [
             (tc_idx, tc) for tc_idx, tc in enumerate(task.transforms) if _sql_pushdown_requested(tc)
         ]
@@ -511,8 +515,12 @@ def _task_renderable(task: TaskConfig) -> dict[str, object]:
     sink models is a safe superset — a stray ``{{ map }}`` in any of them would
     likewise never be substituted."""
     return {
-        "source": task.source.model_dump(),
+        "source": task.source.model_dump() if task.source is not None else None,
         "sinks": [s.model_dump() for s in task.effective_sinks()],
+        # Operator kinds (ADR-0099): statements / proc args are also templatable.
+        "statements": list(task.statements),
+        "procedure": task.procedure,
+        "args": list(task.args),
     }
 
 

@@ -339,6 +339,14 @@ class Task:
     # can ``expand`` over it (``{{ xcom.discover.regions }}``). Forces the
     # records data path (pushdown/Arrow never touch Python rows). Empty ⇒ no push.
     push_xcom: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # Operator kind (ADR-0099). ``etl`` (default) = source→transforms→sink(s).
+    # ``sql`` / ``proc_call`` are pure orchestration steps run against
+    # ``op_connection`` — no dataflow, rows-affected published to XCom.
+    kind: str = "etl"
+    op_connection: str | None = None
+    statements: list[str] = field(default_factory=list)  # sql operator
+    procedure: str | None = None  # proc_call operator
+    proc_args: list[str] = field(default_factory=list)  # proc_call operator
     # Dataflow graph (ADR-0030). When ``graph_nodes`` is non-empty the task runs
     # as an operator graph (records flow along edges, branching per-edge ``when``)
     # instead of the flat source→transforms→sinks path.
@@ -896,6 +904,8 @@ class Pipeline:
             return derive_asset_key(conn, sink_fields(spec))
 
         for task in self.tasks:
+            if task.kind in ("sql", "proc_call"):
+                continue  # operator kinds (ADR-0099) — no asset lineage
             if task.graph_nodes:
                 src_keys: list[AssetKey] = []
                 for n in task.graph_nodes:
@@ -1107,6 +1117,11 @@ class Pipeline:
             "sink_options": task.sink_options,
             "sinks": [{"table": s.table, "options": s.options} for s in task.sinks],
             "pre_sql": [a.statement for a in task.pre_sql],
+            # Operator fields (ADR-0099) — e.g. a log step's args reference
+            # ``{{ xcom.load_mart.records_written }}``.
+            "statements": task.statements,
+            "procedure": task.procedure,
+            "proc_args": task.proc_args,
         }
         ctx: dict[str, Any] = {"xcom": self._xcom}
         active = {"xcom"}
@@ -1132,6 +1147,9 @@ class Pipeline:
             sink_options=_r(task.sink_options),
             sinks=new_sinks,
             pre_sql=new_pre_sql,
+            statements=[_r(s) for s in task.statements],
+            procedure=_r(task.procedure),
+            proc_args=[_r(a) for a in task.proc_args],
         )
 
     def _execute_task(
@@ -1175,7 +1193,7 @@ class Pipeline:
         # templatable fields — done *before* the runner so pushdown/Arrow/records
         # all see the concrete value. Cheap no-op when there's nothing to resolve.
         task = self._render_task_xcom(task, map_values=map_values)
-        if cursored and not task.cursor_column:
+        if cursored and task.kind == "etl" and not task.cursor_column:
             raise TaskError(
                 f"Task {task.name or task.source!r}: cursor_column is required "
                 "when Pipeline.run is called with cursor_from/cursor_to."
@@ -1725,6 +1743,45 @@ class Pipeline:
                 )
             conn.execute_statement(action.statement)
 
+    def _run_operator_task(
+        self, task: Task, connectors: dict[str, Connector]
+    ) -> tuple[int, int, CursorValue]:
+        """Run a ``sql`` / ``proc_call`` operator (ADR-0099) — a pure
+        orchestration step against ``op_connection``, no source/sink dataflow.
+
+        Returns ``(0, rows_affected, None)`` so the single chokepoint
+        (``_execute_task``) publishes ``records_written`` to XCom — e.g. a
+        downstream log step reads ``{{ xcom.<this>.records_written }}``.
+        """
+        conn = connectors.get(task.op_connection or "")
+        if conn is None:
+            raise TaskError(
+                f"operator task {task.name or task.kind!r}: no connector for "
+                f"connection {task.op_connection!r}"
+            )
+        if not isinstance(conn, SqlExecutor):
+            raise TaskError(
+                f"operator task {task.name or task.kind!r}: connection "
+                f"{task.op_connection!r} does not support execute_statement "
+                "(must implement SqlExecutor)"
+            )
+        self._task_data_paths[task.name or "task"] = task.kind
+        if task.kind == "proc_call":
+            if not task.procedure:
+                raise TaskError(f"proc_call task {task.name!r}: missing procedure")
+            # Args may be rendered to non-str by a whole-string ``{{ xcom }}``
+            # ref (type-preserving) — ``{{ xcom.load.records_written }}`` → int.
+            stmt = f"CALL {task.procedure}({', '.join(str(a) for a in task.proc_args)})"
+            affected = conn.execute_statement(stmt)
+            return 0, max(affected, 0), None
+        # kind == "sql": run statements in order, each committed; sum rows.
+        total = 0
+        for stmt in task.statements:
+            affected = conn.execute_statement(stmt)
+            if affected > 0:
+                total += affected
+        return 0, total, None
+
     def _run_task(
         self,
         task: Task,
@@ -1732,6 +1789,8 @@ class Pipeline:
         cursor_from: CursorValue = None,
         cursor_to: CursorValue = None,
     ) -> tuple[int, int, CursorValue]:
+        if task.kind in ("sql", "proc_call"):
+            return self._run_operator_task(task, connectors)
         if task.graph_nodes:
             self._task_data_paths[task.name or "task"] = "graph"
             return self._run_graph_task(task, connectors, cursor_from, cursor_to)

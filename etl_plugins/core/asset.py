@@ -47,6 +47,16 @@ _FROM_RE = re.compile(r"\bfrom\s+([A-Za-z0-9_.\"`]+)", re.IGNORECASE)
 
 
 def _table_from_query(query: str) -> str | None:
+    # Prefer the sqlglot-based extractor — the naive ``_FROM_RE`` below grabs
+    # the ``FROM`` inside ``EXTRACT(YEAR FROM TO_DATE(...))`` and similar, which
+    # mis-derives the asset key (ADR-0099 dogfood: a mart's source resolved to
+    # ``TO_DATE``). sqlglot parses the real FROM/JOIN base tables; the regex
+    # stays as a fallback for non-SQL "query" strings (e.g. a Mongo collection).
+    from etl_plugins.core.sql_introspect import extract_referenced_tables
+
+    tables = extract_referenced_tables(query)
+    if tables:
+        return tables[0]
     m = _FROM_RE.search(query)
     if not m:
         return None

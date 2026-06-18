@@ -30,6 +30,7 @@ from etl_plugins.core.asset import (
     asset_kind,
     derive_asset_key,
 )
+from etl_plugins.core.sql_introspect import extract_statement_io
 from etl_plugins.runtime.sql_lineage import extract_referenced_tables
 
 
@@ -98,8 +99,23 @@ def derive_lineage(cfg: PipelineConfig) -> AssetLineage:
                     _add_edge(sk, sink_key)
     else:
         for task in cfg.effective_tasks():
-            # Operator kinds (ADR-0099): sql / proc_call have no source/sink →
-            # no asset lineage.
+            # Operator kinds (ADR-0099). ``sql`` steps run statements — register
+            # the table each one writes (INSERT/MERGE/… target) as an output
+            # asset and any tables it reads as inputs, so e.g. a batch-log step
+            # shows its target in the catalog. ``proc_call`` is opaque (we can't
+            # see inside a stored procedure) — skipped.
+            if task.kind == "sql":
+                for stmt in task.statements:
+                    targets, sources = extract_statement_io(stmt)
+                    in_keys = [derive_asset_key(task.connection, {"table": s}) for s in sources]
+                    for ik in in_keys:
+                        _add_in(ik, "table")
+                    for tgt in targets:
+                        out_key = derive_asset_key(task.connection, {"table": tgt})
+                        _add_out(out_key, "table")
+                        for ik in in_keys:
+                            _add_edge(ik, out_key)
+                continue
             if task.source is None:
                 continue
             src_data = task.source.model_dump()

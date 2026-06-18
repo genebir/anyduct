@@ -551,6 +551,8 @@ interface TaskJson {
   statements?: string[];
   procedure?: string;
   args?: string[];
+  reads?: string[];
+  writes?: string[];
   [k: string]: unknown;
 }
 
@@ -619,6 +621,8 @@ export function serializeTasksDAG(
       task.connection = d.connection as string;
       task.procedure = d.procedure as string;
       task.args = Array.isArray(d.args) ? (d.args as string[]) : [];
+      if (Array.isArray(d.reads) && d.reads.length) task.reads = d.reads as string[];
+      if (Array.isArray(d.writes) && d.writes.length) task.writes = d.writes as string[];
     } else {
       // etl "Load": source read connection, sink write connection (defaults to
       // the same — in-database INSERT…SELECT; different = cross-DB load).
@@ -675,7 +679,14 @@ export function deserializeTasksDAG(config: PipelineConfigJson | null): GraphBui
       data = { name: t.name, connection: t.connection, statement: (t.statements ?? []).join(";\n\n") };
     } else if (t.kind === "proc_call") {
       operatorId = "op:proc_call";
-      data = { name: t.name, connection: t.connection, procedure: t.procedure, args: t.args ?? [] };
+      data = {
+        name: t.name,
+        connection: t.connection,
+        procedure: t.procedure,
+        args: t.args ?? [],
+        reads: t.reads ?? [],
+        writes: t.writes ?? [],
+      };
     } else {
       const src = t.source ?? {};
       const snk = t.sink ?? t.sinks?.[0] ?? {};

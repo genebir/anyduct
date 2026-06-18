@@ -203,6 +203,12 @@ class TaskConfig(BaseModel):
     # expressions (string literals are quoted by the caller; ``{{ }}`` templates ok).
     procedure: str | None = None
     args: list[str] = Field(default_factory=list)
+    # proc_call lineage declaration (ADR-0099). A stored procedure is opaque —
+    # we can't see what it touches. Declaring the tables it ``reads`` / ``writes``
+    # lets the catalog register them as input / output assets (Airflow-style
+    # inlets/outlets). Optional; empty ⇒ the proc contributes no lineage.
+    reads: list[str] = Field(default_factory=list)
+    writes: list[str] = Field(default_factory=list)
     # Upstream task names that must complete before this task runs.
     depends_on: list[str] = Field(default_factory=list)
     # When this task runs given its upstream states (see ``TRIGGER_RULES``).

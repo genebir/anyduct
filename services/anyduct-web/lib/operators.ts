@@ -1835,6 +1835,19 @@ export const OPERATORS_ORCH: OperatorSpec[] = [
         kind: "json",
         placeholder: '["\'START\'", "{{ xcom.load.records_written }}"]',
       },
+      {
+        key: "reads",
+        label: "Reads tables (JSON array, for lineage)",
+        kind: "json",
+        help: "A stored procedure is opaque — declare the tables it reads so the catalog shows them as inputs.",
+        placeholder: '["stg.orders"]',
+      },
+      {
+        key: "writes",
+        label: "Writes tables (JSON array, for lineage)",
+        kind: "json",
+        placeholder: '["mart.daily"]',
+      },
     ],
   },
 ];

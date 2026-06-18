@@ -108,3 +108,51 @@ def test_proc_call_is_opaque_no_lineage() -> None:
     lin = derive_lineage(cfg)
     # proc_call contributes nothing; only the etl load's assets show.
     assert {str(k) for k in lin.outputs} == {"wh/mart.t"}
+
+
+def test_proc_call_declared_lineage() -> None:
+    """ADR-0099: proc_call is opaque, but declared reads/writes register in
+    the catalog (Airflow-style inlets/outlets)."""
+    cfg = PipelineConfig.model_validate(
+        {
+            "name": "p",
+            "tasks": [
+                {
+                    "name": "run_proc",
+                    "kind": "proc_call",
+                    "connection": "wh",
+                    "procedure": "ops.daily_rollup",
+                    "reads": ["stg.orders", "stg.customers"],
+                    "writes": ["mart.daily"],
+                }
+            ],
+        }
+    )
+    lin = derive_lineage(cfg)
+    inp = {str(k) for k in lin.inputs}
+    out = {str(k) for k in lin.outputs}
+    assert inp == {"wh/stg.orders", "wh/stg.customers"}
+    assert out == {"wh/mart.daily"}
+    edges = {(str(e.upstream), str(e.downstream)) for e in lin.edges}
+    assert ("wh/stg.orders", "wh/mart.daily") in edges
+    assert ("wh/stg.customers", "wh/mart.daily") in edges
+
+
+def test_proc_call_no_declaration_is_opaque() -> None:
+    cfg = PipelineConfig.model_validate(
+        {
+            "name": "p",
+            "tasks": [
+                {"name": "p1", "kind": "proc_call", "connection": "wh", "procedure": "x.y"},
+                {
+                    "name": "load",
+                    "depends_on": ["p1"],
+                    "source": {"connection": "wh", "query": "SELECT a FROM stg.s"},
+                    "sink": {"connection": "wh", "table": "mart.t"},
+                },
+            ],
+        }
+    )
+    lin = derive_lineage(cfg)
+    # undeclared proc contributes nothing.
+    assert {str(k) for k in lin.outputs} == {"wh/mart.t"}

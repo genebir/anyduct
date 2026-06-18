@@ -347,6 +347,9 @@ class Task:
     statements: list[str] = field(default_factory=list)  # sql operator
     procedure: str | None = None  # proc_call operator
     proc_args: list[str] = field(default_factory=list)  # proc_call operator
+    # proc_call declared lineage (ADR-0099): tables the procedure reads/writes.
+    proc_reads: list[str] = field(default_factory=list)
+    proc_writes: list[str] = field(default_factory=list)
     # Dataflow graph (ADR-0030). When ``graph_nodes`` is non-empty the task runs
     # as an operator graph (records flow along edges, branching per-edge ``when``)
     # instead of the flat source→transforms→sinks path.

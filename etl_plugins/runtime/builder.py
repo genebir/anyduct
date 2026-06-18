@@ -124,6 +124,8 @@ def _build_task(
             statements=list(task_cfg.statements),
             procedure=task_cfg.procedure,
             proc_args=list(task_cfg.args),
+            proc_reads=list(task_cfg.reads),
+            proc_writes=list(task_cfg.writes),
             depends_on=list(task_cfg.depends_on),
             trigger_rule=task_cfg.trigger_rule,
             retry=task_cfg.retry,

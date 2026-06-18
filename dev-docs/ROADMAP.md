@@ -594,7 +594,7 @@
   - [x] **P2b** 생성 진입점(생성 다이얼로그 Dataflow/Orchestration 선택 → blankOrchestration) + 노드 라벨 "Step" + glossary. (2026-06-18)
   - 확정 kind 집합: `etl`(기본)/`sql`/`proc_call` (sql_load는 etl 자동 pushdown으로 흡수)
 - **P3 — 레퍼런스 재구축**: [x] `BSASTS102`를 operator DAG로(`sql(START log) ▸ etl(pre_sql DELETE+load) ▸ sql(END log)`) → **test_verti 라이브 검증 완료(2026-06-18, IN_CRTR_DD=20260303)**: 2회 실행 succeeded 127/127, `TB_BSASTS102` 127행 멱등(254 아님), BCOLOG701 START(NOCS=0)/END(NOCS=127) 로그 적재, **END NOCS=127이 `{{ xcom.load_mart.records_written }}`로 전달**(operator XCom 실증). data_paths: load_mart=arrow, logs=sql.
-- **카탈로그 — operator DAG 리니지** ✅ (2026-06-18): `sql` operator의 statement write 타깃(INSERT/MERGE/…)을 출력 자산으로 등록(`extract_statement_io`) → 배치로그 스텝의 BCOLOG701이 카탈로그 노출. **EXTRACT(YEAR FROM TO_DATE(...)) 키 오추출 버그 수정**(naive FROM 정규식 → sqlglot 우선, 전 파이프라인 리니지 정확도↑). live: BSASTS102 재실행 → BCOLOG701 자산+materialization, TB_BSASTS102 edges 정상(TO_DATE 잔재 정리). 단위 +8.
+- **카탈로그 — operator DAG 리니지** ✅ (2026-06-18): ① `sql` operator의 statement write 타깃(INSERT/MERGE/…)을 출력 자산으로 등록(`extract_statement_io`) → BCOLOG701 카탈로그 노출. ② **EXTRACT(YEAR FROM TO_DATE(...)) 키 오추출 수정**(naive FROM 정규식 → sqlglot 우선). ③ **컬럼 리니지 대소문자 불일치 수정**(sqlglot 소문자화 업스트림 키가 대문자 자산과 exact-match 실패 → 엣지 전손실; `_asset_by_key`/`_ensure_column` case-무관 fallback). live: BSASTS102 재실행 → BCOLOG701 자산+materialization, TB_BSASTS102 테이블 edges 정상(TO_DATE 정리) + **컬럼 엣지 0→7**(마트 컬럼 ← DS 원본 컬럼). 단위 +8.
 - **P4 — 수렴(후속)**: [ ] `sql_exec` graph 노드 → `sql` operator 안내, graph-as-operator 통합 검토, 마이그레이션 가이드 / proc_call 컬럼-레벨 리니지(현재 opaque)
 
 ### 10.5 Schedule + Run 모니터링 (← 작업 중, 2026-05-18 Schedule CRUD + Run 상세까지 완료)

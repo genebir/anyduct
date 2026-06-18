@@ -725,3 +725,33 @@ def test_single_task_shape_emits_no_deferred_warnings() -> None:
     rule is task-DAG only and must not fire here."""
     cfg = _cfg(source={"connection": "wh", "query": "SELECT * WHERE r = '{{ map.region }}'"})
     assert _codes(cfg, "map_", "xcom_") == []
+
+
+def test_proc_call_without_lineage_decl_warns() -> None:
+    cfg = PipelineConfig.model_validate(
+        {
+            "name": "p",
+            "tasks": [{"name": "p1", "kind": "proc_call", "connection": "wh", "procedure": "x.y"}],
+        }
+    )
+    codes = [w.code for w in lint_pipeline(cfg)]
+    assert "proc_call_lineage_recommended" in codes
+
+
+def test_proc_call_with_lineage_decl_clean() -> None:
+    cfg = PipelineConfig.model_validate(
+        {
+            "name": "p",
+            "tasks": [
+                {
+                    "name": "p1",
+                    "kind": "proc_call",
+                    "connection": "wh",
+                    "procedure": "x.y",
+                    "writes": ["mart.t"],
+                }
+            ],
+        }
+    )
+    codes = [w.code for w in lint_pipeline(cfg)]
+    assert "proc_call_lineage_recommended" not in codes

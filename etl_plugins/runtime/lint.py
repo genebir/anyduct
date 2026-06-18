@@ -124,7 +124,35 @@ def lint_pipeline(cfg: PipelineConfig) -> list[LintWarning]:
     # ConfigError). Surface it statically so the typo shows up at dry-run.
     warnings.extend(_lint_deferred_template_refs(cfg))
 
+    # ADR-0099: a ``proc_call`` step is opaque — without a declared
+    # ``reads``/``writes`` it contributes nothing to the catalog. Nudge the
+    # user to annotate it so the lineage graph isn't silently missing the
+    # tables a stored procedure touches.
+    warnings.extend(_lint_proc_call_lineage(cfg))
+
     return warnings
+
+
+def _lint_proc_call_lineage(cfg: PipelineConfig) -> list[LintWarning]:
+    """Advisory: a ``proc_call`` task with neither ``reads`` nor ``writes``
+    declared is invisible to the catalog (the procedure body is opaque)."""
+    out: list[LintWarning] = []
+    if not cfg.tasks:
+        return out
+    for idx, task in enumerate(cfg.tasks):
+        if task.kind == "proc_call" and not task.reads and not task.writes:
+            out.append(
+                LintWarning(
+                    code="proc_call_lineage_recommended",
+                    message=(
+                        f"proc_call step {task.name!r} declares no reads/writes, so "
+                        "the procedure's tables won't appear in the catalog. Add "
+                        "'reads'/'writes' (the tables it touches) for lineage."
+                    ),
+                    location=f"tasks.{idx}",
+                )
+            )
+    return out
 
 
 def _has_per_record_code_transform(cfg: PipelineConfig) -> bool:

@@ -589,8 +589,9 @@
   - [ ] `proc_call` operator — `CALL 프로시저(args)` 1급 (레거시 로그/배치 프로시저)
   - [ ] 모든 operator에 params/retry/timeout/expand 균일 적용(단일 초크포인트 재사용 확인) + lint(미지 kind/conn 누락) + 단위 테스트
 - **P2 — UI 빌더 "Operator DAG / 오케스트레이션" 모드**:
-  - [ ] operator 팔레트 + **의존(순서) 엣지**(데이터플로우 graph와 시각·시맨틱 구분) + kind별 properties
-  - [ ] task-DAG safe-exit 카드 해소(이제 빌더에서 직접 편집)
+  - [x] operator 팔레트(op:load/op:sql/op:proc_call) + **의존(순서) 엣지**("then" 라벨, 다중 fan-in 허용) + kind별 properties. 캔버스 재사용(operator 노드 양쪽 핸들). tasks shape serialize/deserialize/validate. (2026-06-18)
+  - [x] task-DAG safe-exit 카드 해소 — tasks shape → orchestration 모드 자동 편집. live: BSASTS102 operator DAG(sql▸etl▸sql, XCom NOCS) 생성·dry-run·edit 200. (2026-06-18)
+  - [x] **P2b** 생성 진입점(생성 다이얼로그 Dataflow/Orchestration 선택 → blankOrchestration) + 노드 라벨 "Step" + glossary. (2026-06-18)
   - 확정 kind 집합: `etl`(기본)/`sql`/`proc_call` (sql_load는 etl 자동 pushdown으로 흡수)
 - **P3 — 레퍼런스 재구축**: [ ] `BSASTS102` 프로시저를 새 모델로(`proc_call ▸ etl(pre_sql DELETE+INSERT…SELECT) ▸ proc_call`) → test_verti 라이브 검증(적재·BCOLOG701 로그·일자 멱등)
 - **P4 — 수렴(후속)**: [ ] `sql_exec` graph 노드 → `sql` operator 안내, graph-as-operator 통합 검토, 마이그레이션 가이드

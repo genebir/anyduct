@@ -1862,8 +1862,17 @@ const TIMEOUT_FIELD: FieldDef = {
   kind: "number",
   help: "Fail this step if it runs longer than this. Empty = no timeout.",
 };
+// Per-step retry override (Airflow per-task ``retries``). Empty = inherit the
+// pipeline-level retry policy. Exponential backoff with a 5s base is assumed;
+// the full policy lives in pipeline settings.
+const RETRY_FIELD: FieldDef = {
+  key: "retry_max_attempts",
+  label: "Retries (max attempts)",
+  kind: "number",
+  help: "Retry this step on failure (exponential backoff). Empty = use the pipeline default.",
+};
 for (const s of OPERATORS_ORCH) {
-  s.fields = [...s.fields, TRIGGER_RULE_FIELD, TIMEOUT_FIELD];
+  s.fields = [...s.fields, TRIGGER_RULE_FIELD, RETRY_FIELD, TIMEOUT_FIELD];
 }
 
 export const OPERATORS: OperatorSpec[] = [

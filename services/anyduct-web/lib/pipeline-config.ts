@@ -543,6 +543,7 @@ interface TaskJson {
   depends_on?: string[];
   trigger_rule?: string;
   timeout_seconds?: number;
+  retry?: { max_attempts: number; backoff: string; initial_delay_seconds: number };
   source?: { connection?: string; query?: string; [k: string]: unknown };
   sink?: { connection?: string; [k: string]: unknown } | null;
   sinks?: { connection?: string; [k: string]: unknown }[];
@@ -597,6 +598,10 @@ export function serializeTasksDAG(
     const timeout = Number(d.timeout_seconds);
     if (d.timeout_seconds !== undefined && d.timeout_seconds !== "" && timeout > 0) {
       task.timeout_seconds = timeout;
+    }
+    const attempts = Number(d.retry_max_attempts);
+    if (d.retry_max_attempts !== undefined && d.retry_max_attempts !== "" && attempts > 1) {
+      task.retry = { max_attempts: attempts, backoff: "exponential", initial_delay_seconds: 5 };
     }
     if (op?.connectorType === "sql") {
       task.kind = "sql";
@@ -684,6 +689,7 @@ export function deserializeTasksDAG(config: PipelineConfigJson | null): GraphBui
     if (t.timeout_seconds !== undefined && t.timeout_seconds !== null) {
       data.timeout_seconds = t.timeout_seconds;
     }
+    if (t.retry?.max_attempts) data.retry_max_attempts = t.retry.max_attempts;
     const id = nextId("op");
     nameToId.set(t.name, id);
     nodes.push({ id, operatorId, data, position: { x: 0, y: 0 } });

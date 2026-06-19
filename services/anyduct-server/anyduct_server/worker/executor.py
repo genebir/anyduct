@@ -524,17 +524,32 @@ class RunExecutor:
         try:
             rows = await NodeRunRepository().create_for_run(session, run_id, specs)
             now = datetime.now(UTC)
+            task_records = result.task_records or {}
+            mapped = result.mapped_instances or {}
             for row in rows:
                 state = result.task_states.get(row.node_id) or ""
                 row.status = _TASK_STATE_TO_RUN_STATUS.get(state, RunStatus.SUCCEEDED)
                 row.finished_at = now
-                row.records_written = 0
+                # Per-step record counts (ADR-0099 monitoring) — the DAG view's
+                # "R/W" per node, not just the run-level total. Absent for a
+                # skipped/upstream-failed step (it never ran) → stays 0.
+                read, written = task_records.get(row.node_id, (0, 0))
+                row.records_read = read
+                row.records_written = written
+                rj: dict[str, Any] = {}
                 # The RunStatus enum has no SKIPPED — both branch-deselected
                 # ("skipped") and upstream-failure-skipped ("upstream_failed")
                 # collapse to CANCELLED. Stash the original task state so the UI
                 # can label them distinctly without an enum/migration change.
                 if state:
-                    row.result_json = {"task_state": state}
+                    rj["task_state"] = state
+                # Dynamic-mapping fan-out (ADR-0098): a mapped task is one
+                # aggregated node_run, so stash the per-instance breakdown
+                # ("region=eu failed") that the single row otherwise hides.
+                if row.node_id in mapped:
+                    rj["mapped_instances"] = mapped[row.node_id]
+                if rj:
+                    row.result_json = rj
             await session.flush()
         except Exception as e:  # pragma: no cover - defensive
             log.warning("run.task_node_runs_failed", error_class=type(e).__name__, error=str(e))

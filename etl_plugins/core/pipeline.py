@@ -440,6 +440,17 @@ class RunResult:
     # engine). Operators read this off the run to answer "why was this
     # fast/slow" without spelunking logs.
     data_paths: dict[str, str] = field(default_factory=dict)
+    # Per-task record counts (ADR-0099 monitoring, 2026-06-19): task name →
+    # (records_read, records_written). Empty for non-DAG runs. Lets the worker
+    # populate each node_run's counts (the DAG view's "R/W" per step) instead of
+    # only the run-level total. A mapped task records the summed counts.
+    task_records: dict[str, tuple[int, int]] = field(default_factory=dict)
+    # Per-instance outcomes of dynamically-mapped tasks (ADR-0098 ``expand``):
+    # task name → list of one dict per fan-out instance with ``map_values`` +
+    # ``records_read``/``records_written``/``success``/``error_class``. Empty
+    # unless a task fanned out. Surfaces "instance region=eu failed" in the UI,
+    # which the single aggregated node_run otherwise hides.
+    mapped_instances: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
 
 
 def _project_columns_through_transforms(source_columns: list[Any], task: Task) -> list[Any]:
@@ -1310,6 +1321,7 @@ class Pipeline:
         total_read = 0
         total_written = 0
         first_error: BaseException | None = None
+        instance_results: list[dict[str, Any]] = []
         for inst in instances:
             try:
                 read, written = self._execute_task(
@@ -1328,10 +1340,30 @@ class Pipeline:
                 )
                 total_read += read
                 total_written += written
+                instance_results.append(
+                    {
+                        "map_values": dict(inst),
+                        "records_read": read,
+                        "records_written": written,
+                        "success": True,
+                        "error_class": None,
+                    }
+                )
             except Exception as exc:
+                instance_results.append(
+                    {
+                        "map_values": dict(inst),
+                        "records_read": 0,
+                        "records_written": 0,
+                        "success": False,
+                        "error_class": type(exc).__name__,
+                    }
+                )
                 if first_error is None:
                     first_error = exc
         if task.name:
+            result.mapped_instances[task.name] = instance_results
+            result.task_records[task.name] = (total_read, total_written)
             self._xcom[task.name] = {
                 "records_read": total_read,
                 "records_written": total_written,
@@ -1401,6 +1433,8 @@ class Pipeline:
                     task_runner=task_runner,
                 )
                 states[name] = TASK_SUCCESS
+                if name:
+                    result.task_records[name] = (read, written)
                 if task.branch:
                     selected = set(self._branch_select(task, read=read, written=written))
                     for child in downstream.get(name, set()) - selected:

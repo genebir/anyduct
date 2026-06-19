@@ -218,3 +218,28 @@ def test_builder_forwards_literal_expand() -> None:
     )
     pipeline, _ = build_pipeline(pc, {"s": InMemoryBatchSource(), "k": InMemoryBatchSink()})
     assert pipeline.tasks[0].expand == {"r": ["a", "b"]}
+
+
+def test_expand_records_per_instance_outcomes_and_task_records() -> None:
+    """``result.mapped_instances`` carries one entry per fan-out instance (with
+    its map_values + records + success), and ``result.task_records`` carries the
+    summed counts — both feed per-step run monitoring (ADR-0099, 2026-06-19)."""
+    sb = _CaptureSource([Record(data={"i": 1}), Record(data={"i": 2})])
+    kb = InMemoryBatchSink()
+    task = Task(
+        name="load",
+        source="sb",
+        query="region={{ map.region }}",
+        sink="kb",
+        expand={"region": ["kr", "us", "jp"]},
+    )
+    p = Pipeline("p").add(task)
+    _connect(sb, kb)
+    result = p.run(connectors={"sb": sb, "kb": kb})
+
+    insts = result.mapped_instances["load"]
+    assert [i["map_values"]["region"] for i in insts] == ["kr", "us", "jp"]
+    assert all(i["success"] is True for i in insts)
+    assert all(i["records_written"] == 2 for i in insts)
+    # Summed per-task counts (3 instances x 2 records).
+    assert result.task_records["load"] == (6, 6)

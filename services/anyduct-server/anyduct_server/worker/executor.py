@@ -526,6 +526,7 @@ class RunExecutor:
             now = datetime.now(UTC)
             task_records = result.task_records or {}
             mapped = result.mapped_instances or {}
+            task_errors = result.task_errors or {}
             for row in rows:
                 state = result.task_states.get(row.node_id) or ""
                 row.status = _TASK_STATE_TO_RUN_STATUS.get(state, RunStatus.SUCCEEDED)
@@ -536,6 +537,10 @@ class RunExecutor:
                 read, written = task_records.get(row.node_id, (0, 0))
                 row.records_read = read
                 row.records_written = written
+                # Per-step error so the DAG view shows *which* step broke and why.
+                err = task_errors.get(row.node_id)
+                if err is not None:
+                    row.error_class, row.error_message = err
                 rj: dict[str, Any] = {}
                 # The RunStatus enum has no SKIPPED — both branch-deselected
                 # ("skipped") and upstream-failure-skipped ("upstream_failed")

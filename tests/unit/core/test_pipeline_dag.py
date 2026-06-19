@@ -192,6 +192,29 @@ def test_failed_task_states_recorded() -> None:
     assert captured == {"a": TASK_FAILED, "b": TASK_UPSTREAM_FAILED}
 
 
+def test_failed_task_error_and_records_captured() -> None:
+    """A failed DAG task records its error in ``result.task_errors`` and each
+    succeeded task records its counts in ``result.task_records`` — both feed the
+    per-step DAG monitoring view (ADR-0099, 2026-06-19)."""
+    p = Pipeline("p")
+    p.add(_t("root", "ok"))
+    p.add(_t("bad", "bad", depends_on=["root"]))
+    captured: dict[str, object] = {}
+    p.on(
+        "post_run",
+        lambda ctx, res: captured.update(
+            task_errors=dict(res.task_errors), task_records=dict(res.task_records)
+        ),
+    )
+    with pytest.raises(RuntimeError):
+        p.run(connectors={"src": _src(3), "ok": InMemoryBatchSink(), "bad": _FailingSink()})
+    errors = captured["task_errors"]
+    assert "bad" in errors  # type: ignore[operator]
+    assert errors["bad"][0]  # error_class is a non-empty string  # type: ignore[index]
+    # The successful root recorded its (read, written) counts.
+    assert captured["task_records"]["root"][0] == 3  # type: ignore[index]
+
+
 def test_independent_branch_runs_after_sibling_fails() -> None:
     ok_sink, b = InMemoryBatchSink(), InMemoryBatchSink()
     # A DAG with a shared root and two independent children; one fails, the

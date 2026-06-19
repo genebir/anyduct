@@ -451,6 +451,11 @@ class RunResult:
     # unless a task fanned out. Surfaces "instance region=eu failed" in the UI,
     # which the single aggregated node_run otherwise hides.
     mapped_instances: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    # Per-task error for failed DAG tasks (ADR-0099 monitoring): task name →
+    # (error_class, error_message). Lets the worker fill each failed node_run's
+    # error so the DAG view shows *which* step broke and why — not just the
+    # run-level first error. Empty for non-DAG runs / all-success runs.
+    task_errors: dict[str, tuple[str, str]] = field(default_factory=dict)
 
 
 def _project_columns_through_transforms(source_columns: list[Any], task: Task) -> list[Any]:
@@ -1441,6 +1446,8 @@ class Pipeline:
                         deselected.add(child)
             except Exception as exc:
                 states[name] = TASK_FAILED
+                if name:
+                    result.task_errors[name] = (type(exc).__name__, str(exc))
                 metrics.counter(ERRORS_TOTAL).add(1, {**attrs, "phase": "run"})
                 if first_error is None:
                     first_error = exc

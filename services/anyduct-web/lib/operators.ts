@@ -1901,8 +1901,31 @@ const BRANCH_FIELD: FieldDef = {
   placeholder:
     '[{"when": "records_written > 0", "to": ["load_mart"]}, {"when": null, "to": ["log_empty"]}]',
 };
+// Dynamic task mapping (Airflow ``.expand()``, ADR-0098). When set, this step
+// fans out into one instance per list element — e.g. one load per region. Each
+// instance exposes ``{{ map.<key> }}`` in its query / statement / args. The list
+// can be a literal, a per-run param (``{{ params.regions }}``), or an upstream
+// XCom list (``{{ xcom.discover.items }}``). Advanced — empty for a single run.
+const EXPAND_FIELD: FieldDef = {
+  key: "expand",
+  label: "Fan-out (dynamic mapping)",
+  kind: "json",
+  help:
+    "Run this step once per list element. Object of {key: list}: each instance " +
+    "exposes {{ map.<key> }} in its query/statement/args. The list may be a " +
+    "literal, {{ params.x }}, or an upstream {{ xcom.<task>.<key> }}. Multiple " +
+    "keys = cross product. Empty = run once.",
+  placeholder: '{"region": ["us", "eu", "apac"]}',
+};
 for (const s of OPERATORS_ORCH) {
-  s.fields = [...s.fields, TRIGGER_RULE_FIELD, RETRY_FIELD, TIMEOUT_FIELD, BRANCH_FIELD];
+  s.fields = [
+    ...s.fields,
+    TRIGGER_RULE_FIELD,
+    RETRY_FIELD,
+    TIMEOUT_FIELD,
+    BRANCH_FIELD,
+    EXPAND_FIELD,
+  ];
 }
 
 export const OPERATORS: OperatorSpec[] = [

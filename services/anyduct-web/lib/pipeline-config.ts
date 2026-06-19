@@ -546,6 +546,7 @@ interface TaskJson {
   timeout_seconds?: number;
   retry?: { max_attempts: number; backoff: string; initial_delay_seconds: number };
   branch?: { when: string | null; to: string[] }[];
+  expand?: Record<string, unknown>;
   source?: { connection?: string; query?: string; [k: string]: unknown };
   sink?: { connection?: string; [k: string]: unknown } | null;
   sinks?: { connection?: string; [k: string]: unknown }[];
@@ -612,6 +613,16 @@ export function serializeTasksDAG(
     // renderer stores it as a parsed array on node data.
     if (Array.isArray(d.branch) && d.branch.length) {
       task.branch = d.branch as { when: string | null; to: string[] }[];
+    }
+    // Dynamic task mapping (ADR-0098) — a JSON object {key: list}. Non-empty
+    // fans this step out into one instance per element (cross product over keys).
+    if (
+      d.expand &&
+      typeof d.expand === "object" &&
+      !Array.isArray(d.expand) &&
+      Object.keys(d.expand as object).length
+    ) {
+      task.expand = d.expand as Record<string, unknown>;
     }
     if (op?.connectorType === "sql") {
       task.kind = "sql";
@@ -719,6 +730,7 @@ export function deserializeTasksDAG(config: PipelineConfigJson | null): GraphBui
     }
     if (t.retry?.max_attempts) data.retry_max_attempts = t.retry.max_attempts;
     if (Array.isArray(t.branch) && t.branch.length) data.branch = t.branch;
+    if (t.expand && Object.keys(t.expand).length) data.expand = t.expand;
     const id = nextId("op");
     nameToId.set(t.name, id);
     nodes.push({ id, operatorId, data, position: { x: 0, y: 0 } });

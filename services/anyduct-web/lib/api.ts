@@ -618,6 +618,11 @@ export interface NodeRunEntry {
   error_class: string | null;
   error_message: string | null;
   output_ref: string | null;
+  /** Free-form per-node result. For Task-DAG runs (ADR-0099) carries
+   * ``{ task_state: "skipped" | "upstream_failed" | ... }`` so a
+   * branch-deselected node is distinguishable from an upstream-failure skip
+   * (both render as ``cancelled`` in the RunStatus enum). */
+  result_json?: { task_state?: string } & Record<string, unknown>;
 }
 
 export const runsApi = {

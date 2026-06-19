@@ -529,6 +529,12 @@ class RunExecutor:
                 row.status = _TASK_STATE_TO_RUN_STATUS.get(state, RunStatus.SUCCEEDED)
                 row.finished_at = now
                 row.records_written = 0
+                # The RunStatus enum has no SKIPPED — both branch-deselected
+                # ("skipped") and upstream-failure-skipped ("upstream_failed")
+                # collapse to CANCELLED. Stash the original task state so the UI
+                # can label them distinctly without an enum/migration change.
+                if state:
+                    row.result_json = {"task_state": state}
             await session.flush()
         except Exception as e:  # pragma: no cover - defensive
             log.warning("run.task_node_runs_failed", error_class=type(e).__name__, error=str(e))

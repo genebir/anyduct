@@ -55,6 +55,20 @@ const STATUS_TEXT: Record<StatusKey, string> = {
   cancelled: "text-text-muted",
 };
 
+/** Display label for a node's status. A Task-DAG run (ADR-0099) has no SKIPPED
+ *  enum, so a branch-deselected node and an upstream-failure skip both arrive as
+ *  ``cancelled``. ``result_json.task_state`` preserves which it was — surface it
+ *  so an engineer reading the DAG can tell "deliberately skipped by a branch"
+ *  from "couldn't run because an upstream failed". */
+function statusLabel(n: NodeRunEntry): string {
+  if (n.status === "cancelled") {
+    const ts = n.result_json?.task_state;
+    if (ts === "skipped") return "skipped";
+    if (ts === "upstream_failed") return "upstream failed";
+  }
+  return n.status;
+}
+
 /** Render a node-run's duration as ``D 3.2s`` (succeeded/failed/cancelled)
  *  or ``D 1.4s+`` (still running — shows elapsed since started_at, the
  *  trailing ``+`` flags that it's not the final number).
@@ -139,7 +153,7 @@ function nodeCard(n: NodeRunEntry, selected: boolean): React.ReactNode {
       </div>
       <div className="mt-1 flex items-center justify-between gap-2">
         <span className="text-[10px] uppercase tracking-wider text-text-muted">{n.kind}</span>
-        <span className={cn("text-[10px] font-medium", STATUS_TEXT[n.status])}>{n.status}</span>
+        <span className={cn("text-[10px] font-medium", STATUS_TEXT[n.status])}>{statusLabel(n)}</span>
       </div>
       {showCounters || duration ? (
         <div className="mt-0.5 text-[10px] text-text-secondary">

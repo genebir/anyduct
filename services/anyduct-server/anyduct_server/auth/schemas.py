@@ -626,6 +626,11 @@ class NodeRunEntry(BaseModel):
     error_class: str | None
     error_message: str | None
     output_ref: str | None
+    # Free-form per-node result. For Task-DAG runs (ADR-0099) carries
+    # ``{"task_state": "skipped"|"upstream_failed"|...}`` so the UI can tell a
+    # branch-deselected node from an upstream-failure skip — both of which the
+    # RunStatus enum collapses to ``cancelled``.
+    result_json: dict[str, Any] = {}
 
 
 class DryRunConnectorCheck(BaseModel):

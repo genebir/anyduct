@@ -117,6 +117,16 @@ def _build_task(
                 f"{label}: connection {task_cfg.connection!r} "
                 f"not in available connectors {sorted(connectors)}"
             )
+        # Branch rules (ADR-0028) apply to ANY operator kind — the predicate is
+        # over the task's own outcome (records_read/written/success). Validate
+        # each predicate compiles at build time, mirroring the etl path below.
+        # (Bug fix 2026-06-19: branch was silently dropped for sql/proc_call.)
+        for br in task_cfg.branch:
+            if br.when is not None:
+                try:
+                    compile(br.when, "<branch:when>", "eval")
+                except SyntaxError as exc:
+                    raise ConfigError(f"{label}: invalid branch 'when': {exc}") from exc
         return Task(
             name=task_cfg.name,
             kind=task_cfg.kind,
@@ -128,6 +138,7 @@ def _build_task(
             proc_writes=list(task_cfg.writes),
             depends_on=list(task_cfg.depends_on),
             trigger_rule=task_cfg.trigger_rule,
+            branch=[BranchRule(when=br.when, to=list(br.to)) for br in task_cfg.branch],
             retry=task_cfg.retry,
             timeout_seconds=task_cfg.timeout_seconds,
             expand=dict(task_cfg.expand),

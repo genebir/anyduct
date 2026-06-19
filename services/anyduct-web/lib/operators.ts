@@ -1885,8 +1885,24 @@ const RETRY_FIELD: FieldDef = {
   kind: "number",
   help: "Retry this step on failure (exponential backoff). Empty = use the pipeline default.",
 };
+// Branch selection (Airflow BranchPythonOperator analog, ADR-0028). When set,
+// this step CHOOSES which of its downstream steps run based on its OWN outcome;
+// the rest are skipped (and the skip propagates). Rules are tried in order;
+// ``when: null`` is the else/default. Advanced — empty for a plain step.
+const BRANCH_FIELD: FieldDef = {
+  key: "branch",
+  label: "Branch rules (conditional routing)",
+  kind: "json",
+  help:
+    "Pick which downstream steps run based on THIS step's outcome. Array of " +
+    "{when, to}: 'when' is a Python predicate over records_read / records_written / " +
+    "success (null = else); 'to' lists downstream step names to run. Unlisted " +
+    "downstreams are skipped. Empty = no branching.",
+  placeholder:
+    '[{"when": "records_written > 0", "to": ["load_mart"]}, {"when": null, "to": ["log_empty"]}]',
+};
 for (const s of OPERATORS_ORCH) {
-  s.fields = [...s.fields, TRIGGER_RULE_FIELD, RETRY_FIELD, TIMEOUT_FIELD];
+  s.fields = [...s.fields, TRIGGER_RULE_FIELD, RETRY_FIELD, TIMEOUT_FIELD, BRANCH_FIELD];
 }
 
 export const OPERATORS: OperatorSpec[] = [

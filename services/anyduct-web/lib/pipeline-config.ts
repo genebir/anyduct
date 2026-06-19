@@ -363,7 +363,8 @@ export type GraphIssueKind =
   // Orchestration (Operator DAG, ADR-0099)
   | "missing_name"
   | "duplicate_name"
-  | "missing_statement";
+  | "missing_statement"
+  | "branch_bad_target";
 
 export interface GraphIssue {
   kind: GraphIssueKind;
@@ -544,6 +545,7 @@ interface TaskJson {
   trigger_rule?: string;
   timeout_seconds?: number;
   retry?: { max_attempts: number; backoff: string; initial_delay_seconds: number };
+  branch?: { when: string | null; to: string[] }[];
   source?: { connection?: string; query?: string; [k: string]: unknown };
   sink?: { connection?: string; [k: string]: unknown } | null;
   sinks?: { connection?: string; [k: string]: unknown }[];
@@ -604,6 +606,12 @@ export function serializeTasksDAG(
     const attempts = Number(d.retry_max_attempts);
     if (d.retry_max_attempts !== undefined && d.retry_max_attempts !== "" && attempts > 1) {
       task.retry = { max_attempts: attempts, backoff: "exponential", initial_delay_seconds: 5 };
+    }
+    // Branch selection rules (ADR-0028) — a JSON array of {when, to}. Non-empty
+    // makes this a branch step that picks which downstreams run. The JSON field
+    // renderer stores it as a parsed array on node data.
+    if (Array.isArray(d.branch) && d.branch.length) {
+      task.branch = d.branch as { when: string | null; to: string[] }[];
     }
     if (op?.connectorType === "sql") {
       task.kind = "sql";
@@ -710,6 +718,7 @@ export function deserializeTasksDAG(config: PipelineConfigJson | null): GraphBui
       data.timeout_seconds = t.timeout_seconds;
     }
     if (t.retry?.max_attempts) data.retry_max_attempts = t.retry.max_attempts;
+    if (Array.isArray(t.branch) && t.branch.length) data.branch = t.branch;
     const id = nextId("op");
     nameToId.set(t.name, id);
     nodes.push({ id, operatorId, data, position: { x: 0, y: 0 } });
@@ -756,6 +765,34 @@ export function validateTasksDAG(state: GraphBuilderState): GraphIssue[] {
       const dupes = state.nodes.filter((n) => (n.data.name as string)?.trim() === name);
       for (const n of dupes) {
         issues.push({ kind: "duplicate_name", message: `Duplicate step name "${name}"`, nodeId: n.id });
+      }
+    }
+  }
+  // Branch ``to`` must reference an ACTUAL direct downstream of the branch step
+  // — otherwise the rule selects nothing (or, worse, looks like it routes but
+  // the core skips every real downstream). Catch the typo before a run.
+  const nameOfId = (id: string): string | undefined =>
+    (state.nodes.find((x) => x.id === id)?.data.name as string | undefined)?.trim();
+  for (const n of state.nodes) {
+    const branch = n.data.branch;
+    if (!Array.isArray(branch) || branch.length === 0) continue;
+    const downstream = new Set(
+      state.edges
+        .filter((e) => e.source === n.id)
+        .map((e) => nameOfId(e.target))
+        .filter((x): x is string => Boolean(x)),
+    );
+    const stepName = (n.data.name as string | undefined)?.trim() ?? "step";
+    for (const rule of branch as { to?: unknown }[]) {
+      const targets = Array.isArray(rule?.to) ? (rule.to as unknown[]) : [];
+      for (const target of targets) {
+        if (typeof target === "string" && !downstream.has(target)) {
+          issues.push({
+            kind: "branch_bad_target",
+            message: `Branch in "${stepName}" routes to "${target}", which isn't a downstream step`,
+            nodeId: n.id,
+          });
+        }
       }
     }
   }

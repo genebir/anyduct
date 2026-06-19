@@ -374,12 +374,43 @@ tasks:
 
 Each operator gets the orchestration knobs uniformly: `depends_on` (order),
 `trigger_rule` (`all_success` default; `all_done` for an error-log step),
+`branch` (conditional routing, below), `expand` (dynamic fan-out, above),
 per-step `retry` / `timeout_seconds`, and `{{ params.* }}` / `{{ xcom.* }}`
 templating. Catalog lineage tracks every step — a `sql` step's INSERT target
 becomes an output asset; the etl load's source/sink form the table + column
 lineage. The web builder edits this on the same canvas in **orchestration
-mode** (operator palette + dependency edges). Full example:
-[`operator_dag_mart.yaml`](https://github.com/anyduct/etl-plugins/blob/main/examples/operator_dag_mart.yaml).
+mode** (operator palette + dependency edges); `branch`, `expand`, `trigger_rule`,
+`retry`, and `timeout` are all per-step fields in the properties panel — no YAML
+required. Full examples:
+[`operator_dag_mart.yaml`](https://github.com/anyduct/etl-plugins/blob/main/examples/operator_dag_mart.yaml)
+and (branch + fan-out)
+[`operator_dag_branch_fanout.yaml`](https://github.com/anyduct/etl-plugins/blob/main/examples/operator_dag_branch_fanout.yaml).
+
+### Conditional routing — `branch` (Airflow `BranchPythonOperator`)
+
+A step can **choose which of its downstream steps run** based on its own
+outcome — the rest are skipped, and the skip propagates to *their* descendants.
+Declare `branch` as an ordered list of `{when, to}` rules; the first whose
+`when` predicate is truthy wins, and `when: null` is the default/else.
+
+```yaml
+- name: probe                       # stages the day's rows
+  kind: sql
+  connection: warehouse
+  statements:
+    - "INSERT INTO staging.probe SELECT id FROM fct.orders WHERE day = '{{ params.run_day }}'"
+  branch:
+    - when: "records_written > 0"   # had data → run the load
+      to: [load_regions]
+    - when: null                    # else → log the empty day
+      to: [log_empty]
+```
+
+The predicate is sandboxed (no builtins), same contract as the `filter` /
+`assert` transforms, over `records_read` / `records_written` / `success`. Each
+`to` target must be a **direct downstream** (a step that `depends_on` this one) —
+the builder and dry-run flag a target that isn't. A branch-skipped step shows
+as `skipped` in the run DAG (distinct from an upstream-failure skip).
 
 > **`sql_exec` graph node vs `sql` operator.** The dataflow graph builder has a
 > legacy "Run SQL" node (`sql_exec`) for side-effect SQL *inside a graph*. For

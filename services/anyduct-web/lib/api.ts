@@ -862,9 +862,14 @@ export const assetsApi = {
     api<AssetLineageGraphResponse>(
       `/workspaces/${workspaceId}/assets/${assetId}/lineage-graph?depth=${depth}`,
     ),
-  columnLineageGraph: (workspaceId: string, assetId: string, depth = 3) =>
+  columnLineageGraph: (
+    workspaceId: string,
+    assetId: string,
+    depth = 3,
+    direction: "upstream" | "downstream" = "upstream",
+  ) =>
     api<AssetColumnLineageGraphResponse>(
-      `/workspaces/${workspaceId}/assets/${assetId}/column-lineage-graph?depth=${depth}`,
+      `/workspaces/${workspaceId}/assets/${assetId}/column-lineage-graph?depth=${depth}&direction=${direction}`,
     ),
   columnLineage: (workspaceId: string, assetId: string) =>
     api<AssetColumnLineageResponse>(

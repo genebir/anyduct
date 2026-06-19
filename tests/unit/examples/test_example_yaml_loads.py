@@ -137,3 +137,26 @@ def test_operator_dag_mart_example_validates() -> None:
     assert "{{ xcom.load_mart.records_written }}" in end.statements[0]
     # the error-log runs even when an upstream step fails.
     assert by_name["write_error_log"].trigger_rule == "all_done"
+
+
+def test_operator_dag_branch_fanout_example_validates() -> None:
+    """ADR-0028/0098: branch + expand example. Guards the two orchestration
+    features (conditional routing + dynamic fan-out) the UI exposes against
+    config-schema drift, and doubles as copy-pasteable docs."""
+    pc = load_pipeline(EXAMPLES / "operator_dag_branch_fanout.yaml")
+    assert pc.name == "regional_sales_fanout"
+    by_name = {t.name: t for t in pc.tasks}
+    assert set(by_name) == {"probe", "load_regions", "log_empty"}
+    # probe branches on its own outcome to one of two downstreams.
+    probe = by_name["probe"]
+    assert probe.kind == "sql"
+    assert [(r.when, r.to) for r in probe.branch] == [
+        ("records_written > 0", ["load_regions"]),
+        (None, ["log_empty"]),
+    ]
+    # load_regions fans out one instance per region via expand.
+    load = by_name["load_regions"]
+    assert load.expand == {"region": ["us", "eu", "apac"]}
+    assert load.source is not None
+    assert "{{ map.region }}" in (load.source.query or "")
+    assert load.depends_on == ["probe"]

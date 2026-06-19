@@ -127,6 +127,8 @@ function bfsDepth(nodes: NodeRunEntry[]): Map<string, number> {
 function nodeCard(n: NodeRunEntry, selected: boolean): React.ReactNode {
   const showCounters = n.records_read > 0 || n.records_written > 0;
   const duration = formatNodeDuration(n);
+  const mappedInstances = n.result_json?.mapped_instances ?? null;
+  const mappedFailed = mappedInstances?.filter((i) => !i.success).length ?? 0;
   return (
     <div
       className={cn(
@@ -180,6 +182,52 @@ function nodeCard(n: NodeRunEntry, selected: boolean): React.ReactNode {
       {n.error_class ? (
         <div className="mt-0.5 truncate text-[10px] text-error" title={n.error_message ?? ""}>
           {n.error_class}
+        </div>
+      ) : null}
+      {/* Dynamic-mapping fan-out (expand, ADR-0098). A mapped task is one
+          aggregated node; surface the per-instance breakdown so an engineer
+          can see "instance region=eu failed" instead of guessing from the
+          single rolled-up status. */}
+      {mappedInstances ? (
+        <div className="mt-1 border-t border-border-subtle/60 pt-1">
+          <div className="text-[9px] uppercase tracking-wider text-text-muted">
+            ⑃ {mappedInstances.length} {mappedInstances.length === 1 ? "instance" : "instances"}
+            {mappedFailed > 0 ? (
+              <span className="ml-1 text-error">· {mappedFailed} failed</span>
+            ) : null}
+          </div>
+          <ul className="mt-0.5 space-y-px">
+            {mappedInstances.slice(0, 6).map((inst, i) => (
+              <li
+                key={i}
+                className="flex items-center gap-1 text-[9px]"
+                title={inst.error_class ?? undefined}
+              >
+                <span
+                  className={cn(
+                    "h-1 w-1 shrink-0 rounded-full",
+                    inst.success ? "bg-success" : "bg-error",
+                  )}
+                  aria-hidden
+                />
+                <span className="truncate font-mono text-text-secondary">
+                  {Object.entries(inst.map_values)
+                    .map(([k, v]) => `${k}=${String(v)}`)
+                    .join(", ")}
+                </span>
+                {inst.records_written > 0 ? (
+                  <span className="ml-auto shrink-0 text-text-muted">
+                    {inst.records_written.toLocaleString()}
+                  </span>
+                ) : null}
+              </li>
+            ))}
+            {mappedInstances.length > 6 ? (
+              <li className="text-[9px] text-text-muted">
+                +{mappedInstances.length - 6} more
+              </li>
+            ) : null}
+          </ul>
         </div>
       ) : null}
     </div>

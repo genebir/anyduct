@@ -1843,9 +1843,27 @@ class Pipeline:
                 "(must implement SqlExecutor)"
             )
         self._task_data_paths[task.name or "task"] = task.kind
+        # Per-task execution timeout (자유도 2단계). Like the etl read loop, this
+        # is a COOPERATIVE deadline — checked *between* statements, so a
+        # multi-statement step (the DDL ▸ DELETE ▸ INSERT idempotency shape)
+        # stops before the next statement once the budget is blown. It does NOT
+        # interrupt a single blocking ``execute_statement`` mid-run (Python can't
+        # kill a blocked thread) — same documented caveat as the etl path.
+        timeout_s = (
+            task.timeout_seconds if task.timeout_seconds is not None else self.task_timeout_seconds
+        )
+        deadline = (time.monotonic() + timeout_s) if timeout_s else None
+
+        def _check_deadline() -> None:
+            if deadline is not None and time.monotonic() > deadline:
+                raise TaskTimeoutError(
+                    f"task {task.name or task.kind!r} exceeded timeout_seconds={timeout_s}"
+                )
+
         if task.kind == "proc_call":
             if not task.procedure:
                 raise TaskError(f"proc_call task {task.name!r}: missing procedure")
+            _check_deadline()
             # Args may be rendered to non-str by a whole-string ``{{ xcom }}``
             # ref (type-preserving) — ``{{ xcom.load.records_written }}`` → int.
             stmt = f"CALL {task.procedure}({', '.join(str(a) for a in task.proc_args)})"
@@ -1854,6 +1872,7 @@ class Pipeline:
         # kind == "sql": run statements in order, each committed; sum rows.
         total = 0
         for stmt in task.statements:
+            _check_deadline()
             affected = conn.execute_statement(stmt)
             if affected > 0:
                 total += affected

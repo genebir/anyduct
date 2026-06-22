@@ -113,6 +113,40 @@ def test_sql_operator_runs_statements_and_pushes_rowcount() -> None:
     assert result.data_paths.get("cleanup") == "sql"
 
 
+class _SlowSqlConn(_SqlConn):
+    """SqlExecutor whose first statement sleeps past a tiny deadline so the
+    *next* statement trips the cooperative timeout check."""
+
+    def execute_statement(self, statement: str) -> int:
+        import time
+
+        self.statements.append(statement)
+        time.sleep(0.05)
+        return 0
+
+
+def test_sql_operator_honors_timeout_between_statements() -> None:
+    """``timeout_seconds`` on a sql operator is enforced cooperatively between
+    statements (자유도 2단계). Regression: it used to be silently ignored — a
+    runaway multi-statement step ran to completion regardless (2026-06-22)."""
+    from etl_plugins.core.exceptions import TaskTimeoutError
+
+    conn = _SlowSqlConn()
+    task = Task(
+        name="slow",
+        kind="sql",
+        op_connection="wh",
+        statements=["SELECT pg_sleep_a()", "SELECT pg_sleep_b()", "SELECT pg_sleep_c()"],
+        timeout_seconds=0.01,
+    )
+    p = Pipeline("p").add(task)
+    with pytest.raises(TaskTimeoutError, match="exceeded timeout_seconds"):
+        p.run(connectors={"wh": conn})
+    # First statement ran (deadline checked before each); the timeout tripped
+    # before the second, so not all three ran.
+    assert len(conn.statements) < 3
+
+
 def test_proc_call_operator_builds_call_statement() -> None:
     conn = _SqlConn()
     task = Task(

@@ -238,6 +238,19 @@ def test_task_attempts_one_when_no_retry_needed() -> None:
     assert captured["a"] == 1
 
 
+def test_task_durations_recorded_per_task() -> None:
+    """Each DAG task records its wall-clock in ``result.task_durations`` so the
+    worker can back-date node_run.started_at (per-step duration view)."""
+    p = Pipeline("p")
+    p.add(_t("a", "snk"))
+    p.add(_t("b", "snk2", depends_on=["a"]))
+    captured: dict[str, float] = {}
+    p.on("post_run", lambda ctx, res: captured.update(res.task_durations))
+    p.run(connectors={"src": _src(2), "snk": InMemoryBatchSink(), "snk2": InMemoryBatchSink()})
+    assert set(captured) == {"a", "b"}
+    assert all(v >= 0.0 for v in captured.values())
+
+
 def test_failed_task_error_and_records_captured() -> None:
     """A failed DAG task records its error in ``result.task_errors`` and each
     succeeded task records its counts in ``result.task_records`` — both feed the

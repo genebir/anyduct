@@ -462,6 +462,11 @@ class RunResult:
     # otherwise can't see, since retries happen inside the single chokepoint.
     # For a mapped task it's the max attempts across its fan-out instances.
     task_attempts: dict[str, int] = field(default_factory=dict)
+    # Per-task wall-clock seconds (monitoring, 2026-06-22): task name → elapsed
+    # across all attempts. Lets the worker set each node_run's started_at (=
+    # finished_at minus elapsed) so the DAG view shows per-step duration ("which
+    # step was slow?"). A mapped task sums its instances' time.
+    task_durations: dict[str, float] = field(default_factory=dict)
 
 
 def _project_columns_through_transforms(source_columns: list[Any], task: Task) -> list[Any]:
@@ -1250,6 +1255,7 @@ class Pipeline:
         runner: Callable[..., tuple[int, int, CursorValue]] = _counting_runner
         if effective_retry is not None:
             runner = retryable(**self._retry_kwargs(effective_retry))(runner)
+        task_t0 = time.monotonic()
         try:
             read_count, write_count, task_max = runner(task, conns, cursor_from, cursor_to)
             task_span.set_attribute("records_read", read_count)
@@ -1259,12 +1265,16 @@ class Pipeline:
             raise
         finally:
             task_span.end()
-            # Record attempts even on failure (retries exhausted = a flaky
-            # signal) — max across mapped instances. Runs before the success-only
-            # bookkeeping below so a raised task still gets its count.
+            # Record attempts + wall-clock even on failure (retries exhausted = a
+            # flaky signal; a slow failure is still worth timing) — attempts max
+            # across mapped instances, duration summed. Runs before the
+            # success-only bookkeeping below so a raised task still gets counted.
             if task.name:
                 result.task_attempts[task.name] = max(
                     result.task_attempts.get(task.name, 0), attempts[0]
+                )
+                result.task_durations[task.name] = result.task_durations.get(task.name, 0.0) + (
+                    time.monotonic() - task_t0
                 )
         result.records_read += read_count
         result.records_written += write_count

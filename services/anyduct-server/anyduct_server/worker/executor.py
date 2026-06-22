@@ -30,7 +30,7 @@ import logging
 import threading
 from collections.abc import Callable
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -528,10 +528,18 @@ class RunExecutor:
             mapped = result.mapped_instances or {}
             task_errors = result.task_errors or {}
             task_attempts = result.task_attempts or {}
+            task_durations = result.task_durations or {}
             for row in rows:
                 state = result.task_states.get(row.node_id) or ""
                 row.status = _TASK_STATE_TO_RUN_STATUS.get(state, RunStatus.SUCCEEDED)
                 row.finished_at = now
+                # Per-step duration: the core measured each task's wall-clock, so
+                # back-date started_at from the (shared) finish time. This gives
+                # the DAG view a "D Xs" per step ("which step was slow?"). A step
+                # that never ran (skipped) has no duration → started_at stays null.
+                elapsed = task_durations.get(row.node_id)
+                if elapsed is not None:
+                    row.started_at = now - timedelta(seconds=elapsed)
                 # Per-step record counts (ADR-0099 monitoring) — the DAG view's
                 # "R/W" per node, not just the run-level total. Absent for a
                 # skipped/upstream-failed step (it never ran) → stays 0.

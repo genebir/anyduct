@@ -192,6 +192,52 @@ def test_failed_task_states_recorded() -> None:
     assert captured == {"a": TASK_FAILED, "b": TASK_UPSTREAM_FAILED}
 
 
+class _FlakySink(InMemoryBatchSink):
+    """Fails the first ``fail_times`` writes, then succeeds — a flaky upstream."""
+
+    def __init__(self, fail_times: int = 1) -> None:
+        super().__init__()
+        self._remaining = fail_times
+
+    def write(self, records, *, mode="append", key_columns=None, **options):  # type: ignore[no-untyped-def]
+        rows = list(records)
+        if self._remaining > 0:
+            self._remaining -= 1
+            raise RuntimeError("transient")
+        return super().write(rows, mode=mode, key_columns=key_columns, **options)
+
+
+def test_task_attempts_recorded_for_flaky_task() -> None:
+    """A task that fails once then succeeds under a per-task retry records its
+    attempt count in ``result.task_attempts`` — the flaky-upstream signal a
+    20-year engineer reads off the DAG (자유도 2단계 monitoring, 2026-06-22)."""
+    from etl_plugins.config.models import RetryConfig
+
+    p = Pipeline("p")
+    p.add(
+        _t(
+            "flaky",
+            "snk",
+            retry=RetryConfig(max_attempts=3, backoff="fixed", initial_delay_seconds=0.0),
+        )
+    )
+    captured: dict[str, int] = {}
+    p.on("post_run", lambda ctx, res: captured.update(res.task_attempts))
+    p.run(connectors={"src": _src(2), "snk": _FlakySink(fail_times=1)})
+    # one failure + one success = 2 attempts
+    assert captured["flaky"] == 2
+
+
+def test_task_attempts_one_when_no_retry_needed() -> None:
+    """A clean task records exactly 1 attempt (no retry)."""
+    p = Pipeline("p")
+    p.add(_t("a", "snk"))
+    captured: dict[str, int] = {}
+    p.on("post_run", lambda ctx, res: captured.update(res.task_attempts))
+    p.run(connectors={"src": _src(2), "snk": InMemoryBatchSink()})
+    assert captured["a"] == 1
+
+
 def test_failed_task_error_and_records_captured() -> None:
     """A failed DAG task records its error in ``result.task_errors`` and each
     succeeded task records its counts in ``result.task_records`` — both feed the

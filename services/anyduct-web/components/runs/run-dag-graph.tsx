@@ -157,6 +157,14 @@ function nodeCard(n: NodeRunEntry, selected: boolean): React.ReactNode {
         <span className="text-[10px] uppercase tracking-wider text-text-muted">{n.kind}</span>
         <span className={cn("text-[10px] font-medium", STATUS_TEXT[n.status])}>{statusLabel(n)}</span>
       </div>
+      {/* Retry badge (자유도 2단계, 2026-06-22): a step that took >1 attempt
+          retried before settling — a flaky-upstream signal. Amber tone, shown
+          only when it actually retried (attempt > 1). */}
+      {n.attempt > 1 ? (
+        <div className="mt-0.5 text-[10px] font-medium text-warning" title={`${n.attempt} attempts`}>
+          ↻ ×{n.attempt}
+        </div>
+      ) : null}
       {showCounters || duration ? (
         <div className="mt-0.5 text-[10px] text-text-secondary">
           {/* Phase AFP (2026-06-04) — thousand-separated counts, matching

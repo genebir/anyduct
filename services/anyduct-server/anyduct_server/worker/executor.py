@@ -527,6 +527,7 @@ class RunExecutor:
             task_records = result.task_records or {}
             mapped = result.mapped_instances or {}
             task_errors = result.task_errors or {}
+            task_attempts = result.task_attempts or {}
             for row in rows:
                 state = result.task_states.get(row.node_id) or ""
                 row.status = _TASK_STATE_TO_RUN_STATUS.get(state, RunStatus.SUCCEEDED)
@@ -537,6 +538,10 @@ class RunExecutor:
                 read, written = task_records.get(row.node_id, (0, 0))
                 row.records_read = read
                 row.records_written = written
+                # Per-step attempt count (자유도 2단계) — "succeeded after N tries"
+                # is a flaky-upstream signal. A step that never ran (skipped)
+                # stays at 0; one that ran is at least 1.
+                row.attempt = task_attempts.get(row.node_id, 0)
                 # Per-step error so the DAG view shows *which* step broke and why.
                 err = task_errors.get(row.node_id)
                 if err is not None:

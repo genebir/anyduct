@@ -456,6 +456,12 @@ class RunResult:
     # error so the DAG view shows *which* step broke and why — not just the
     # run-level first error. Empty for non-DAG runs / all-success runs.
     task_errors: dict[str, tuple[str, str]] = field(default_factory=dict)
+    # Per-task attempt count (자유도 2단계 monitoring, 2026-06-22): task name →
+    # number of attempts the task actually took (1 = no retry). Surfaces "this
+    # step succeeded only after 3 tries" — a flaky-upstream signal an engineer
+    # otherwise can't see, since retries happen inside the single chokepoint.
+    # For a mapped task it's the max attempts across its fan-out instances.
+    task_attempts: dict[str, int] = field(default_factory=dict)
 
 
 def _project_columns_through_transforms(source_columns: list[Any], task: Task) -> list[Any]:
@@ -1231,7 +1237,17 @@ class Pipeline:
         # (its own override, else the pipeline default). The deadline/timeout
         # is applied inside ``_run_task`` per attempt via ``task.timeout_seconds``.
         effective_retry = task.retry or self.retry
-        runner = task_runner
+        # Count actual attempts: tenacity invokes the wrapped runner once per
+        # attempt, so a tiny counting closure around it captures the attempt
+        # count without reaching into the retry decorator's internals. ``[0]``
+        # is mutated in place (closure over a list, not a rebind).
+        attempts = [0]
+
+        def _counting_runner(*a: Any, **k: Any) -> tuple[int, int, CursorValue]:
+            attempts[0] += 1
+            return task_runner(*a, **k)
+
+        runner: Callable[..., tuple[int, int, CursorValue]] = _counting_runner
         if effective_retry is not None:
             runner = retryable(**self._retry_kwargs(effective_retry))(runner)
         try:
@@ -1243,6 +1259,13 @@ class Pipeline:
             raise
         finally:
             task_span.end()
+            # Record attempts even on failure (retries exhausted = a flaky
+            # signal) — max across mapped instances. Runs before the success-only
+            # bookkeeping below so a raised task still gets its count.
+            if task.name:
+                result.task_attempts[task.name] = max(
+                    result.task_attempts.get(task.name, 0), attempts[0]
+                )
         result.records_read += read_count
         result.records_written += write_count
         if task_max is not None and (

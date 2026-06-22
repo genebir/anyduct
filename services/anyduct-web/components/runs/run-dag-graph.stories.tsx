@@ -81,6 +81,18 @@ export const AllSucceeded: Story = {
   },
 };
 
+/** A step that retried before settling shows an amber "↻ ×N" badge — the
+ *  flaky-upstream signal (자유도 2단계). Here the load succeeded on its 3rd try. */
+export const RetriedStep: Story = {
+  args: {
+    nodes: [
+      nr("extract", "sql", "succeeded", [], { records_written: 500, attempt: 1 }),
+      nr("load_mart", "etl", "succeeded", ["extract"], { records_written: 500, attempt: 3 }),
+      nr("log", "sql", "succeeded", ["load_mart"], { attempt: 1 }),
+    ],
+  },
+};
+
 /** A failure mid-DAG cancels the rest — downstream becomes cancelled, not failed. */
 export const PartialFailure: Story = {
   args: {

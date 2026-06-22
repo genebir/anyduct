@@ -547,6 +547,7 @@ interface TaskJson {
   retry?: { max_attempts: number; backoff: string; initial_delay_seconds: number };
   branch?: { when: string | null; to: string[] }[];
   expand?: Record<string, unknown>;
+  push_xcom?: Record<string, { column: string; distinct?: boolean }>;
   source?: { connection?: string; query?: string; [k: string]: unknown };
   sink?: { connection?: string; [k: string]: unknown } | null;
   sinks?: { connection?: string; [k: string]: unknown }[];
@@ -623,6 +624,16 @@ export function serializeTasksDAG(
       Object.keys(d.expand as object).length
     ) {
       task.expand = d.expand as Record<string, unknown>;
+    }
+    // Explicit XCom push (ADR-0097) — {key: {column, distinct?}}. Publishes a
+    // column's values as a list for a downstream expand to fan out over.
+    if (
+      d.push_xcom &&
+      typeof d.push_xcom === "object" &&
+      !Array.isArray(d.push_xcom) &&
+      Object.keys(d.push_xcom as object).length
+    ) {
+      task.push_xcom = d.push_xcom as Record<string, { column: string; distinct?: boolean }>;
     }
     if (op?.connectorType === "sql") {
       task.kind = "sql";
@@ -731,6 +742,7 @@ export function deserializeTasksDAG(config: PipelineConfigJson | null): GraphBui
     if (t.retry?.max_attempts) data.retry_max_attempts = t.retry.max_attempts;
     if (Array.isArray(t.branch) && t.branch.length) data.branch = t.branch;
     if (t.expand && Object.keys(t.expand).length) data.expand = t.expand;
+    if (t.push_xcom && Object.keys(t.push_xcom).length) data.push_xcom = t.push_xcom;
     const id = nextId("op");
     nameToId.set(t.name, id);
     nodes.push({ id, operatorId, data, position: { x: 0, y: 0 } });

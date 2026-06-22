@@ -1917,6 +1917,22 @@ const EXPAND_FIELD: FieldDef = {
     "keys = cross product. Empty = run once.",
   placeholder: '{"region": ["us", "eu", "apac"]}',
 };
+// Explicit XCom push (ADR-0097). Publishes the list of a column's values from
+// the rows this step processes under ``xcom.<step>.<key>`` — the upstream-list
+// source a downstream ``expand`` fans out over (the only way to make "fan out
+// over what the previous step discovered" reachable; auto-XCom only carries
+// scalars). ``{key: {column, distinct?}}``. Advanced — empty for none.
+const PUSH_XCOM_FIELD: FieldDef = {
+  key: "push_xcom",
+  label: "Publish list to XCom (push_xcom)",
+  kind: "json",
+  help:
+    "Publish a column's values as a list under {{ xcom.<step>.<key> }}, so a " +
+    "downstream step can expand (fan out) over it. Object of {key: {column, " +
+    "distinct?}}: 'column' is the row column to collect; 'distinct' (optional) " +
+    "de-dups preserving first-seen order. Empty = publish nothing extra.",
+  placeholder: '{"regions": {"column": "region", "distinct": true}}',
+};
 for (const s of OPERATORS_ORCH) {
   s.fields = [
     ...s.fields,
@@ -1925,6 +1941,7 @@ for (const s of OPERATORS_ORCH) {
     TIMEOUT_FIELD,
     BRANCH_FIELD,
     EXPAND_FIELD,
+    PUSH_XCOM_FIELD,
   ];
 }
 

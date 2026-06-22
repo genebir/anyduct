@@ -103,13 +103,30 @@ tasks:
 * `task.retry` wins over the pipeline `retry` for that task; tasks
   without one fall back to the pipeline default (or no retry).
 * `task.timeout_seconds` wins over the pipeline `task_timeout_seconds`;
-  `None`/absent means no timeout. The deadline is **cooperative** —
-  checked at each record boundary, so a chunked read/transform stream is
-  failed with `TaskTimeoutError` once it runs long. It does *not*
-  interrupt a single blocking driver call mid-fetch (Python can't kill a
-  blocked thread). `TaskTimeoutError` is a `TaskError` subclass, so a
-  configured retry will retry a slow task, each attempt getting a fresh
-  window.
+  `None`/absent means no timeout. The deadline is **cooperative** — for an
+  `etl` task it's checked at each record boundary (a chunked read/transform
+  stream is failed once it runs long); for a `sql` / `proc_call` operator it's
+  checked **between statements** (a multi-statement step stops before the next
+  statement once the budget is blown). Either way it raises `TaskTimeoutError`.
+  It does *not* interrupt a single blocking driver call mid-fetch / mid-statement
+  (Python can't kill a blocked thread). `TaskTimeoutError` is a `TaskError`
+  subclass, so a configured retry will retry a slow task, each attempt getting a
+  fresh window.
+
+### Per-step monitoring in the run DAG
+
+For a task-DAG run, the run-detail **DAG view** surfaces each step's outcome so
+an operator can diagnose without opening logs:
+
+* **status** — `succeeded` / `failed`, plus `skipped` (a `branch` deselected it)
+  vs `upstream failed` (an upstream step broke) shown distinctly.
+* **`↻ ×N`** — the step retried `N` times before settling (a flaky-upstream
+  signal; shown only when `N > 1`).
+* **duration** — per-step wall-clock (`D 3.2s`), so the slow step is obvious.
+* **error class** — a failed step shows its `error_class` (e.g.
+  `TaskTimeoutError`, `WriteError`) inline.
+* **fan-out** — a mapped (`expand`) step shows its per-instance breakdown
+  (`⑃ N instances · M failed`).
 
 ## Hooks
 

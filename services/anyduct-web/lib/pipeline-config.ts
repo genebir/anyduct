@@ -28,6 +28,9 @@ export interface DlqSettings {
   table: string;
   topic: string;
   mode: "append" | "overwrite" | "upsert";
+  /** Optional column to stamp the transform error reason into, so a DLQ'd
+   *  record says *why* it failed (the DLQ table/topic must carry it). */
+  error_column: string;
 }
 
 export interface BuilderState {
@@ -49,6 +52,7 @@ export const DEFAULT_DLQ: DlqSettings = {
   table: "",
   topic: "",
   mode: "append",
+  error_column: "",
 };
 
 export interface PipelineConfigJson {
@@ -84,6 +88,7 @@ export interface PipelineConfigJson {
     table?: string | null;
     topic?: string | null;
     mode: string;
+    error_column?: string | null;
   } | null;
   [k: string]: unknown;
 }
@@ -244,6 +249,7 @@ export function deserialize(
           config.dlq.mode === "overwrite" || config.dlq.mode === "upsert"
             ? config.dlq.mode
             : "append",
+        error_column: config.dlq.error_column ?? "",
       }
     : { ...DEFAULT_DLQ };
 
@@ -524,6 +530,7 @@ export function serializeGraph(
     };
     if (meta.dlq.table) dlq.table = meta.dlq.table;
     if (meta.dlq.topic) dlq.topic = meta.dlq.topic;
+    if (meta.dlq.error_column) dlq.error_column = meta.dlq.error_column;
     out.dlq = dlq;
   }
   return out;
@@ -690,6 +697,7 @@ export function serializeTasksDAG(
     const dlq: PipelineConfigJson["dlq"] = { connection: meta.dlq.connection, mode: meta.dlq.mode };
     if (meta.dlq.table) dlq.table = meta.dlq.table;
     if (meta.dlq.topic) dlq.topic = meta.dlq.topic;
+    if (meta.dlq.error_column) dlq.error_column = meta.dlq.error_column;
     out.dlq = dlq;
   }
   return out;
@@ -860,6 +868,7 @@ export function extractPipelineMeta(
           mode: (config.dlq.mode ?? DEFAULT_DLQ.mode) as DlqSettings["mode"],
           table: config.dlq.table ?? "",
           topic: config.dlq.topic ?? "",
+          error_column: config.dlq.error_column ?? "",
         }
       : { ...DEFAULT_DLQ },
   };

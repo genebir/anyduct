@@ -9,6 +9,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- **비-문자열 cursor 컬럼 backfill이 TypeError로 전부 실패 (2026-06-23, 엔지니어 dogfood)**: backfill 범위는 REST/JSON에서 문자열로 오는데 `cursor_to` 상한 검사가 Python `cv > cursor_to`라 컬럼이 date/int/Decimal이면 'date > str' TypeError로 죽었다 — lower bound는 read_since가 SQL로 처리해 가려졌고 upper bound만 Python이라 **모든 비-문자열 cursor backfill + 분할백필(ADR-0095)이 실패**. `_coerce_cursor_bound`로 상한을 컬럼값 타입으로 강제변환. 라이브 operator DAG date-cursor backfill (2026-01-01,2026-01-03] → day 02·03만 정확 적재. 단위 +2.
+
 ### Added
 - **operator DAG 스텝별 retry attempt + duration 가시화 (2026-06-22, 자율런 2차)**: 20년차 엔지니어 dogfood로 두 갭 적발·해소. ① **retry attempt** — per-task retry가 코어 단일 초크포인트(`_execute_task`) 내부에서 일어나 "이 스텝이 몇 번 만에 성공했나"(flaky upstream 신호)가 어디에도 안 보였다. `RunResult.task_attempts`(tenacity가 시도마다 호출하는 특성을 이용한 카운팅 클로저, retry.py 무변경; finally에서 성공/실패 모두 기록; mapped는 인스턴스 max) → `node_run.attempt` → RunDagGraph amber "↻ ×N" 배지(attempt>1). 라이브: 카운터 테이블 sql 태스크가 'flaky_step succeeded attempt:3'. ② **스텝별 duration** — `_persist_task_node_runs`가 finished_at만 설정하고 started_at을 null로 둬 task-DAG 스텝 duration이 안 보였다. `RunResult.task_durations`(코어 per-task wall-clock 측정) → 워커가 started_at = finished_at − elapsed 역산 → DAG 뷰 "D Xs". 둘 다 backward-compat(기본 빈 dict), 코어 단위 +3, 스토리 1.
 - **빌더 push_xcom(컬럼 리스트 XCom 발행) 노출 (2026-06-22)**: 오케스트레이션 스텝에 `push_xcom` 필드(JSON `{key:{column,distinct?}}`) — 스텝이 처리한 행에서 컬럼 값을 리스트로 `{{ xcom.<step>.<key> }}`에 발행, 하류 `expand`가 fan-out. expand의 세 리스트 출처(리터럴/params/상류 XCom) 중 마지막이 그동안 YAML 전용이라 빌더 미도달이던 갭 해소(auto-XCom은 스칼라만). 라이브: discover가 3 region push_xcom → load_region fan-out(us/eu/apac). 오케스트레이션 데이터플로우 UI 완비(trigger_rule·branch·expand·push_xcom).

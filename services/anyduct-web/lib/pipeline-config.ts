@@ -28,6 +28,9 @@ export interface DlqSettings {
   table: string;
   topic: string;
   mode: "append" | "overwrite" | "upsert";
+  /** Optional column to stamp the transform error reason into, so a DLQ'd
+   *  record says *why* it failed (the DLQ table/topic must carry it). */
+  error_column: string;
 }
 
 export interface BuilderState {
@@ -49,6 +52,7 @@ export const DEFAULT_DLQ: DlqSettings = {
   table: "",
   topic: "",
   mode: "append",
+  error_column: "",
 };
 
 export interface PipelineConfigJson {
@@ -84,6 +88,7 @@ export interface PipelineConfigJson {
     table?: string | null;
     topic?: string | null;
     mode: string;
+    error_column?: string | null;
   } | null;
   [k: string]: unknown;
 }
@@ -92,6 +97,7 @@ const KIND_ORDER: Record<OperatorSpec["kind"], number> = {
   source: 0,
   transform: 1,
   sink: 2,
+  operator: 1,
 };
 
 export function blankBuilder(): BuilderState {
@@ -243,6 +249,7 @@ export function deserialize(
           config.dlq.mode === "overwrite" || config.dlq.mode === "upsert"
             ? config.dlq.mode
             : "append",
+        error_column: config.dlq.error_column ?? "",
       }
     : { ...DEFAULT_DLQ };
 
@@ -358,7 +365,12 @@ export type GraphIssueKind =
   | "missing_input"
   | "wrong_fanin"
   | "join_needs_two"
-  | "missing_connection";
+  | "missing_connection"
+  // Orchestration (Operator DAG, ADR-0099)
+  | "missing_name"
+  | "duplicate_name"
+  | "missing_statement"
+  | "branch_bad_target";
 
 export interface GraphIssue {
   kind: GraphIssueKind;
@@ -518,9 +530,305 @@ export function serializeGraph(
     };
     if (meta.dlq.table) dlq.table = meta.dlq.table;
     if (meta.dlq.topic) dlq.topic = meta.dlq.topic;
+    if (meta.dlq.error_column) dlq.error_column = meta.dlq.error_column;
     out.dlq = dlq;
   }
   return out;
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Orchestration / Operator DAG (ADR-0099)
+
+   A task-DAG pipeline (`tasks: [...]` + `depends_on`) is edited on the SAME
+   canvas as a dataflow graph, but each node is an *operator* (Load / Run SQL /
+   Call procedure) and edges are *ordering* (dependency), not data. Nodes carry
+   a unique ``name``; depends_on is reconstructed from the incoming edges.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+interface TaskJson {
+  name: string;
+  kind?: string;
+  depends_on?: string[];
+  trigger_rule?: string;
+  timeout_seconds?: number;
+  retry?: { max_attempts: number; backoff: string; initial_delay_seconds: number };
+  branch?: { when: string | null; to: string[] }[];
+  expand?: Record<string, unknown>;
+  push_xcom?: Record<string, { column: string; distinct?: boolean }>;
+  source?: { connection?: string; query?: string; [k: string]: unknown };
+  sink?: { connection?: string; [k: string]: unknown } | null;
+  sinks?: { connection?: string; [k: string]: unknown }[];
+  connection?: string;
+  statements?: string[];
+  procedure?: string;
+  args?: string[];
+  reads?: string[];
+  writes?: string[];
+  [k: string]: unknown;
+}
+
+export function isTasksConfig(
+  config: PipelineConfigJson | null,
+): config is PipelineConfigJson & { tasks: TaskJson[] } {
+  const t = (config as { tasks?: unknown } | null)?.tasks;
+  return Boolean(config && !isGraphConfig(config) && Array.isArray(t) && t.length > 0);
+}
+
+/** One Load (etl) node to start a new orchestration pipeline. */
+export function blankOrchestration(): GraphBuilderState {
+  const n = makeNode("op:load");
+  return {
+    nodes: [{ id: n.id, operatorId: n.operatorId, data: { ...n.data }, position: { x: 0, y: 80 } }],
+    edges: [],
+  };
+}
+
+export function serializeTasksDAG(
+  state: GraphBuilderState,
+  meta: {
+    name: string;
+    mode?: "batch" | "stream";
+    variables?: Record<string, unknown>;
+    auto_materialize?: boolean;
+    freshness_sla_minutes?: number | null;
+    retry?: RetrySettings;
+    dlq?: DlqSettings;
+  },
+): PipelineConfigJson {
+  const nameOf = (id: string): string => {
+    const n = state.nodes.find((x) => x.id === id);
+    return (n?.data.name as string) || id;
+  };
+  const tasks = state.nodes.map((n) => {
+    const op = findOperator(n.operatorId);
+    const d = n.data;
+    const task: TaskJson = { name: (d.name as string) || n.id };
+    const deps = state.edges.filter((e) => e.target === n.id).map((e) => nameOf(e.source));
+    if (deps.length) task.depends_on = deps;
+    if (d.trigger_rule && d.trigger_rule !== "all_success") {
+      task.trigger_rule = d.trigger_rule as string;
+    }
+    const timeout = Number(d.timeout_seconds);
+    if (d.timeout_seconds !== undefined && d.timeout_seconds !== "" && timeout > 0) {
+      task.timeout_seconds = timeout;
+    }
+    const attempts = Number(d.retry_max_attempts);
+    if (d.retry_max_attempts !== undefined && d.retry_max_attempts !== "" && attempts > 1) {
+      task.retry = { max_attempts: attempts, backoff: "exponential", initial_delay_seconds: 5 };
+    }
+    // Branch selection rules (ADR-0028) — a JSON array of {when, to}. Non-empty
+    // makes this a branch step that picks which downstreams run. The JSON field
+    // renderer stores it as a parsed array on node data.
+    if (Array.isArray(d.branch) && d.branch.length) {
+      task.branch = d.branch as { when: string | null; to: string[] }[];
+    }
+    // Dynamic task mapping (ADR-0098) — a JSON object {key: list}. Non-empty
+    // fans this step out into one instance per element (cross product over keys).
+    if (
+      d.expand &&
+      typeof d.expand === "object" &&
+      !Array.isArray(d.expand) &&
+      Object.keys(d.expand as object).length
+    ) {
+      task.expand = d.expand as Record<string, unknown>;
+    }
+    // Explicit XCom push (ADR-0097) — {key: {column, distinct?}}. Publishes a
+    // column's values as a list for a downstream expand to fan out over.
+    if (
+      d.push_xcom &&
+      typeof d.push_xcom === "object" &&
+      !Array.isArray(d.push_xcom) &&
+      Object.keys(d.push_xcom as object).length
+    ) {
+      task.push_xcom = d.push_xcom as Record<string, { column: string; distinct?: boolean }>;
+    }
+    if (op?.connectorType === "sql") {
+      task.kind = "sql";
+      task.connection = d.connection as string;
+      // The editor holds one or more statements separated by ';'. Split so the
+      // core runs each (committed in order). Round-trips with the ';\n\n' join
+      // in deserialize. (Caveat: a ';' inside a string literal would split —
+      // rare for DDL/DML; documented.)
+      task.statements = String(d.statement ?? "")
+        .split(";")
+        .map((s) => s.trim())
+        .filter(Boolean);
+    } else if (op?.connectorType === "proc_call") {
+      task.kind = "proc_call";
+      task.connection = d.connection as string;
+      task.procedure = d.procedure as string;
+      task.args = Array.isArray(d.args) ? (d.args as string[]) : [];
+      if (Array.isArray(d.reads) && d.reads.length) task.reads = d.reads as string[];
+      if (Array.isArray(d.writes) && d.writes.length) task.writes = d.writes as string[];
+    } else {
+      // etl "Load": source read connection, sink write connection (defaults to
+      // the same — in-database INSERT…SELECT; different = cross-DB load).
+      const conn = d.connection as string;
+      const sinkConn = (d.sink_connection as string) || conn;
+      task.source = { connection: conn, ...(d.query ? { query: d.query as string } : {}) };
+      const sink: Record<string, unknown> = {
+        connection: sinkConn,
+        mode: (d.mode as string) ?? "append",
+      };
+      if (d.table) sink.table = d.table;
+      if (d.pre_sql) sink.pre_sql = d.pre_sql;
+      const kc = (d.key_columns as string | undefined)?.trim();
+      if (kc) sink.key_columns = kc.split(",").map((s) => s.trim()).filter(Boolean);
+      task.sink = sink;
+    }
+    return task;
+  });
+  const out: PipelineConfigJson = {
+    name: meta.name,
+    mode: meta.mode ?? "batch",
+    ...(meta.variables && Object.keys(meta.variables).length ? { variables: meta.variables } : {}),
+    ...(meta.auto_materialize ? { auto_materialize: true } : {}),
+    ...(meta.freshness_sla_minutes ? { freshness_sla_minutes: meta.freshness_sla_minutes } : {}),
+    tasks,
+  } as PipelineConfigJson;
+  if (meta.retry?.enabled) {
+    out.retry = {
+      max_attempts: meta.retry.max_attempts,
+      backoff: meta.retry.backoff,
+      initial_delay_seconds: meta.retry.initial_delay_seconds,
+    };
+  }
+  if (meta.dlq?.enabled && meta.dlq.connection) {
+    const dlq: PipelineConfigJson["dlq"] = { connection: meta.dlq.connection, mode: meta.dlq.mode };
+    if (meta.dlq.table) dlq.table = meta.dlq.table;
+    if (meta.dlq.topic) dlq.topic = meta.dlq.topic;
+    if (meta.dlq.error_column) dlq.error_column = meta.dlq.error_column;
+    out.dlq = dlq;
+  }
+  return out;
+}
+
+export function deserializeTasksDAG(config: PipelineConfigJson | null): GraphBuilderState {
+  const tasks = ((config as { tasks?: TaskJson[] } | null)?.tasks ?? []) as TaskJson[];
+  const nodes: GraphBuilderNode[] = [];
+  const nameToId = new Map<string, string>();
+  for (const t of tasks) {
+    let operatorId = "op:load";
+    let data: Record<string, unknown> = { name: t.name };
+    if (t.kind === "sql") {
+      operatorId = "op:sql";
+      // Join the statement list back into one editable SQL block (split by ';'
+      // on save). Preserves multi-statement sql steps through a round-trip.
+      data = { name: t.name, connection: t.connection, statement: (t.statements ?? []).join(";\n\n") };
+    } else if (t.kind === "proc_call") {
+      operatorId = "op:proc_call";
+      data = {
+        name: t.name,
+        connection: t.connection,
+        procedure: t.procedure,
+        args: t.args ?? [],
+        reads: t.reads ?? [],
+        writes: t.writes ?? [],
+      };
+    } else {
+      const src = t.source ?? {};
+      const snk = t.sink ?? t.sinks?.[0] ?? {};
+      const kc = snk.key_columns;
+      const srcConn = src.connection ?? snk.connection;
+      data = {
+        name: t.name,
+        connection: srcConn,
+        // Only surface a write connection when it actually differs (keeps the
+        // common same-connection case clean).
+        sink_connection: snk.connection && snk.connection !== srcConn ? snk.connection : undefined,
+        query: src.query,
+        table: snk.table,
+        mode: snk.mode ?? "append",
+        pre_sql: snk.pre_sql,
+        key_columns: Array.isArray(kc) ? kc.join(",") : kc,
+      };
+    }
+    if (t.trigger_rule) data.trigger_rule = t.trigger_rule;
+    if (t.timeout_seconds !== undefined && t.timeout_seconds !== null) {
+      data.timeout_seconds = t.timeout_seconds;
+    }
+    if (t.retry?.max_attempts) data.retry_max_attempts = t.retry.max_attempts;
+    if (Array.isArray(t.branch) && t.branch.length) data.branch = t.branch;
+    if (t.expand && Object.keys(t.expand).length) data.expand = t.expand;
+    if (t.push_xcom && Object.keys(t.push_xcom).length) data.push_xcom = t.push_xcom;
+    const id = nextId("op");
+    nameToId.set(t.name, id);
+    nodes.push({ id, operatorId, data, position: { x: 0, y: 0 } });
+  }
+  const edges: GraphBuilderEdge[] = [];
+  for (const t of tasks) {
+    const tid = nameToId.get(t.name);
+    if (!tid) continue;
+    for (const dep of t.depends_on ?? []) {
+      const sid = nameToId.get(dep);
+      if (sid) edges.push({ id: nextId("edge"), source: sid, target: tid });
+    }
+  }
+  layoutGraph(nodes, edges);
+  return { nodes, edges };
+}
+
+/** Client-side validation for an Operator DAG: unique non-empty names +
+ *  per-operator required fields. (Acyclicity is enforced by the canvas.) */
+export function validateTasksDAG(state: GraphBuilderState): GraphIssue[] {
+  const issues: GraphIssue[] = [];
+  const seen = new Map<string, number>();
+  for (const n of state.nodes) {
+    const op = findOperator(n.operatorId);
+    const name = (n.data.name as string | undefined)?.trim();
+    const label = op ? op.label : "Step";
+    if (!name) {
+      issues.push({ kind: "missing_name", message: `A "${label}" step needs a name`, nodeId: n.id });
+    } else {
+      seen.set(name, (seen.get(name) ?? 0) + 1);
+    }
+    if (!n.data.connection) {
+      issues.push({ kind: "missing_connection", message: `"${name ?? label}" needs a connection`, nodeId: n.id });
+    }
+    if (op?.connectorType === "sql" && !(n.data.statement as string | undefined)?.trim()) {
+      issues.push({ kind: "missing_statement", message: `"${name ?? label}" needs a SQL statement`, nodeId: n.id });
+    }
+    if (op?.connectorType === "proc_call" && !(n.data.procedure as string | undefined)?.trim()) {
+      issues.push({ kind: "missing_statement", message: `"${name ?? label}" needs a procedure`, nodeId: n.id });
+    }
+  }
+  for (const [name, count] of seen) {
+    if (count > 1) {
+      const dupes = state.nodes.filter((n) => (n.data.name as string)?.trim() === name);
+      for (const n of dupes) {
+        issues.push({ kind: "duplicate_name", message: `Duplicate step name "${name}"`, nodeId: n.id });
+      }
+    }
+  }
+  // Branch ``to`` must reference an ACTUAL direct downstream of the branch step
+  // — otherwise the rule selects nothing (or, worse, looks like it routes but
+  // the core skips every real downstream). Catch the typo before a run.
+  const nameOfId = (id: string): string | undefined =>
+    (state.nodes.find((x) => x.id === id)?.data.name as string | undefined)?.trim();
+  for (const n of state.nodes) {
+    const branch = n.data.branch;
+    if (!Array.isArray(branch) || branch.length === 0) continue;
+    const downstream = new Set(
+      state.edges
+        .filter((e) => e.source === n.id)
+        .map((e) => nameOfId(e.target))
+        .filter((x): x is string => Boolean(x)),
+    );
+    const stepName = (n.data.name as string | undefined)?.trim() ?? "step";
+    for (const rule of branch as { to?: unknown }[]) {
+      const targets = Array.isArray(rule?.to) ? (rule.to as unknown[]) : [];
+      for (const target of targets) {
+        if (typeof target === "string" && !downstream.has(target)) {
+          issues.push({
+            kind: "branch_bad_target",
+            message: `Branch in "${stepName}" routes to "${target}", which isn't a downstream step`,
+            nodeId: n.id,
+          });
+        }
+      }
+    }
+  }
+  return issues;
 }
 
 /** Pull policy / behaviour metadata off a stored ``PipelineConfigJson`` so
@@ -560,6 +868,7 @@ export function extractPipelineMeta(
           mode: (config.dlq.mode ?? DEFAULT_DLQ.mode) as DlqSettings["mode"],
           table: config.dlq.table ?? "",
           topic: config.dlq.topic ?? "",
+          error_column: config.dlq.error_column ?? "",
         }
       : { ...DEFAULT_DLQ },
   };

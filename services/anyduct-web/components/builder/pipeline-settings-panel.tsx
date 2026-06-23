@@ -186,6 +186,17 @@ export function PipelineSettingsPanel({
             <option value="upsert">{t("builder.upsert")}</option>
           </select>
         </FieldRow>
+        {/* Error reason column (2026-06-23) — when set, the failure reason is
+            stamped into this column so a DLQ'd record is self-describing. The
+            DLQ table/topic must carry the column. */}
+        <FieldRow label={t("builder.dlqErrorColumn")} help={t("builder.dlqErrorColumnHelp")}>
+          <Input
+            value={dlq.error_column}
+            disabled={!dlq.enabled}
+            placeholder={t("builder.dlqErrorColumnPlaceholder")}
+            onChange={(e) => onChangeDlq({ ...dlq, error_column: e.target.value })}
+          />
+        </FieldRow>
       </Section>
 
       <VariablesEditor variables={variables} onChange={onChangeVariables} />

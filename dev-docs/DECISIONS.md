@@ -2866,4 +2866,181 @@ L1 출시 직후 사용자가 5개 회신:
 
 ---
 
+## ADR-0097: 태스크 간 값 전달 — XCom(`{{ xcom.<task>.<key> }}`) [자유도 3단계]
+
+**Date**: 2026-06-17
+**Status**: Accepted (구현 + core unit 검증; slice 1 = auto-xcom pull)
+
+**Context**: 태스크-DAG는 ADR-0028에서 순서(`depends_on`/`trigger_rule`/`branch`)만 다뤘고,
+당시 *"태스크 간 데이터는 저장소(테이블/객체) 경유 — 코어에 XCom류 신규 메커니즘 불필요(필요 시 후속)"* 로
+의도적으로 미뤘다. Airflow 지향 자유도를 높이는 흐름(① 런타임 파라미터/`{{ }}` 템플릿, ② per-task
+retry/timeout)에서 가장 부족한 오케스트레이션 1급 요소가 바로 **상류 태스크 산출값을 하류 태스크가
+직접 참조**하는 경로다(③ dynamic task mapping의 선행 요건이기도 함). 또 branch predicate는 이미
+상류 컨텍스트(`records_read`/`records_written`/`success`)를 노출하고 있어 — 사실상 proto-XCom — 이를
+일반화하는 자연스러운 확장이다.
+
+**Decision**:
+- **문법은 ① `{{ }}` 템플릿 재사용** — pull = `{{ xcom.<task_name>.<key> }}`. path-only 안전
+  렌더러를 그대로 쓰므로 함수 호출/산술/코드실행 없음(Jinja2 비도입 자세 유지). Airflow의
+  `ti.xcom_pull(...)` 같은 호출형 대신 점-경로형이라 우리 샌드박스에 정확히 맞는다.
+- **2-phase 렌더링으로 "하류는 상류 실행 후 렌더" 문제 해결**:
+  - phase-1(load/once, 기존): `${var}`/`!secret`/`{{ params/ds/... }}` 를 빌드 전 1회 렌더.
+    단, **`xcom` 네임스페이스는 deferred** — `render_config_templates(deferred={"xcom"})` 기본값으로
+    `{{ xcom.* }}` 토큰을 건드리지 않고 통과(미정의 에러도 안 냄). 호출부(워커/CLI/빌더) 변경 0.
+  - phase-2(per-task, 코어 실행 시점): `_execute_task`가 태스크 실행 *직전* 그 태스크의 템플릿 가능
+    문자열 필드(`query`/`source_options`/`sink_table`/`sink_options`/`sinks[]`)를 누적된 xcom
+    스토어로 렌더(`dataclasses.replace`로 렌더된 사본 — 원본 Task 불변, 멱등 재실행 안전). 렌더가
+    pushdown/arrow/records 분기보다 앞서므로 ELT 푸시다운도 해석된 값으로 실행.
+- **xcom 스토어 = 단일 초크포인트**: linear/DAG 양 경로가 모두 `_execute_task`를 지나므로 거기서
+  실행 후 `xcom[task.name] = {records_read, records_written, success, new_cursor}` 자동 적재
+  (auto-xcom — branch predicate 어휘와 정합 + `new_cursor` 추가). 이름 없는 단일 태스크는 적재 안 함
+  (참조 불가하므로).
+- **templating 모듈을 `etl_plugins/core/templating.py`로 이전** — phase-2가 코어에서 렌더해야 하는데
+  import 계약상 `core`는 `runtime`을 import 못 한다. 렌더러는 순수 유틸(코어 개념)이므로 core로 옮기고
+  `etl_plugins/runtime/templating.py`는 재-export shim으로 남겨 기존 import 전부 무변경(runtime→core 허용).
+
+**Consequences**:
+- ✅ 하류 태스크가 `SELECT ... WHERE id > {{ xcom.extract.new_cursor }}` 처럼 상류 산출값을 직접 참조.
+  ③ dynamic mapping(상류 출력으로 fan-out)의 토대.
+- ⚠️ **리니지는 phase-1 config 기준**(xcom deferred 상태) — 테이블명에 xcom을 끼우면 카탈로그 asset
+  키가 토큰 그대로일 수 있다(쿼리 본문 xcom은 best-effort opaque). 슬라이스 1 한계로 문서화.
+- ⚠️ **slice 1 = auto-xcom pull만**. 명시적 push(임의 계산값을 키로 적재 — 예: `{type: xcom_push}`)와
+  web 노출은 후속 슬라이스. 그래프-shape 노드 단위 xcom도 후속(현재는 task 단위).
+- backward-compat 완전: 신규 deferred 기본값/스토어는 `{{ xcom }}` 미사용 파이프라인에 오버헤드 0.
+
+---
+
+## ADR-0098: 동적 태스크 매핑 — `expand` (Airflow `.expand()`) [자유도 3단계]
+
+**Date**: 2026-06-17
+**Status**: Accepted (구현 + core unit + 서버 e2e 검증; slice 1 = flat task fan-out)
+
+**Context**: Airflow 지향 자유도 트랙(① params/템플릿, ② per-task retry/timeout, ③ XCom)의
+정점. 런타임에 **태스크를 N개 인스턴스로 fan-out**(리전별/파일별/파티션별)하는 Airflow의
+간판 기능. ③ XCom이 선행 요건이었고(상류 출력으로 매핑), ①의 per-run params와도 직접 맞물린다
+(params 리스트로 fan-out).
+
+**Decision**:
+- **`expand: {name → list}`** — 태스크가 리스트 원소당 1 인스턴스로 펼쳐짐(키 여러 개면 cross
+  product, Airflow 시맨틱). 각 인스턴스는 `{{ map.<name> }}`를 템플릿 필드에 노출.
+- **3가지 리스트 출처가 모두 템플릿 한 경로로**: ① 리터럴 리스트 ② per-run param 리스트
+  (`{{ params.regions }}` — 로드타임 해석, 트리거가 fan-out을 바꿈) ③ 상류 XCom 리스트
+  (`{{ xcom.discover.items }}` — 실행시점 해석). → `map`을 `xcom`과 함께 **deferred 네임스페이스**로
+  추가(로드타임 패스가 `{{ map.* }}` 통과, 코어가 인스턴스별 해석). *(이 deferred 누락이 첫 구현에서
+  param-driven expand를 깨뜨렸고 테스트가 잡음 — 영향도 관리의 사례.)*
+- **단일 초크포인트 재사용**: `_execute_task`가 `map_values is None and task.expand`면
+  `_execute_mapped_task`로 분기 → 인스턴스마다 `_execute_task(..., map_values=inst)` 재귀(인스턴스는
+  재-expand 안 함). 각 인스턴스는 풀 단일-태스크 경로(retry/timeout/데이터경로 선택)를 독립 수행 —
+  ②③와 동일한 "linear/DAG 공통 초크포인트" invariant 유지.
+- **실패 격리 + 집계**: 한 인스턴스 실패가 나머지를 막지 않음(첫 에러를 끝에 raise → 태스크 failed).
+  records는 인스턴스 합산, 부모가 **집계**를 XCom에 push(`{{ xcom.load.records_written }}`=총합).
+  빈 리스트 = 0 인스턴스(success, 0 records — 에러 아님).
+
+**Consequences**:
+- ✅ 런타임 데이터 의존 fan-out 완성 — 자유도 트랙(①②③ + expand) 코어 완결. 서버 e2e로 풀스택 입증
+  (트리거 params → 워커 렌더(map deferred) → 코어 expand → 데이터 안착).
+- ⚠️ **slice 1 = flat task fan-out만**. 서비스 레이어 per-instance `node_run`(현재는 집계 1행),
+  graph-노드 단위 매핑, 웹 노출은 후속. `{{ map.* }}`를 expand 없이 쓰면 토큰이 그대로 남음(향후 lint).
+- backward-compat 완전: `expand` 기본 빈 dict → 미선언 시 동작/오버헤드 0.
+
+**후속 (2026-06-17, deferred 템플릿 정적 lint — ADR-0097/0098 공통)**: 위에서 예고한 lint를 구현했다.
+`{{ map.* }}` / `{{ xcom.* }}`는 per-task 실행시점에만 해석되는 deferred 네임스페이스라 phase-1 정적
+검증을 비껴가고, `expand` 키 누락·상류 태스크명 오타는 토큰이 치환 안 된 채 커넥터에 닿거나(literal) per-task
+렌더가 `ConfigError`로 죽는다. `runtime/lint.py`에 4 advisory 규칙 추가 — `map_ref_without_expand`(expand
+미선언), `map_ref_unknown_key`(expand 키 불일치), `xcom_ref_unknown_task`(존재 안 하는 태스크 참조),
+`xcom_ref_not_upstream`(상류 의존 closure 밖 태스크의 xcom pull → 실행 순서 미보장). 태스크-DAG shape
+한정(레거시 단일-태스크는 expand·타 태스크가 구조상 없음; graph-노드 매핑은 미구현이라 대상 아님). 렌더되는
+필드 집합(`source`/`sinks` model_dump)을 코어 신설 `template_paths()`(전체 점-경로 추출)로 스캔 — 코어
+`_render_task_xcom`이 실제 렌더하는 필드의 안전한 superset. dry-run REST가 이미 `lint_pipeline`을 호출하므로
+배선 0(Phase DD/AEN 경로 재사용), web은 `w.message` verbatim 렌더라 i18n 키 0. 단위 +11.
+
+**후속 (2026-06-18, 명시적 XCom push — `push_xcom`)**: ADR-0097 slice 1은 auto-XCom(요약 4키)만
+publish했는데, 그 중 어느 것도 **fan-out 리스트가 아니다**. 그래서 ADR-0098이 문서화한 dynamic mapping의
+세 번째 fan-out 출처(상류 XCom 리스트 `{{ xcom.discover.items }}`)는 *실제로 동작한 적이 없었다* —
+`self._xcom[discover]`에 리스트를 넣을 경로가 없었기 때문. 이 후속이 그 keystone을 채운다.
+
+- **결정**: `TaskConfig.push_xcom: {key → {column, distinct?}}` — 태스크가 처리한 행들에서 그 컬럼 값을
+  리스트로 투영해 `xcom.<task>.<key>`로 publish. 하류는 `expand: {region: "{{ xcom.discover.regions }}"}`로
+  fan-out(whole-string 템플릿이 리스트 타입 보존 → `_resolve_expand`가 그대로 사용).
+- **단일 초크포인트 유지**: `_run_task`의 count 패스(records_read를 세는 그 패스)에서 *라우팅 accept 전에*
+  수집 → 멀티-sink 조건부 fan-out에서도 전 행을 커버. 수집은 사이드 채널 `_task_xcom_pushes`(스크래치,
+  run마다 리셋)로 모으고 `_execute_task`가 auto 요약 dict에 `**`-병합 — auto-push는 단일 리터럴로 유지,
+  retry는 사이드 채널을 덮어쓰니 항상 성공 패스 값.
+- **records 경로 강제**: pushdown(INSERT…SELECT)·Arrow는 Python 행을 안 거치므로 컬럼 투영 불가 →
+  `push_xcom` 선언 시 두 fast-path를 건너뜀(`if not task.push_xcom`). discover 류는 소량이라 비용 무시 가능.
+- **시맨틱**: `distinct`=first-seen 순서 보존, 컬럼 부재=TaskError(즉시 실패), 빈 소스=빈 리스트(success).
+  매핑된 인스턴스(map_values≠None)는 개별 push 안 함(부모가 집계 — ADR-0098과 동일).
+- **Consequences**: ⚠️ slice 1 = 컬럼 투영만(임의 계산값 push·graph-노드 push는 후속). 모델 검증(`column`
+  필수, 허용 키 `column`/`distinct`만) + 빌더 forward. 서버 변화 0(`push_xcom`은 config_json 일부, dry-run/
+  워커 동일 빌드 경로). 단위 +7(keystone push→expand e2e 포함). backward-compat 완전.
+
+---
+
+## ADR-0099: 오케스트레이션 ETL 1급화 — task-DAG를 타입 있는 Operator DAG로 승격
+
+**Date**: 2026-06-18
+**Status**: Accepted (설계 합의 — 사용자 "가장 알맞게 진행" 위임; P1 구현 착수)
+
+**Context**:
+사용자의 레거시 Vertica 프로시저(`PID_SM_TB_BSASTS102_1` — `START로그 ▸ DELETE ▸ INSERT…SELECT ▸ END로그`)를
+빌더에 노드로 옮기는 과정에서 **모델 미스매치**가 드러났다.
+
+- 이런 ETL의 본질은 **오케스트레이션**이다: 순서 있는 SQL 스텝의 나열 + 대부분 순수 side-effect(DELETE/CALL/
+  로그적재)로 스텝 사이에 **데이터가 흐르지 않는다**.
+- 그런데 웹 빌더는 **데이터플로우(graph)** 모델이다("레코드가 노드→노드로 흐른다"). "DELETE 하고 그 다음
+  INSERT" 같은 **순수 순서**를 표현할 엣지가 없다(둘 사이 흐를 데이터가 없으므로). 결국 마트를 graph로
+  욱여넣느라 로그를 DuckDB sql 변환으로 분기하는 **부자연스러운 우회**를 하게 됐다.
+- 코어에는 **task-DAG**(`depends_on`/`trigger_rule`/`branch`, ADR-0028)라는 오케스트레이션 모델이 *이미 있고*,
+  이번 자유도 트랙(ADR-0097/0098 + params/per-task retry·timeout)이 Airflow의 TI/XCom에 해당하는
+  **제어·데이터 평면을 이미 깔았다**. 하지만 ① 웹 빌더가 task-DAG를 못 그리고(safe-exit 카드), ② task 한 개가
+  `source→transforms→sink(s)`로 고정돼 "그냥 이 SQL 한 문장 실행"·"이 프로시저 CALL" 같은 **1급 단위가 없다**
+  (`sql_exec`는 graph 노드로만 존재하는 우회, `pre_sql`은 sink에 매달린 곁가지).
+
+**Decision** (사용자 선택: 그린필드 신규 계층 대신 **기존 task-DAG 승격**):
+task-DAG를 **타입 있는 Operator DAG**로 일반화한다 — 코어를 버리지 않고 이번 세션 자산(retry/timeout/XCom/
+expand의 단일 초크포인트 `_execute_task`)을 그대로 재사용.
+
+1. **Operator = 타입 있는 작업 단위.** `TaskConfig`에 `kind` 추가(기본 `"etl"` = 현행 `source→transforms→sink`,
+   **완전 backward-compat**). 초기 타소노미:
+   - `etl` (기본) — 현행 task. same-conn이면 자동 pushdown, 교차-conn이면 Arrow/records.
+   - `sql` — `statements: list[str]` 를 **순차 실행**(각 문장 `execute_statement` 계약대로 커밋 — 레거시
+     프로시저도 DELETE/INSERT를 별 statement로 돌리므로 동일 시맨틱). DDL/DELETE/MERGE 등 source/sink에
+     안 묶인 순수 스텝. **rows-affected(합계)를 XCom `records_written`으로 push**(`sql_exec` 승격 + `pre_sql` 흡수).
+   - `proc_call` — `procedure` + `args: list[str]`(SQL 식 — 문자열은 caller가 quote, `{{ }}` 템플릿 가능)을
+     `CALL <procedure>(<args>)`로 합성해 `execute_statement` 실행. 레거시 로그/배치 프로시저 1급 표현.
+   - **`sql_load`는 별 kind로 두지 않는다** — `etl`(기본)이 same-conn이면 이미 자동 pushdown(`INSERT…SELECT`)을
+     하므로 흡수. (`copy` = transform 없는 etl, `branch`/sensor = 기존) — 추가 kind 불요.
+   - **확정 kind 집합: `etl`(기본) / `sql` / `proc_call`.**
+2. **엣지 = 순서(제어), 데이터는 XCom으로.** `depends_on`(+`trigger_rule`)이 순서, 스텝 간 값은
+   `{{ xcom.<op>.<key> }}`(ADR-0097). graph의 "엣지=데이터"와 명확히 분리 — Airflow와 동일한 제어/데이터 분리.
+3. **모든 Operator가 자유도 기능을 균일하게 받는다.** params/템플릿·per-op retry·timeout·expand가 이미 단일
+   초크포인트(`_execute_task`)를 지나므로 kind 분기만 추가하면 자동 적용.
+4. **graph(데이터플로우)는 유지.** 데이터-파이프라인 용도는 graph, 오케스트레이션은 Operator DAG. 장기적으로
+   "graph = 본문이 데이터플로우 서브그래프인 하나의 operator"로 수렴 가능하나 이번 범위 아님.
+
+**이 프로시저의 새 모델 표현** (설계 검증):
+```
+op write_start_log  kind=proc_call   CALL …BCOLOG701…(START)
+op load_mart        kind=etl          depends_on=[write_start_log]
+                    sink.pre_sql=DELETE WHERE CRTR_YMD={{params.IN_CRTR_DD}}; source=INSERT…SELECT(마트 쿼리)
+op write_end_log    kind=proc_call   depends_on=[load_mart]
+                    CALL …BCOLOG701…(END, NOCS={{ xcom.load_mart.records_written }})
+```
+→ 순서대로 끌어다 놓으면 끝. DuckDB 우회·데이터플로우 왜곡 없음. NOCS는 XCom으로 자연 전달.
+
+**Consequences / 단계 로드맵** (ROADMAP의 신규 섹션과 연동):
+- **P1 (코어)**: `TaskConfig.kind` + `_execute_task`/`_run_task`에 `sql`/`proc_call` 디스패치. rows-affected →
+  XCom. 기존 retry/timeout/XCom/expand 재사용. lint(미지 kind, conn 누락)·validate. 단위 테스트. backward-compat.
+- **P2 (UI)**: 빌더에 "Operator DAG / 오케스트레이션" 모드 — operator 팔레트 + **의존(순서) 엣지**(데이터플로우
+  graph와 구분). kind별 properties. task-DAG safe-exit 해소.
+- **P3 (레퍼런스)**: `BSASTS102`를 새 모델로 재구축 → test_verti 라이브 검증(적재·로그·멱등).
+- **P4 (수렴, 후속)**: `sql_exec` graph 노드 → `sql` operator 안내, graph-as-operator 통합, 마이그레이션 가이드.
+
+**Alternatives considered**:
+- **그린필드 신규 Operator 계층** — 자유도는 높으나 graph/task-DAG와 **이중 모델 관리 + 마이그레이션 비용**.
+  사용자가 기존 승격을 선택(이번 세션 XCom/params/retry/expand 자산 재사용이 결정적).
+- **graph-only 유지 + 데이터플로우 강제** — 현 상태. 오케스트레이션 ETL(순서·side-effect)에 구조적으로 안 맞음.
+
+---
+
 ## (이후 ADR 작성 시 위 양식을 복사해서 추가)

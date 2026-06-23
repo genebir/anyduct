@@ -46,6 +46,12 @@ class TaskError(PipelineError):
     """Task-level execution error (missing source/sink, type mismatch, etc.)."""
 
 
+class TaskTimeoutError(TaskError):
+    """A task exceeded its ``timeout_seconds`` (자유도 2단계). A subclass of
+    TaskError so a configured ``retry`` retries a slow task by default; the
+    deadline is checked at record/chunk boundaries (see Pipeline)."""
+
+
 class TransformError(PipelineError):
     """A transform callable raised."""
 

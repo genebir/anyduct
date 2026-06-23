@@ -30,6 +30,7 @@ from etl_plugins.core.asset import (
     asset_kind,
     derive_asset_key,
 )
+from etl_plugins.core.sql_introspect import extract_statement_io
 from etl_plugins.runtime.sql_lineage import extract_referenced_tables
 
 
@@ -98,6 +99,37 @@ def derive_lineage(cfg: PipelineConfig) -> AssetLineage:
                     _add_edge(sk, sink_key)
     else:
         for task in cfg.effective_tasks():
+            # Operator kinds (ADR-0099). ``sql`` steps run statements — register
+            # the table each one writes (INSERT/MERGE/… target) as an output
+            # asset and any tables it reads as inputs, so e.g. a batch-log step
+            # shows its target in the catalog.
+            if task.kind == "sql":
+                for stmt in task.statements:
+                    targets, sources = extract_statement_io(stmt)
+                    in_keys = [derive_asset_key(task.connection, {"table": s}) for s in sources]
+                    for ik in in_keys:
+                        _add_in(ik, "table")
+                    for tgt in targets:
+                        out_key = derive_asset_key(task.connection, {"table": tgt})
+                        _add_out(out_key, "table")
+                        for ik in in_keys:
+                            _add_edge(ik, out_key)
+                continue
+            # ``proc_call`` is opaque, but a declared ``reads``/``writes`` set
+            # (Airflow-style inlets/outlets) lets the catalog register what the
+            # procedure touches.
+            if task.kind == "proc_call":
+                in_keys = [derive_asset_key(task.connection, {"table": t}) for t in task.reads]
+                for ik in in_keys:
+                    _add_in(ik, "table")
+                for w in task.writes:
+                    out_key = derive_asset_key(task.connection, {"table": w})
+                    _add_out(out_key, "table")
+                    for ik in in_keys:
+                        _add_edge(ik, out_key)
+                continue
+            if task.source is None:
+                continue
             src_data = task.source.model_dump()
             primary_in = derive_asset_key(task.source.connection, src_data)
             _add_in(primary_in, asset_kind(src_data))
@@ -142,6 +174,8 @@ def _query_referenced_asset_keys(
     """
     source: SourceConfig | GraphNodeConfig
     if isinstance(source_holder, TaskConfig):
+        if source_holder.source is None:  # operator kinds (ADR-0099)
+            return []
         source = source_holder.source
     else:
         source = source_holder

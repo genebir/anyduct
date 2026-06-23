@@ -55,6 +55,20 @@ const STATUS_TEXT: Record<StatusKey, string> = {
   cancelled: "text-text-muted",
 };
 
+/** Display label for a node's status. A Task-DAG run (ADR-0099) has no SKIPPED
+ *  enum, so a branch-deselected node and an upstream-failure skip both arrive as
+ *  ``cancelled``. ``result_json.task_state`` preserves which it was — surface it
+ *  so an engineer reading the DAG can tell "deliberately skipped by a branch"
+ *  from "couldn't run because an upstream failed". */
+function statusLabel(n: NodeRunEntry): string {
+  if (n.status === "cancelled") {
+    const ts = n.result_json?.task_state;
+    if (ts === "skipped") return "skipped";
+    if (ts === "upstream_failed") return "upstream failed";
+  }
+  return n.status;
+}
+
 /** Render a node-run's duration as ``D 3.2s`` (succeeded/failed/cancelled)
  *  or ``D 1.4s+`` (still running — shows elapsed since started_at, the
  *  trailing ``+`` flags that it's not the final number).
@@ -113,6 +127,8 @@ function bfsDepth(nodes: NodeRunEntry[]): Map<string, number> {
 function nodeCard(n: NodeRunEntry, selected: boolean): React.ReactNode {
   const showCounters = n.records_read > 0 || n.records_written > 0;
   const duration = formatNodeDuration(n);
+  const mappedInstances = n.result_json?.mapped_instances ?? null;
+  const mappedFailed = mappedInstances?.filter((i) => !i.success).length ?? 0;
   return (
     <div
       className={cn(
@@ -139,8 +155,16 @@ function nodeCard(n: NodeRunEntry, selected: boolean): React.ReactNode {
       </div>
       <div className="mt-1 flex items-center justify-between gap-2">
         <span className="text-[10px] uppercase tracking-wider text-text-muted">{n.kind}</span>
-        <span className={cn("text-[10px] font-medium", STATUS_TEXT[n.status])}>{n.status}</span>
+        <span className={cn("text-[10px] font-medium", STATUS_TEXT[n.status])}>{statusLabel(n)}</span>
       </div>
+      {/* Retry badge (자유도 2단계, 2026-06-22): a step that took >1 attempt
+          retried before settling — a flaky-upstream signal. Amber tone, shown
+          only when it actually retried (attempt > 1). */}
+      {n.attempt > 1 ? (
+        <div className="mt-0.5 text-[10px] font-medium text-warning" title={`${n.attempt} attempts`}>
+          ↻ ×{n.attempt}
+        </div>
+      ) : null}
       {showCounters || duration ? (
         <div className="mt-0.5 text-[10px] text-text-secondary">
           {/* Phase AFP (2026-06-04) — thousand-separated counts, matching
@@ -166,6 +190,52 @@ function nodeCard(n: NodeRunEntry, selected: boolean): React.ReactNode {
       {n.error_class ? (
         <div className="mt-0.5 truncate text-[10px] text-error" title={n.error_message ?? ""}>
           {n.error_class}
+        </div>
+      ) : null}
+      {/* Dynamic-mapping fan-out (expand, ADR-0098). A mapped task is one
+          aggregated node; surface the per-instance breakdown so an engineer
+          can see "instance region=eu failed" instead of guessing from the
+          single rolled-up status. */}
+      {mappedInstances ? (
+        <div className="mt-1 border-t border-border-subtle/60 pt-1">
+          <div className="text-[9px] uppercase tracking-wider text-text-muted">
+            ⑃ {mappedInstances.length} {mappedInstances.length === 1 ? "instance" : "instances"}
+            {mappedFailed > 0 ? (
+              <span className="ml-1 text-error">· {mappedFailed} failed</span>
+            ) : null}
+          </div>
+          <ul className="mt-0.5 space-y-px">
+            {mappedInstances.slice(0, 6).map((inst, i) => (
+              <li
+                key={i}
+                className="flex items-center gap-1 text-[9px]"
+                title={inst.error_class ?? undefined}
+              >
+                <span
+                  className={cn(
+                    "h-1 w-1 shrink-0 rounded-full",
+                    inst.success ? "bg-success" : "bg-error",
+                  )}
+                  aria-hidden
+                />
+                <span className="truncate font-mono text-text-secondary">
+                  {Object.entries(inst.map_values)
+                    .map(([k, v]) => `${k}=${String(v)}`)
+                    .join(", ")}
+                </span>
+                {inst.records_written > 0 ? (
+                  <span className="ml-auto shrink-0 text-text-muted">
+                    {inst.records_written.toLocaleString()}
+                  </span>
+                ) : null}
+              </li>
+            ))}
+            {mappedInstances.length > 6 ? (
+              <li className="text-[9px] text-text-muted">
+                +{mappedInstances.length - 6} more
+              </li>
+            ) : null}
+          </ul>
         </div>
       ) : null}
     </div>

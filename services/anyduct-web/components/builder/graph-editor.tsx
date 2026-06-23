@@ -42,6 +42,7 @@ export function GraphEditor({
   state,
   connections,
   mode = "batch",
+  builderKind = "dataflow",
   onChange,
   settingsPanel,
   dryRunPanel,
@@ -51,6 +52,9 @@ export function GraphEditor({
   state: GraphBuilderState;
   connections: ConnectionSummary[];
   mode?: "batch" | "stream";
+  /** "orchestration" (Operator DAG, ADR-0099) swaps the palette to operator
+   *  steps; "dataflow" (default) is the source/transform/sink graph. */
+  builderKind?: "dataflow" | "orchestration";
   onChange: (next: GraphBuilderState) => void;
   /** Rendered in the right side when no node / edge is selected (graph-only
    *  mode, 2026-05-26). Callers usually pass a ``PipelineSettingsPanel``
@@ -310,7 +314,7 @@ export function GraphEditor({
 
   return (
     <div className="flex min-h-0 flex-1 overflow-hidden">
-      <Palette mode={mode} variant="graph" />
+      <Palette mode={mode} variant={builderKind === "orchestration" ? "orchestration" : "graph"} />
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="min-h-0 flex-1">
           <GraphCanvas

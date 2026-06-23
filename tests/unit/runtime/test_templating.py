@@ -15,8 +15,10 @@ from etl_plugins.core.exceptions import ConfigError
 from etl_plugins.runtime.templating import (
     RuntimeContext,
     has_template,
+    references_namespace,
     render_config_templates,
     render_templates,
+    template_namespaces,
 )
 
 CTX = RuntimeContext(
@@ -37,6 +39,44 @@ def test_context_mapping_keys() -> None:
     assert CTX["ts"].startswith("2026-06-15T13:30:00")
     assert CTX["pipeline_name"] == "orders"
     assert CTX["params"]["region"] == "kr"
+
+
+# ---------- deferred namespaces (ADR-0097, xcom) ----------
+
+
+def test_deferred_namespace_left_intact_whole_string() -> None:
+    out = render_templates("{{ xcom.a.b }}", CTX, deferred=frozenset({"xcom"}))
+    assert out == "{{ xcom.a.b }}"
+
+
+def test_deferred_namespace_left_intact_embedded() -> None:
+    out = render_templates(
+        "WHERE id > {{ xcom.extract.new_cursor }} AND day = '{{ ds }}'",
+        CTX,
+        deferred=frozenset({"xcom"}),
+    )
+    # xcom kept verbatim, ds resolved
+    assert out == "WHERE id > {{ xcom.extract.new_cursor }} AND day = '2026-06-15'"
+
+
+def test_render_config_defers_xcom_by_default() -> None:
+    ctx = RuntimeContext(
+        run_id="r", logical_date=datetime(2026, 6, 15, tzinfo=UTC), pipeline_name="p"
+    )
+    cfg = {"query": "SELECT {{ ds }} {{ xcom.a.b }}"}
+    out = render_config_templates(cfg, ctx)  # default deferred = {"xcom"}
+    assert out["query"] == "SELECT 2026-06-15 {{ xcom.a.b }}"
+
+
+def test_template_namespaces_collected() -> None:
+    obj = {"q": "{{ ds }} {{ xcom.a.b }}", "t": ["{{ params.x }}"]}
+    assert template_namespaces(obj) == {"ds", "xcom", "params"}
+
+
+def test_references_namespace() -> None:
+    assert references_namespace("{{ xcom.a.b }}", "xcom") is True
+    assert references_namespace("{{ ds }}", "xcom") is False
+    assert references_namespace({"k": ["{{ xcom.t.k }}"]}, "xcom") is True
 
 
 # ---------- embedded interpolation ----------

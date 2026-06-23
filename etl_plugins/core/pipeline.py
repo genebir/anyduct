@@ -11,7 +11,8 @@ import contextlib
 import re
 import time
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from itertools import product
 from types import CodeType
 from typing import Any, cast
 
@@ -36,9 +37,18 @@ from etl_plugins.core.connector import (
 )
 from etl_plugins.core.context import Context
 from etl_plugins.core.cursor import CursorValue
-from etl_plugins.core.exceptions import PipelineError, TaskError, TransformError
+from etl_plugins.core.exceptions import (
+    PipelineError,
+    TaskError,
+    TaskTimeoutError,
+    TransformError,
+)
 from etl_plugins.core.record import Record
 from etl_plugins.core.sql_exec import SqlExecutor
+from etl_plugins.core.templating import (
+    render_templates,
+    template_namespaces,
+)
 from etl_plugins.observability.lineage import (
     COMPLETE,
     FAIL,
@@ -75,6 +85,40 @@ AnyTransformFn = TransformFn | DatasetTransformFn
 def is_dataset_transform(fn: AnyTransformFn) -> bool:
     """True when ``fn`` is a dataset-level transform (stream-in → stream-out)."""
     return getattr(fn, "dataset_transform", False) is True
+
+
+def _coerce_cursor_bound(bound: Any, sample: Any) -> Any:
+    """Coerce a cursor ``bound`` to the type of an actual column ``sample`` so
+    they compare.
+
+    A backfill range arrives over REST/JSON as strings (``"2026-01-03"``), but
+    the cursor column's values are typed (``date`` / ``int`` / ``Decimal`` …).
+    The inclusive upper-bound check (``cv > cursor_to``) is done in Python, so a
+    ``date > str`` would raise ``TypeError``. Coerce the string bound to the
+    sample's type first. Best-effort: an un-coercible bound is returned
+    unchanged (a genuinely incomparable pair then surfaces its own error).
+    """
+    import datetime as _dt
+    from decimal import Decimal as _Decimal
+
+    if type(bound) is type(sample) or not isinstance(bound, str):
+        return bound
+    try:
+        if isinstance(sample, _dt.datetime):
+            return _dt.datetime.fromisoformat(bound)
+        if isinstance(sample, _dt.date):  # date (datetime already handled above)
+            return _dt.date.fromisoformat(bound)
+        if isinstance(sample, bool):  # bool is an int subclass — leave as-is
+            return bound
+        if isinstance(sample, int):
+            return int(bound)
+        if isinstance(sample, float):
+            return float(bound)
+        if isinstance(sample, _Decimal):
+            return _Decimal(bound)
+    except (ValueError, TypeError, ArithmeticError):
+        return bound
+    return bound
 
 
 # Task-orchestration DAG task states (ADR-0028).
@@ -310,6 +354,36 @@ class Task:
     # Branch selection rules (ADR-0028). Non-empty ⇒ this is a branch task that
     # chooses which direct downstream tasks run; the rest are skipped.
     branch: list[BranchRule] = field(default_factory=list)
+    # Per-task retry / timeout (자유도 2단계). ``retry`` overrides the
+    # pipeline-level default for this task; ``timeout_seconds`` fails the task
+    # (TaskTimeoutError) if its read loop runs past the deadline. Both None ⇒
+    # inherit the pipeline defaults (``Pipeline.retry`` / ``task_timeout_seconds``).
+    retry: RetryConfig | None = None
+    timeout_seconds: float | None = None
+    # Dynamic task mapping (ADR-0098, Airflow ``.expand()``). ``name → list``;
+    # the task fans out into one instance per element (cross product over keys),
+    # each exposing ``{{ map.<key> }}`` in its templatable fields. Values may be
+    # ``{{ }}`` templates — a per-run param list (``{{ params.regions }}``,
+    # resolved at load time) or an upstream list (``{{ xcom.discover.items }}``,
+    # resolved at execution time). Empty ⇒ this is not a mapped task.
+    expand: dict[str, Any] = field(default_factory=dict)
+    # Explicit XCom push (ADR-0097 follow-up). ``key → {column, distinct?}``;
+    # after the task runs, the list of that column's values across the rows it
+    # processed is published as ``self._xcom[task][key]`` — so a downstream task
+    # can ``expand`` over it (``{{ xcom.discover.regions }}``). Forces the
+    # records data path (pushdown/Arrow never touch Python rows). Empty ⇒ no push.
+    push_xcom: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # Operator kind (ADR-0099). ``etl`` (default) = source→transforms→sink(s).
+    # ``sql`` / ``proc_call`` are pure orchestration steps run against
+    # ``op_connection`` — no dataflow, rows-affected published to XCom.
+    kind: str = "etl"
+    op_connection: str | None = None
+    statements: list[str] = field(default_factory=list)  # sql operator
+    procedure: str | None = None  # proc_call operator
+    proc_args: list[str] = field(default_factory=list)  # proc_call operator
+    # proc_call declared lineage (ADR-0099): tables the procedure reads/writes.
+    proc_reads: list[str] = field(default_factory=list)
+    proc_writes: list[str] = field(default_factory=list)
     # Dataflow graph (ADR-0030). When ``graph_nodes`` is non-empty the task runs
     # as an operator graph (records flow along edges, branching per-edge ``when``)
     # instead of the flat source→transforms→sinks path.
@@ -400,6 +474,33 @@ class RunResult:
     # engine). Operators read this off the run to answer "why was this
     # fast/slow" without spelunking logs.
     data_paths: dict[str, str] = field(default_factory=dict)
+    # Per-task record counts (ADR-0099 monitoring, 2026-06-19): task name →
+    # (records_read, records_written). Empty for non-DAG runs. Lets the worker
+    # populate each node_run's counts (the DAG view's "R/W" per step) instead of
+    # only the run-level total. A mapped task records the summed counts.
+    task_records: dict[str, tuple[int, int]] = field(default_factory=dict)
+    # Per-instance outcomes of dynamically-mapped tasks (ADR-0098 ``expand``):
+    # task name → list of one dict per fan-out instance with ``map_values`` +
+    # ``records_read``/``records_written``/``success``/``error_class``. Empty
+    # unless a task fanned out. Surfaces "instance region=eu failed" in the UI,
+    # which the single aggregated node_run otherwise hides.
+    mapped_instances: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    # Per-task error for failed DAG tasks (ADR-0099 monitoring): task name →
+    # (error_class, error_message). Lets the worker fill each failed node_run's
+    # error so the DAG view shows *which* step broke and why — not just the
+    # run-level first error. Empty for non-DAG runs / all-success runs.
+    task_errors: dict[str, tuple[str, str]] = field(default_factory=dict)
+    # Per-task attempt count (자유도 2단계 monitoring, 2026-06-22): task name →
+    # number of attempts the task actually took (1 = no retry). Surfaces "this
+    # step succeeded only after 3 tries" — a flaky-upstream signal an engineer
+    # otherwise can't see, since retries happen inside the single chokepoint.
+    # For a mapped task it's the max attempts across its fan-out instances.
+    task_attempts: dict[str, int] = field(default_factory=dict)
+    # Per-task wall-clock seconds (monitoring, 2026-06-22): task name → elapsed
+    # across all attempts. Lets the worker set each node_run's started_at (=
+    # finished_at minus elapsed) so the DAG view shows per-step duration ("which
+    # step was slow?"). A mapped task sums its instances' time.
+    task_durations: dict[str, float] = field(default_factory=dict)
 
 
 def _project_columns_through_transforms(source_columns: list[Any], task: Task) -> list[Any]:
@@ -729,7 +830,10 @@ class Pipeline:
     mode: str = "batch"  # batch | stream
     tasks: list[Task] = field(default_factory=list)
     commit_strategy: str = "after_sink_flush"  # used by stream runtime; see SPEC.md §5.5
-    retry: RetryConfig | None = None  # if set, wrap each task with @retryable
+    retry: RetryConfig | None = None  # default per-task retry (task.retry overrides)
+    # Default per-task execution timeout (자유도 2단계). Applied to any task
+    # without its own ``timeout_seconds``. None ⇒ no timeout.
+    task_timeout_seconds: float | None = None
     dlq: DlqConfig | None = None  # if set, route TransformError records to this sink
     # ADR-0041 K5b: static column lineage derived at build time from the
     # source ``PipelineConfig`` so emitters (e.g. OpenLineage) can attach a
@@ -742,6 +846,16 @@ class Pipeline:
     # copied into ``RunResult.data_paths``). Pipelines are built per run by
     # the worker, so instance state is safe here.
     _task_data_paths: dict[str, str] = field(default_factory=dict)
+    # Scratch: XCom store of the CURRENT run (ADR-0097). ``task name → {key:
+    # value}`` — each task auto-pushes its summary after running; downstream
+    # tasks pull via ``{{ xcom.<task>.<key> }}`` rendered just before they run.
+    # Reset by ``run``; safe instance state for the same reason as above.
+    _xcom: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # Scratch: explicit XCom pushes collected during ``_run_task`` (ADR-0097
+    # follow-up). ``task name → {key: [values]}`` — merged into ``_xcom`` after
+    # the task runs. Separate from ``_xcom`` so the auto-summary push stays a
+    # single literal dict and a retry simply overwrites the collected values.
+    _task_xcom_pushes: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def add(self, task: Task) -> Pipeline:
         self.tasks.append(task)
@@ -854,6 +968,8 @@ class Pipeline:
             return derive_asset_key(conn, sink_fields(spec))
 
         for task in self.tasks:
+            if task.kind in ("sql", "proc_call"):
+                continue  # operator kinds (ADR-0099) — no asset lineage
             if task.graph_nodes:
                 src_keys: list[AssetKey] = []
                 for n in task.graph_nodes:
@@ -919,9 +1035,12 @@ class Pipeline:
 
         result = RunResult(run_id=ctx.run_id, pipeline_name=self.name, success=False)
         self._task_data_paths = {}
+        self._xcom = {}
+        self._task_xcom_pushes = {}
+        # Per-task retry (자유도 2단계): pass the RAW runner; ``_execute_task``
+        # wraps each task with its OWN effective retry (task.retry ?? pipeline
+        # retry), so a task can override the pipeline default.
         task_runner = self._run_task
-        if self.retry is not None:
-            task_runner = retryable(**self._retry_kwargs())(task_runner)
 
         # Lineage (ADR-0036): emit START now; COMPLETE/FAIL after the run. The
         # default emitter is a no-op, so this is free unless a backend is set.
@@ -1044,6 +1163,59 @@ class Pipeline:
             t.depends_on or t.branch or t.trigger_rule != DEFAULT_TRIGGER_RULE for t in self.tasks
         )
 
+    def _render_task_xcom(self, task: Task, *, map_values: dict[str, Any] | None = None) -> Task:
+        """Resolve the execution-time namespaces in this task's templatable
+        fields: ``{{ xcom.<task>.<key> }}`` (ADR-0097) and, for a mapped
+        instance, ``{{ map.<key> }}`` (dynamic task mapping, ADR-0098).
+
+        Only those namespaces are resolved — any other ``{{ }}`` reference is
+        left untouched (already rendered at load time, or owned by no pass).
+        Returns the task unchanged (no copy) when it references none of them, so
+        ordinary pipelines pay nothing. An undefined reference raises
+        ``ConfigError`` (a typo / bad ``depends_on`` order surfaces at once).
+        """
+        renderable: dict[str, Any] = {
+            "query": task.query,
+            "source_options": task.source_options,
+            "sink_table": task.sink_table,
+            "sink_options": task.sink_options,
+            "sinks": [{"table": s.table, "options": s.options} for s in task.sinks],
+            "pre_sql": [a.statement for a in task.pre_sql],
+            # Operator fields (ADR-0099) — e.g. a log step's args reference
+            # ``{{ xcom.load_mart.records_written }}``.
+            "statements": task.statements,
+            "procedure": task.procedure,
+            "proc_args": task.proc_args,
+        }
+        ctx: dict[str, Any] = {"xcom": self._xcom}
+        active = {"xcom"}
+        if map_values is not None:
+            ctx["map"] = map_values
+            active.add("map")
+        if active.isdisjoint(template_namespaces(renderable)):
+            return task
+        # Defer every namespace except the active ones so a stray token (e.g. a
+        # manually-built task) is preserved rather than erroring here.
+        deferred = frozenset(template_namespaces(renderable) - active)
+
+        def _r(value: Any) -> Any:
+            return render_templates(value, ctx, deferred=deferred)
+
+        new_sinks = [replace(s, table=_r(s.table), options=_r(s.options)) for s in task.sinks]
+        new_pre_sql = [replace(a, statement=_r(a.statement)) for a in task.pre_sql]
+        return replace(
+            task,
+            query=_r(task.query),
+            source_options=_r(task.source_options),
+            sink_table=_r(task.sink_table),
+            sink_options=_r(task.sink_options),
+            sinks=new_sinks,
+            pre_sql=new_pre_sql,
+            statements=[_r(s) for s in task.statements],
+            procedure=_r(task.procedure),
+            proc_args=[_r(a) for a in task.proc_args],
+        )
+
     def _execute_task(
         self,
         task: Task,
@@ -1058,9 +1230,34 @@ class Pipeline:
         tracer: Any,
         attrs: dict[str, Any],
         task_runner: Callable[..., tuple[int, int, CursorValue]],
+        map_values: dict[str, Any] | None = None,
     ) -> tuple[int, int]:
-        """Run one task fully: span + runner + metric/result accumulation + hooks."""
-        if cursored and not task.cursor_column:
+        """Run one task fully: span + runner + metric/result accumulation + hooks.
+
+        ``map_values`` is set for one instance of a dynamically-mapped task
+        (ADR-0098); ``None`` is an ordinary single execution. A task that
+        declares ``expand`` and is *not* already a mapped instance fans out here.
+        """
+        if map_values is None and task.expand:
+            return self._execute_mapped_task(
+                task,
+                conns,
+                cursor_from,
+                cursor_to,
+                cursored=cursored,
+                ctx=ctx,
+                result=result,
+                metrics=metrics,
+                tracer=tracer,
+                attrs=attrs,
+                task_runner=task_runner,
+            )
+        # XCom pull (ADR-0097): resolve any deferred ``{{ xcom.<task>.<key> }}``
+        # (and ``{{ map.<key> }}`` for a mapped instance) in this task's
+        # templatable fields — done *before* the runner so pushdown/Arrow/records
+        # all see the concrete value. Cheap no-op when there's nothing to resolve.
+        task = self._render_task_xcom(task, map_values=map_values)
+        if cursored and task.kind == "etl" and not task.cursor_column:
             raise TaskError(
                 f"Task {task.name or task.source!r}: cursor_column is required "
                 "when Pipeline.run is called with cursor_from/cursor_to."
@@ -1075,8 +1272,26 @@ class Pipeline:
                 "sink": ",".join(s.name for s in task.effective_sinks()),
             },
         )
+        # Per-task retry (자유도 2단계): wrap with this task's effective retry
+        # (its own override, else the pipeline default). The deadline/timeout
+        # is applied inside ``_run_task`` per attempt via ``task.timeout_seconds``.
+        effective_retry = task.retry or self.retry
+        # Count actual attempts: tenacity invokes the wrapped runner once per
+        # attempt, so a tiny counting closure around it captures the attempt
+        # count without reaching into the retry decorator's internals. ``[0]``
+        # is mutated in place (closure over a list, not a rebind).
+        attempts = [0]
+
+        def _counting_runner(*a: Any, **k: Any) -> tuple[int, int, CursorValue]:
+            attempts[0] += 1
+            return task_runner(*a, **k)
+
+        runner: Callable[..., tuple[int, int, CursorValue]] = _counting_runner
+        if effective_retry is not None:
+            runner = retryable(**self._retry_kwargs(effective_retry))(runner)
+        task_t0 = time.monotonic()
         try:
-            read_count, write_count, task_max = task_runner(task, conns, cursor_from, cursor_to)
+            read_count, write_count, task_max = runner(task, conns, cursor_from, cursor_to)
             task_span.set_attribute("records_read", read_count)
             task_span.set_attribute("records_written", write_count)
         except Exception as exc:
@@ -1084,16 +1299,152 @@ class Pipeline:
             raise
         finally:
             task_span.end()
+            # Record attempts + wall-clock even on failure (retries exhausted = a
+            # flaky signal; a slow failure is still worth timing) — attempts max
+            # across mapped instances, duration summed. Runs before the
+            # success-only bookkeeping below so a raised task still gets counted.
+            if task.name:
+                result.task_attempts[task.name] = max(
+                    result.task_attempts.get(task.name, 0), attempts[0]
+                )
+                result.task_durations[task.name] = result.task_durations.get(task.name, 0.0) + (
+                    time.monotonic() - task_t0
+                )
         result.records_read += read_count
         result.records_written += write_count
         if task_max is not None and (
             result.new_cursor is None or task_max > result.new_cursor  # type: ignore[operator]
         ):
             result.new_cursor = task_max
+        # XCom push (ADR-0097): auto-publish this task's summary so downstream
+        # tasks can pull it. Keyed by name — an unnamed single task can't be
+        # referenced, so skip it. Vocabulary matches the branch predicate env
+        # (records_read / records_written / success) plus new_cursor. Mapped
+        # instances (map_values set) don't push individually — the parent
+        # publishes the aggregate (ADR-0098).
+        if task.name and map_values is None:
+            self._xcom[task.name] = {
+                "records_read": read_count,
+                "records_written": write_count,
+                "success": True,
+                "new_cursor": task_max,
+                # Explicit pushes (ADR-0097 f/u) collected in ``_run_task`` —
+                # e.g. a discovered list a downstream task fans out over.
+                **self._task_xcom_pushes.get(task.name, {}),
+            }
         metrics.counter(RECORDS_READ_TOTAL).add(read_count, attrs)
         metrics.counter(RECORDS_WRITTEN_TOTAL).add(write_count, attrs)
         self._fire("on_task_end", ctx, task, write_count)
         return read_count, write_count
+
+    def _resolve_expand(self, task: Task) -> list[dict[str, Any]]:
+        """Expand a mapped task's ``expand`` spec into one mapping per instance
+        (ADR-0098). Each value is a list (literal, or a ``{{ }}`` template — e.g.
+        ``{{ params.regions }}`` resolved at load time, or ``{{ xcom.t.k }}``
+        resolved now). Multiple keys form the cross product (Airflow semantics).
+        """
+        resolved: dict[str, list[Any]] = {}
+        ctx: dict[str, Any] = {"xcom": self._xcom}
+        for key, raw in task.expand.items():
+            value = raw
+            if isinstance(raw, (str, list, dict)):
+                deferred = frozenset(template_namespaces(raw) - {"xcom"})
+                value = render_templates(raw, ctx, deferred=deferred)
+            if not isinstance(value, list):
+                raise TaskError(
+                    f"task {task.name or task.source!r}: expand[{key!r}] must "
+                    f"resolve to a list, got {type(value).__name__}"
+                )
+            resolved[key] = value
+        keys = list(resolved)
+        return [dict(zip(keys, combo, strict=True)) for combo in product(*resolved.values())]
+
+    def _execute_mapped_task(
+        self,
+        task: Task,
+        conns: dict[str, Connector],
+        cursor_from: CursorValue,
+        cursor_to: CursorValue,
+        *,
+        cursored: bool,
+        ctx: Context,
+        result: RunResult,
+        metrics: Any,
+        tracer: Any,
+        attrs: dict[str, Any],
+        task_runner: Callable[..., tuple[int, int, CursorValue]],
+    ) -> tuple[int, int]:
+        """Run one dynamically-mapped task as N instances (ADR-0098).
+
+        Each instance runs the full single-task path with its ``map_values``
+        injected (``{{ map.<key> }}``), independently — one failing instance does
+        not stop the others; the first error is re-raised at the end so the task
+        is reported failed. Records sum across instances; the parent publishes the
+        aggregate to XCom. An empty expansion runs zero instances (success, 0
+        records) — a no-op rather than an error.
+        """
+        instances = self._resolve_expand(task)
+        _module_logger.info(
+            "task_mapped_expand",
+            pipeline=self.name,
+            task=task.name or task.source,
+            instances=len(instances),
+        )
+        total_read = 0
+        total_written = 0
+        first_error: BaseException | None = None
+        instance_results: list[dict[str, Any]] = []
+        for inst in instances:
+            try:
+                read, written = self._execute_task(
+                    task,
+                    conns,
+                    cursor_from,
+                    cursor_to,
+                    cursored=cursored,
+                    ctx=ctx,
+                    result=result,
+                    metrics=metrics,
+                    tracer=tracer,
+                    attrs=attrs,
+                    task_runner=task_runner,
+                    map_values=inst,
+                )
+                total_read += read
+                total_written += written
+                instance_results.append(
+                    {
+                        "map_values": dict(inst),
+                        "records_read": read,
+                        "records_written": written,
+                        "success": True,
+                        "error_class": None,
+                    }
+                )
+            except Exception as exc:
+                instance_results.append(
+                    {
+                        "map_values": dict(inst),
+                        "records_read": 0,
+                        "records_written": 0,
+                        "success": False,
+                        "error_class": type(exc).__name__,
+                    }
+                )
+                if first_error is None:
+                    first_error = exc
+        if task.name:
+            result.mapped_instances[task.name] = instance_results
+            result.task_records[task.name] = (total_read, total_written)
+            self._xcom[task.name] = {
+                "records_read": total_read,
+                "records_written": total_written,
+                "success": first_error is None,
+                "new_cursor": None,
+            }
+        if first_error is not None:
+            raise first_error
+        return total_read, total_written
 
     def _run_dag(
         self,
@@ -1154,12 +1505,16 @@ class Pipeline:
                     task_runner=task_runner,
                 )
                 states[name] = TASK_SUCCESS
+                if name:
+                    result.task_records[name] = (read, written)
                 if task.branch:
                     selected = set(self._branch_select(task, read=read, written=written))
                     for child in downstream.get(name, set()) - selected:
                         deselected.add(child)
             except Exception as exc:
                 states[name] = TASK_FAILED
+                if name:
+                    result.task_errors[name] = (type(exc).__name__, str(exc))
                 metrics.counter(ERRORS_TOTAL).add(1, {**attrs, "phase": "run"})
                 if first_error is None:
                     first_error = exc
@@ -1499,6 +1854,64 @@ class Pipeline:
                 )
             conn.execute_statement(action.statement)
 
+    def _run_operator_task(
+        self, task: Task, connectors: dict[str, Connector]
+    ) -> tuple[int, int, CursorValue]:
+        """Run a ``sql`` / ``proc_call`` operator (ADR-0099) — a pure
+        orchestration step against ``op_connection``, no source/sink dataflow.
+
+        Returns ``(0, rows_affected, None)`` so the single chokepoint
+        (``_execute_task``) publishes ``records_written`` to XCom — e.g. a
+        downstream log step reads ``{{ xcom.<this>.records_written }}``.
+        """
+        conn = connectors.get(task.op_connection or "")
+        if conn is None:
+            raise TaskError(
+                f"operator task {task.name or task.kind!r}: no connector for "
+                f"connection {task.op_connection!r}"
+            )
+        if not isinstance(conn, SqlExecutor):
+            raise TaskError(
+                f"operator task {task.name or task.kind!r}: connection "
+                f"{task.op_connection!r} does not support execute_statement "
+                "(must implement SqlExecutor)"
+            )
+        self._task_data_paths[task.name or "task"] = task.kind
+        # Per-task execution timeout (자유도 2단계). Like the etl read loop, this
+        # is a COOPERATIVE deadline — checked *between* statements, so a
+        # multi-statement step (the DDL ▸ DELETE ▸ INSERT idempotency shape)
+        # stops before the next statement once the budget is blown. It does NOT
+        # interrupt a single blocking ``execute_statement`` mid-run (Python can't
+        # kill a blocked thread) — same documented caveat as the etl path.
+        timeout_s = (
+            task.timeout_seconds if task.timeout_seconds is not None else self.task_timeout_seconds
+        )
+        deadline = (time.monotonic() + timeout_s) if timeout_s else None
+
+        def _check_deadline() -> None:
+            if deadline is not None and time.monotonic() > deadline:
+                raise TaskTimeoutError(
+                    f"task {task.name or task.kind!r} exceeded timeout_seconds={timeout_s}"
+                )
+
+        if task.kind == "proc_call":
+            if not task.procedure:
+                raise TaskError(f"proc_call task {task.name!r}: missing procedure")
+            _check_deadline()
+            # Args may be rendered to non-str by a whole-string ``{{ xcom }}``
+            # ref (type-preserving) — ``{{ xcom.load.records_written }}`` → int.
+            stmt = f"CALL {task.procedure}({', '.join(str(a) for a in task.proc_args)})"
+            affected = conn.execute_statement(stmt)
+            return 0, max(affected, 0), None
+        # kind == "sql": run statements in order, each committed; sum rows.
+        total = 0
+        for stmt in task.statements:
+            _check_deadline()
+            affected = conn.execute_statement(stmt)
+            if affected > 0:
+                total += affected
+        return 0, total, None
+
     def _run_task(
         self,
         task: Task,
@@ -1506,6 +1919,8 @@ class Pipeline:
         cursor_from: CursorValue = None,
         cursor_to: CursorValue = None,
     ) -> tuple[int, int, CursorValue]:
+        if task.kind in ("sql", "proc_call"):
+            return self._run_operator_task(task, connectors)
         if task.graph_nodes:
             self._task_data_paths[task.name or "task"] = "graph"
             return self._run_graph_task(task, connectors, cursor_from, cursor_to)
@@ -1542,12 +1957,16 @@ class Pipeline:
         self._run_pre_sql(task, connectors)
 
         cursored_run = cursor_from is not None or cursor_to is not None
-        pushed = self._try_sql_pushdown(task, source, sinks, cursored=cursored_run)
-        if pushed is not None:
-            return pushed
-        fast = self._try_arrow_fast_path(task, source, sinks, cursored=cursored_run)
-        if fast is not None:
-            return fast
+        # Explicit XCom push (ADR-0097 f/u) needs to see the rows in Python to
+        # project a column into a list, so it forces the records path — the
+        # pushdown/Arrow fast paths never materialise rows.
+        if not task.push_xcom:
+            pushed = self._try_sql_pushdown(task, source, sinks, cursored=cursored_run)
+            if pushed is not None:
+                return pushed
+            fast = self._try_arrow_fast_path(task, source, sinks, cursored=cursored_run)
+            if fast is not None:
+                return fast
         self._task_data_paths[task.name or "task"] = "records"
 
         records_read = 0
@@ -1558,16 +1977,33 @@ class Pipeline:
         cursored = cursor_from is not None or cursor_to is not None
         cursor_col = task.cursor_column if cursored else None
 
+        # Per-task execution timeout (자유도 2단계). Cooperative deadline checked
+        # at each record boundary — a slow read/transform stream is failed with
+        # TaskTimeoutError (retried if a retry policy applies; each attempt gets
+        # a fresh window). It does NOT interrupt a single blocking driver call
+        # mid-fetch (Python can't kill a blocked thread); for chunked reads —
+        # the normal ETL shape — it bounds wall-clock effectively.
+        timeout_s = (
+            task.timeout_seconds if task.timeout_seconds is not None else self.task_timeout_seconds
+        )
+        deadline = (time.monotonic() + timeout_s) if timeout_s else None
+
         def _source_iter() -> Iterator[Record]:
             if cursor_col is not None:
-                yield from source.read_since(
+                base = source.read_since(
                     cursor_col,
                     cursor_from,
                     query=task.query,
                     **task.source_options,
                 )
             else:
-                yield from source.read(query=task.query, **task.source_options)
+                base = source.read(query=task.query, **task.source_options)
+            for rec in base:
+                if deadline is not None and time.monotonic() > deadline:
+                    raise TaskTimeoutError(
+                        f"task {task.name or task.source!r} exceeded timeout_seconds={timeout_s}"
+                    )
+                yield rec
 
         def _cursor_stream(count: bool) -> Iterator[Record]:
             nonlocal records_read, new_cursor
@@ -1584,9 +2020,14 @@ class Pipeline:
                     # caller is responsible for picking a column whose
                     # values are mutually comparable with cursor_to /
                     # new_cursor.
-                    if cursor_to is not None and cv is not None and cv > cursor_to:
-                        # Ordering is ascending — anything after this is also > cursor_to.
-                        return
+                    if cursor_to is not None and cv is not None:
+                        # Coerce the (often string, from a JSON backfill range)
+                        # bound to the column value's type so date/int/Decimal
+                        # cursors compare instead of raising TypeError.
+                        upper = _coerce_cursor_bound(cursor_to, cv)
+                        if cv > upper:
+                            # Ascending order — everything after is also > cursor_to.
+                            return
                     if count and cv is not None and (new_cursor is None or cv > new_cursor):
                         new_cursor = cv
                 if count:
@@ -1623,11 +2064,35 @@ class Pipeline:
                         metrics.counter(ERRORS_TOTAL).add(
                             1, {"pipeline": self.name, "phase": "transform", "routed": "dlq"}
                         )
-                        self._dlq_route_batch(connectors, raw)
+                        self._dlq_route_batch(connectors, raw, error=str(exc))
                         continue
                     raise TransformError(f"transform {fn!r} failed on record {raw!r}") from exc
                 if record is not None:
                     yield record
+
+        # Explicit XCom push (ADR-0097 f/u): collect the projected column's
+        # values from the rows this task processes (post-transform, count pass
+        # only — the same pass that counts records_read), so a downstream task
+        # can ``expand`` over the list. ``distinct`` preserves first-seen order.
+        xcom_collected: dict[str, list[Any]] = {key: [] for key in task.push_xcom}
+        xcom_seen: dict[str, set[Any]] = {
+            key: set() for key, spec in task.push_xcom.items() if spec.get("distinct")
+        }
+
+        def _collect_xcom(record: Record) -> None:
+            for key, spec in task.push_xcom.items():
+                column = spec["column"]
+                if column not in record.data:
+                    raise TaskError(
+                        f"task {task.name or task.source!r}: push_xcom[{key!r}] "
+                        f"column {column!r} not in record (have {sorted(record.data)})"
+                    )
+                value = record.data[column]
+                if key in xcom_seen:
+                    if value in xcom_seen[key]:
+                        continue
+                    xcom_seen[key].add(value)
+                xcom_collected[key].append(value)
 
         def _read_and_transform(
             count: bool = True,
@@ -1639,6 +2104,11 @@ class Pipeline:
                     _apply_row_stage(stream, stage) if isinstance(stage, list) else stage(stream)
                 )
             for record in stream:
+                # Collect XCom projections on the count pass before routing, so
+                # the published list covers every row the task produced (not
+                # just one sink's share under conditional fan-out).
+                if count and task.push_xcom:
+                    _collect_xcom(record)
                 # Conditional routing (ADR-0027): a per-sink ``accept``
                 # decides whether this transformed record belongs to the
                 # sink currently being written.
@@ -1712,6 +2182,11 @@ class Pipeline:
                 pre_sql=spec.pre_sql,
                 **spec.options,
             )
+        if task.push_xcom and task.name:
+            # Publish via the side channel; ``_execute_task`` merges it into the
+            # task's XCom entry alongside the auto summary. A retry re-runs this
+            # and overwrites, so the values always reflect the successful pass.
+            self._task_xcom_pushes[task.name] = dict(xcom_collected)
         return records_read, written, new_cursor
 
     def _try_sql_pushdown(
@@ -1841,9 +2316,11 @@ class Pipeline:
 
     # ---------- internal helpers ------------------------------------------
 
-    def _retry_kwargs(self) -> dict[str, Any]:
-        """Translate ``self.retry`` (RetryConfig) into ``@retryable`` kwargs."""
-        rc = self.retry
+    def _retry_kwargs(self, rc: RetryConfig | None = None) -> dict[str, Any]:
+        """Translate a RetryConfig into ``@retryable`` kwargs (defaults to the
+        pipeline-level ``self.retry``; callers pass a task's own override)."""
+        if rc is None:
+            rc = self.retry
         if rc is None:
             return {}
         out: dict[str, Any] = {
@@ -1859,6 +2336,7 @@ class Pipeline:
         self,
         connectors: dict[str, Connector],
         record: Record,
+        error: str | None = None,
     ) -> None:
         """Best-effort write the offending record to the DLQ BatchSink.
 
@@ -1868,6 +2346,9 @@ class Pipeline:
         and the ``contextlib.suppress`` below silently dropped every
         bad record — DLQ promised partial-success but delivered
         nothing. Bug surfaced by the dogfood scenario.
+
+        2026-06-23: when ``DlqConfig.error_column`` is set, stamp the transform
+        error reason into that column so the DLQ record says *why* it failed.
         """
         if self.dlq is None:
             return
@@ -1877,13 +2358,25 @@ class Pipeline:
         write_kwargs: dict[str, Any] = {"mode": self.dlq.mode}
         if self.dlq.table is not None:
             write_kwargs["table"] = self.dlq.table
+        out = self._dlq_stamp_error(record, error)
         with contextlib.suppress(Exception):
-            sink.write([record], **write_kwargs)
+            sink.write([out], **write_kwargs)
+
+    def _dlq_stamp_error(self, record: Record, error: str | None) -> Record:
+        """Return ``record`` with the error reason merged into
+        ``DlqConfig.error_column`` (if configured). A no-op copy otherwise."""
+        if self.dlq is None or self.dlq.error_column is None or error is None:
+            return record
+        return Record(
+            data={**record.data, self.dlq.error_column: error},
+            metadata=record.metadata,
+        )
 
     async def _dlq_route_stream(
         self,
         connectors: dict[str, Connector],
         record: Record,
+        error: str | None = None,
     ) -> None:
         """Best-effort publish the offending record to the DLQ StreamSink."""
         if self.dlq is None:
@@ -1892,8 +2385,9 @@ class Pipeline:
         if not isinstance(sink, StreamSink):
             return
         topic = self.dlq.topic or "dlq"
+        out = self._dlq_stamp_error(record, error)
         with contextlib.suppress(Exception):
-            await sink.publish(topic, record)
+            await sink.publish(topic, out)
 
     # ---------------- stream runtime (Step 3.2) ---------------------------
 
@@ -2042,7 +2536,7 @@ class Pipeline:
                             1,
                             {"pipeline": self.name, "phase": "transform", "routed": "dlq"},
                         )
-                        await self._dlq_route_stream(connectors, raw)
+                        await self._dlq_route_stream(connectors, raw, error=str(exc))
                         continue
                     raise TransformError(f"transform {fn!r} failed on record {raw!r}") from exc
 

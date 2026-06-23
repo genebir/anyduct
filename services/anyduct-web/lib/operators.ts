@@ -38,7 +38,11 @@ import {
 // "call" was a linear-builder kind for fire-and-forget pipeline-to-pipeline
 // triggers (ADR-0029). Graph-only mode (2026-05-26) surfaces those in the
 // pipeline settings panel instead, so the operator kind is gone.
-export type OperatorKind = "source" | "transform" | "sink";
+// ``operator`` (ADR-0099): an orchestration step in a Task-DAG pipeline —
+// a Load (etl task), Run SQL (sql), or Call procedure (proc_call). Unlike
+// source/transform/sink (dataflow), operator nodes are ordered by dependency
+// edges and each is a self-contained unit of work.
+export type OperatorKind = "source" | "transform" | "sink" | "operator";
 
 interface FieldBase {
   key: string;
@@ -1733,10 +1737,224 @@ for (const s of SINKS) {
   }
 }
 
-export const OPERATORS: OperatorSpec[] = [...SOURCES, ...TRANSFORMS, ...SINKS];
+// ─── Orchestration operators (ADR-0099) ────────────────────────────────────
+// Task-DAG nodes: a Load (etl), Run SQL (sql), Call procedure (proc_call).
+// Each is one ordered unit of work; dependency edges set the order.
+export const OPERATORS_ORCH: OperatorSpec[] = [
+  {
+    id: "op:load",
+    kind: "operator",
+    connectorType: "etl",
+    label: "Load (ETL)",
+    description:
+      "Read with a SQL query and write to a table — the workhorse load step. " +
+      "Same-connection loads run as INSERT…SELECT inside the database.",
+    icon: DatabaseZapIcon,
+    accent: "#6366F1",
+    anyConnection: true,
+    fields: [
+      { key: "name", label: "Step name", kind: "string", required: true, placeholder: "load_mart" },
+      { key: "connection", label: "Read connection", kind: "connection", required: true },
+      { key: "query", label: "Read (SQL)", kind: "sql", placeholder: "SELECT ... FROM ..." },
+      {
+        key: "sink_connection",
+        label: "Write connection",
+        kind: "connection",
+        help: "Leave empty to write to the same connection (in-database INSERT…SELECT). Set a different one for a cross-DB load.",
+      },
+      { key: "table", label: "Write to table", kind: "string", placeholder: "schema.table" },
+      {
+        key: "mode",
+        label: "Mode",
+        kind: "select",
+        defaultValue: "append",
+        options: [
+          { label: "Append", value: "append" },
+          { label: "Overwrite", value: "overwrite" },
+          { label: "Upsert", value: "upsert" },
+        ],
+      },
+      {
+        key: "pre_sql",
+        label: "Pre-write SQL (idempotency)",
+        kind: "sql",
+        placeholder: "DELETE FROM schema.table WHERE day = '{{ params.day }}'",
+        help: "Runs before the write — e.g. DELETE the partition this step re-inserts.",
+      },
+      { key: "key_columns", label: "Key columns (upsert)", kind: "string", placeholder: "id" },
+    ],
+  },
+  {
+    id: "op:sql",
+    kind: "operator",
+    connectorType: "sql",
+    label: "Run SQL",
+    description:
+      "Run a SQL statement (DELETE / DDL / MERGE) against a connection. " +
+      "Rows affected are published to XCom as records_written.",
+    icon: TerminalIcon,
+    accent: "#FACC15",
+    anyConnection: true,
+    fields: [
+      { key: "name", label: "Step name", kind: "string", required: true, placeholder: "cleanup" },
+      { key: "connection", label: "Connection", kind: "connection", required: true },
+      {
+        key: "statement",
+        label: "SQL statement(s)",
+        kind: "sql",
+        required: true,
+        placeholder: "DELETE FROM schema.table WHERE day = '{{ params.day }}'",
+        help: "One or more statements separated by ';' — each runs in order.",
+      },
+    ],
+  },
+  {
+    id: "op:proc_call",
+    kind: "operator",
+    connectorType: "proc_call",
+    label: "Call procedure",
+    description:
+      "CALL a stored procedure with positional arguments. Arguments are SQL " +
+      "expressions — quote strings yourself; {{ xcom.* }} / {{ params.* }} work.",
+    icon: LayersIcon,
+    accent: "#22D3EE",
+    anyConnection: true,
+    fields: [
+      { key: "name", label: "Step name", kind: "string", required: true, placeholder: "write_log" },
+      { key: "connection", label: "Connection", kind: "connection", required: true },
+      {
+        key: "procedure",
+        label: "Procedure",
+        kind: "string",
+        required: true,
+        placeholder: "SCHEMA.PROC_NAME",
+      },
+      {
+        key: "args",
+        label: "Arguments (JSON array of SQL expressions)",
+        kind: "json",
+        placeholder: '["\'START\'", "{{ xcom.load.records_written }}"]',
+      },
+      {
+        key: "reads",
+        label: "Reads tables (JSON array, for lineage)",
+        kind: "json",
+        help: "A stored procedure is opaque — declare the tables it reads so the catalog shows them as inputs.",
+        placeholder: '["stg.orders"]',
+      },
+      {
+        key: "writes",
+        label: "Writes tables (JSON array, for lineage)",
+        kind: "json",
+        placeholder: '["mart.daily"]',
+      },
+    ],
+  },
+];
+
+// Every orchestration step gets a ``trigger_rule`` (Airflow-style): when does
+// it run given its upstream steps' outcomes. ``all_done`` is the key one — an
+// error-log step that must run even when an upstream step failed (ADR-0099).
+const TRIGGER_RULE_FIELD: FieldDef = {
+  key: "trigger_rule",
+  label: "Run when",
+  kind: "select",
+  defaultValue: "all_success",
+  help: "When this step runs given its upstream steps. Use 'all done' for an error-log step.",
+  options: [
+    { label: "All upstream succeeded", value: "all_success" },
+    { label: "All upstream done (even if failed)", value: "all_done" },
+    { label: "Any upstream succeeded", value: "one_success" },
+    { label: "No upstream failed", value: "none_failed" },
+  ],
+};
+// Per-step execution timeout (Airflow ``execution_timeout``). Checked at
+// record/chunk boundaries; a slow step fails with TaskTimeoutError.
+const TIMEOUT_FIELD: FieldDef = {
+  key: "timeout_seconds",
+  label: "Timeout (seconds)",
+  kind: "number",
+  help: "Fail this step if it runs longer than this. Empty = no timeout.",
+};
+// Per-step retry override (Airflow per-task ``retries``). Empty = inherit the
+// pipeline-level retry policy. Exponential backoff with a 5s base is assumed;
+// the full policy lives in pipeline settings.
+const RETRY_FIELD: FieldDef = {
+  key: "retry_max_attempts",
+  label: "Retries (max attempts)",
+  kind: "number",
+  help: "Retry this step on failure (exponential backoff). Empty = use the pipeline default.",
+};
+// Branch selection (Airflow BranchPythonOperator analog, ADR-0028). When set,
+// this step CHOOSES which of its downstream steps run based on its OWN outcome;
+// the rest are skipped (and the skip propagates). Rules are tried in order;
+// ``when: null`` is the else/default. Advanced — empty for a plain step.
+const BRANCH_FIELD: FieldDef = {
+  key: "branch",
+  label: "Branch rules (conditional routing)",
+  kind: "json",
+  help:
+    "Pick which downstream steps run based on THIS step's outcome. Array of " +
+    "{when, to}: 'when' is a Python predicate over records_read / records_written / " +
+    "success (null = else); 'to' lists downstream step names to run. Unlisted " +
+    "downstreams are skipped. Empty = no branching.",
+  placeholder:
+    '[{"when": "records_written > 0", "to": ["load_mart"]}, {"when": null, "to": ["log_empty"]}]',
+};
+// Dynamic task mapping (Airflow ``.expand()``, ADR-0098). When set, this step
+// fans out into one instance per list element — e.g. one load per region. Each
+// instance exposes ``{{ map.<key> }}`` in its query / statement / args. The list
+// can be a literal, a per-run param (``{{ params.regions }}``), or an upstream
+// XCom list (``{{ xcom.discover.items }}``). Advanced — empty for a single run.
+const EXPAND_FIELD: FieldDef = {
+  key: "expand",
+  label: "Fan-out (dynamic mapping)",
+  kind: "json",
+  help:
+    "Run this step once per list element. Object of {key: list}: each instance " +
+    "exposes {{ map.<key> }} in its query/statement/args. The list may be a " +
+    "literal, {{ params.x }}, or an upstream {{ xcom.<task>.<key> }}. Multiple " +
+    "keys = cross product. Empty = run once.",
+  placeholder: '{"region": ["us", "eu", "apac"]}',
+};
+// Explicit XCom push (ADR-0097). Publishes the list of a column's values from
+// the rows this step processes under ``xcom.<step>.<key>`` — the upstream-list
+// source a downstream ``expand`` fans out over (the only way to make "fan out
+// over what the previous step discovered" reachable; auto-XCom only carries
+// scalars). ``{key: {column, distinct?}}``. Advanced — empty for none.
+const PUSH_XCOM_FIELD: FieldDef = {
+  key: "push_xcom",
+  label: "Publish list to XCom (push_xcom)",
+  kind: "json",
+  help:
+    "Publish a column's values as a list under {{ xcom.<step>.<key> }}, so a " +
+    "downstream step can expand (fan out) over it. Object of {key: {column, " +
+    "distinct?}}: 'column' is the row column to collect; 'distinct' (optional) " +
+    "de-dups preserving first-seen order. Empty = publish nothing extra.",
+  placeholder: '{"regions": {"column": "region", "distinct": true}}',
+};
+for (const s of OPERATORS_ORCH) {
+  s.fields = [
+    ...s.fields,
+    TRIGGER_RULE_FIELD,
+    RETRY_FIELD,
+    TIMEOUT_FIELD,
+    BRANCH_FIELD,
+    EXPAND_FIELD,
+    PUSH_XCOM_FIELD,
+  ];
+}
+
+export const OPERATORS: OperatorSpec[] = [
+  ...SOURCES,
+  ...TRANSFORMS,
+  ...SINKS,
+  ...OPERATORS_ORCH,
+];
 
 /** Sub-category within a kind — used to group a long palette (Airflow-style). */
 export function operatorCategory(spec: OperatorSpec): string {
+  if (spec.kind === "operator") return "Steps";
   if (spec.kind === "transform") {
     switch (spec.connectorType) {
       case "filter":
@@ -1773,6 +1991,7 @@ export const OPERATOR_GROUPS: { kind: OperatorKind; label: string; specs: Operat
   { kind: "source", label: "Sources", specs: SOURCES },
   { kind: "transform", label: "Transforms", specs: TRANSFORMS },
   { kind: "sink", label: "Sinks", specs: SINKS },
+  { kind: "operator", label: "Steps", specs: OPERATORS_ORCH },
 ];
 
 /** Operators grouped kind → category → specs, for a collapsible palette. */
@@ -1809,10 +2028,12 @@ export const OPERATOR_KIND_ACCENT: Record<OperatorKind, string> = {
   source: "#6366F1",
   transform: "#FBBF24",
   sink: "#4ADE80",
+  operator: "#22D3EE",
 };
 
 export const KIND_ICON: Record<OperatorKind, ComponentType<LucideProps>> = {
   source: DatabaseIcon,
   transform: WrenchIcon,
   sink: FileTextIcon,
+  operator: LayersIcon,
 };

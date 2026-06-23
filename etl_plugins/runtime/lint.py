@@ -28,7 +28,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from etl_plugins.config.models import PipelineConfig, TransformConfig
+from etl_plugins.config.models import PipelineConfig, TaskConfig, TransformConfig
+from etl_plugins.core.templating import template_paths
 from etl_plugins.runtime.column_lineage import (
     _apply_transform as _column_lineage_apply_transform,
 )
@@ -116,7 +117,42 @@ def lint_pipeline(cfg: PipelineConfig) -> list[LintWarning]:
     # quietly become "Python did it".
     warnings.extend(_lint_sql_pushdown_ineligible(cfg))
 
+    # ADR-0097/0098 (2026-06-17): the deferred ``{{ map.* }}`` / ``{{ xcom.* }}``
+    # namespaces are resolved per task at execution time. A reference that
+    # names no ``expand`` key / no upstream task never gets substituted — the
+    # literal token reaches the connector (or the per-task render raises
+    # ConfigError). Surface it statically so the typo shows up at dry-run.
+    warnings.extend(_lint_deferred_template_refs(cfg))
+
+    # ADR-0099: a ``proc_call`` step is opaque — without a declared
+    # ``reads``/``writes`` it contributes nothing to the catalog. Nudge the
+    # user to annotate it so the lineage graph isn't silently missing the
+    # tables a stored procedure touches.
+    warnings.extend(_lint_proc_call_lineage(cfg))
+
     return warnings
+
+
+def _lint_proc_call_lineage(cfg: PipelineConfig) -> list[LintWarning]:
+    """Advisory: a ``proc_call`` task with neither ``reads`` nor ``writes``
+    declared is invisible to the catalog (the procedure body is opaque)."""
+    out: list[LintWarning] = []
+    if not cfg.tasks:
+        return out
+    for idx, task in enumerate(cfg.tasks):
+        if task.kind == "proc_call" and not task.reads and not task.writes:
+            out.append(
+                LintWarning(
+                    code="proc_call_lineage_recommended",
+                    message=(
+                        f"proc_call step {task.name!r} declares no reads/writes, so "
+                        "the procedure's tables won't appear in the catalog. Add "
+                        "'reads'/'writes' (the tables it touches) for lineage."
+                    ),
+                    location=f"tasks.{idx}",
+                )
+            )
+    return out
 
 
 def _has_per_record_code_transform(cfg: PipelineConfig) -> bool:
@@ -248,6 +284,8 @@ def _lint_column_mapping_consistency(cfg: PipelineConfig) -> list[LintWarning]:
     has_explicit_tasks = bool(cfg.tasks)
     for task_idx, task in enumerate(cfg.effective_tasks()):
         source = task.source
+        if source is None:  # operator kinds (ADR-0099) — no source/columns
+            continue
         transforms = list(task.transforms)
         mapping = _column_lineage_initial_mapping(source.connection, source.query)
         if mapping is None:
@@ -448,6 +486,8 @@ def _lint_sql_pushdown_ineligible(cfg: PipelineConfig) -> list[LintWarning]:
 
     has_explicit_tasks = bool(cfg.tasks)
     for task_idx, task in enumerate(cfg.effective_tasks()):
+        if task.source is None:  # operator kinds (ADR-0099) — no transforms/source
+            continue
         requested = [
             (tc_idx, tc) for tc_idx, tc in enumerate(task.transforms) if _sql_pushdown_requested(tc)
         ]
@@ -494,6 +534,126 @@ def _lint_sql_pushdown_ineligible(cfg: PipelineConfig) -> list[LintWarning]:
                 )
             )
     return warnings
+
+
+def _task_renderable(task: TaskConfig) -> dict[str, object]:
+    """The templatable content of one task, mirroring the fields the core
+    ``Pipeline._render_task_xcom`` resolves at execution time (source query +
+    options, each sink's table + options + pre_sql). Dumping the whole source /
+    sink models is a safe superset — a stray ``{{ map }}`` in any of them would
+    likewise never be substituted."""
+    return {
+        "source": task.source.model_dump() if task.source is not None else None,
+        "sinks": [s.model_dump() for s in task.effective_sinks()],
+        # Operator kinds (ADR-0099): statements / proc args are also templatable.
+        "statements": list(task.statements),
+        "procedure": task.procedure,
+        "args": list(task.args),
+    }
+
+
+def _lint_deferred_template_refs(cfg: PipelineConfig) -> list[LintWarning]:
+    """ADR-0097/0098: ``{{ map.<key> }}`` / ``{{ xcom.<task>.<key> }}`` are
+    deferred namespaces resolved per task at execution time. A reference that
+    names no ``expand`` key (map) or no upstream task (xcom) never resolves —
+    the literal token reaches the connector, or the per-task render raises
+    ``ConfigError``. This rule catches both statically.
+
+    Task-DAG shape only — the legacy single-task shape has no other tasks to
+    pull xcom from and no ``expand`` field, and graph-node mapping/xcom is a
+    future slice (ADR-0098 follow-up).
+    """
+    if not cfg.tasks:
+        return []
+
+    warnings: list[LintWarning] = []
+    known_tasks = {t.name for t in cfg.tasks if t.name}
+    # Transitive ``depends_on`` closure per task — an xcom pull is only safe
+    # from a task guaranteed to have run first (a topological ancestor).
+    upstream = _transitive_upstream(cfg.tasks)
+
+    for task_idx, task in enumerate(cfg.tasks):
+        location = f"tasks.{task_idx}"
+        paths = template_paths(_task_renderable(task))
+        expand_keys = set(task.expand)
+        for path in sorted(paths):
+            head, _, rest = path.partition(".")
+            if head == "map":
+                key = rest.split(".", 1)[0] if rest else ""
+                if not task.expand:
+                    warnings.append(
+                        LintWarning(
+                            code="map_ref_without_expand",
+                            message=(
+                                f"task {task.name!r} references {{{{ map.{key} }}}} "
+                                "but declares no 'expand' — the token will not be "
+                                "substituted. Add an 'expand' mapping (dynamic task "
+                                "mapping, ADR-0098) or remove the reference."
+                            ),
+                            location=location,
+                        )
+                    )
+                elif key not in expand_keys:
+                    warnings.append(
+                        LintWarning(
+                            code="map_ref_unknown_key",
+                            message=(
+                                f"task {task.name!r} references {{{{ map.{key} }}}} "
+                                f"but 'expand' declares only {sorted(expand_keys)}. "
+                                "The token will not be substituted."
+                            ),
+                            location=location,
+                        )
+                    )
+            elif head == "xcom":
+                ref_task = rest.split(".", 1)[0] if rest else ""
+                if ref_task not in known_tasks:
+                    warnings.append(
+                        LintWarning(
+                            code="xcom_ref_unknown_task",
+                            message=(
+                                f"task {task.name!r} references "
+                                f"{{{{ xcom.{ref_task}.* }}}} but no task named "
+                                f"{ref_task!r} exists. The per-task render will "
+                                "raise at execution time."
+                            ),
+                            location=location,
+                        )
+                    )
+                elif ref_task != task.name and ref_task not in upstream[task.name]:
+                    warnings.append(
+                        LintWarning(
+                            code="xcom_ref_not_upstream",
+                            message=(
+                                f"task {task.name!r} pulls xcom from {ref_task!r}, "
+                                "which is not an upstream dependency — it may not "
+                                "have run yet when this task executes. Add it to "
+                                "'depends_on' so ordering is guaranteed."
+                            ),
+                            location=location,
+                        )
+                    )
+    return warnings
+
+
+def _transitive_upstream(tasks: list[TaskConfig]) -> dict[str, set[str]]:
+    """Map each task name to the set of all its transitive ``depends_on``
+    ancestors. Tolerates cycles / dangling edges (those are caught by the
+    pipeline builder, not here)."""
+    direct = {t.name: set(t.depends_on) for t in tasks if t.name}
+    names = set(direct)
+    closure: dict[str, set[str]] = {name: set() for name in names}
+    for name in names:
+        seen: set[str] = set()
+        stack = list(direct.get(name, ()))
+        while stack:
+            up = stack.pop()
+            if up in seen or up == name:
+                continue
+            seen.add(up)
+            stack.extend(direct.get(up, ()))
+        closure[name] = seen
+    return closure
 
 
 __all__ = ["LintWarning", "lint_pipeline"]

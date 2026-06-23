@@ -777,6 +777,11 @@ export const en = {
   "pipelines.new": "New pipeline",
   "pipelines.nameLabel": "Pipeline name",
   "pipelines.namePlaceholder": "orders-sync",
+  "pipelines.kindLabel": "Pipeline type",
+  "pipelines.kindDataflow": "Dataflow",
+  "pipelines.kindDataflowDesc": "Records flow source → transform → sink.",
+  "pipelines.kindOrchestration": "Orchestration",
+  "pipelines.kindOrchestrationDesc": "Ordered steps: Load / Run SQL / Call procedure.",
   "pipelines.modeBatch": "Batch",
   "pipelines.modeStream": "Stream",
   "pipelines.createOpen": "Create & open builder",
@@ -854,6 +859,7 @@ export const en = {
 
   // pipeline builder (edit page + builder components)
   "builder.title": "Pipeline builder",
+  "builder.opKindStep": "Step",
   "builder.draft": "draft",
   "builder.dryRun": "Dry run",
   "builder.dryRunPassed": "Dry run passed",
@@ -896,6 +902,9 @@ export const en = {
     "Records that fail transform are routed here instead of failing the whole run.",
   "builder.selectConnection": "— Select a connection —",
   "builder.dlqTableHelp": "Batch sink target. Leave blank if using a stream-based DLQ.",
+  "builder.dlqErrorColumn": "Error column (optional)",
+  "builder.dlqErrorColumnHelp": "Stamp the failure reason into this column so a routed record says why it failed. The DLQ table/topic must have it.",
+  "builder.dlqErrorColumnPlaceholder": "_dlq_error",
   "builder.dlqTablePlaceholder": "dlq.records_failed",
   "builder.dlqTopicHelp": "Stream sink target. Leave blank if using a batch DLQ.",
   "builder.dlqTopicPlaceholder": "dlq.failed-records",
@@ -1043,6 +1052,8 @@ export const en = {
   "glossary.sink": "Sink — where the data is written TO (the destination DB, file, etc.).",
   "glossary.transform":
     "Transform — modifies data on the way through (filter, rename columns, run SQL…).",
+  "glossary.operator":
+    "Step — one ordered unit of work (load a table, run SQL, call a procedure). Edges set the order.",
   "glossary.dag":
     "DAG (Directed Acyclic Graph) — a graph where data flows one direction with no loops.",
   "glossary.cursor":
@@ -1131,6 +1142,15 @@ export const en = {
     "Write records to an S3 (or MinIO) object as parquet / CSV / JSON.",
   "op.sink:kafka.label": "Kafka topic",
   "op.sink:kafka.description": "Stream-sink records to a Kafka topic.",
+  "op.op:load.label": "Load (ETL)",
+  "op.op:load.description":
+    "Read with a SQL query and write to a table. Same-connection loads run as INSERT…SELECT in the database.",
+  "op.op:sql.label": "Run SQL",
+  "op.op:sql.description":
+    "Run a SQL statement (DELETE / DDL / MERGE) against a connection. Rows affected go to XCom.",
+  "op.op:proc_call.label": "Call procedure",
+  "op.op:proc_call.description":
+    "CALL a stored procedure with positional SQL-expression arguments ({{ xcom.* }} / {{ params.* }} work).",
 
   // runs list
   "runs.colReadWritten": "Read / Written",
@@ -1393,6 +1413,9 @@ export const en = {
   "assets.lgHint": "Hover an asset to trace its path · click to pin · ↗ to open",
   "assets.lgPinHint": "Click to pin this trace; click again or click the background to clear.",
   "assets.clTruncated": "more upstream",
+  "assets.clTruncatedDown": "more downstream",
+  "assets.clDirUpstream": "Upstream",
+  "assets.clDirImpact": "Impact",
   "assets.clTruncatedHint":
     "The walk was cut by the hop depth or the asset cap — increase hops or open an upstream asset to keep digging.",
   "assets.clMoreColumns": "+{count} more columns",
@@ -2292,6 +2315,11 @@ export const ko: Messages = {
   "pipelines.new": "새 파이프라인",
   "pipelines.nameLabel": "파이프라인 이름",
   "pipelines.namePlaceholder": "orders-sync",
+  "pipelines.kindLabel": "파이프라인 유형",
+  "pipelines.kindDataflow": "데이터플로우",
+  "pipelines.kindDataflowDesc": "레코드가 소스 → 변환 → 싱크로 흐릅니다.",
+  "pipelines.kindOrchestration": "오케스트레이션",
+  "pipelines.kindOrchestrationDesc": "순서 있는 스텝: 적재 / SQL 실행 / 프로시저 호출.",
   "pipelines.modeBatch": "배치",
   "pipelines.modeStream": "스트림",
   "pipelines.createOpen": "생성 후 빌더 열기",
@@ -2368,6 +2396,7 @@ export const ko: Messages = {
     "커서 윈도우 재실행 (append 전략은 커서로 새 행을 읽음). 분할 지점을 주면 병렬 run으로 큐잉됩니다.",
 
   "builder.title": "파이프라인 빌더",
+  "builder.opKindStep": "스텝",
   "builder.draft": "초안",
   "builder.dryRun": "드라이런",
   "builder.dryRunPassed": "드라이런 통과",
@@ -2410,6 +2439,9 @@ export const ko: Messages = {
     "변환에 실패한 레코드는 전체 실행을 실패시키는 대신 여기로 라우팅됩니다.",
   "builder.selectConnection": "— 연결 선택 —",
   "builder.dlqTableHelp": "배치 싱크 대상. 스트림 기반 DLQ를 사용하면 비워 두세요.",
+  "builder.dlqErrorColumn": "오류 컬럼 (선택)",
+  "builder.dlqErrorColumnHelp": "실패 사유를 이 컬럼에 기록해 라우팅된 레코드가 왜 실패했는지 보이게 합니다. DLQ 테이블/토픽에 해당 컬럼이 있어야 합니다.",
+  "builder.dlqErrorColumnPlaceholder": "_dlq_error",
   "builder.dlqTablePlaceholder": "dlq.records_failed",
   "builder.dlqTopicHelp": "스트림 싱크 대상. 배치 DLQ를 사용하면 비워 두세요.",
   "builder.dlqTopicPlaceholder": "dlq.failed-records",
@@ -2557,6 +2589,8 @@ export const ko: Messages = {
   "glossary.sink": "Sink — 데이터를 저장할 곳 (목적지 DB, 파일 등).",
   "glossary.transform":
     "Transform — 데이터가 통과하면서 가공되는 단계 (필터, 컬럼 이름 변경, SQL 실행 등).",
+  "glossary.operator":
+    "스텝 — 순서가 있는 하나의 작업 단위 (테이블 적재, SQL 실행, 프로시저 호출). 엣지가 순서를 정합니다.",
   "glossary.dag":
     "DAG (방향성 비순환 그래프) — 데이터가 한 방향으로 흐르고 순환이 없는 그래프.",
   "glossary.cursor":
@@ -2641,6 +2675,15 @@ export const ko: Messages = {
     "S3(또는 MinIO) 객체에 레코드를 parquet / CSV / JSON 으로 기록합니다.",
   "op.sink:kafka.label": "Kafka 토픽",
   "op.sink:kafka.description": "Kafka 토픽에 레코드를 스트림으로 기록합니다.",
+  "op.op:load.label": "적재 (ETL)",
+  "op.op:load.description":
+    "SQL 쿼리로 읽어 테이블에 적재합니다. 같은 커넥션이면 DB 안에서 INSERT…SELECT로 실행됩니다.",
+  "op.op:sql.label": "SQL 실행",
+  "op.op:sql.description":
+    "커넥션에 SQL 문(DELETE / DDL / MERGE)을 실행합니다. 영향 행 수는 XCom으로 전달됩니다.",
+  "op.op:proc_call.label": "프로시저 호출",
+  "op.op:proc_call.description":
+    "저장 프로시저를 위치 인자(SQL 식)로 CALL 합니다 ({{ xcom.* }} / {{ params.* }} 사용 가능).",
 
   "runs.colReadWritten": "읽음 / 기록",
   // Phase ABG (2026-06-01) — 트리거 출처 컬럼
@@ -2898,6 +2941,9 @@ export const ko: Messages = {
   "assets.lgHint": "자산에 마우스를 올리면 경로 추적 · 클릭하면 고정 · ↗로 이동",
   "assets.lgPinHint": "클릭하면 이 경로를 고정합니다. 다시 클릭하거나 배경을 클릭하면 해제됩니다.",
   "assets.clTruncated": "더 위가 있음",
+  "assets.clTruncatedDown": "더 아래가 있음",
+  "assets.clDirUpstream": "상류",
+  "assets.clDirImpact": "영향도",
   "assets.clTruncatedHint":
     "홉 깊이 또는 자산 수 제한으로 탐색이 잘렸습니다 — 홉을 늘리거나 업스트림 자산을 열어 계속 추적하세요.",
   "assets.clMoreColumns": "+{count}개 컬럼 더",

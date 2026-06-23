@@ -81,6 +81,18 @@ export const AllSucceeded: Story = {
   },
 };
 
+/** A step that retried before settling shows an amber "↻ ×N" badge — the
+ *  flaky-upstream signal (자유도 2단계). Here the load succeeded on its 3rd try. */
+export const RetriedStep: Story = {
+  args: {
+    nodes: [
+      nr("extract", "sql", "succeeded", [], { records_written: 500, attempt: 1 }),
+      nr("load_mart", "etl", "succeeded", ["extract"], { records_written: 500, attempt: 3 }),
+      nr("log", "sql", "succeeded", ["load_mart"], { attempt: 1 }),
+    ],
+  },
+};
+
 /** A failure mid-DAG cancels the rest — downstream becomes cancelled, not failed. */
 export const PartialFailure: Story = {
   args: {
@@ -93,6 +105,33 @@ export const PartialFailure: Story = {
       }),
       nr("join", "join", "cancelled", ["clean", "dedupe"]),
       nr("sink", "sink", "cancelled", ["join"]),
+    ],
+  },
+};
+
+/** Operator DAG (ADR-0099): a branch-deselected step shows "skipped" (not
+ *  "cancelled"), and a dynamically-mapped (``expand``) step shows its per-instance
+ *  fan-out breakdown — one instance failed here (region=eu). */
+export const OperatorDagWithBranchAndFanout: Story = {
+  args: {
+    nodes: [
+      nr("gate", "sql", "succeeded", [], { records_written: 5 }),
+      nr("load_present", "sql", "succeeded", ["gate"], { records_written: 5 }),
+      nr("log_absent", "sql", "cancelled", ["gate"], {
+        result_json: { task_state: "skipped" },
+      }),
+      nr("fanout", "sql", "failed", ["load_present"], {
+        records_written: 2,
+        error_class: "WriteError",
+        error_message: "region=eu: connection refused",
+        result_json: {
+          mapped_instances: [
+            { map_values: { region: "us" }, records_read: 0, records_written: 1, success: true, error_class: null },
+            { map_values: { region: "eu" }, records_read: 0, records_written: 0, success: false, error_class: "WriteError" },
+            { map_values: { region: "apac" }, records_read: 0, records_written: 1, success: true, error_class: null },
+          ],
+        },
+      }),
     ],
   },
 };

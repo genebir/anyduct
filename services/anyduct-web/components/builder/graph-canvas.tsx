@@ -45,8 +45,10 @@ function connectionAllowed(
   if (tgtOp?.kind === "source") return false; // no edge into a source
   // Fan-in: only join (multiInput) nodes accept ≥2 incoming edges. For every
   // other kind, we still enforce the "one incoming edge" rule so semantics
-  // stay unambiguous (single-input stream per transform/sink).
-  if (!tgtOp?.multiInput && edges.some((e) => e.target === target)) return false;
+  // stay unambiguous (single-input stream per transform/sink). Orchestration
+  // operators (ADR-0099) are exempt — a step can depend on many upstream steps.
+  if (tgtOp?.kind !== "operator" && !tgtOp?.multiInput && edges.some((e) => e.target === target))
+    return false;
   if (edges.some((e) => e.source === source && e.target === target)) return false; // dup
   // cycle: is `source` reachable from `target`?
   const adj = new Map<string, string[]>();
@@ -162,12 +164,16 @@ function GraphCanvasInner({
   // stand out against the default `All records` ones.
   const layoutEdges: Edge[] = edges.map((e) => {
     const conditional = Boolean(e.when);
+    // Orchestration (ADR-0099): edges between operator steps are *ordering*
+    // (depends_on), not data — label them "then" instead of "All records".
+    const srcOp = findOperator(nodes.find((n) => n.id === e.source)?.operatorId ?? "");
+    const ordering = srcOp?.kind === "operator";
     return {
       id: e.id,
       source: e.source,
       target: e.target,
       animated: true,
-      label: conditional ? `if ${e.when}` : "All records",
+      label: ordering ? "then" : conditional ? `if ${e.when}` : "All records",
       labelStyle: {
         fill: conditional ? "rgb(var(--accent))" : "rgb(var(--text-muted))",
         fontSize: 11,

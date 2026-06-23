@@ -23,7 +23,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
@@ -125,11 +125,31 @@ class AssetRepository:
     # ---------- write: column lineage (J2) --------------------------------
 
     async def _asset_by_key(self, workspace_id: UUID, key: AssetKey) -> Asset | None:
-        return (
+        asset = (
             await self._session.execute(
                 select(Asset).where(Asset.workspace_id == workspace_id, Asset.asset_key == str(key))
             )
         ).scalar_one_or_none()
+        if asset is not None:
+            return asset
+        # Case-insensitive fallback (ADR-0099 dogfood): sqlglot lowercases
+        # unquoted identifiers, so a column-lineage upstream key
+        # ``conn/bda_ds.t`` won't exact-match the table-level asset
+        # ``conn/BDA_DS.T`` (uppercase, as written) — the edge would be
+        # silently dropped. Only runs when the exact match fails, so
+        # case-matching callers are unaffected.
+        return (
+            (
+                await self._session.execute(
+                    select(Asset).where(
+                        Asset.workspace_id == workspace_id,
+                        func.lower(Asset.asset_key) == str(key).lower(),
+                    )
+                )
+            )
+            .scalars()
+            .first()
+        )
 
     async def _ensure_column(self, asset_id: UUID, name: str) -> AssetColumn:
         existing = (
@@ -141,6 +161,23 @@ class AssetRepository:
         ).scalar_one_or_none()
         if existing is not None:
             return existing
+        # Case-insensitive fallback — reuse an existing column that differs
+        # only in case (sqlglot-lowercased upstream column vs the real
+        # uppercase one) instead of creating a duplicate.
+        ci = (
+            (
+                await self._session.execute(
+                    select(AssetColumn).where(
+                        AssetColumn.asset_id == asset_id,
+                        func.lower(AssetColumn.name) == name.lower(),
+                    )
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if ci is not None:
+            return ci
         col = AssetColumn(asset_id=asset_id, name=name)
         self._session.add(col)
         await self._session.flush()
@@ -314,7 +351,7 @@ class AssetRepository:
         return columns, upstream_map
 
     async def column_lineage_graph(
-        self, *, asset_id: UUID, max_depth: int, max_assets: int = 40
+        self, *, asset_id: UUID, max_depth: int, max_assets: int = 40, direction: str = "upstream"
     ) -> tuple[
         dict[UUID, tuple[Asset, int]],
         dict[UUID, list[str]],
@@ -349,6 +386,12 @@ class AssetRepository:
 
         down_col = aliased(AssetColumn)
         up_col = aliased(AssetColumn)
+        # ``downstream`` walks impact (this column → who consumes it): the
+        # frontier is the UPSTREAM side and we reach DOWNSTREAM columns. The
+        # default ``upstream`` walk is the provenance drill-down (the reverse).
+        is_down = direction == "downstream"
+        boundary_col = up_col if is_down else down_col  # frontier side of an edge
+        reach_col = down_col if is_down else up_col  # newly discovered side
         for depth in range(1, max_depth + 1):
             if not frontier:
                 break
@@ -363,30 +406,32 @@ class AssetRepository:
                 .select_from(ColumnLineageEdge)
                 .join(down_col, down_col.id == ColumnLineageEdge.downstream_column_id)
                 .join(up_col, up_col.id == ColumnLineageEdge.upstream_column_id)
-                .join(Asset, Asset.id == up_col.asset_id)
-                .where(down_col.asset_id.in_(frontier))
+                .join(Asset, Asset.id == reach_col.asset_id)
+                .where(boundary_col.asset_id.in_(frontier))
             )
             next_frontier: set[UUID] = set()
-            for up_aid, up_name, dn_aid, dn_name, up_asset in rows.all():
+            for up_aid, up_name, dn_aid, dn_name, reach_asset in rows.all():
+                reach_aid = dn_aid if is_down else up_aid
                 key = (up_aid, up_name, dn_aid, dn_name)
-                if up_aid not in depths:
+                if reach_aid not in depths:
                     if len(depths) >= max_assets:
                         truncated = True
                         continue
-                    depths[up_aid] = (up_asset, depth)
-                    next_frontier.add(up_aid)
+                    depths[reach_aid] = (reach_asset, depth)
+                    next_frontier.add(reach_aid)
                 if key not in seen_edges:
                     seen_edges.add(key)
                     edges.append(key)
             frontier = next_frontier
 
         if frontier:
-            # Depth cap reached with unexplored assets — does anything feed
-            # them? One existence probe so the UI can say "more upstream".
+            # Depth cap reached with unexplored assets — does anything continue
+            # past them? One existence probe so the UI can say "more …".
             probe = await self._session.execute(
                 select(ColumnLineageEdge.id)
                 .join(down_col, down_col.id == ColumnLineageEdge.downstream_column_id)
-                .where(down_col.asset_id.in_(frontier))
+                .join(up_col, up_col.id == ColumnLineageEdge.upstream_column_id)
+                .where(boundary_col.asset_id.in_(frontier))
                 .limit(1)
             )
             if probe.first() is not None:

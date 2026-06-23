@@ -145,3 +145,44 @@ export const IncompleteSource: Story = {
     },
   },
 };
+
+// Orchestration operator steps (ADR-0099) — kind "operator". These render with
+// BOTH handles (a step depends-on and is-depended-on) and a "Step" category
+// label; the summary leads with the step name (the depends_on identifier).
+export const LoadOperator: Story = {
+  args: {
+    nodes: [
+      nodeFromOperator("op:load", {
+        name: "load_mart",
+        connection: "warehouse",
+        table: "mart.daily_sales",
+        mode: "overwrite",
+      }),
+    ],
+  },
+};
+
+export const SqlOperator: Story = {
+  args: {
+    nodes: [
+      nodeFromOperator("op:sql", {
+        name: "write_start_log",
+        connection: "warehouse",
+        statement: "INSERT INTO ops.batch_log (step) VALUES ('START')",
+      }),
+    ],
+  },
+};
+
+export const ProcCallOperator: Story = {
+  args: {
+    nodes: [
+      nodeFromOperator("op:proc_call", {
+        name: "run_rollup",
+        connection: "warehouse",
+        procedure: "ops.daily_rollup",
+        args: [],
+      }),
+    ],
+  },
+};

@@ -106,9 +106,48 @@ def _build_task(
     connector_factory: Callable[[str], Connector] | None = None,
 ) -> Task:
     """Build one runtime :class:`Task` from a :class:`TaskConfig`."""
-    src = task_cfg.source
-    sink_cfgs = task_cfg.effective_sinks()
     label = f"pipeline {pipeline_name!r} task {task_cfg.name!r}"
+
+    # Operator kinds (ADR-0099): ``sql`` / ``proc_call`` are pure orchestration
+    # steps — no source/sink, run a statement / call a procedure against
+    # ``connection``. Build a minimal Task; the core dispatches on ``kind``.
+    if task_cfg.kind in ("sql", "proc_call"):
+        if task_cfg.connection not in connectors:
+            raise ConfigError(
+                f"{label}: connection {task_cfg.connection!r} "
+                f"not in available connectors {sorted(connectors)}"
+            )
+        # Branch rules (ADR-0028) apply to ANY operator kind — the predicate is
+        # over the task's own outcome (records_read/written/success). Validate
+        # each predicate compiles at build time, mirroring the etl path below.
+        # (Bug fix 2026-06-19: branch was silently dropped for sql/proc_call.)
+        for br in task_cfg.branch:
+            if br.when is not None:
+                try:
+                    compile(br.when, "<branch:when>", "eval")
+                except SyntaxError as exc:
+                    raise ConfigError(f"{label}: invalid branch 'when': {exc}") from exc
+        return Task(
+            name=task_cfg.name,
+            kind=task_cfg.kind,
+            op_connection=task_cfg.connection,
+            statements=list(task_cfg.statements),
+            procedure=task_cfg.procedure,
+            proc_args=list(task_cfg.args),
+            proc_reads=list(task_cfg.reads),
+            proc_writes=list(task_cfg.writes),
+            depends_on=list(task_cfg.depends_on),
+            trigger_rule=task_cfg.trigger_rule,
+            branch=[BranchRule(when=br.when, to=list(br.to)) for br in task_cfg.branch],
+            retry=task_cfg.retry,
+            timeout_seconds=task_cfg.timeout_seconds,
+            expand=dict(task_cfg.expand),
+        )
+
+    src = task_cfg.source
+    if src is None:  # pragma: no cover - guarded by TaskConfig validator
+        raise ConfigError(f"{label}: kind 'etl' needs a source")
+    sink_cfgs = task_cfg.effective_sinks()
 
     if src.connection not in connectors:
         raise ConfigError(
@@ -155,6 +194,10 @@ def _build_task(
         depends_on=list(task_cfg.depends_on),
         trigger_rule=task_cfg.trigger_rule,
         branch=[BranchRule(when=br.when, to=list(br.to)) for br in task_cfg.branch],
+        retry=task_cfg.retry,
+        timeout_seconds=task_cfg.timeout_seconds,
+        expand=dict(task_cfg.expand),
+        push_xcom={k: dict(v) for k, v in task_cfg.push_xcom.items()},
     )
     # When a sink reuses the source's connection, give it a dedicated instance
     # (separate physical connection) so the streaming read cursor and the write
@@ -403,6 +446,7 @@ def build_pipeline(
             mode=pipeline_config.mode,
             commit_strategy=commit_strategy,
             retry=pipeline_config.retry,
+            task_timeout_seconds=pipeline_config.task_timeout_seconds,
             dlq=pipeline_config.dlq,
         )
         pipeline.add(graph_task)
@@ -465,6 +509,7 @@ def build_pipeline(
         mode=pipeline_config.mode,
         commit_strategy=commit_strategy,
         retry=pipeline_config.retry,
+        task_timeout_seconds=pipeline_config.task_timeout_seconds,
         dlq=pipeline_config.dlq,
     )
     for task in tasks:

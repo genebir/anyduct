@@ -166,19 +166,23 @@ async def asset_lineage_graph(
 async def asset_column_lineage_graph(
     asset_id: UUID,
     depth: int = 3,
+    direction: str = "upstream",
     ctx: WorkspaceContext = _require_viewer,
     session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> AssetColumnLineageGraphResponse:
-    """Multi-hop upstream column lineage (2026-06-12) — the conventional
-    catalog drill-down: BFS up to ``depth`` hops (clamped to [1, 5]) and
-    at most 40 assets, returning asset cards (with their column lists)
-    plus column→column edges. ``opaque`` refers to the ROOT asset; the
-    UI shows the banner in that case (upstream assets may still be
-    individually opaque — their cards just have no incoming edges)."""
+    """Multi-hop column lineage (2026-06-12; ``direction`` added 2026-06-19).
+
+    ``direction=upstream`` (default) is the provenance drill-down — BFS over
+    ``column_lineage_edges`` toward the columns that FEED the root.
+    ``direction=downstream`` is **column impact analysis** — which downstream
+    columns CONSUME the root's columns ("what breaks if I change this column").
+    BFS up to ``depth`` hops (clamped [1, 5]), ≤40 assets. ``opaque`` refers to
+    the ROOT asset."""
     depth = max(1, min(depth, 5))
+    direction = "downstream" if direction == "downstream" else "upstream"
     asset = await _resolve_or_404(session, workspace_id=ctx.workspace.id, asset_id=asset_id)
     assets, columns, edges, truncated = await AssetRepository(session).column_lineage_graph(
-        asset_id=asset.id, max_depth=depth
+        asset_id=asset.id, max_depth=depth, direction=direction
     )
     return AssetColumnLineageGraphResponse(
         id=asset.id,

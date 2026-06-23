@@ -32,6 +32,9 @@ export default function AssetDetailPage() {
     useState<AssetColumnLineageGraphResponse | null>(null);
   // Multi-hop drill-down depth (2026-06-12) — changing refetches the graph.
   const [lineageDepth, setLineageDepth] = useState(3);
+  // Column lineage direction (2026-06-19): upstream = provenance,
+  // downstream = impact analysis ("what consumes this column").
+  const [lineageDir, setLineageDir] = useState<"upstream" | "downstream">("upstream");
 
   useEffect(() => {
     if (!ws) return;
@@ -39,7 +42,7 @@ export default function AssetDetailPage() {
     Promise.all([
       assetsApi.lineageGraph(ws.id, id, assetDepth),
       assetsApi.materializations(ws.id, id),
-      assetsApi.columnLineageGraph(ws.id, id, lineageDepth),
+      assetsApi.columnLineageGraph(ws.id, id, lineageDepth, lineageDir),
     ])
       .then(([lin, m, col]) => {
         if (cancelled) return;
@@ -54,7 +57,7 @@ export default function AssetDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [ws, id, t, lineageDepth, assetDepth]);
+  }, [ws, id, t, lineageDepth, assetDepth, lineageDir]);
 
   return (
     <>
@@ -102,8 +105,28 @@ export default function AssetDetailPage() {
             </Card>
 
             <Card className="p-0">
-              <div className="border-b border-border-subtle px-4 py-3 text-sm font-semibold text-text">
-                {t("assets.columnLineage")}
+              <div className="flex items-center justify-between gap-2 border-b border-border-subtle px-4 py-3">
+                <span className="text-sm font-semibold text-text">
+                  {t("assets.columnLineage")}
+                </span>
+                {/* Direction toggle (2026-06-19): upstream = provenance,
+                    downstream = impact analysis. */}
+                <div className="flex shrink-0 overflow-hidden rounded-md border border-border-subtle text-xs">
+                  {(["upstream", "downstream"] as const).map((dir) => (
+                    <button
+                      key={dir}
+                      type="button"
+                      onClick={() => setLineageDir(dir)}
+                      className={`cursor-pointer px-2.5 py-1 transition ${
+                        lineageDir === dir
+                          ? "bg-accent text-on-accent"
+                          : "text-text-secondary hover:bg-overlay"
+                      }`}
+                    >
+                      {t(dir === "upstream" ? "assets.clDirUpstream" : "assets.clDirImpact")}
+                    </button>
+                  ))}
+                </div>
               </div>
               {columnLineage === null ? (
                 <div className="px-4 py-8 text-center text-sm text-text-muted">
@@ -130,6 +153,7 @@ export default function AssetDetailPage() {
                   <ColumnLineageGraph
                     graph={columnLineage}
                     depth={lineageDepth}
+                    direction={lineageDir}
                     onDepthChange={setLineageDepth}
                     onSelectAsset={(assetId) => router.push(`/w/${slug}/assets/${assetId}`)}
                   />

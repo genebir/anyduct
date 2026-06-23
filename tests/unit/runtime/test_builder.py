@@ -106,6 +106,107 @@ def test_build_pipeline_minimum() -> None:
     assert connectors == {"s": src, "k": snk}
 
 
+def test_build_pipeline_forwards_per_task_retry_and_timeout() -> None:
+    """TaskConfig.retry/timeout_seconds + PipelineConfig.task_timeout_seconds
+    reach the core Task/Pipeline (자유도 2단계)."""
+    pc = PipelineConfig.model_validate(
+        {
+            "name": "p",
+            "task_timeout_seconds": 30.0,
+            "tasks": [
+                {
+                    "name": "t",
+                    "source": {"connection": "s", "query": "SELECT 1"},
+                    "sink": {"connection": "k", "table": "T", "mode": "append"},
+                    "timeout_seconds": 5.0,
+                    "retry": {
+                        "max_attempts": 4,
+                        "backoff": "fixed",
+                        "initial_delay_seconds": 0.0,
+                    },
+                }
+            ],
+        }
+    )
+    pipeline, _ = build_pipeline(pc, {"s": InMemoryBatchSource(), "k": InMemoryBatchSink()})
+    assert pipeline.task_timeout_seconds == 30.0
+    task = pipeline.tasks[0]
+    assert task.timeout_seconds == 5.0
+    assert task.retry is not None
+    assert task.retry.max_attempts == 4
+
+
+def test_build_pipeline_forwards_branch_on_sql_operator() -> None:
+    """Branch rules must reach the core Task for ANY operator kind, not only
+    ``etl``. Regression for a 2026-06-19 bug where the sql/proc_call build path
+    silently dropped ``branch`` — a branch step built from the UI did nothing."""
+    pc = PipelineConfig.model_validate(
+        {
+            "name": "p",
+            "tasks": [
+                {
+                    "name": "gate",
+                    "kind": "sql",
+                    "connection": "db",
+                    "statements": ["SELECT 1"],
+                    "branch": [
+                        {"when": "records_written > 0", "to": ["present"]},
+                        {"when": None, "to": ["absent"]},
+                    ],
+                },
+                {
+                    "name": "present",
+                    "kind": "sql",
+                    "connection": "db",
+                    "statements": ["SELECT 1"],
+                    "depends_on": ["gate"],
+                },
+                {
+                    "name": "absent",
+                    "kind": "sql",
+                    "connection": "db",
+                    "statements": ["SELECT 1"],
+                    "depends_on": ["gate"],
+                },
+            ],
+        }
+    )
+    pipeline, _ = build_pipeline(pc, {"db": InMemoryBatchSource()})
+    gate = next(t for t in pipeline.tasks if t.name == "gate")
+    assert [(r.when, r.to) for r in gate.branch] == [
+        ("records_written > 0", ["present"]),
+        (None, ["absent"]),
+    ]
+
+
+def test_build_pipeline_rejects_invalid_branch_when_on_sql_operator() -> None:
+    """A syntactically broken branch predicate on a sql operator is caught at
+    build time (parity with the etl path), not silently ignored."""
+    pc = PipelineConfig.model_validate(
+        {
+            "name": "p",
+            "tasks": [
+                {
+                    "name": "gate",
+                    "kind": "sql",
+                    "connection": "db",
+                    "statements": ["SELECT 1"],
+                    "branch": [{"when": "records_written >", "to": ["x"]}],
+                },
+                {
+                    "name": "x",
+                    "kind": "sql",
+                    "connection": "db",
+                    "statements": ["SELECT 1"],
+                    "depends_on": ["gate"],
+                },
+            ],
+        }
+    )
+    with pytest.raises(ConfigError, match="invalid branch"):
+        build_pipeline(pc, {"db": InMemoryBatchSource()})
+
+
 def test_build_pipeline_splits_shared_source_sink_connection() -> None:
     """A sink reusing the source's connection gets its own instance (a separate
     physical connection) so the streaming read cursor and the write don't

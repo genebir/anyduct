@@ -597,3 +597,161 @@ def test_sql_transform_unparseable_still_nudges() -> None:
     cfg = _cfg(transforms=[{"type": "sql", "query": "NOT REALLY ((( SQL"}])
     warnings = _mapping_warnings(cfg)
     assert len(warnings) == 1
+
+
+# ---------- deferred template refs: map / xcom (ADR-0097/0098) ----------
+
+
+def _codes(cfg: PipelineConfig, *prefixes: str) -> list[str]:
+    """Codes of warnings whose code starts with any given prefix."""
+    return [
+        w.code
+        for w in lint_pipeline(cfg)
+        if not prefixes or any(w.code.startswith(p) for p in prefixes)
+    ]
+
+
+def _task(name: str, query: str, table: str = "out", **over: object) -> dict:
+    base: dict = {
+        "name": name,
+        "source": {"connection": "wh", "query": query},
+        "sink": {"connection": "wh", "table": table},
+    }
+    base.update(over)
+    return base
+
+
+def test_map_ref_without_expand_warns() -> None:
+    cfg = PipelineConfig.model_validate(
+        {"name": "p", "tasks": [_task("load", "SELECT * FROM t WHERE r = '{{ map.region }}'")]}
+    )
+    assert _codes(cfg, "map_") == ["map_ref_without_expand"]
+
+
+def test_map_ref_with_matching_expand_key_is_clean() -> None:
+    cfg = PipelineConfig.model_validate(
+        {
+            "name": "p",
+            "tasks": [
+                _task(
+                    "load",
+                    "SELECT * FROM t WHERE r = '{{ map.region }}'",
+                    expand={"region": ["us", "eu"]},
+                )
+            ],
+        }
+    )
+    assert _codes(cfg, "map_") == []
+
+
+def test_map_ref_unknown_key_warns() -> None:
+    cfg = PipelineConfig.model_validate(
+        {
+            "name": "p",
+            "tasks": [
+                _task(
+                    "load",
+                    "SELECT * FROM t WHERE r = '{{ map.region }}'",
+                    expand={"shard": [1, 2]},
+                )
+            ],
+        }
+    )
+    assert _codes(cfg, "map_") == ["map_ref_unknown_key"]
+
+
+def test_xcom_ref_unknown_task_warns() -> None:
+    cfg = PipelineConfig.model_validate(
+        {
+            "name": "p",
+            "tasks": [
+                _task("a", "SELECT 1"),
+                _task("b", "SELECT * WHERE id > {{ xcom.nope.new_cursor }}", depends_on=["a"]),
+            ],
+        }
+    )
+    assert _codes(cfg, "xcom_") == ["xcom_ref_unknown_task"]
+
+
+def test_xcom_ref_upstream_dependency_is_clean() -> None:
+    cfg = PipelineConfig.model_validate(
+        {
+            "name": "p",
+            "tasks": [
+                _task("a", "SELECT 1"),
+                _task("b", "SELECT * WHERE id > {{ xcom.a.new_cursor }}", depends_on=["a"]),
+            ],
+        }
+    )
+    assert _codes(cfg, "xcom_") == []
+
+
+def test_xcom_ref_transitive_upstream_is_clean() -> None:
+    cfg = PipelineConfig.model_validate(
+        {
+            "name": "p",
+            "tasks": [
+                _task("a", "SELECT 1"),
+                _task("b", "SELECT 2", depends_on=["a"]),
+                _task("c", "SELECT * WHERE id > {{ xcom.a.new_cursor }}", depends_on=["b"]),
+            ],
+        }
+    )
+    assert _codes(cfg, "xcom_") == []
+
+
+def test_xcom_ref_not_upstream_warns() -> None:
+    cfg = PipelineConfig.model_validate(
+        {
+            "name": "p",
+            "tasks": [
+                _task("a", "SELECT 1"),
+                _task("b", "SELECT * WHERE id > {{ xcom.a.new_cursor }}"),
+            ],
+        }
+    )
+    assert _codes(cfg, "xcom_") == ["xcom_ref_not_upstream"]
+
+
+def test_map_in_sink_table_is_scanned() -> None:
+    cfg = PipelineConfig.model_validate(
+        {"name": "p", "tasks": [_task("load", "SELECT 1", table="out_{{ map.shard }}")]}
+    )
+    assert _codes(cfg, "map_") == ["map_ref_without_expand"]
+
+
+def test_single_task_shape_emits_no_deferred_warnings() -> None:
+    """Legacy single-task shape has no other tasks / no expand field — the
+    rule is task-DAG only and must not fire here."""
+    cfg = _cfg(source={"connection": "wh", "query": "SELECT * WHERE r = '{{ map.region }}'"})
+    assert _codes(cfg, "map_", "xcom_") == []
+
+
+def test_proc_call_without_lineage_decl_warns() -> None:
+    cfg = PipelineConfig.model_validate(
+        {
+            "name": "p",
+            "tasks": [{"name": "p1", "kind": "proc_call", "connection": "wh", "procedure": "x.y"}],
+        }
+    )
+    codes = [w.code for w in lint_pipeline(cfg)]
+    assert "proc_call_lineage_recommended" in codes
+
+
+def test_proc_call_with_lineage_decl_clean() -> None:
+    cfg = PipelineConfig.model_validate(
+        {
+            "name": "p",
+            "tasks": [
+                {
+                    "name": "p1",
+                    "kind": "proc_call",
+                    "connection": "wh",
+                    "procedure": "x.y",
+                    "writes": ["mart.t"],
+                }
+            ],
+        }
+    )
+    codes = [w.code for w in lint_pipeline(cfg)]
+    assert "proc_call_lineage_recommended" not in codes

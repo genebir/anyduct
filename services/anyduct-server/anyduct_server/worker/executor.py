@@ -30,7 +30,7 @@ import logging
 import threading
 from collections.abc import Callable
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -100,6 +100,16 @@ _HEARTBEAT_INTERVAL_SECONDS = 10.0
 # fan even in a DAG with no cycles.
 _MAX_TRIGGER_CHAIN = 50
 
+# Task-DAG per-task terminal state (RunResult.task_states) → node_run status
+# (ADR-0099). RunStatus has no ``skipped`` yet, so skip / upstream-fail map to
+# cancelled — the run-detail DAG greys those steps out.
+_TASK_STATE_TO_RUN_STATUS = {
+    "success": RunStatus.SUCCEEDED,
+    "failed": RunStatus.FAILED,
+    "skipped": RunStatus.CANCELLED,
+    "upstream_failed": RunStatus.CANCELLED,
+}
+
 
 class _PipelineBuildError(Exception):
     """Raised by :meth:`RunExecutor._build` so the executor can record the
@@ -156,6 +166,17 @@ class RunExecutor:
         self._node_level_run_id: str = ""
         self._node_outcomes: list[NodeOutcome] | None = None
         self._node_deps: dict[str, list[str]] = {}
+        # Task-DAG (Operator DAG, ADR-0099) per-step monitoring: the in-process
+        # run path records one ``node_run`` per task from ``RunResult.task_states``
+        # (captured via a ``post_run`` hook so a FAILED run's partial states are
+        # available too). Lets the run-detail DAG show per-step status without the
+        # node-level wave executor (which is graph-only).
+        self._last_run_result: RunResult | None = None
+        self._task_node_specs: list[NodeSpec] = []
+
+    def _stash_run_result(self, _ctx: Any, result: RunResult) -> None:
+        """``post_run`` hook — capture the RunResult (success or failure)."""
+        self._last_run_result = result
 
     async def execute(self, run_id: UUID) -> Run:
         """Execute the run identified by ``run_id``; persist the result.
@@ -305,6 +326,9 @@ class RunExecutor:
                         # on success, fire-and-forget. Same transaction as the
                         # success write so it's all-or-nothing.
                         await self._trigger_downstream(session, run, log)
+                        # Per-step DAG (ADR-0099): record node_runs from the
+                        # task states so the run detail shows each step's outcome.
+                        await self._persist_task_node_runs(session, run.id, log)
                     except _RunCancelledError:
                         # Phase P (2026-05-28) — user-requested cancel. Not an
                         # error; suppress the failure log + record_failure
@@ -325,6 +349,10 @@ class RunExecutor:
                             error=str(e),
                         )
                         _record_failure(run, type(e).__name__, str(e))
+                        # Per-step DAG (ADR-0099): even on failure, record which
+                        # step failed / was skipped (RunResult captured via the
+                        # post_run hook before the core re-raised).
+                        await self._persist_task_node_runs(session, run.id, log)
                     finally:
                         heartbeat_stop.set()
                         with contextlib.suppress(asyncio.CancelledError):
@@ -482,6 +510,67 @@ class RunExecutor:
                 phase="derive",
             )
             return None, cfg
+
+    async def _persist_task_node_runs(self, session: AsyncSession, run_id: UUID, log: Any) -> None:
+        """Record one ``node_run`` per task of a Task-DAG run from the captured
+        ``RunResult.task_states`` (ADR-0099). Best-effort — a monitoring write
+        must never flip the run's recorded outcome. Graph-shape runs use the
+        node-level wave executor instead; single-task / non-DAG runs have empty
+        ``task_states`` and are skipped here."""
+        result = self._last_run_result
+        specs = self._task_node_specs
+        if not specs or result is None or not result.task_states:
+            return
+        try:
+            rows = await NodeRunRepository().create_for_run(session, run_id, specs)
+            now = datetime.now(UTC)
+            task_records = result.task_records or {}
+            mapped = result.mapped_instances or {}
+            task_errors = result.task_errors or {}
+            task_attempts = result.task_attempts or {}
+            task_durations = result.task_durations or {}
+            for row in rows:
+                state = result.task_states.get(row.node_id) or ""
+                row.status = _TASK_STATE_TO_RUN_STATUS.get(state, RunStatus.SUCCEEDED)
+                row.finished_at = now
+                # Per-step duration: the core measured each task's wall-clock, so
+                # back-date started_at from the (shared) finish time. This gives
+                # the DAG view a "D Xs" per step ("which step was slow?"). A step
+                # that never ran (skipped) has no duration → started_at stays null.
+                elapsed = task_durations.get(row.node_id)
+                if elapsed is not None:
+                    row.started_at = now - timedelta(seconds=elapsed)
+                # Per-step record counts (ADR-0099 monitoring) — the DAG view's
+                # "R/W" per node, not just the run-level total. Absent for a
+                # skipped/upstream-failed step (it never ran) → stays 0.
+                read, written = task_records.get(row.node_id, (0, 0))
+                row.records_read = read
+                row.records_written = written
+                # Per-step attempt count (자유도 2단계) — "succeeded after N tries"
+                # is a flaky-upstream signal. A step that never ran (skipped)
+                # stays at 0; one that ran is at least 1.
+                row.attempt = task_attempts.get(row.node_id, 0)
+                # Per-step error so the DAG view shows *which* step broke and why.
+                err = task_errors.get(row.node_id)
+                if err is not None:
+                    row.error_class, row.error_message = err
+                rj: dict[str, Any] = {}
+                # The RunStatus enum has no SKIPPED — both branch-deselected
+                # ("skipped") and upstream-failure-skipped ("upstream_failed")
+                # collapse to CANCELLED. Stash the original task state so the UI
+                # can label them distinctly without an enum/migration change.
+                if state:
+                    rj["task_state"] = state
+                # Dynamic-mapping fan-out (ADR-0098): a mapped task is one
+                # aggregated node_run, so stash the per-instance breakdown
+                # ("region=eu failed") that the single row otherwise hides.
+                if row.node_id in mapped:
+                    rj["mapped_instances"] = mapped[row.node_id]
+                if rj:
+                    row.result_json = rj
+            await session.flush()
+        except Exception as e:  # pragma: no cover - defensive
+            log.warning("run.task_node_runs_failed", error_class=type(e).__name__, error=str(e))
 
     async def _persist_lineage(
         self,
@@ -1171,6 +1260,9 @@ class RunExecutor:
         # considered "executed". For the failure path we still
         # record — the FIRST failing step's prior steps DID run.
         for task in cfg.effective_tasks():
+            # Operator kinds (ADR-0099): sql / proc_call carry no source.
+            if task.source is None:
+                continue
             # Phase W: source SELECT in the linear shape. ``query`` is
             # optional (some sources read by table name only), so
             # check truthy. Same SQL-connection-type filter as the
@@ -1368,6 +1460,20 @@ class RunExecutor:
         except ConfigError as e:
             raise _PipelineBuildError(f"pipeline build failed: {e}") from e
         ctx = Context(pipeline_name=core_pipeline.name, run_id=str(run_id))
+
+        # Per-step monitoring (ADR-0099): for a Task-DAG (explicit ``tasks``),
+        # capture per-task terminal states via a post_run hook and stash one
+        # NodeSpec per task — ``execute`` writes node_runs after the run so the
+        # run-detail DAG shows which step ran / failed / was skipped.
+        self._last_run_result = None
+        self._task_node_specs = []
+        if cfg.graph is None and cfg.tasks:
+            core_pipeline.on("post_run", self._stash_run_result)
+            self._task_node_specs = [
+                NodeSpec(node_id=t.name, kind=t.kind, depends_on=list(t.depends_on))
+                for t in cfg.effective_tasks()
+                if t.name
+            ]
 
         # Connect + run + close happen in a single worker thread so drivers
         # (notably sqlite3) bound to a thread don't trip on cross-thread reuse.

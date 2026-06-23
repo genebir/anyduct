@@ -78,7 +78,7 @@ export function PipelineNode({ id, data }: NodeProps) {
           className="!h-2.5 !w-2.5 !rounded-full !border-2 !border-bg !bg-accent"
         />
       ) : null}
-      {op.kind === "source" || op.kind === "transform" ? (
+      {op.kind === "source" || op.kind === "transform" || op.kind === "operator" ? (
         <Handle
           type="source"
           position={Position.Right}
@@ -99,7 +99,7 @@ export function PipelineNode({ id, data }: NodeProps) {
             className="truncate text-xs uppercase tracking-wider text-text-muted underline decoration-dotted decoration-text-muted/40 underline-offset-2"
             title={glossaryTooltip(op.kind, t)}
           >
-            {op.kind}
+            {op.kind === "operator" ? t("builder.opKindStep") : op.kind}
           </div>
           <div className="truncate text-sm font-semibold text-text">
             {label}
@@ -151,6 +151,7 @@ function glossaryTooltip(
   if (kind === "source") return t("glossary.source");
   if (kind === "sink") return t("glossary.sink");
   if (kind === "transform") return t("glossary.transform");
+  if (kind === "operator") return t("glossary.operator");
   return "";
 }
 
@@ -178,6 +179,19 @@ function describeNode(
       (values.key as string) ||
       "";
     return target ? `${conn} · ${target}` : conn;
+  }
+  if (op.kind === "operator") {
+    // Orchestration step (ADR-0099): the step name is the key identifier
+    // (depends_on references it); pair it with the write/target hint.
+    const name = (values.name as string) || "";
+    const stmt = typeof values.statement === "string" ? values.statement : "";
+    const detail =
+      (values.table as string) ||
+      (values.procedure as string) ||
+      (stmt.length > 28 ? `${stmt.slice(0, 28)}…` : stmt) ||
+      "";
+    if (name && detail) return `${name} · ${detail}`;
+    return name || detail || t("builder.notConfigured");
   }
   // transform — show first non-empty field as a hint
   const first = op.fields[0]?.key;

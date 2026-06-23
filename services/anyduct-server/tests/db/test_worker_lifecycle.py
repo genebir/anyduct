@@ -444,6 +444,64 @@ async def test_executor_renders_runtime_params_and_ds(
     assert "out_us_20260615" in tables
 
 
+async def test_executor_dynamic_task_mapping_over_params(
+    session: AsyncSession, tmp_path: Path
+) -> None:
+    """자유도 3단계 (ADR-0098): a task with ``expand`` driven by a per-run param
+    list fans out into one instance per element through the real worker.
+
+    ``params.regions = ['alice','carol']`` → 2 mapped instances, each filtering
+    the seeded table by ``{{ map.region }}`` → 2 rows land. Proves the full
+    stack: trigger params → worker render (map deferred) → core expand → data.
+    """
+    db_path = _prepare_sqlite_fixture(tmp_path)  # seed rows: alice/bob/carol
+    ws = await _seed_workspace(session, slug="we-expand")
+    await _seed_connection(session, workspace_id=ws.id, name="src", config={"database": db_path})
+    await _seed_connection(session, workspace_id=ws.id, name="dst", config={"database": db_path})
+    cfg = {
+        "name": "p",
+        "tasks": [
+            {
+                "name": "load",
+                "source": {
+                    "connection": "src",
+                    "query": "SELECT id, name FROM seed WHERE name = '{{ map.region }}'",
+                },
+                "sink": {"connection": "dst", "table": "out", "mode": "append"},
+                "expand": {"region": "{{ params.regions }}"},
+            }
+        ],
+    }
+    p, pv = await _seed_pipeline(session, workspace_id=ws.id, name="p", config=cfg)
+    run = await _seed_pending_run(
+        session,
+        workspace_id=ws.id,
+        pipeline_id=p.id,
+        pipeline_version_id=pv.id,
+        result_json={"params": {"regions": ["alice", "carol"]}},
+    )
+    claimed = await claim_pending_run(session, worker_id="worker-A")
+    assert claimed is not None
+    await session.commit()
+
+    await RunExecutor(
+        _SessionFactoryAdapter(session), StaticSecretBackend(), worker_id="worker-A"
+    ).execute(run.id)
+
+    refreshed = (await session.execute(select(Run).where(Run.id == run.id))).scalar_one()
+    assert refreshed.status == RunStatus.SUCCEEDED, (
+        refreshed.error_class,
+        refreshed.error_message,
+    )
+    assert refreshed.records_written == 2  # one row per mapped region
+    con = sqlite3.connect(db_path)
+    try:
+        rows = con.execute("SELECT name FROM out ORDER BY name").fetchall()
+    finally:
+        con.close()
+    assert rows == [("alice",), ("carol",)]
+
+
 async def test_executor_fails_on_undefined_variable(session: AsyncSession, tmp_path: Path) -> None:
     db_path = _prepare_sqlite_fixture(tmp_path)
     ws = await _seed_workspace(session, slug="we-badvar")

@@ -151,9 +151,19 @@ class DlqConfig(BaseModel):
     table: str | None = None
     topic: str | None = None
     mode: str = "append"
+    # Optional column/field to stamp the transform error reason into, so a DLQ'd
+    # record is self-describing ("why did this fail?") instead of just the
+    # original columns. The DLQ table/topic must carry this column. ``None``
+    # (default) keeps the historical verbatim-record behaviour.
+    error_column: str | None = None
 
 
 TRIGGER_RULES = frozenset({"all_success", "all_done", "one_success", "none_failed"})
+
+# Operator kinds for a Task-DAG node (ADR-0099). ``etl`` is the historical
+# source→transforms→sink task; ``sql`` / ``proc_call`` are pure orchestration
+# steps (run a statement / call a procedure against a connection, no dataflow).
+OPERATOR_KINDS = frozenset({"etl", "sql", "proc_call"})
 
 
 class BranchRuleConfig(BaseModel):
@@ -178,28 +188,105 @@ class TaskConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str
-    source: SourceConfig
+    # Operator kind (ADR-0099). ``etl`` (default) is the historical
+    # source→transforms→sink(s) task. ``sql`` / ``proc_call`` are pure
+    # orchestration steps (no dataflow) — see ``OPERATOR_KINDS``.
+    kind: str = "etl"
+    # ``etl`` requires ``source``; ``sql`` / ``proc_call`` leave it None and run
+    # against ``connection`` instead.
+    source: SourceConfig | None = None
     transforms: list[TransformConfig] = Field(default_factory=list)
     sink: SinkConfig | None = None
     sinks: list[SinkConfig] = Field(default_factory=list)
+    # --- sql / proc_call operators (ADR-0099) -------------------------------
+    # Connection the operator runs its statement(s) against.
+    connection: str | None = None
+    # ``sql`` operator: statements run in order, each committed (execute_statement
+    # contract). Total rows-affected is published to XCom as ``records_written``.
+    statements: list[str] = Field(default_factory=list)
+    # ``proc_call`` operator: ``CALL <procedure>(<args>)``. ``args`` are SQL
+    # expressions (string literals are quoted by the caller; ``{{ }}`` templates ok).
+    procedure: str | None = None
+    args: list[str] = Field(default_factory=list)
+    # proc_call lineage declaration (ADR-0099). A stored procedure is opaque —
+    # we can't see what it touches. Declaring the tables it ``reads`` / ``writes``
+    # lets the catalog register them as input / output assets (Airflow-style
+    # inlets/outlets). Optional; empty ⇒ the proc contributes no lineage.
+    reads: list[str] = Field(default_factory=list)
+    writes: list[str] = Field(default_factory=list)
     # Upstream task names that must complete before this task runs.
     depends_on: list[str] = Field(default_factory=list)
     # When this task runs given its upstream states (see ``TRIGGER_RULES``).
     trigger_rule: str = "all_success"
     # Branch selection rules — non-empty makes this a branch task.
     branch: list[BranchRuleConfig] = Field(default_factory=list)
+    # Per-task retry override (자유도 2단계, 2026-06-17). When set, this task
+    # uses its own retry policy instead of the pipeline-level ``retry``
+    # (Airflow per-task ``retries``/``retry_delay``). ``None`` → fall back to
+    # the pipeline default.
+    retry: RetryConfig | None = None
+    # Per-task execution timeout in seconds (Airflow ``execution_timeout``).
+    # Checked at record/chunk boundaries during the read loop — a slow task
+    # is failed with TaskTimeoutError (retried if a retry policy applies).
+    # ``None`` → fall back to the pipeline's ``task_timeout_seconds``.
+    timeout_seconds: float | None = None
+    # Dynamic task mapping (자유도 3단계, ADR-0098 — Airflow ``.expand()``).
+    # ``name → list`` (or a ``{{ }}`` template resolving to a list); the task
+    # fans out into one instance per element (cross product over keys), each
+    # exposing ``{{ map.<key> }}``. Empty ⇒ not a mapped task.
+    expand: dict[str, Any] = Field(default_factory=dict)
+    # Explicit XCom push (자유도 3단계 f/u, ADR-0097). ``key → {column, distinct?}``;
+    # publishes the list of that column's values from the rows this task
+    # processes under ``xcom.<task>.<key>``, so a downstream task can
+    # ``expand`` over it (``{{ xcom.discover.regions }}``). Without this only
+    # the auto summary (records_read/written/success/new_cursor) is on XCom —
+    # none of which is a fan-out list. Forces the records data path.
+    push_xcom: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _check_sink(self) -> TaskConfig:
-        if self.sink is not None and self.sinks:
-            raise ValueError(f"task {self.name!r}: specify either 'sink' or 'sinks', not both")
-        if self.sink is None and not self.sinks:
-            raise ValueError(f"task {self.name!r}: needs a 'sink' or non-empty 'sinks'")
+        if self.kind not in OPERATOR_KINDS:
+            raise ValueError(
+                f"task {self.name!r}: unknown kind {self.kind!r} "
+                f"(allowed: {sorted(OPERATOR_KINDS)})"
+            )
+        if self.kind == "etl":
+            if self.source is None:
+                raise ValueError(f"task {self.name!r}: kind 'etl' needs a 'source'")
+            if self.sink is not None and self.sinks:
+                raise ValueError(f"task {self.name!r}: specify either 'sink' or 'sinks', not both")
+            if self.sink is None and not self.sinks:
+                raise ValueError(f"task {self.name!r}: needs a 'sink' or non-empty 'sinks'")
+        else:
+            # sql / proc_call: pure orchestration steps — no dataflow source/sink.
+            if self.source is not None or self.sink is not None or self.sinks:
+                raise ValueError(
+                    f"task {self.name!r}: kind {self.kind!r} takes no source/sink "
+                    "(use 'connection' + statements/procedure)"
+                )
+            if not self.connection:
+                raise ValueError(f"task {self.name!r}: kind {self.kind!r} needs a 'connection'")
+            if self.kind == "sql" and not self.statements:
+                raise ValueError(f"task {self.name!r}: kind 'sql' needs non-empty 'statements'")
+            if self.kind == "proc_call" and not self.procedure:
+                raise ValueError(f"task {self.name!r}: kind 'proc_call' needs a 'procedure'")
         if self.trigger_rule not in TRIGGER_RULES:
             raise ValueError(
                 f"task {self.name!r}: unknown trigger_rule {self.trigger_rule!r} "
                 f"(allowed: {sorted(TRIGGER_RULES)})"
             )
+        for key, spec in self.push_xcom.items():
+            if not isinstance(spec, dict) or "column" not in spec:
+                raise ValueError(
+                    f"task {self.name!r}: push_xcom[{key!r}] needs a 'column' "
+                    "(the row column whose values are published as a list)"
+                )
+            extra = set(spec) - {"column", "distinct"}
+            if extra:
+                raise ValueError(
+                    f"task {self.name!r}: push_xcom[{key!r}] has unknown keys "
+                    f"{sorted(extra)} (allowed: 'column', 'distinct')"
+                )
         return self
 
     def effective_sinks(self) -> list[SinkConfig]:
@@ -443,6 +530,9 @@ class PipelineConfig(BaseModel):
     # --- dataflow graph shape (ADR-0030) ---
     graph: GraphConfig | None = None
     retry: RetryConfig | None = None
+    # Default per-task execution timeout (자유도 2단계). Applied to any task
+    # that doesn't set its own ``timeout_seconds``. ``None`` → no timeout.
+    task_timeout_seconds: float | None = None
     observability: ObservabilityConfig | None = None
     commit: CommitConfig | None = None
     dlq: DlqConfig | None = None

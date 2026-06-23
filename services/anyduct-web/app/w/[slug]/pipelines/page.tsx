@@ -53,6 +53,8 @@ import {
   DEFAULT_DLQ,
   DEFAULT_RETRY,
   serializeGraph,
+  serializeTasksDAG,
+  blankOrchestration,
 } from "@/lib/pipeline-config";
 import { migrationSummaryOf } from "@/lib/migration-utils";
 import { cn } from "@/lib/cn";
@@ -285,6 +287,9 @@ export default function PipelinesPage() {
   const [paramsFor, setParamsFor] = useState<PipelineSummary | null>(null);
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
+  // Pipeline shape to create (ADR-0099): "dataflow" = visual graph (records
+  // flow), "orchestration" = Operator DAG (ordered sql/proc_call/load steps).
+  const [newKind, setNewKind] = useState<"dataflow" | "orchestration">("dataflow");
   const [submitting, setSubmitting] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<PipelineSummary | null>(
     null,
@@ -386,15 +391,18 @@ export default function PipelinesPage() {
       // removed; a fresh pipeline is just an empty graph + the user's
       // chosen name + batch mode. The editor's empty-canvas overlay
       // (Phase L1) walks them through dragging the first source.
-      const config = serializeGraph(
-        { nodes: [], edges: [] },
-        {
-          name: newName.trim(),
-          mode: "batch",
-          retry: { ...DEFAULT_RETRY },
-          dlq: { ...DEFAULT_DLQ },
-        },
-      );
+      const meta = {
+        name: newName.trim(),
+        mode: "batch" as const,
+        retry: { ...DEFAULT_RETRY },
+        dlq: { ...DEFAULT_DLQ },
+      };
+      // Orchestration starts with one Load step so the stored config is a
+      // task-DAG (the editor detects it and opens in orchestration mode).
+      const config =
+        newKind === "orchestration"
+          ? serializeTasksDAG(blankOrchestration(), meta)
+          : serializeGraph({ nodes: [], edges: [] }, meta);
       const created = await pipelinesApi.create(ws.id, {
         name: newName.trim(),
         config,
@@ -593,6 +601,37 @@ export default function PipelinesPage() {
                 autoFocus
               />
             </label>
+
+            <div className="mt-4 flex flex-col gap-1.5">
+              <span className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
+                {t("pipelines.kindLabel")}
+              </span>
+              <div className="grid grid-cols-2 gap-2">
+                {(["dataflow", "orchestration"] as const).map((k) => (
+                  <button
+                    key={k}
+                    type="button"
+                    onClick={() => setNewKind(k)}
+                    className={`cursor-pointer rounded-lg border p-3 text-left transition ${
+                      newKind === k
+                        ? "border-accent bg-accent/5"
+                        : "border-border-subtle hover:border-border"
+                    }`}
+                  >
+                    <div className="text-sm font-semibold text-text">
+                      {t(k === "dataflow" ? "pipelines.kindDataflow" : "pipelines.kindOrchestration")}
+                    </div>
+                    <div className="mt-0.5 text-xs text-text-muted">
+                      {t(
+                        k === "dataflow"
+                          ? "pipelines.kindDataflowDesc"
+                          : "pipelines.kindOrchestrationDesc",
+                      )}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
 
             <div className="mt-5 flex items-center justify-between gap-3">
               <p className="text-xs text-text-muted">

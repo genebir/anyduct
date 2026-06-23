@@ -618,6 +618,25 @@ export interface NodeRunEntry {
   error_class: string | null;
   error_message: string | null;
   output_ref: string | null;
+  /** Free-form per-node result. For Task-DAG runs (ADR-0099) carries
+   * ``{ task_state: "skipped" | "upstream_failed" | ... }`` so a
+   * branch-deselected node is distinguishable from an upstream-failure skip
+   * (both render as ``cancelled`` in the RunStatus enum). A dynamically-mapped
+   * task (``expand``, ADR-0098) also carries ``mapped_instances`` — one entry
+   * per fan-out instance, since the aggregated node otherwise hides them. */
+  result_json?: {
+    task_state?: string;
+    mapped_instances?: MappedInstance[];
+  } & Record<string, unknown>;
+}
+
+/** One fan-out instance of a dynamically-mapped task (``expand``, ADR-0098). */
+export interface MappedInstance {
+  map_values: Record<string, unknown>;
+  records_read: number;
+  records_written: number;
+  success: boolean;
+  error_class: string | null;
 }
 
 export const runsApi = {
@@ -862,9 +881,14 @@ export const assetsApi = {
     api<AssetLineageGraphResponse>(
       `/workspaces/${workspaceId}/assets/${assetId}/lineage-graph?depth=${depth}`,
     ),
-  columnLineageGraph: (workspaceId: string, assetId: string, depth = 3) =>
+  columnLineageGraph: (
+    workspaceId: string,
+    assetId: string,
+    depth = 3,
+    direction: "upstream" | "downstream" = "upstream",
+  ) =>
     api<AssetColumnLineageGraphResponse>(
-      `/workspaces/${workspaceId}/assets/${assetId}/column-lineage-graph?depth=${depth}`,
+      `/workspaces/${workspaceId}/assets/${assetId}/column-lineage-graph?depth=${depth}&direction=${direction}`,
     ),
   columnLineage: (workspaceId: string, assetId: string) =>
     api<AssetColumnLineageResponse>(

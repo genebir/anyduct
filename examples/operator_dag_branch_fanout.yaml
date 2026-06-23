@@ -1,0 +1,81 @@
+# Operator DAG — conditional branching + dynamic fan-out (ADR-0028 / ADR-0098).
+#
+# Extends the operator_dag_mart.yaml shape with the two orchestration features
+# a 20-year data engineer reaches for most:
+#
+#   * branch  — a step CHOOSES which downstream steps run, based on its OWN
+#               outcome (records_read / records_written / success). The rest are
+#               skipped, and the skip propagates. Airflow BranchPythonOperator.
+#   * expand  — a step FANS OUT into one instance per list element, each
+#               exposing ``{{ map.<key> }}``. Airflow ``.expand()``.
+#
+#                       ┌─(rows > 0)─►  load_regions  (fans out: us / eu / apac)
+#     probe ──branch──┤
+#                       └─(else)─────►  log_empty
+#
+# probe writes a staging row count; if the day has data it routes to the
+# regional load (which runs once per region), otherwise it routes to a no-data
+# log step. Idempotent per (day, region) via pre_sql DELETE.
+#
+#     uv run anyduct validate examples/operator_dag_branch_fanout.yaml \
+#         --connections examples/connections.example.yaml
+#
+name: regional_sales_fanout
+mode: batch
+
+params:
+  run_day: "20260601"        # YYYYMMDD — override per run
+
+tasks:
+  # 1) probe — stage the day's order ids; branch on how many landed --------
+  - name: probe
+    kind: sql
+    connection: pg_oltp
+    statements:
+      - DELETE FROM staging.daily_probe WHERE run_day = '{{ params.run_day }}'
+      - >
+        INSERT INTO staging.daily_probe (run_day, order_id)
+        SELECT '{{ params.run_day }}', order_id
+        FROM fct.orders WHERE order_day = '{{ params.run_day }}'
+    branch:
+      # rows for the day → run the regional load, skip the no-data log
+      - when: "records_written > 0"
+        to: [load_regions]
+      # no rows → log it, skip the load (default/else rule)
+      - when: null
+        to: [log_empty]
+
+  # 2) load_regions — fan out: one mart load per region (expand) -----------
+  - name: load_regions
+    depends_on: [probe]
+    expand:
+      region: ["us", "eu", "apac"]
+    source:
+      connection: pg_oltp
+      query: |
+        SELECT
+          '{{ params.run_day }}'   AS sales_day,
+          '{{ map.region }}'       AS region,
+          SUM(amount)              AS total_amount,
+          COUNT(*)                 AS order_count
+        FROM fct.orders
+        WHERE order_day = '{{ params.run_day }}'
+          AND region    = '{{ map.region }}'
+        GROUP BY region
+    sink:
+      connection: pg_oltp
+      table: mart.regional_sales
+      mode: append
+      pre_sql: >
+        DELETE FROM mart.regional_sales
+        WHERE sales_day = '{{ params.run_day }}' AND region = '{{ map.region }}'
+
+  # 3) log_empty — runs only when probe found no rows (branch else) --------
+  - name: log_empty
+    kind: sql
+    connection: pg_oltp
+    depends_on: [probe]
+    statements:
+      - >
+        INSERT INTO ops.batch_log (program_id, run_day, status)
+        SELECT 'regional_sales_fanout', '{{ params.run_day }}', 'NO_DATA'

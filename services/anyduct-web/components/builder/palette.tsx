@@ -22,7 +22,7 @@ export function Palette({
   /** Builder variant: linear hides graph-only operators (join / aggregate)
    *  because they don't fit the `source → transform* → sink` linear shape;
    *  graph shows them. (ADR-0041 I1.) */
-  variant?: "linear" | "graph";
+  variant?: "linear" | "graph" | "orchestration";
 }) {
   const { t } = useLocale();
   const [query, setQuery] = useState("");
@@ -33,6 +33,9 @@ export function Palette({
   // typing "조인" find the join operator (Phase L2 i18n).
   const matches = (spec: OperatorSpec) =>
     operatorAllowedForMode(spec, mode) &&
+    // Orchestration (ADR-0099) shows ONLY operator steps; dataflow variants
+    // hide them. The two pipeline shapes don't mix on one canvas.
+    (variant === "orchestration" ? spec.kind === "operator" : spec.kind !== "operator") &&
     (variant === "graph" || !spec.graphOnly) &&
     (!q ||
       spec.label.toLowerCase().includes(q) ||

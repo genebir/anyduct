@@ -111,3 +111,52 @@ def test_task_dag_batch_log_example_validates() -> None:
         sink = by_name[t].effective_sinks()[0]
         assert sink.mode == "overwrite"
         assert sink.auto_create_table is True
+
+
+def test_operator_dag_mart_example_validates() -> None:
+    """ADR-0099: operator DAG example — typed sql/etl steps, params, XCom,
+    and an all_done error-log step. Doubles as docs for the operator model."""
+    pc = load_pipeline(EXAMPLES / "operator_dag_mart.yaml")
+    assert pc.name == "daily_sales_mart"
+    assert pc.params == {"run_day": "20260601"}
+    by_name = {t.name: t for t in pc.tasks}
+    assert len(by_name) == 4
+    # sql operator steps run statements against a connection (no source/sink).
+    start = by_name["write_start_log"]
+    assert start.kind == "sql"
+    assert start.source is None and start.sink is None
+    assert start.connection == "pg_oltp"
+    assert len(start.statements) == 1
+    # the etl load is the default kind with a pre_sql DELETE for idempotency.
+    load = by_name["load_mart"]
+    assert load.kind == "etl"
+    assert load.source is not None
+    assert load.depends_on == ["write_start_log"]
+    # the end-log reads the load step's rows-affected via XCom.
+    end = by_name["write_end_log"]
+    assert "{{ xcom.load_mart.records_written }}" in end.statements[0]
+    # the error-log runs even when an upstream step fails.
+    assert by_name["write_error_log"].trigger_rule == "all_done"
+
+
+def test_operator_dag_branch_fanout_example_validates() -> None:
+    """ADR-0028/0098: branch + expand example. Guards the two orchestration
+    features (conditional routing + dynamic fan-out) the UI exposes against
+    config-schema drift, and doubles as copy-pasteable docs."""
+    pc = load_pipeline(EXAMPLES / "operator_dag_branch_fanout.yaml")
+    assert pc.name == "regional_sales_fanout"
+    by_name = {t.name: t for t in pc.tasks}
+    assert set(by_name) == {"probe", "load_regions", "log_empty"}
+    # probe branches on its own outcome to one of two downstreams.
+    probe = by_name["probe"]
+    assert probe.kind == "sql"
+    assert [(r.when, r.to) for r in probe.branch] == [
+        ("records_written > 0", ["load_regions"]),
+        (None, ["log_empty"]),
+    ]
+    # load_regions fans out one instance per region via expand.
+    load = by_name["load_regions"]
+    assert load.expand == {"region": ["us", "eu", "apac"]}
+    assert load.source is not None
+    assert "{{ map.region }}" in (load.source.query or "")
+    assert load.depends_on == ["probe"]

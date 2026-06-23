@@ -1,0 +1,88 @@
+# Operator DAG — a parameterized mart load with batch logging (ADR-0099).
+#
+# This is the modern shape for legacy stored-procedure-style ETL: a DAG of
+# typed *operators* connected by dependency edges (run order), where data
+# passes between steps via XCom — not a dataflow graph. It mirrors a classic
+#
+#     START log  →  DELETE + INSERT (the mart)  →  END log
+#
+# procedure, faithfully and without a graph contortion.
+#
+# Operator kinds:
+#   * ``kind: sql``       — run statement(s) against a connection (DDL / DELETE
+#                           / log INSERT). Side-effect; rows-affected → XCom.
+#   * ``kind: proc_call`` — CALL a stored procedure (not shown; see docs).
+#   * (default, no kind)  — ``etl``: source query → sink table (the load).
+#
+# Parameterized: ``{{ params.run_day }}`` is supplied per run (CLI ``--param``
+# or the trigger dialog). The DELETE + the WHERE + the log all share it, so the
+# same pipeline runs any day with no config edit. Idempotent: re-running a day
+# DELETEs that day's rows first (mode: append + pre_sql).
+#
+# XCom: the load step auto-publishes ``records_written``; the end-log step reads
+# it as ``{{ xcom.load_mart.records_written }}`` — no separate count query.
+#
+# trigger_rule: the error-log step uses ``all_done`` so it runs EVEN IF an
+# upstream step failed (the procedure's EXCEPTION-handler equivalent).
+#
+#     uv run anyduct validate examples/operator_dag_mart.yaml \
+#         --connections examples/connections.example.yaml
+#
+name: daily_sales_mart
+mode: batch
+
+params:
+  run_day: "20260601"        # YYYYMMDD — override per run
+
+tasks:
+  # 1) START log — one row into the batch-log table (sql step) -------------
+  - name: write_start_log
+    kind: sql
+    connection: pg_oltp
+    statements:
+      - >
+        INSERT INTO ops.batch_log (program_id, run_day, step, status)
+        SELECT 'daily_sales_mart', '{{ params.run_day }}', 'START', 'RUNNING'
+
+  # 2) Load the mart (etl) — DELETE the day (idempotent), then INSERT…SELECT
+  - name: load_mart
+    depends_on: [write_start_log]
+    source:
+      connection: pg_oltp
+      query: |
+        SELECT
+          '{{ params.run_day }}'        AS sales_day,
+          o.region                      AS region,
+          SUM(o.amount)                 AS total_amount,
+          COUNT(*)                      AS order_count
+        FROM fct.orders o
+        WHERE o.order_day = '{{ params.run_day }}'
+        GROUP BY o.region
+    sink:
+      connection: pg_oltp
+      table: mart.daily_sales
+      mode: append
+      pre_sql: |
+        DELETE FROM mart.daily_sales WHERE sales_day = '{{ params.run_day }}'
+
+  # 3) END log — rows-affected comes straight from the load step's XCom -----
+  - name: write_end_log
+    kind: sql
+    connection: pg_oltp
+    depends_on: [load_mart]
+    statements:
+      - >
+        INSERT INTO ops.batch_log (program_id, run_day, step, status, row_count)
+        SELECT 'daily_sales_mart', '{{ params.run_day }}', 'END', 'SUCCESS',
+               {{ xcom.load_mart.records_written }}
+
+  # 4) Error log — runs even if an upstream step failed (trigger_rule) ------
+  - name: write_error_log
+    kind: sql
+    connection: pg_oltp
+    depends_on: [load_mart]
+    trigger_rule: all_done
+    statements:
+      - >
+        INSERT INTO ops.batch_log (program_id, run_day, step, status)
+        SELECT 'daily_sales_mart', '{{ params.run_day }}', 'AUDIT', 'DONE'

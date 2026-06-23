@@ -65,12 +65,16 @@ interface CardLayout {
 export function ColumnLineageGraph({
   graph,
   depth,
+  direction = "upstream",
   onDepthChange,
   onSelectAsset,
 }: {
   graph: AssetColumnLineageGraphResponse;
   /** Current hop depth (the page owns it — changing refetches). */
   depth: number;
+  /** "upstream" = provenance (root right, sources left); "downstream" =
+   *  impact analysis (root left, consumers right). Mirrors lane placement. */
+  direction?: "upstream" | "downstream";
   onDepthChange?: (depth: number) => void;
   onSelectAsset?: (assetId: string) => void;
 }) {
@@ -87,7 +91,10 @@ export function ColumnLineageGraph({
 
   const model = useMemo(() => {
     const maxLane = Math.max(0, ...graph.assets.map((a) => a.depth));
-    const laneX = (d: number) => (maxLane - d) * (CARD_W + SPAN_W);
+    // Upstream: root (depth 0) sits rightmost, sources fan left. Downstream
+    // (impact): mirror — root leftmost, consumers fan right.
+    const laneX = (d: number) =>
+      (direction === "downstream" ? d : maxLane - d) * (CARD_W + SPAN_W);
 
     // Columns that participate in lineage (linked) per asset.
     const linked = new Map<string, Set<string>>();
@@ -189,7 +196,7 @@ export function ColumnLineageGraph({
       link(e.to, e.from);
     }
     return { cards, edges, adjacency, height, width, maxLane };
-  }, [graph, expanded, query]);
+  }, [graph, expanded, query, direction]);
 
   // Search highlight: union of every match's transitive closure.
   const searchSet = useMemo(() => {
@@ -278,7 +285,7 @@ export function ColumnLineageGraph({
             className="rounded bg-warning/15 px-1.5 py-0.5 text-[10px] text-warning"
             title={t("assets.clTruncatedHint")}
           >
-            {t("assets.clTruncated")}
+            {t(direction === "downstream" ? "assets.clTruncatedDown" : "assets.clTruncated")}
           </span>
         ) : null}
         <input

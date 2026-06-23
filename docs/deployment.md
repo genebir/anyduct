@@ -232,6 +232,16 @@ what you know of the data's distribution (the server intentionally does
 not auto-split a min/max scan into equal arithmetic windows — that
 produces skew on gappy ids or bursty time ranges).
 
+!!! warning "Operator DAGs: avoid a destructive setup step"
+    Each sub-run re-runs the **entire** pipeline with its own window — for an
+    operator DAG that means *every* task runs once per partition, including any
+    `sql` setup step. A step that `DROP`/`TRUNCATE`s the destination
+    (`DROP TABLE … ; CREATE TABLE …`) will **wipe the sibling windows' rows** —
+    the last sub-run to finish wins and you keep only its window. Make
+    per-window writes idempotent instead: a `pre_sql` that `DELETE`s just the
+    window (`DELETE … WHERE day > '{left}' AND day <= '{right}'`), or create the
+    destination out of band so no task drops it.
+
 ## Kubernetes (Helm)
 
 `services/charts/anyduct` deploys the same topology (verified end-to-end on

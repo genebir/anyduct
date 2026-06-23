@@ -87,6 +87,40 @@ def is_dataset_transform(fn: AnyTransformFn) -> bool:
     return getattr(fn, "dataset_transform", False) is True
 
 
+def _coerce_cursor_bound(bound: Any, sample: Any) -> Any:
+    """Coerce a cursor ``bound`` to the type of an actual column ``sample`` so
+    they compare.
+
+    A backfill range arrives over REST/JSON as strings (``"2026-01-03"``), but
+    the cursor column's values are typed (``date`` / ``int`` / ``Decimal`` …).
+    The inclusive upper-bound check (``cv > cursor_to``) is done in Python, so a
+    ``date > str`` would raise ``TypeError``. Coerce the string bound to the
+    sample's type first. Best-effort: an un-coercible bound is returned
+    unchanged (a genuinely incomparable pair then surfaces its own error).
+    """
+    import datetime as _dt
+    from decimal import Decimal as _Decimal
+
+    if type(bound) is type(sample) or not isinstance(bound, str):
+        return bound
+    try:
+        if isinstance(sample, _dt.datetime):
+            return _dt.datetime.fromisoformat(bound)
+        if isinstance(sample, _dt.date):  # date (datetime already handled above)
+            return _dt.date.fromisoformat(bound)
+        if isinstance(sample, bool):  # bool is an int subclass — leave as-is
+            return bound
+        if isinstance(sample, int):
+            return int(bound)
+        if isinstance(sample, float):
+            return float(bound)
+        if isinstance(sample, _Decimal):
+            return _Decimal(bound)
+    except (ValueError, TypeError, ArithmeticError):
+        return bound
+    return bound
+
+
 # Task-orchestration DAG task states (ADR-0028).
 TASK_SUCCESS = "success"
 TASK_FAILED = "failed"
@@ -1986,9 +2020,14 @@ class Pipeline:
                     # caller is responsible for picking a column whose
                     # values are mutually comparable with cursor_to /
                     # new_cursor.
-                    if cursor_to is not None and cv is not None and cv > cursor_to:
-                        # Ordering is ascending — anything after this is also > cursor_to.
-                        return
+                    if cursor_to is not None and cv is not None:
+                        # Coerce the (often string, from a JSON backfill range)
+                        # bound to the column value's type so date/int/Decimal
+                        # cursors compare instead of raising TypeError.
+                        upper = _coerce_cursor_bound(cursor_to, cv)
+                        if cv > upper:
+                            # Ascending order — everything after is also > cursor_to.
+                            return
                     if count and cv is not None and (new_cursor is None or cv > new_cursor):
                         new_cursor = cv
                 if count:

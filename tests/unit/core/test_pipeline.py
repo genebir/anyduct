@@ -342,6 +342,41 @@ def test_run_with_cursor_to_caps_upper_bound(
     assert result.new_cursor == 2
 
 
+def test_run_with_string_cursor_to_over_int_column(
+    in_memory_source: InMemoryBatchSource,
+    in_memory_sink: InMemoryBatchSink,
+) -> None:
+    """A backfill range arrives over REST/JSON as strings, but the cursor column
+    is typed. ``cursor_to="2"`` (str) over an int column must still cap at 2 —
+    regression for a TypeError ('>' not supported between int and str) that
+    failed every non-string cursor backfill on a task-DAG (2026-06-23)."""
+    Pipeline("p").add(Task.extract("src", "q", cursor_column="id").load("snk", table="T")).run(
+        connectors={"src": in_memory_source, "snk": in_memory_sink},
+        cursor_to="2",  # string bound, int column
+    )
+    assert sorted(r.data["id"] for r in in_memory_sink.records) == [1, 2]
+
+
+def test_run_with_string_cursor_to_over_date_column(
+    in_memory_sink: InMemoryBatchSink,
+) -> None:
+    """Same coercion for a ``date`` cursor column — the e-commerce backfill shape."""
+    import datetime as dt
+
+    src = InMemoryBatchSource(
+        [
+            Record(data={"id": 1, "day": dt.date(2026, 1, 1)}),
+            Record(data={"id": 2, "day": dt.date(2026, 1, 2)}),
+            Record(data={"id": 3, "day": dt.date(2026, 1, 3)}),
+        ]
+    )
+    Pipeline("p").add(Task.extract("src", "q", cursor_column="day").load("snk", table="T")).run(
+        connectors={"src": src, "snk": in_memory_sink},
+        cursor_to="2026-01-02",  # ISO string bound, date column
+    )
+    assert sorted(r.data["id"] for r in in_memory_sink.records) == [1, 2]
+
+
 def test_run_with_cursor_window(
     in_memory_source: InMemoryBatchSource,
     in_memory_sink: InMemoryBatchSink,

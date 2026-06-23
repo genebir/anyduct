@@ -151,6 +151,11 @@ class DlqConfig(BaseModel):
     table: str | None = None
     topic: str | None = None
     mode: str = "append"
+    # Optional column/field to stamp the transform error reason into, so a DLQ'd
+    # record is self-describing ("why did this fail?") instead of just the
+    # original columns. The DLQ table/topic must carry this column. ``None``
+    # (default) keeps the historical verbatim-record behaviour.
+    error_column: str | None = None
 
 
 TRIGGER_RULES = frozenset({"all_success", "all_done", "one_success", "none_failed"})

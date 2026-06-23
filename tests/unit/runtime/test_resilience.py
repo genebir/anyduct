@@ -285,6 +285,53 @@ def test_batch_dlq_routes_failed_transform_records_and_continues() -> None:
     assert [r.data["i"] for r in dlq.records] == [2]
 
 
+def test_batch_dlq_stamps_error_reason_when_error_column_set() -> None:
+    """``DlqConfig.error_column`` stamps the transform error reason onto the
+    DLQ'd record so it's self-describing (why did this fail?), 2026-06-23."""
+    src = InMemoryBatchSource(
+        [Record(data={"i": 1, "bad": False}), Record(data={"i": 2, "bad": True})]
+    )
+    snk, dlq = InMemoryBatchSink(), InMemoryBatchSink()
+
+    def _no_bad(rec: Record) -> Record:
+        if rec.data.get("bad"):
+            raise ValueError(f"bad row {rec.data['i']}")
+        return rec
+
+    task = Task(name="t", source="s", sink="k", transforms=[_no_bad])
+    p = Pipeline(
+        "p",
+        dlq=DlqConfig(connection="d", mode="append", error_column="_dlq_error"),
+    ).add(task)
+    for c in (src, snk, dlq):
+        c.connect()
+    p.run(connectors={"s": src, "k": snk, "d": dlq})
+    assert [r.data["i"] for r in dlq.records] == [2]
+    # the error reason is stamped into the configured column
+    assert "bad row 2" in dlq.records[0].data["_dlq_error"]
+    # the main sink's good record is untouched (no error column leaked)
+    assert "_dlq_error" not in snk.records[0].data
+
+
+def test_batch_dlq_without_error_column_keeps_record_verbatim() -> None:
+    """Default (no error_column) keeps the historical verbatim-record behaviour."""
+    src = InMemoryBatchSource([Record(data={"i": 2, "bad": True})])
+    snk, dlq = InMemoryBatchSink(), InMemoryBatchSink()
+
+    def _no_bad(rec: Record) -> Record:
+        if rec.data.get("bad"):
+            raise ValueError("bad")
+        return rec
+
+    p = Pipeline("p", dlq=DlqConfig(connection="d")).add(
+        Task(name="t", source="s", sink="k", transforms=[_no_bad])
+    )
+    for c in (src, snk, dlq):
+        c.connect()
+    p.run(connectors={"s": src, "k": snk, "d": dlq})
+    assert dlq.records[0].data == {"i": 2, "bad": True}
+
+
 def test_batch_no_dlq_means_transform_failure_propagates() -> None:
     """Without DLQ configured, the first transform failure raises TransformError."""
     src = InMemoryBatchSource([Record(data={"x": 1})])

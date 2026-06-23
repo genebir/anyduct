@@ -2064,7 +2064,7 @@ class Pipeline:
                         metrics.counter(ERRORS_TOTAL).add(
                             1, {"pipeline": self.name, "phase": "transform", "routed": "dlq"}
                         )
-                        self._dlq_route_batch(connectors, raw)
+                        self._dlq_route_batch(connectors, raw, error=str(exc))
                         continue
                     raise TransformError(f"transform {fn!r} failed on record {raw!r}") from exc
                 if record is not None:
@@ -2336,6 +2336,7 @@ class Pipeline:
         self,
         connectors: dict[str, Connector],
         record: Record,
+        error: str | None = None,
     ) -> None:
         """Best-effort write the offending record to the DLQ BatchSink.
 
@@ -2345,6 +2346,9 @@ class Pipeline:
         and the ``contextlib.suppress`` below silently dropped every
         bad record — DLQ promised partial-success but delivered
         nothing. Bug surfaced by the dogfood scenario.
+
+        2026-06-23: when ``DlqConfig.error_column`` is set, stamp the transform
+        error reason into that column so the DLQ record says *why* it failed.
         """
         if self.dlq is None:
             return
@@ -2354,13 +2358,25 @@ class Pipeline:
         write_kwargs: dict[str, Any] = {"mode": self.dlq.mode}
         if self.dlq.table is not None:
             write_kwargs["table"] = self.dlq.table
+        out = self._dlq_stamp_error(record, error)
         with contextlib.suppress(Exception):
-            sink.write([record], **write_kwargs)
+            sink.write([out], **write_kwargs)
+
+    def _dlq_stamp_error(self, record: Record, error: str | None) -> Record:
+        """Return ``record`` with the error reason merged into
+        ``DlqConfig.error_column`` (if configured). A no-op copy otherwise."""
+        if self.dlq is None or self.dlq.error_column is None or error is None:
+            return record
+        return Record(
+            data={**record.data, self.dlq.error_column: error},
+            metadata=record.metadata,
+        )
 
     async def _dlq_route_stream(
         self,
         connectors: dict[str, Connector],
         record: Record,
+        error: str | None = None,
     ) -> None:
         """Best-effort publish the offending record to the DLQ StreamSink."""
         if self.dlq is None:
@@ -2369,8 +2385,9 @@ class Pipeline:
         if not isinstance(sink, StreamSink):
             return
         topic = self.dlq.topic or "dlq"
+        out = self._dlq_stamp_error(record, error)
         with contextlib.suppress(Exception):
-            await sink.publish(topic, record)
+            await sink.publish(topic, out)
 
     # ---------------- stream runtime (Step 3.2) ---------------------------
 
@@ -2519,7 +2536,7 @@ class Pipeline:
                             1,
                             {"pipeline": self.name, "phase": "transform", "routed": "dlq"},
                         )
-                        await self._dlq_route_stream(connectors, raw)
+                        await self._dlq_route_stream(connectors, raw, error=str(exc))
                         continue
                     raise TransformError(f"transform {fn!r} failed on record {raw!r}") from exc
 

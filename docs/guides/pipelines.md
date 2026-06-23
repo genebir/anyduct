@@ -76,6 +76,19 @@ pipeline = Pipeline(
   `Record` is best-effort written to the DLQ sink and the pipeline
   continues. A counter `etl_plugins.errors{phase=transform, routed=dlq}`
   is incremented on every routed record.
+* `dlq.error_column` *(optional)* — stamp the **failure reason** into this
+  column so a routed record is self-describing ("why did this fail?")
+  instead of just the original columns. The DLQ table/topic must carry the
+  column. Without it, the record is written verbatim (the historical
+  behaviour). Turn a DLQ table into a triage queue:
+
+  ```python
+  dlq=DlqConfig(
+      connection="warehouse", table="rejects", mode="append",
+      error_column="_dlq_error",   # rejects.(…, _dlq_error TEXT)
+  )
+  # a rejected row lands as {…original cols…, "_dlq_error": "assert: amount >= 0"}
+  ```
 
 ## Per-task retry & timeout (자유도 2단계)
 

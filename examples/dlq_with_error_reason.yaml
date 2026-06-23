@@ -1,0 +1,45 @@
+# Dead-letter queue with a self-describing failure reason (DLQ error_column).
+#
+# A row-level transform that raises on bad data doesn't kill the run — the
+# offending record is routed to the DLQ sink and the pipeline continues
+# (partial success). With `dlq.error_column` set, each routed record also
+# carries *why* it failed, turning the DLQ table into a triage queue.
+#
+#   source ──► assert (amount >= 0) ──► sink (pg_oltp.clean_orders)
+#                     │ fails
+#                     └────────────────► dlq  (pg_oltp.rejected_orders,
+#                                              + _dlq_error column)
+#
+# The DLQ table must carry the error column, e.g.:
+#   CREATE TABLE rejected_orders (id int, amount numeric, _dlq_error text);
+#
+#     uv run anyduct validate examples/dlq_with_error_reason.yaml \
+#         --connections examples/connections.example.yaml
+#
+name: orders_with_dlq
+mode: batch
+
+# Bad records (failing the assert below) are routed here with the reason
+# stamped into `_dlq_error` instead of failing the whole run.
+dlq:
+  connection: pg_oltp
+  table: rejected_orders
+  mode: append
+  error_column: _dlq_error        # rejects land as {…, _dlq_error: "assert: …"}
+
+source:
+  connection: pg_oltp
+  query: SELECT id, amount FROM staging.orders
+
+transforms:
+  # A data-quality gate. on_fail=fail raises an AssertionFailedError per bad
+  # row; because a `dlq` is configured, that row is routed (not fatal).
+  - type: assert
+    condition: "data['amount'] >= 0"
+    on_fail: fail
+    message: "amount must be non-negative"
+
+sink:
+  connection: pg_oltp
+  table: clean_orders
+  mode: append

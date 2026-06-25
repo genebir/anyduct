@@ -555,6 +555,7 @@ interface TaskJson {
   branch?: { when: string | null; to: string[] }[];
   expand?: Record<string, unknown>;
   push_xcom?: Record<string, { column: string; distinct?: boolean }>;
+  transforms?: Record<string, unknown>[];
   source?: { connection?: string; query?: string; [k: string]: unknown };
   sink?: { connection?: string; [k: string]: unknown } | null;
   sinks?: { connection?: string; [k: string]: unknown }[];
@@ -675,6 +676,14 @@ export function serializeTasksDAG(
       const kc = (d.key_columns as string | undefined)?.trim();
       if (kc) sink.key_columns = kc.split(",").map((s) => s.trim()).filter(Boolean);
       task.sink = sink;
+      // Preserve any transforms verbatim. The orchestration Load step has no
+      // transform editor (transforms belong to the dataflow graph), but a
+      // task-DAG etl task CAN carry them (e.g. authored in YAML). Round-trip
+      // them as opaque data so editing the step in orchestration mode never
+      // silently drops them.
+      if (Array.isArray(d.transforms) && d.transforms.length) {
+        task.transforms = d.transforms as Record<string, unknown>[];
+      }
     }
     return task;
   });
@@ -741,6 +750,11 @@ export function deserializeTasksDAG(config: PipelineConfigJson | null): GraphBui
         mode: snk.mode ?? "append",
         pre_sql: snk.pre_sql,
         key_columns: Array.isArray(kc) ? kc.join(",") : kc,
+        // Carry transforms as opaque node data so they survive a round-trip
+        // (orchestration mode has no transform editor — see serialize).
+        ...(Array.isArray(t.transforms) && t.transforms.length
+          ? { transforms: t.transforms }
+          : {}),
       };
     }
     if (t.trigger_rule) data.trigger_rule = t.trigger_rule;

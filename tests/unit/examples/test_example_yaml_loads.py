@@ -160,3 +160,15 @@ def test_operator_dag_branch_fanout_example_validates() -> None:
     assert load.source is not None
     assert "{{ map.region }}" in (load.source.query or "")
     assert load.depends_on == ["probe"]
+
+
+def test_dlq_with_error_reason_example_validates() -> None:
+    """DLQ error_column example (2026-06-23) — guards the self-describing-DLQ
+    feature against config-schema drift and doubles as docs."""
+    pc = load_pipeline(EXAMPLES / "dlq_with_error_reason.yaml")
+    assert pc.name == "orders_with_dlq"
+    assert pc.dlq is not None
+    assert pc.dlq.table == "rejected_orders"
+    assert pc.dlq.error_column == "_dlq_error"
+    # the assert transform is what routes bad rows to the DLQ.
+    assert pc.transforms[0].type == "assert"

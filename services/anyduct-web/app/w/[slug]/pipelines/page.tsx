@@ -399,10 +399,27 @@ export default function PipelinesPage() {
       };
       // Orchestration starts with one Load step so the stored config is a
       // task-DAG (the editor detects it and opens in orchestration mode).
-      const config =
-        newKind === "orchestration"
-          ? serializeTasksDAG(blankOrchestration(), meta)
-          : serializeGraph({ nodes: [], edges: [] }, meta);
+      // Unlike a dataflow graph (which may be saved empty), every operator
+      // task requires a `connection` at config-validation time — so a blank
+      // Load with no connection 422s on create. Pre-fill the starter with the
+      // workspace's first connection (the user adjusts it in the editor); if
+      // the workspace has none, guide them to add one first instead of
+      // surfacing a cryptic validation error.
+      let config;
+      if (newKind === "orchestration") {
+        const firstConn =
+          connNames && connNames.size > 0 ? [...connNames][0] : "";
+        if (!firstConn) {
+          toast.error(t("pipelines.needConnectionFirst"));
+          setSubmitting(false);
+          return;
+        }
+        const blank = blankOrchestration();
+        blank.nodes[0].data.connection = firstConn;
+        config = serializeTasksDAG(blank, meta);
+      } else {
+        config = serializeGraph({ nodes: [], edges: [] }, meta);
+      }
       const created = await pipelinesApi.create(ws.id, {
         name: newName.trim(),
         config,
